@@ -1,0 +1,37 @@
+#!/bin/sh
+# zm-dockerd: rootless Docker in a zm box (zm-eakh.12.5.26; SPEC 20 "Boxes", Root and Docker). zm-run-tart runs it
+# from PID 1 in a box bound with docker=on, as the box's user, with XDG_RUNTIME_DIR and DOCKER_HOST set
+# (vmhost/oci_root.go); every exec gets DOCKER_HOST too, so `docker run` finds it.
+#
+# dockerd runs inside rootlesskit's user namespace (newuidmap, setuid, is why such a box needs root) with a
+# slirp4netns network: its containers' traffic leaves as this user's ordinary sockets, through the box's own
+# filtered network, and the box gets no capability for it. Under gVisor: no iptables NAT inside (so no bridge:
+# use docker run --network host for the network), and overlayfs wants a tmpfs upper (box memory), so storage is
+# vfs under HOME, which a kept box keeps.
+set -eu
+XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/zm-docker}
+export XDG_RUNTIME_DIR
+# A kept box starts again with the last boot's sockets and pid files: none is live, so start clean.
+rm -rf "$XDG_RUNTIME_DIR"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+# Only Kata bindings request bridge networking. A native guest kernel can give
+# dockerd capabilities in its own user/network namespace without adding any to
+# the outer box. gVisor keeps its no-raw-packets runtime and no-bridge mode.
+case "${ZM_DOCKER_NETWORK:-none}" in
+  none) set -- --iptables=false --ip6tables=false --bridge=none "$@" ;;
+  bridge)
+    # Docker's libnetwork socket directory must be searchable by runner on
+    # Kata's shared root filesystem. Prepare it before entering rootlesskit,
+    # and bind dockerd's exec root to the directory we prepared.
+    mkdir -p "$XDG_RUNTIME_DIR/docker/libnetwork"
+    chmod 700 "$XDG_RUNTIME_DIR/docker/libnetwork"
+    set -- --exec-root="$XDG_RUNTIME_DIR/docker" "$@"
+    # Capability-aware setuid helpers retain runner's identity while writing
+    # its child user namespace's maps. No outer SYS_ADMIN or file xattrs.
+    PATH=/usr/local/libexec/zm-rootless-idmap:$PATH
+    export PATH
+    ;;
+  *) echo "ZM_DOCKER_NETWORK must be none or bridge" >&2; exit 1 ;;
+esac
+exec dockerd-rootless.sh --feature containerd-snapshotter=false --storage-driver=vfs "$@"

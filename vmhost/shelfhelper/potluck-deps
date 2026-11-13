@@ -1,0 +1,349 @@
+#!/bin/sh
+# potluck-deps: the in-box helper for the package shelf (docs/shelf.md).
+#
+#   potluck-deps link [dir]
+#
+# Go: reads dir's go.sum (and go.work.sum) and appends each module version it names, and each go.mod
+# it names alone, to $HOME/.potluck/wants as "go <module> <version>" or "go <module> <version>/go.mod"
+# (nothing to link: the box's GOPROXY reads the shelf's goproxy/ tree), but only those this box's own
+# module cache holds (Go downloaded them here: run link after the build). It names nothing unless the box's
+# GOPROXY's first network entry is https://proxy.golang.org (a file:// tree may come before it) and its
+# GOSUMDB is sum.golang.org, and none that its GOPRIVATE,
+# GONOPROXY, GONOSUMDB or GOINSECURE match (a pattern this helper cannot read as plain globs names none).
+# A module those settings do not mark private was asked of the public proxy first by the box's own Go.
+# The settings are the box's own, as `go env` gives them (the go on PATH, else the shelf's newest);
+# without a go, from the environment, and none at all when a go env file exists. POTLUCK_DEPS_GO=off
+# names no Go module (the driver's own link step sets it: it runs before the job's script, which may set
+# GOPRIVATE itself).
+#
+# npm: reads dir's package-lock.json (or npm-shrinkwrap.json) and, for each package that came from
+# https://registry.npmjs.org/ with a sha512 integrity, symlinks the shelf's blob for that hash into this
+# box's own npm cache when the shelf has it. npm checks every cached tarball against the lockfile's
+# sha512 when it reads it, so a missing or wrong blob is only a cache miss. Every such package, linked
+# or not, is appended to $HOME/.potluck/wants as "npm <name> <version> sha512-<base64>"; when the host's
+# owner sets shelf_fill=boxes the host reads that list, from inside the box, to fill the shelf. Packages from other registries, git, file or link entries, and entries
+# without a sha512 are left out of both.
+#
+# Exits 0 without doing anything when the shelf is not mounted, there is no lockfile or go.sum, or (for
+# npm) node is missing. POTLUCK_SHELF overrides the shelf root (default /opt/potluck-cache).
+set -u
+
+usage() {
+	echo "usage: potluck-deps link [dir]" >&2
+	exit 2
+}
+
+[ $# -ge 1 ] || usage
+cmd=$1
+shift
+case $cmd in
+link) ;;
+-h | --help | help)
+	echo "usage: potluck-deps link [dir]"
+	exit 0
+	;;
+*) usage ;;
+esac
+[ $# -le 1 ] || usage
+dir=${1:-.}
+case $dir in
+/*) ;;
+*) dir=./$dir ;; # so cd never reads a leading - as an option
+esac
+
+shelf=${POTLUCK_SHELF:-/opt/potluck-cache}
+[ -d "$shelf" ] || exit 0
+
+wants=
+if [ -n "${HOME:-}" ]; then
+	wants=$HOME/.potluck/wants
+fi
+
+go_wants() {
+	[ -n "$wants" ] || return 0
+	[ "${POTLUCK_DEPS_GO:-}" != off ] || return 0
+	set --
+	for f in go.sum go.work.sum; do
+		if [ -f "$dir/$f" ]; then set -- "$@" "$dir/$f"; fi
+	done
+	[ $# -gt 0 ] || return 0
+	g=$(command -v go 2>/dev/null) || g=
+	if [ -z "$g" ]; then
+		case $(uname -m) in x86_64) a=x64 ;; aarch64 | arm64) a=arm64 ;; *) a= ;; esac
+		if [ -n "$a" ]; then
+			g=$(for c in "$shelf"/tools/go/*/"$a".complete; do
+				d=${c%.complete}
+				if [ -f "$c" ] && [ -x "$d/bin/go" ]; then v=${d%/*}; echo "${v##*/} $d/bin/go"; fi
+			done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 | cut -d' ' -f2-)
+		fi
+	fi
+	if [ -n "$g" ]; then
+		v=$(cd / && GOTOOLCHAIN=local GOFLAGS= "$g" env GOPROXY GOSUMDB GOPRIVATE GONOPROXY GONOSUMDB GOINSECURE GOMODCACHE 2>/dev/null) || {
+			echo "potluck-deps: go env failed: no Go modules named" >&2
+			return 0
+		}
+	else
+		e=${GOENV:-${XDG_CONFIG_HOME:-$HOME/.config}/go/env}
+		if [ "$e" != off ] && [ -e "$e" ]; then
+			echo "potluck-deps: no go to read $e with: no Go modules named" >&2
+			return 0
+		fi
+		p=${GOPATH:-$HOME/go}
+		v=$(printf '%s\n' "${GOPROXY:-https://proxy.golang.org,direct}" "${GOSUMDB:-sum.golang.org}" \
+			"${GOPRIVATE:-}" "${GONOPROXY:-}" "${GONOSUMDB:-}" "${GOINSECURE:-}" "${GOMODCACHE:-${p%%:*}/pkg/mod}")
+	fi
+	out=$(PD_GO=$v PD_WANTS=$wants awk '
+	BEGIN {
+		split(ENVIRON["PD_GO"], e, "\n")
+		ok = 0
+		n = split(e[1], ps, /[,|]/)
+		i = 1
+		if (n > 1 && ps[1] ~ /^file:\/\//) i = 2 # the shelf, or any other local tree
+		if (ps[i] == "https://proxy.golang.org" || ps[i] == "https://proxy.golang.org/") ok = 1
+		if (e[2] != "sum.golang.org" && index(e[2], "sum.golang.org+") != 1) ok = 0
+		np = 0
+		n = split(e[3] "," e[4] "," e[5] "," e[6], gs, ",")
+		for (i = 1; i <= n; i++) {
+			p = gs[i]
+			sub(/\/$/, "", p)
+			if (p == "") continue
+			if (p !~ /^[A-Za-z0-9._~\/*?-]+$/) { ok = 0; break } # [classes] and \escapes: name nothing
+			r = ""
+			for (j = 1; j <= length(p); j++) {
+				c = substr(p, j, 1)
+				if (c == ".") r = r "[.]"
+				else if (c == "*") r = r "[^/]*"
+				else if (c == "?") r = r "[^/]"
+				else r = r c
+			}
+			np++
+			re[np] = "^" r "$"
+			elems[np] = gsub(/\//, "/", p) + 1
+		}
+		if (ENVIRON["PD_WANTS"] != "") {
+			while ((getline l < ENVIRON["PD_WANTS"]) > 0) seen[l] = 1
+			close(ENVIRON["PD_WANTS"])
+		}
+	}
+	# Go escapes upper case in cache paths as ! and the lower case letter.
+	function esc(s,   r, j, c) {
+		r = ""
+		for (j = 1; j <= length(s); j++) {
+			c = substr(s, j, 1)
+			if (c ~ /[A-Z]/) r = r "!" tolower(c)
+			else r = r c
+		}
+		return r
+	}
+	# fetched says whether this box'"'"'s module cache holds the version'"'"'s .info and .zip (for a go.mod, its .mod):
+	# Go downloaded it here, through this box'"'"'s own settings.
+	function has(f,   x, ok) {
+		ok = (getline x < f) > 0
+		close(f)
+		return ok
+	}
+	function fetched(mod, v, ext,   d) {
+		if (e[7] == "") return 0
+		d = e[7] "/cache/download/" esc(mod) "/@v/" esc(v)
+		if (ext == "mod") return has(d ".mod") # Go loads a go.mod alone without its .info
+		return has(d ".info") && has(d ".zip")
+	}
+	function private(mod,   k, m, parts, pre, j) {
+		m = split(mod, parts, "/")
+		for (k = 1; k <= np; k++) {
+			if (m < elems[k]) continue
+			pre = parts[1]
+			for (j = 2; j <= elems[k]; j++) pre = pre "/" parts[j]
+			if (pre ~ re[k]) return 1
+		}
+		return 0
+	}
+	ok && NF == 3 && $3 ~ /^h1:/ {
+		mod = $1; ver = $2
+		if (length(mod) > 400 || mod !~ /^[A-Za-z0-9._~\/-]+$/) next
+		if (length(ver) > 140 || ver !~ /^v[0-9A-Za-z.+-]+(\/go\.mod)?$/) next
+		if (private(mod)) next
+		base = ver
+		gm = sub(/\/go\.mod$/, "", base)
+		if (!fetched(mod, base, gm ? "mod" : "zip")) next
+		base = ver
+		if (sub(/\/go\.mod$/, "", base) == 0) whole[mod " " base] = 1
+		if (!((mod " " ver) in listed)) { listed[mod " " ver] = 1; order[++count] = mod " " ver }
+	}
+	END {
+		named = 0
+		for (i = 1; i <= count; i++) {
+			split(order[i], f, " ")
+			base = f[2]
+			if (sub(/\/go\.mod$/, "", base) && ((f[1] " " base) in whole)) continue
+			named++
+			l = "go " order[i]
+			if (!(l in seen)) print l
+		}
+		if (!ok) print "potluck-deps: go: the box'"'"'s Go settings are not the public proxy and checksum database alone: no modules named" > "/dev/stderr"
+		else print "potluck-deps: go " named " modules named" > "/dev/stderr"
+	}' "$@") || return 0
+	[ -n "$out" ] || return 0
+	(umask 077 && mkdir -p "${wants%/*}" && printf '%s\n' "$out" >>"$wants") ||
+		echo "potluck-deps: write $wants failed" >&2
+}
+
+lock=
+for f in npm-shrinkwrap.json package-lock.json; do
+	if [ -f "$dir/$f" ]; then
+		lock=$dir/$f
+		break
+	fi
+done
+go_wants
+[ -n "$lock" ] || exit 0
+
+if ! command -v node >/dev/null 2>&1; then
+	echo "potluck-deps: node not found; nothing linked" >&2
+	exit 0
+fi
+
+# npm gives npm_config_cache precedence over every npmrc, so take it as is; otherwise ask npm in dir
+# (it reads the project's .npmrc); otherwise npm's default.
+cache=${npm_config_cache:-}
+if [ -z "$cache" ] && command -v npm >/dev/null 2>&1; then
+	cache=$(cd "$dir" && npm config get cache 2>/dev/null) || cache=
+fi
+if [ -z "$cache" ]; then
+	[ -n "${HOME:-}" ] || exit 0
+	cache=$HOME/.npm
+fi
+# npm expands a leading ~/; npm ci runs in dir, so a relative cache path is relative to dir.
+case $cache in
+/*) ;;
+"~/"*) cache=${HOME:-}/${cache#"~/"} ;;
+*) cache=$dir/$cache ;;
+esac
+
+exec node - "$lock" "$shelf" "$cache" "$wants" <<'JS'
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const [lockPath, shelf, cache, wantsPath] = process.argv.slice(2);
+
+const REGISTRY = 'https://registry.npmjs.org/';
+// A wants line is space separated; refuse anything that could break a line or a field.
+const SAFE = /^[\x21-\x7e]{1,214}$/;
+
+let lock;
+try {
+  lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+} catch (e) {
+  console.error(`potluck-deps: cannot read ${lockPath}: ${e.message}`);
+  process.exit(0);
+}
+
+// [resolved, integrity] for every package in the lockfile. v2 and v3 list them in "packages" keyed by
+// install path; v1 nests them in "dependencies".
+function entries(lock) {
+  const out = [];
+  if (lock.packages && typeof lock.packages === 'object') {
+    for (const [key, v] of Object.entries(lock.packages)) {
+      if (!v || typeof v !== 'object' || v.link) continue;
+      if (!key.includes('node_modules/')) continue; // the root and workspace sources, from no registry
+      out.push([v.resolved, v.integrity]);
+    }
+    return out;
+  }
+  const stack = [lock.dependencies];
+  while (stack.length) {
+    const deps = stack.pop();
+    if (!deps || typeof deps !== 'object') continue;
+    for (const v of Object.values(deps)) {
+      if (!v || typeof v !== 'object') continue;
+      out.push([v.resolved, v.integrity]);
+      stack.push(v.dependencies);
+    }
+  }
+  return out;
+}
+
+// The name and version npm fetches from a registry tarball URL, <registry><name>/-/<base>-<version>.tgz,
+// where name is base or @scope/base (its slash may be written %2f); null for any other URL. Taking them
+// from the URL, not the lockfile's own fields, ties the want to what is fetched (and handles aliases).
+function fromURL(resolved) {
+  if (typeof resolved !== 'string' || !resolved.startsWith(REGISTRY)) return null;
+  const m = /^(?:(@[^/@%]+)(?:\/|%2[fF]))?([^/@%][^/%]*)\/-\/([^/?#%]+)\.tgz$/.exec(resolved.slice(REGISTRY.length));
+  if (!m) return null;
+  const [, scope, base, file] = m;
+  const name = scope ? `${scope}/${base}` : base;
+  if (!file.startsWith(base + '-')) return null;
+  const version = file.slice(base.length + 1);
+  if (!SAFE.test(name) || !SAFE.test(version)) return null;
+  return [name, version];
+}
+
+// The sha512 in an integrity string (it may list several hashes), as [base64, hex], or null.
+function sha512(integrity) {
+  if (typeof integrity !== 'string') return null;
+  for (const part of integrity.trim().split(/\s+/)) {
+    const m = /^sha512-([A-Za-z0-9+/]+={0,2})(\?.*)?$/.exec(part);
+    if (!m) continue;
+    const buf = Buffer.from(m[1], 'base64');
+    if (buf.length !== 64 || buf.toString('base64') !== m[1]) continue;
+    return [m[1], buf.toString('hex')];
+  }
+  return null;
+}
+
+// Lines already in the wants file are not written again, so running link before every npm ci keeps
+// the file one line a package.
+const seen = new Set();
+if (wantsPath) {
+  try {
+    for (const line of fs.readFileSync(wantsPath, 'utf8').split('\n')) seen.add(line);
+  } catch {}
+}
+const wants = [];
+const named = new Set();
+let linked = 0;
+let present = 0;
+for (const [resolved, integrity] of entries(lock)) {
+  const nv = fromURL(resolved);
+  if (!nv) continue;
+  const [name, version] = nv;
+  const h = sha512(integrity);
+  if (!h) continue;
+  const [b64, hex] = h;
+  const line = `npm ${name} ${version} sha512-${b64}`;
+  if (named.has(line)) continue;
+  named.add(line);
+  if (!seen.has(line)) wants.push(line);
+
+  const rel = path.join('content-v2', 'sha512', hex.slice(0, 2), hex.slice(2, 4), hex.slice(4));
+  const src = path.join(shelf, 'npm', rel);
+  const dst = path.join(cache, '_cacache', rel);
+  try {
+    if (!fs.lstatSync(src).isFile()) continue;
+  } catch {
+    continue; // not on the shelf: npm fetches it
+  }
+  try {
+    fs.lstatSync(dst);
+    present++;
+    continue; // the box's cache already has something there; npm checks it
+  } catch {}
+  try {
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.symlinkSync(src, dst);
+    linked++;
+  } catch (e) {
+    console.error(`potluck-deps: link ${dst}: ${e.message}`);
+  }
+}
+
+if (wantsPath && wants.length) {
+  try {
+    fs.mkdirSync(path.dirname(wantsPath), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(wantsPath, wants.join('\n') + '\n', { mode: 0o600 });
+  } catch (e) {
+    console.error(`potluck-deps: write ${wantsPath}: ${e.message}`);
+  }
+}
+console.error(`potluck-deps: npm ${named.size} packages, ${linked} linked, ${present} already cached`);
+JS

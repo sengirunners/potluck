@@ -1,0 +1,68 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+# Read-only token. A pull request from a fork runs on GitHub-hosted ubuntu-latest, never a self-hosted runner
+# (internal/workflowlint holds this); the guard is false on push, so main and same-repository PRs take route's label.
+permissions:
+  contents: read
+jobs:
+  # Where go runs: the self-hosted scale set CI_ROUTE_LABEL (a repository variable) when the capacity report at
+  # CI_CAPACITY_URL (a repository secret, so public logs do not print it) says it has a free runner, else the
+  # hosted fallback (scripts/ci/runner-route.sh). With either unset the fallback is picked without a request.
+  # route runs on GitHub-hosted ubuntu-slim (a few billed seconds a run), so a scale set that is busy or down never
+  # holds the choice up. CI_ROUTING=off sends all to the fallback.
+  route:
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    outputs:
+      label: ${{ steps.pick.outputs.label }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+      - id: pick
+        env:
+          ROUTING: ${{ vars.CI_ROUTING }}
+          ROUTE_LABEL: ${{ vars.CI_ROUTE_LABEL }}
+          CAPACITY_URL: ${{ secrets.CI_CAPACITY_URL }}
+          ROUTE_FALLBACK: sengi-standard-4-ubuntu-2404
+        run: scripts/ci/runner-route.sh
+  go:
+    needs: route
+    # A failed or skipped route still runs go, on the fallback.
+    if: ${{ !cancelled() }}
+    # Four cores: the kit and compute packages (moved from zm) test beside conformance, which
+    # alone took 590 s; on two cores the whole suite queues behind it.
+    runs-on: ${{ github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || needs.route.outputs.label || 'sengi-standard-4-ubuntu-2404' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # vmhost/shelfhelper runs its helper with node and npm (Node 22, the agent image's), and fails under CI
+      # without them.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "gofmt needed"; exit 1; }
+      - name: go mod tidy leaves no diff
+        run: go mod tidy && git diff --exit-code go.mod go.sum
+      - run: go build ./...
+      - run: go vet ./...
+      # A throwaway HOME and ZM_HOME, as zm's own suite runs: no test can touch real dotfiles and pass silently.
+      # The whole suite runs on every PR and on main; internal/layers checks the layer rule and that nothing
+      # here depends on zm.
+      - name: go test
+        # umask 022: the runner's shell has 077, under which boxcp's TestDirRoundTrip fails (the reference box's
+        # tar extracts through the umask). It fails the same way in zm under 077 and passes in zm's CI.
+        run: |
+          umask 022
+          tmp=$(mktemp -d)
+          for v in $(env | grep -E '^ZM_' | cut -d= -f1); do unset "$v"; done
+          env GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" GOPATH="$(go env GOPATH)" \
+            HOME="$tmp/home" ZM_HOME="$tmp/zm" go test -timeout 30m ./...

@@ -1,0 +1,41 @@
+# Known-vulnerability scan (govulncheck). It reports only vulnerable code that is actually called, so a red
+# here is real, and a red nightly on main is handled like any other red on main.
+name: vulncheck
+on:
+  schedule:
+    - cron: "23 9 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths: [go.mod, go.sum, .github/workflows/vulncheck.yml]
+permissions:
+  contents: read
+jobs:
+  # The self-hosted scale set when it has a free runner, else the hosted fallback: ci.yml's route job says why.
+  route:
+    runs-on: ubuntu-slim
+    timeout-minutes: 3
+    outputs:
+      label: ${{ steps.pick.outputs.label }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+      - id: pick
+        env:
+          ROUTING: ${{ vars.CI_ROUTING }}
+          ROUTE_LABEL: ${{ vars.CI_ROUTE_LABEL }}
+          CAPACITY_URL: ${{ secrets.CI_CAPACITY_URL }}
+          ROUTE_FALLBACK: sengi-standard-2-ubuntu-2404
+        run: scripts/ci/runner-route.sh
+  govulncheck:
+    needs: route
+    if: ${{ !cancelled() }}
+    runs-on: ${{ github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || needs.route.outputs.label || 'sengi-standard-2-ubuntu-2404' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

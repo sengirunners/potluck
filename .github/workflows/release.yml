@@ -1,0 +1,143 @@
+# Potluck's release channel: after each push to main whose ci passes (and on demand), build the newest green main
+# into release tarballs for macOS and Linux, sign a manifest of their SHA-256 sums with the channel's Ed25519 key,
+# and publish a GitHub release tagged potluck-<version>. install.sh and `potluck upgrade` install only what verifies
+# with the public key built into potluck (internal/upgrade.ReleaseKey; install.sh carries the same key).
+# The private key lives only in the potluck-release environment (secret POTLUCK_RELEASE_KEY), which deploys from
+# main alone.
+#
+# Why this polls ci instead of running after it: a workflow_run trigger, or a release job inside ci.yml (needs: on
+# its jobs, or a workflow_call), puts a write-scoped job in a workflow a fork's pull request can start, which
+# internal/workflowlint refuses. So this runs on push, waits at most 20 minutes for that commit's ci (it takes about
+# 12), and otherwise releases the newest main whose ci passed. Until ReleaseKey is set it does nothing (a notice).
+name: release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: potluck-release
+  cancel-in-progress: false
+jobs:
+  release:
+    name: build, sign, publish
+    runs-on: ${{ vars.RELEASE_RUNNER || 'sengi-standard-4-ubuntu-2404' }}
+    environment: potluck-release
+    if: github.ref == 'refs/heads/main' && github.repository == 'sengirunners/potluck'
+    permissions:
+      contents: write
+      actions: read
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      # No release key yet: nothing to sign with, so succeed with a notice instead of failing every push.
+      - name: release key set?
+        id: key
+        run: |
+          if grep -q '^const ReleaseKey = KeyPlaceholder$' internal/upgrade/upgrade.go; then
+            echo "::notice::internal/upgrade.ReleaseKey is still the placeholder: no release until it is set"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      # On a push, wait (at most 20 minutes) for this commit's ci run; then take the newest main push whose ci
+      # passed, so a red commit never releases and a run that queued behind another never releases an older one.
+      - name: pick the last green main
+        id: pick
+        if: steps.key.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          runs="repos/$GH_REPO/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=50"
+          if [[ "$EVENT" == push ]]; then
+            for _ in $(seq 1 20); do
+              state=$(gh api "$runs&head_sha=$SHA" --jq '[.workflow_runs[] | select(.repository.full_name==env.GH_REPO)] | max_by(.run_number) | (.status // "none") + " " + (.conclusion // "")')
+              case "$state" in
+                "completed success") break ;;
+                completed*) echo "::notice::ci for $SHA ended ${state#completed }: not releasing it"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
+              esac
+              sleep 60
+            done
+          fi
+          sha=$(gh api "$runs&status=success" \
+            --jq '[.workflow_runs[] | select(.head_branch=="main" and .event=="push" and .conclusion=="success" and .repository.full_name==env.GH_REPO)] | max_by(.run_number) | .head_sha')
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "no green main push"; exit 1; }
+          tag="potluck-main-${sha:0:12}"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=main-${sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "$tag is published already"
+          elif gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            # A tag without its release was deleted by hand: never publish it again. Yank with --prerelease.
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "$tag was deleted; not republishing it"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        with:
+          ref: ${{ steps.pick.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
+      # The picked commit must carry the channel's public key, in potluck and in install.sh alike.
+      - name: release key is set
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        run: POTLUCK_RELEASE_BUILD=1 go test -count=1 -run '^(TestReleaseKeyIsSet|TestInstallScriptCarriesTheReleaseKey)$' ./internal/upgrade/
+      - name: build
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        run: go run ./scripts/release -version "${{ steps.pick.outputs.version }}" -commit "${{ steps.pick.outputs.sha }}" -out dist
+      - name: sign
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        env:
+          POTLUCK_RELEASE_KEY: ${{ secrets.POTLUCK_RELEASE_KEY }}
+        run: go run ./scripts/release-sign -version "${{ steps.pick.outputs.version }}" -commit "${{ steps.pick.outputs.sha }}" -out dist
+      # The release's own potluck must verify it with its built-in key alone (an empty home: no update_keys), so a
+      # secret that does not match ReleaseKey never publishes.
+      - name: verify with the built-in key
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          t=$(mktemp -d)
+          tar -xzf "dist/potluck_${{ steps.pick.outputs.version }}_linux_$(go env GOARCH).tar.gz" -C "$t"
+          HOME="$t/home" POTLUCK_HOME="$t/potluck" POTLUCK_NO_AUTOSTART=1 \
+            "$t/potluck_${{ steps.pick.outputs.version }}_linux_$(go env GOARCH)/potluck" upgrade --release dist --dir "$t/bin"
+          "$t/bin/potluck" --version
+      - name: publish
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${{ steps.pick.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/manifest.json.sig \
+            --target "${{ steps.pick.outputs.sha }}" --title "potluck ${{ steps.pick.outputs.version }}" --latest \
+            --notes "Signed potluck release of green main ${{ steps.pick.outputs.sha }}. Install: install.sh (README). Upgrade: potluck upgrade. Yank it (nothing installs it): gh release edit ${{ steps.pick.outputs.tag }} --prerelease"
+      # Keep the newest 30 releases and any younger than 14 days; a failure here never fails the release.
+      - name: prune old releases
+        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.tag_name | test("^potluck-main-[0-9a-f]{12}$")) | [(.published_at // .created_at), .tag_name] | @tsv' |
+            sort -r | tail -n +31 | while IFS=$'\t' read -r at tag; do
+              if [[ "$at" < "$cutoff" ]]; then
+                gh release delete "$tag" --yes --cleanup-tag && echo "pruned $tag (published $at)"
+              fi
+            done

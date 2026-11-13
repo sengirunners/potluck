@@ -1,0 +1,171 @@
+# zm's default Linux box image: build cmd/potluck-driver-tart/images/linux for linux/amd64 and
+# linux/arm64, push it to ghcr.io/sengirunners/potluck-box-linux, check the pushed image has every tool a box needs, and
+# push a branch writing its digest into imagepins/images.pin (the oci default `zm host share` and
+# `zm pool host` lend without --image). It opens no PR: this repository does not let Actions create pull requests,
+# so the run prints the pin line and a compare URL, and a person opens the PR from it (which also starts CI).
+# Until that PR merges, the oci layer has no default and share says so.
+# Then it builds zm's coding-agent image (cmd/potluck-driver-tart/images/agent) FROM the default it just
+# pushed, pushes ghcr.io/sengirunners/potluck-box-agent, checks that each platform's image runs the box tools and claude,
+# codex, node, git, gh and python3, and writes its digest on images.pin's `template=agent` line in the same branch.
+# Runs on demand only (owner's call to publish; a push trigger on the Dockerfile can be added once the first image is
+# out). The first push creates each package private: making ghcr.io/sengirunners/potluck-box-linux and potluck-box-agent public
+# (package settings) is the owner's call, and until then no friend's machine can pull them.
+# The browser builds FROM that newly published agent digest. Staging accepts
+# an exact reviewed source commit and publishes all three images without pin writes.
+# Runtime acceptance and a reviewed real browser pin precede template activation.
+name: box-images
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Exact 40-character source commit for staging (never writes pins); empty builds main
+        required: false
+        default: ''
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: box-images
+  cancel-in-progress: false
+env:
+  IMAGE: ghcr.io/sengirunners/potluck-box-linux
+  AGENT_IMAGE: ghcr.io/sengirunners/potluck-box-agent
+  BROWSER_IMAGE: ghcr.io/sengirunners/potluck-box-browser
+  # QEMU for the arm64 half of the build, pinned (tonistiigi/binfmt:qemu-v10.2.3).
+  BINFMT: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+jobs:
+  linux:
+    name: build, push, pin
+    # The only job that writes; dispatch-only, so a fork's pull request never starts it.
+    permissions:
+      contents: write
+      packages: write
+    if: github.repository == 'sengirunners/potluck' && (github.ref == 'refs/heads/main' || inputs.source_commit != '')
+    runs-on: ${{ vars.RELEASE_RUNNER || 'sengi-standard-4-ubuntu-2404' }}
+    timeout-minutes: 120
+    steps:
+      - name: validate staging source
+        env:
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          if [ -n "$SOURCE_COMMIT" ]; then
+            [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo 'staging source must be an exact commit'; exit 1; }
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build and push
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_HEAD=$(git rev-parse HEAD)
+          SOURCE_REPOSITORY=$GITHUB_REPOSITORY
+          export SOURCE_HEAD SOURCE_REPOSITORY
+          if [ -n "$SOURCE_COMMIT" ]; then
+            [ "$SOURCE_HEAD" = "$SOURCE_COMMIT" ] || exit 1
+            tag="staging-$SOURCE_HEAD"
+          else
+            tag="main-${SOURCE_HEAD:0:12}"
+          fi
+          export TAG="$tag"
+          echo "SOURCE_HEAD=$SOURCE_HEAD" >> "$GITHUB_ENV"
+          echo "SOURCE_REPOSITORY=$SOURCE_REPOSITORY" >> "$GITHUB_ENV"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker run --privileged --rm "$BINFMT" --install arm64
+          docker buildx create --use --name potluck-box
+          scripts/images/publish-box-image.sh "$IMAGE" cmd/potluck-driver-tart/images/linux meta.json -
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: build and push the agent image
+        id: agent
+        env:
+          BASE: ${{ steps.push.outputs.pin }}
+          TAG: ${{ steps.push.outputs.tag }}
+        run: scripts/images/publish-box-image.sh "$AGENT_IMAGE" cmd/potluck-driver-tart/images/agent agent-meta.json "$BASE"
+      - name: build and push the browser image
+        id: browser
+        env:
+          BASE: ${{ steps.agent.outputs.pin }}
+          TAG: ${{ steps.push.outputs.tag }}
+        run: scripts/images/publish-box-image.sh "$BROWSER_IMAGE" cmd/potluck-driver-tart/images/browser browser-meta.json "$BASE"
+      - name: check the pushed images
+        env:
+          PIN: ${{ steps.push.outputs.pin }}
+          AGENT_PIN: ${{ steps.agent.outputs.pin }}
+          BROWSER_PIN: ${{ steps.browser.outputs.pin }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          box='for t in sh bash timeout awk sleep cat kill ps perl git nc ip ping; do command -v "$t" >/dev/null || { echo "lacks $t"; exit 1; }; done; test -x /home/runner/run.sh'
+          # The agent image's own tools, each run (not only found): a broken install fails here.
+          agent='claude --version && codex --version && node --version && npm --version && git --version && gh --version && python3 --version && python3 -m venv /tmp/v && rg --version && jq --version && sudo -n true'
+          # Run each platform's own manifest, not the index: on the runner's Docker a second `docker run` of the
+          # same index digest for another platform fails "cannot overwrite digest" (box-images run 42510606609).
+          check() { # image pin, script
+            for p in linux/amd64 linux/arm64; do
+              d=$(docker buildx imagetools inspect --raw "$1" | jq -r --arg a "${p#linux/}" \
+                '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)] | .[0].digest // empty')
+              [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no $p manifest in $1"; exit 1; }
+              docker run --rm --platform "$p" "${1%@*}@$d" sh -c "$2"
+            done
+          }
+          check "$PIN" "$box"
+          check "$AGENT_PIN" "$box && $agent"
+          check "$BROWSER_PIN" "$box && $agent && node /opt/potluck-browser/node_modules/playwright/cli.js --version"
+          {
+            echo '### Built image chain (browser runtime acceptance and activation pending)'
+            echo "default: $PIN"
+            echo "agent: $AGENT_PIN"
+            echo "browser: $BROWSER_PIN"
+            echo "source: $SOURCE_HEAD"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: write the pin and push a branch
+        if: inputs.source_commit == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PIN: ${{ steps.push.outputs.pin }}
+          AGENT_PIN: ${{ steps.agent.outputs.pin }}
+          TAG: ${{ steps.push.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the image field: the keys after it (runner_dir=..., template=...) stay. The plain oci linux line
+          # gets the default, the template=agent line the agent image. Plain spaces, no classes: the hostprobe test
+          # runs the same patterns line by line in Go's regexp.
+          sed -i -E "/ template=/!s#^(oci +linux +)[^ ]+#\1$PIN#" imagepins/images.pin
+          sed -i -E "/ template=agent( |$)/s#^(oci +linux +)[^ ]+#\1$AGENT_PIN#" imagepins/images.pin
+          grep -qE "^oci linux $PIN( |$)" imagepins/images.pin || { echo "images.pin has no oci linux line"; exit 1; }
+          grep -qE "^oci linux $AGENT_PIN .*template=agent( |$)" imagepins/images.pin || { echo "images.pin has no agent line"; exit 1; }
+          go test -count=1 ./hostprobe/ -run 'TestDefaultPins'
+          if git diff --quiet; then echo "images.pin already pins $PIN"; exit 0; fi
+          branch="box-image-$TAG"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "Pin zm's Linux box images $TAG (default and agent)"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+            git push "https://github.com/$GITHUB_REPOSITORY" "HEAD:refs/heads/$branch"
+          url="https://github.com/$GITHUB_REPOSITORY/compare/main...$branch?expand=1"
+          {
+            echo "### zm's Linux box images are pushed; open their PR"
+            echo
+            echo "images.pin line: \`oci linux $PIN\`"
+            echo
+            echo "agent line: \`oci linux $AGENT_PIN template=agent\`"
+            echo
+            echo "Open the PR (Actions may not open one here): $url"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "images.pin line: oci linux $PIN"
+          echo "images.pin line: oci linux $AGENT_PIN template=agent"
+          echo "open the PR: $url"

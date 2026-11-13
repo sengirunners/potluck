@@ -1,0 +1,41 @@
+# zm's default box images (zm-eakh.12.23.6): what `zm host share` and `zm pool host` lend when no --image is
+# given. zm embeds this file, so the pins update with zm. The daemon checks each box's booted digest against the
+# binding's pin at acquire and releases any other (SPEC 20 "Boxes"), so a default is checked like any --image.
+#
+# Named images use name=NAME and are lent alone with --with NAME. root=on keeps passwordless sudo
+# inside the VM by default (--root=false overrides it). Named images are not sandbox templates.
+# One default line per layer and guest OS: layer, os, then the image pinned by digest (name@sha256:<64 hex>), or "-" when
+# zm's own image for it is not published yet (share then says so and names --image), then the image's own floor
+# when it has one: min_cpu=N min_memory_mb=N (a Tart image's cpuCountMin and memorySizeMin: tart set refuses less,
+# so share lends no smaller size of it), and runner_dir=PATH when the image carries GitHub's runner (relative to the
+# guest user's home unless absolute; zm-eakh.12.24.5): share binds it as the box's runner_dir, so the box serves
+# GitHub Actions jobs (`github-jit`), and template=NAME on a template's line (zm-eakh.12.5.20): a layer's first
+# line without one is its default, and share lends each published template image beside it (the default stays
+# the binding's first image; `zm sandbox create --template NAME` boots the template's). A layer and OS have one
+# plain line and one line per template; a template name is one internal/api knows (api.BoxTemplateImage). A box image needs sh, bash, awk, sleep, cat, kill, ps, perl, git, nc (and ip and ping for the VM-to-VM
+# network check), plus what a GitHub just-in-time runner needs.
+#
+# tart darwin: Cirrus Labs' macOS Tahoe base, built from github.com/cirruslabs/macos-image-templates
+#   (templates/vanilla-tahoe.pkr.hcl, then templates/base.pkr.hcl; MIT). It has the Tart guest agent, Homebrew
+#   with the Command Line Tools (git), the GitHub runner in ~/actions-runner (scripts/install-actions-runner.sh,
+#   run as the image's user admin), and macOS's own bash, perl, nc and
+#   ping (no ip: the VM-to-VM check is a SKIP). macOS itself is under Apple's licence, which allows two macOS VMs
+#   per Mac (zm-run-tart's cap). About 27 GB to pull. Digest of :latest read from ghcr.io on 2026-11-07; its Tart
+#   config (the manifest's config layer) sets cpuCountMin 2 and memorySizeMin 4294967296 (4096 MiB).
+# oci linux: zm's own, cmd/potluck-driver-tart/images/linux/Dockerfile (GitHub's actions-runner image plus netcat-openbsd,
+#   iproute2, iputils-ping and procps; no public image has all of them). .github/workflows/box-images.yml
+#   builds it, pushes ghcr.io/sengirunners/potluck-box-linux and writes its digest here (keeping the keys after it). The
+#   runner is in /home/runner (the base's; the Dockerfile's build fails without /home/runner/run.sh).
+# oci linux, template agent: zm's coding-agent image, cmd/potluck-driver-tart/images/agent/Dockerfile, built by the same
+#   workflow FROM the potluck-box-linux image it pushes (so the runner and box tools stay), adding git, gh, Node 22
+#   with npm and corepack, Python 3 with pip and venv, ripgrep, jq, build-essential and the Claude Code and Codex
+#   CLIs, each pinned. "-" until the workflow first publishes ghcr.io/sengirunners/potluck-box-agent.
+tart darwin ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on min_free_gb=60 pull_minutes=60
+oci linux ghcr.io/sengirunners/potluck-box-linux@sha256:b47c4d9f2e92103e6a64ab4c51642a0328ab599c4580d5c560fb93f0c306c6f0 runner_dir=/home/runner
+oci linux ghcr.io/sengirunners/potluck-box-agent@sha256:84c89bd837e6cc72c575c93c59c4ed0e18e4352a027544a270a7670f30a83594 runner_dir=/home/runner template=agent
+# Built by box-images run 43289820968 from its freshly published agent/Linux chain.
+oci linux ghcr.io/sengirunners/potluck-box-browser@sha256:28b009beab77de08afbc02a1205085a4e595191f32198e4c8df3e164583b487e runner_dir=/home/runner template=browser
+# min_free_gb budgets download, unpacked disk and box space; pull_minutes bounds the pull.
+# Named Mac image: selected alone by --with xcode, not as a sandbox template.
+# Cirrus Xcode 26.3 (67.5 GB download, 120 GB disk); runner refreshed by the driver before each Actions job.
+tart darwin ghcr.io/cirruslabs/macos-tahoe-xcode@sha256:39980f3a654be50fab35d8ead868b25b7b5c52adb59ec2fca23073c714cac9c6 min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on name=xcode min_free_gb=200 pull_minutes=180

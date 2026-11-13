@@ -1,0 +1,264 @@
+package owners
+
+// GitHub grants (SPEC 22 "Join by GitHub"; owners-2026-11-01 Q11): a role
+// in a project or area for a GitHub user, by numeric id, or for a GitHub
+// org, whose active members qualify (checked live at join, never cached).
+// No identity exists until the person joins.
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/authz"
+	"github.com/sengirunners/potluck/kit/core"
+	"github.com/sengirunners/potluck/kit/store"
+)
+
+var grantMigrations = []store.Migration{
+	{Kind: store.KindRegistry, Name: "owners/0002_github_grants", Script: `
+CREATE TABLE github_grants (
+	account    TEXT NOT NULL,
+	login      TEXT NOT NULL,
+	kind       TEXT NOT NULL,
+	project    TEXT NOT NULL,
+	area       TEXT NOT NULL DEFAULT '',
+	role       TEXT NOT NULL,
+	created    INTEGER NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (account, project, area)
+);
+CREATE INDEX github_grants_project ON github_grants (project);`},
+}
+
+func (s *Service) grantRoutes(r *core.Router) {
+	r.HandleFunc("POST /v0/grants/github", core.Authed, "admin on the project/area; the login resolved to its GitHub id now", jsonH(s.handleGrant))
+	r.HandleFunc("DELETE /v0/grants/github", core.Authed, "admin on the project/area", jsonH(s.handleRevoke))
+	r.HandleFunc("GET /v0/grants/github", core.Authed, "admin on the project named by ?project=", jsonH(s.handleGrants))
+}
+
+// adminOf is the project (by ref) and area sub administers. A project or
+// area sub cannot see answers like a missing one.
+func (s *Service) adminOf(sub *authz.Subject, ref, area string) (api.Project, string, error) {
+	p, err := s.d.Projects.Get(sub.Scope, ref)
+	if err != nil {
+		return p, "", err
+	}
+	area = strings.ToLower(strings.TrimSpace(area))
+	if area != "" && (!s.d.Projects.HasArea(p.ID, area) || !sub.Can(authz.Read, authz.Object{Project: p.ID, Area: area})) {
+		return p, "", api.NotFound("area", area)
+	}
+	return p, area, sub.Check(authz.Admin, authz.Object{Project: p.ID, Area: area}, "project", ref)
+}
+
+func loginArg(s string) string { return strings.TrimPrefix(strings.TrimSpace(s), "@") }
+
+func (s *Service) handleGrant(r *http.Request) (any, error) {
+	var req api.GitHubGrantRequest
+	if err := api.DecodeJSON(r, &req); err != nil {
+		return nil, err
+	}
+	return s.Grant(r.Context(), core.SubjectOf(r.Context()), req)
+}
+
+// Grant gives a GitHub user or org a role in a project or area, keyed to
+// the account's numeric id as GitHub answers the login now.
+func (s *Service) Grant(ctx context.Context, sub *authz.Subject, req api.GitHubGrantRequest) (api.GitHubGrant, error) {
+	rel, err := authz.ParseRelation(req.Role)
+	if err != nil {
+		return api.GitHubGrant{}, err
+	}
+	p, area, err := s.adminOf(sub, req.Project, req.Area)
+	if err != nil {
+		return api.GitHubGrant{}, err
+	}
+	acc, err := s.acc.ByLogin(ctx, loginArg(req.Owner))
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return api.GitHubGrant{}, api.Errorf(api.CodeNotFound, "no GitHub account @%s", loginArg(req.Owner))
+	case err != nil:
+		return api.GitHubGrant{}, providerDown(err)
+	case acc.Kind != KindUser && acc.Kind != KindOrg:
+		return api.GitHubGrant{}, api.Errorf(api.CodeForbidden, "@%s is a GitHub %s; grant a person or an org", acc.Login, acc.Kind)
+	case acc.Kind == KindOrg:
+		// Members are re-checked hourly with the authority's own token, so
+		// it must see the org's members (it is a member's).
+		switch _, err := s.acc.OrgMember(ctx, acc.Login, acc.Login); {
+		case errors.Is(err, ErrNoView):
+			return api.GitHubGrant{}, api.Errorf(api.CodeForbidden, "this authority cannot see @%s's members, so it could not re-check them", acc.Login).
+				WithHint(`an org grant needs github.lookup_token: a secret reference (file:, keychain: or env:; never the token itself in config.json) to a token of a member of @` + acc.Login + ` with scope read:org only`)
+		case err != nil:
+			return api.GitHubGrant{}, providerDown(err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	if _, err := s.d.Store.Registry().ExecContext(ctx, `INSERT INTO github_grants (account, login, kind, project, area, role, created, created_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (account, project, area) DO UPDATE SET role = excluded.role, login = excluded.login`,
+		acc.ID, acc.Login, acc.Kind, p.ID, area, string(rel), store.Millis(now), sub.Address); err != nil {
+		return api.GitHubGrant{}, err
+	}
+	return api.GitHubGrant{Account: acc.ID, Login: acc.Login, Kind: acc.Kind, Role: string(rel), Project: p.Slug, Area: area, Created: now}, nil
+}
+
+func (s *Service) handleRevoke(r *http.Request) (any, error) {
+	var req api.GitHubGrantRequest
+	if err := api.DecodeJSON(r, &req); err != nil {
+		return nil, err
+	}
+	ctx := r.Context()
+	sub := core.SubjectOf(ctx)
+	p, area, err := s.adminOf(sub, req.Project, req.Area)
+	if err != nil {
+		return nil, err
+	}
+	// By the login it was granted under, its current login, or its id.
+	login := loginArg(req.Owner)
+	var account string
+	err = s.d.Store.Registry().QueryRowContext(ctx, `SELECT account FROM github_grants WHERE project = ? AND area = ? AND
+		(lower(login) = lower(?) OR account = ?)`, p.ID, area, login, req.Owner).Scan(&account)
+	if err != nil {
+		if acc, e := s.acc.ByLogin(ctx, login); e == nil {
+			err = s.d.Store.Registry().QueryRowContext(ctx, `SELECT account FROM github_grants WHERE project = ? AND area = ? AND account = ?`,
+				p.ID, area, acc.ID).Scan(&account)
+		}
+	}
+	if err != nil {
+		return nil, api.Errorf(api.CodeNotFound, "no GitHub grant for @%s in %s", login, p.Slug+areaSuffix(area))
+	}
+	if _, err := s.d.Store.Registry().ExecContext(ctx, `DELETE FROM github_grants WHERE account = ? AND project = ? AND area = ?`, account, p.ID, area); err != nil {
+		return nil, err
+	}
+	n, err := s.revokeAdmissions(ctx, account, p.ID, area, "the GitHub grant to @"+login+" was revoked by "+sub.Address)
+	if err != nil {
+		return nil, err
+	}
+	return api.GitHubRevoke{Revoked: true, Admissions: n}, nil
+}
+
+func areaSuffix(a string) string {
+	if a == "" {
+		return ""
+	}
+	return "/" + a
+}
+
+func (s *Service) handleGrants(r *http.Request) (any, error) {
+	sub := core.SubjectOf(r.Context())
+	p, _, err := s.adminOf(sub, r.URL.Query().Get("project"), "")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.d.Store.Registry().QueryContext(r.Context(), `SELECT account, login, kind, area, role, created FROM github_grants
+		WHERE project = ? ORDER BY area, lower(login)`, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := api.GitHubGrantList{Grants: []api.GitHubGrant{}}
+	for rows.Next() {
+		g := api.GitHubGrant{Project: p.Slug}
+		var at int64
+		if err := rows.Scan(&g.Account, &g.Login, &g.Kind, &g.Area, &g.Role, &at); err != nil {
+			return nil, err
+		}
+		g.Created = store.FromMillis(at)
+		out.Grants = append(out.Grants, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for i, g := range out.Grants {
+		if g.Kind != KindUser {
+			continue
+		}
+		if out.Grants[i].Ceilings, err = s.d.Projects.AccountCeilings(r.Context(), sub, g.Account, p.ID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// memberships asks GitHub, live with the login's token, which of the
+// orgs granted in the project ref names the person is an active member
+// of, keyed by the org's account id: each org is looked up by id for its
+// current login first, so a renamed org's members still match and a new
+// org squatting its old login never does. Any error counts as "not a
+// member" (the join's one refusal, never an outage that tells apart).
+func (s *Service) memberships(ctx context.Context, ref, token string) map[string]bool {
+	out := map[string]bool{}
+	p, ok := s.d.Projects.Lookup(strings.TrimSpace(ref))
+	if !ok {
+		return out
+	}
+	rows, err := s.d.Store.Registry().QueryContext(ctx, `SELECT DISTINCT account FROM github_grants WHERE project = ? AND kind = ?`, p.ID, KindOrg)
+	if err != nil {
+		return out
+	}
+	var orgs []string
+	for rows.Next() {
+		var o string
+		if rows.Scan(&o) == nil {
+			orgs = append(orgs, o)
+		}
+	}
+	rows.Close()
+	for _, id := range orgs {
+		org, err := s.acc.ByID(ctx, id)
+		if err != nil || org.Kind != KindOrg {
+			continue
+		}
+		s.renamed(ctx, org)
+		if ok, err := s.acc.Member(ctx, token, org.Login); err == nil && ok {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// renamed records an account's current login on its GitHub grants.
+func (s *Service) renamed(ctx context.Context, acc Account) {
+	_, _ = s.d.Store.Registry().ExecContext(ctx, `UPDATE github_grants SET login = ? WHERE account = ? AND login <> ?`, acc.Login, acc.ID, acc.Login)
+}
+
+// grantKey names the GitHub grant an admission came from.
+type grantKey struct{ account, kind, area string }
+
+// grantFor is the strongest role acc holds in project pid through GitHub
+// grants: its own (by id), or an org's it is an active member of (orgs,
+// by org id, asked live when GitHub answered the login). A whole-project
+// grant wins a tie. It answers the grant it came from.
+//
+// With scoped, only grants that cover area count: a whole-project grant
+// covers any area, an area grant only its own (area "" then asks for the
+// whole project, which only a whole-project grant covers).
+func (s *Service) grantFor(ctx context.Context, pid string, acc Account, orgs map[string]bool, scoped bool, area string) (role string, from grantKey, err error) {
+	rows, err := s.d.Store.Registry().QueryContext(ctx, `SELECT account, kind, area, role FROM github_grants WHERE project = ?`, pid)
+	if err != nil {
+		return "", grantKey{}, err
+	}
+	defer rows.Close()
+	frozen := s.orgJoinsFrozen(ctx, pid)
+	best := authz.None
+	for rows.Next() {
+		var g grantKey
+		var rl string
+		if err := rows.Scan(&g.account, &g.kind, &g.area, &rl); err != nil {
+			return "", grantKey{}, err
+		}
+		if !(g.kind == KindUser && g.account == acc.ID) && !(g.kind == KindOrg && orgs[g.account] && !frozen) {
+			continue
+		}
+		if scoped && g.area != "" && g.area != area {
+			continue
+		}
+		r := authz.Relation(rl)
+		if authz.Max(best, r) != best || (r == best && g.area == "" && from.area != "") {
+			best, from = r, g
+		}
+	}
+	return string(best), from, rows.Err()
+}

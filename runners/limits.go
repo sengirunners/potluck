@@ -1,0 +1,304 @@
+package runners
+
+// A job's runtime limit and its box's renewable lease are different clocks.
+// The host must fit the runtime plus five minutes to boot and register. Once
+// GitHub starts the job, its reported start fixes the deadline; duplicate
+// deliveries never extend it. Watch enforces deadlines at its normal cadence.
+
+import (
+	"cmp"
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/sengirunners/potluck/ghapp"
+	"github.com/sengirunners/potluck/kit/api"
+	"gopkg.in/yaml.v3"
+)
+
+const startupAllowance = 300
+
+type runtimeLimit struct {
+	seconds int
+	source  string
+	// fallback is why job_ttl_s applies instead of the workflow's
+	// timeout-minutes; empty when the workflow's limit applies.
+	fallback string
+}
+
+// workflowSource is where workflowLimit reads a run, its workflow file and a
+// job: GitHub through the App for the broker (*ghapp.Client), a workflow
+// file read with gh for the doctor's check 11.
+type workflowSource interface {
+	Run(ctx context.Context, installation int64, repo string, run int64) (ghapp.Run, error)
+	WorkflowFile(ctx context.Context, installation int64, repo, path, sha string) ([]byte, error)
+	Job(ctx context.Context, installation int64, repo string, id int64) (ghapp.Job, error)
+}
+
+func (s *Service) workflowLimit(ctx context.Context, cl workflowSource, installation int64, repo string, run, id int64, knownRun *ghapp.Run, knownJob *ghapp.Job) runtimeLimit {
+	fallback := func(why string) runtimeLimit {
+		return runtimeLimit{seconds: s.jobTTL(), source: "configured fallback: " + why, fallback: why}
+	}
+	var source ghapp.Run
+	var err error
+	if knownRun != nil {
+		source = *knownRun
+	} else {
+		source, err = cl.Run(ctx, installation, repo, run)
+	}
+	if err != nil {
+		return fallback("workflow source unavailable")
+	}
+	// For these events the workflow is at GITHUB_SHA. PRs have distinct code
+	// and workflow revisions; REST does not expose the caller workflow SHA.
+	switch source.Event {
+	case "push", "workflow_dispatch":
+	default:
+		return fallback("workflow revision is unresolved for " + cmp.Or(source.Event, "unknown event"))
+	}
+	if source.HasReferencedWorkflows {
+		return fallback("reusable workflow identity is unresolved")
+	}
+	body, err := cl.WorkflowFile(ctx, installation, repo, source.Path, source.HeadSHA)
+	if err != nil {
+		if errors.Is(err, ghapp.ErrWorkflowContentsRead) {
+			return fallback(ghapp.ErrWorkflowContentsRead.Error())
+		}
+		return fallback("immutable workflow file unavailable")
+	}
+	var jc ghapp.Job
+	if knownJob != nil {
+		jc = *knownJob
+	} else {
+		jc, err = cl.Job(ctx, installation, repo, id)
+	}
+	if err != nil || jc.Name == "" {
+		return fallback("GitHub job display name unavailable")
+	}
+	var doc struct {
+		Jobs map[string]struct {
+			Name     yaml.Node `yaml:"name"`
+			Timeout  yaml.Node `yaml:"timeout-minutes"`
+			Uses     yaml.Node `yaml:"uses"`
+			Strategy yaml.Node `yaml:"strategy"`
+		} `yaml:"jobs"`
+	}
+	if yaml.Unmarshal(body, &doc) != nil || len(doc.Jobs) == 0 {
+		return fallback("workflow jobs cannot be read")
+	}
+	selected := ""
+	for key, j := range doc.Jobs {
+		if j.Uses.Kind != 0 {
+			return fallback("reusable workflow identity is unresolved")
+		}
+		if j.Strategy.Kind != 0 {
+			return fallback("matrix job identity is unresolved")
+		}
+		name := key
+		if j.Name.Kind != 0 {
+			if j.Name.Kind != yaml.ScalarNode || j.Name.Tag != "!!str" || strings.Contains(j.Name.Value, "${{") {
+				return fallback("dynamic job name is unresolved")
+			}
+			name = j.Name.Value
+		}
+		if name == jc.Name {
+			if selected != "" {
+				return fallback("job display name is ambiguous")
+			}
+			selected = key
+		}
+	}
+	if selected == "" {
+		return fallback("job display name does not identify a workflow job")
+	}
+	timeout := doc.Jobs[selected].Timeout
+	if timeout.Kind == 0 {
+		return fallback("workflow omits timeout-minutes")
+	}
+	if strings.Contains(timeout.Value, "${{") {
+		return fallback("timeout-minutes expression is unresolved")
+	}
+	n, err := strconv.Atoi(timeout.Value)
+	if timeout.Kind != yaml.ScalarNode || timeout.Tag != "!!int" || err != nil || n < 1 || n > jobTTLMax/60 {
+		return fallback("timeout-minutes is not a literal integer within the broker five-day ceiling")
+	}
+	return runtimeLimit{seconds: n * 60, source: fmt.Sprintf("workflow %s@%s job %s", source.Path, source.HeadSHA, selected)}
+}
+
+func (s *Service) ensureLimit(ctx context.Context, cl *ghapp.Client, d delivery, knownRun *ghapp.Run, knownJob *ghapp.Job) error {
+	j, err := s.job(ctx, d.Job.ID)
+	if err != nil || j.limit > 0 {
+		return err
+	}
+	v := s.workflowLimit(ctx, cl, d.Installation.ID, d.Repo.FullName, d.Job.RunID, d.Job.ID, knownRun, knownJob)
+	_, err = s.db().ExecContext(ctx, `UPDATE runners_jobs SET limit_s = ?, limit_source = ? WHERE job = ? AND limit_s = 0`, v.seconds, v.source, d.Job.ID)
+	return err
+}
+
+// startRuntime follows the job that actually takes the runner, including a
+// trusted job that takes another job's minted runner. Missing started_at is
+// observed now, once, rather than guessed from the box acquisition time.
+func (s *Service) startRuntime(ctx context.Context, id, by int64, known *ghapp.Job) error {
+	holder, err := s.job(ctx, id)
+	if err != nil {
+		return err
+	}
+	if holder.started && holder.runs == by {
+		return nil
+	}
+	cl, err := s.client(ctx)
+	if err != nil {
+		return err
+	}
+	var jc ghapp.Job
+	if known != nil {
+		jc = *known
+	} else {
+		jc, err = cl.Job(ctx, holder.installation, holder.repo, by)
+	}
+	if err != nil {
+		return err
+	}
+	actual, err := s.job(ctx, by)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	v := runtimeLimit{seconds: actual.limit, source: actual.limitSource}
+	if v.seconds == 0 {
+		v = s.workflowLimit(ctx, cl, holder.installation, holder.repo, cmp.Or(jc.RunID, holder.run), by, nil, &jc)
+	}
+	start := s.now().Unix()
+	if t, ok := jc.Started(); ok && t.Unix() <= start {
+		start = t.Unix()
+	} else {
+		v.source += "; start observed by broker (GitHub started_at unavailable)"
+	}
+	// The actual job owns its budget and clock, even when its own box is
+	// currently running another job. Assignment facts on that box stay intact.
+	_, err = s.db().ExecContext(ctx, `INSERT INTO runners_jobs (job,installation,repo,run,labels,state,why,created,updated,limit_s,limit_source,started_at,deadline)
+ VALUES (?,?,?,?, '[]', ?, ?,?,?,?,?,?,?) ON CONFLICT(job) DO UPDATE SET
+ state = CASE WHEN runners_jobs.state IN (?,?) THEN excluded.state ELSE runners_jobs.state END,
+ limit_s = CASE WHEN runners_jobs.limit_s = 0 THEN excluded.limit_s ELSE runners_jobs.limit_s END,
+ limit_source = CASE WHEN runners_jobs.started_at = 0 THEN excluded.limit_source ELSE runners_jobs.limit_source END,
+ started_at = CASE WHEN runners_jobs.started_at = 0 THEN excluded.started_at ELSE runners_jobs.started_at END,
+ deadline = CASE WHEN runners_jobs.started_at = 0 THEN excluded.deadline ELSE runners_jobs.deadline END`, by, holder.installation, holder.repo, cmp.Or(jc.RunID, holder.run), jobRunning, "running on runner "+holder.runner+" minted for job "+itoa(id), s.now().Unix(), s.now().Unix(), v.seconds, v.source, start, start+int64(v.seconds), jobWaiting, jobFailed)
+	if err != nil {
+		return err
+	}
+	_, err = s.db().ExecContext(ctx, `UPDATE runners_jobs SET started = 1, runs = ? WHERE job = ? AND state = ? AND started = 0`, by, id, jobServing)
+	return err
+}
+
+// activeJob follows the holder's assignment. Runtime facts belong only to
+// the actual job's row; the holder's own job may run on a different box.
+func (s *Service) activeJob(ctx context.Context, holder job) (job, error) {
+	if !holder.started || holder.runs == 0 {
+		return job{}, nil
+	}
+	if holder.runs == holder.id {
+		return holder, nil
+	}
+	actual, err := s.job(ctx, holder.runs)
+	if err != nil {
+		s.logf("runners: holder job %d: actual job %d is missing: %v", holder.id, holder.runs, err)
+	}
+	return actual, err
+}
+
+func (s *Service) runtimeExpired(ctx context.Context, j job) bool {
+	actual, err := s.activeJob(ctx, j)
+	if err == nil && actual.stopCause == "github_timeout" {
+		_ = s.jobEnded(ctx, actual.id)
+		return true
+	}
+	if err != nil || actual.deadline == 0 || s.now().Unix() < actual.deadline {
+		return false
+	}
+	if actual.stopCause == "" {
+		if cl, e := s.client(ctx); e == nil {
+			if gj, e := cl.Job(ctx, j.installation, j.repo, actual.id); e == nil && gj.Status == "completed" {
+				_ = s.githubEnded(ctx, actual.id, gj.Conclusion)
+				return true
+			}
+		}
+	}
+	victim := actual.id
+	why := timeoutReason("broker_timeout", actual.limit, actual.limitSource)
+	flag, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET stop_cause = 'broker_timeout' WHERE job = ? AND stop_cause IN ('','broker_timeout') AND EXISTS (SELECT 1 FROM runners_jobs carrier WHERE carrier.job = ? AND carrier.state = ? AND carrier.runs = ? AND carrier.handle = ?)`, victim, j.id, jobServing, victim, j.handle)
+	if err != nil {
+		return true
+	}
+	if n, _ := flag.RowsAffected(); n == 0 {
+		return true
+	}
+	// Keep the handle retryable if the link or host cannot release it.
+	l, err := s.link(ctx, j.installation)
+	if err != nil {
+		return true
+	}
+	sub, svc, err := s.poolSubject(ctx, l)
+	if err != nil {
+		return true
+	}
+	if _, err = svc.Release(ctx, sub, l.project, j.target, handleID(j.handle)); err != nil && !api.IsCode(err, api.CodeNotFound) {
+		return true
+	}
+	state := jobDone
+	if victim != j.id {
+		state = jobTaken
+	}
+	carrierWhy := why
+	if victim != j.id {
+		carrierWhy = "job " + itoa(victim) + " on its runner reached its time limit; its box was released"
+	}
+	res, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = ?, handle = '', updated = ? WHERE job = ? AND state = ? AND runs = ? AND handle = ?`, state, clip(carrierWhy), s.now().Unix(), j.id, jobServing, victim, j.handle)
+	if err != nil {
+		return true
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return true
+	}
+	s.logf("runners: job %d: %s", victim, why)
+	if victim != j.id {
+		// A trusted job took this runner: the original queued job still needs a
+		// runner. Its original budget and actual clock were never overwritten.
+		_, _ = s.db().ExecContext(ctx, `UPDATE runners_jobs SET why = ?, state = CASE WHEN state = ? AND runs != 0 AND runs != job THEN state ELSE ? END, updated = ? WHERE job = ?`, clip(why), jobServing, jobDone, s.now().Unix(), victim)
+		_ = s.jobEnded(ctx, victim)
+		_ = s.requeue(ctx, j.id, j.runner)
+	}
+	return true
+}
+
+// githubEnded preserves GitHub's authoritative timeout conclusion. A generic
+// failure or cancellation alone does not establish that a time limit fired.
+func (s *Service) githubEnded(ctx context.Context, id int64, conclusion string) error {
+	if conclusion == "timed_out" {
+		_, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET stop_cause = 'github_timeout' WHERE job = ? AND stop_cause = ''`, id)
+		if err != nil {
+			return err
+		}
+	}
+	_, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET state = ?, updated = ? WHERE job = ? AND state = ?`, jobDone, s.now().Unix(), id, jobRunning)
+	if err != nil {
+		return err
+	}
+	return s.jobEnded(ctx, id)
+}
+
+// timeoutReason derives the user-visible cause from the actual job's first
+// proven timeout decision. A pending release is a stop request, not proof
+// that an unreachable host has already stopped the process.
+func timeoutReason(cause string, limit int, source string) string {
+	switch cause {
+	case "broker_timeout":
+		return fmt.Sprintf("job time limit reached (%d s; %s); stop requested; not re-run", limit, source)
+	case "github_timeout":
+		return "GitHub stopped the job at its workflow time limit (timed_out); not re-run"
+	default:
+		return ""
+	}
+}
