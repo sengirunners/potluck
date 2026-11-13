@@ -120,6 +120,13 @@ type Layer struct {
 	Sudo        string   `json:"sudo_runtime,omitempty"`
 	SudoProblem string   `json:"sudo_problem,omitempty"`
 	SudoSteps   []string `json:"sudo_root_steps,omitempty"`
+	// Guard (oci) is whether zm's per-port anti-spoofing on its network's
+	// bridge runs as zm installs it (boxguard.go); else GuardProblem says
+	// why and GuardSteps install it. A Kata box with docker on zm's network
+	// needs it (its sudo runtime waits for it); nothing else does.
+	Guard        bool     `json:"box_guard,omitempty"`
+	GuardProblem string   `json:"box_guard_problem,omitempty"`
+	GuardSteps   []string `json:"box_guard_root_steps,omitempty"`
 }
 
 // Report is Detect's answer.
@@ -401,9 +408,12 @@ func detectOCI(ctx context.Context, run Runner, f Facts, r Report, pm string) La
 		ociEngine(f, &l)
 	}
 	l.Available = len(l.Problems) == 0 && l.Runtime != ""
+	detectBoxNet(ctx, run, f, &l)
+	if slices.ContainsFunc(l.Runtimes, func(r string) bool { return strings.Contains(r, "kata") }) { // Kata, the default or asked for (share_runtime.go)
+		detectBoxGuard(ctx, run, f, &l)
+	}
 	detectSudo(&l, runtimesJSON, registered, slices.ContainsFunc(l.RootSteps, func(s string) bool { return strings.Contains(s, "runsc install") }))
 	l.RootSteps = dedupe(l.RootSteps)
-	detectBoxNet(ctx, run, f, &l)
 	return l
 }
 

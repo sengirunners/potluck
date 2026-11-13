@@ -256,6 +256,9 @@ func (o ShareOptions) RootSteps() []string {
 		}
 		if on, _ := o.docker(); on && l.Name == "oci" && (layer == "" || layer == "oci") {
 			steps = append(steps, l.SudoSteps...)
+			if o.kataGuardNeeded(l) {
+				steps = append(steps, l.GuardSteps...)
+			}
 		}
 	}
 	return dedupe(steps)
@@ -292,6 +295,7 @@ func Precheck(ctx context.Context, run Runner, o ShareOptions) error {
 			if l.Sudo == "" && len(l.SudoSteps) > 0 {
 				l.Sudo = SudoRuntime
 			}
+			l.Guard = true // as the root step would leave it
 		}
 	}
 	o.Layer = nr.Layer
@@ -589,6 +593,9 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			base["oci_network"] = network
 		}
 		res.Network = network
+		if err := kataDockerGuard(layer, res.Docker, rt, network); err != nil {
+			return res, err
+		}
 		if runner != "" && network != "" && network != "none" { // what the runner's network must and must not reach
 			if !slices.Contains(o.NetAllow, RunnerNetAllow) {
 				o.NetAllow = append(slices.Clone(o.NetAllow), RunnerNetAllow)

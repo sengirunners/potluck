@@ -2,6 +2,8 @@ package vmhost
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,12 +45,116 @@ func validTunInfo() os.FileInfo {
 	return tunFileInfo{mode: os.ModeDevice | os.ModeCharDevice | 0666, stat: st}
 }
 
+// fakeGuard answers ociGuardReady with err, recording the networks asked.
+func fakeGuard(t *testing.T, err error) *[]string {
+	t.Helper()
+	old := ociGuardReady
+	t.Cleanup(func() { ociGuardReady = old })
+	asked := new([]string)
+	ociGuardReady = func(network string) error {
+		*asked = append(*asked, network)
+		return err
+	}
+	return asked
+}
+
+// A Kata box with docker (its guest /proc unmasked) is made only where the
+// guard allows: never while the guard refuses, and nothing is created then.
+// gVisor's docker box never asks for the guard.
+func TestOCIKataDockerGuard(t *testing.T) {
+	for _, rt := range []string{"kata-qemu", "runsc-root"} {
+		t.Run(rt, func(t *testing.T) {
+			fakeKataTun(t, validTunInfo(), nil)
+			asked := fakeGuard(t, errors.New("zm-box-guard.service is \"failed\""))
+			o, dir := newFakeOCI(t, "mine")
+			o.runtime, o.root, o.docker = rt, true, true
+			if ociKataRuntime(rt) {
+				attachFakeHostParent(t, &o)
+			}
+			err := o.Clone("img", "guarded", 1, 512)
+			_, created := os.Stat(filepath.Join(dir, "c", "guarded", "args"))
+			if ociKataRuntime(rt) {
+				if err == nil || !strings.Contains(err.Error(), "zm-box-guard") || created == nil || len(*asked) != 1 || (*asked)[0] != "mine" {
+					t.Fatalf("kata docker with the guard refusing: err %v, created %v, asked %v", err, created == nil, *asked)
+				}
+				return
+			}
+			if err != nil || len(*asked) != 0 {
+				t.Fatalf("gVisor docker box: err %v, guard asked %v", err, *asked)
+			}
+		})
+	}
+	// The real check: no network needs no guard; an owner's network never
+	// has zm's guard.
+	if err := ociGuardReady("none"); err != nil {
+		t.Errorf("network none: %v", err)
+	}
+	if err := ociGuardReady("mine"); err == nil || !strings.Contains(err.Error(), "no such guard") {
+		t.Errorf("an owner's network: %v", err)
+	}
+	// Every Potluck network has its guard, named after its filter unit.
+	if len(ociBoxGuards) != len(ociBoxNets) {
+		t.Fatalf("guards %v for networks %v", ociBoxGuards, ociBoxNets)
+	}
+	for n, unit := range ociBoxNets {
+		if g := ociBoxGuards[n]; g != strings.TrimSuffix(unit, "-net.service")+"-guard.service" {
+			t.Errorf("network %s: guard %q beside filter %q", n, g, unit)
+		}
+	}
+}
+
+// A box made while the guard ran starts again only while it runs: every
+// boot of a Kata box reads the container's own options and networks, so a
+// kept box is held whatever a later request's network says.
+func TestOCIKataDockerGuardBoot(t *testing.T) {
+	fakeKataTun(t, validTunInfo(), nil)
+	oldNet := ociNetReady
+	ociNetReady = func(string) error { return nil }
+	t.Cleanup(func() { ociNetReady = oldNet })
+	var guard error
+	var asked []string
+	oldGuard := ociGuardReady
+	ociGuardReady = func(n string) error { asked = append(asked, n); return guard }
+	t.Cleanup(func() { ociGuardReady = oldGuard })
+	mk := func(name string, docker bool) ociCLI {
+		o, _ := newFakeOCI(t, "potluck-box")
+		o.runtime, o.root, o.docker = "kata-qemu", true, docker
+		attachFakeHostParent(t, &o)
+		if err := o.Clone("img", name, 1, 512); err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+	kept := mk("kept", true)
+	asked = nil
+	if err := kept.guardBoot("kept"); err != nil || len(asked) != 1 || asked[0] != "potluck-box" {
+		t.Fatalf("guard running: %v, asked %v", err, asked)
+	}
+	guard = errors.New(`potluck-box-guard.service is "failed"`)
+	if cmd, _, err := kept.Boot("kept", false, io.Discard); err == nil || !strings.Contains(err.Error(), "guard.service") {
+		if cmd != nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		t.Errorf("Boot of a Kata docker box with its guard failed: %v", err)
+	}
+	kept.network = "none" // a later request does not move the container
+	if err := kept.guardBoot("kept"); err == nil {
+		t.Error("a box made on potluck-box boots under a net-off request with its guard failed")
+	}
+	plain := mk("plain", false)
+	asked = nil
+	if err := plain.guardBoot("plain"); err != nil || len(asked) != 0 {
+		t.Errorf("a Kata box without docker (its /proc masked) asks for the guard: %v %v", err, asked)
+	}
+}
+
 // Exercise the actual create command: bridge support must never change the
 // outer box's capability boundary or turn on raw networking for gVisor.
 func TestOCIDockerNetwork(t *testing.T) {
 	for _, rt := range []string{"kata", "io.containerd.kata.v2", "runsc-root"} {
 		t.Run(rt, func(t *testing.T) {
 			fakeKataTun(t, validTunInfo(), nil)
+			fakeGuard(t, nil)
 			o, dir := newFakeOCI(t, "mine")
 			o.runtime, o.root, o.docker = rt, true, true
 			if ociKataRuntime(rt) {
@@ -75,9 +181,14 @@ func TestOCIDockerNetwork(t *testing.T) {
 			if present := strings.Contains(a, tun); present != (mode == "bridge") {
 				t.Errorf("mode %s guest TUN mapping %v: %s", mode, present, a)
 			}
-			// No device other than this exact guest-kernel TUN request.
-			withoutTun := strings.Replace(a, tun, "\n", 1)
-			for _, bad := range []string{"\n--cap-add\n", "\n--privileged\n", "\n--device\n", "--device=", "--net-raw", "--allow-packet-socket-write"} {
+			const unmask = "\n--security-opt\nsystempaths=unconfined\n"
+			if present := strings.Contains(a, unmask); present != (mode == "bridge") {
+				t.Errorf("mode %s guest /proc unmasked %v: %s", mode, present, a)
+			}
+			// No device other than this exact guest-kernel TUN request, and
+			// no other loosening than the Kata guest's own /proc.
+			withoutTun := strings.Replace(strings.Replace(a, tun, "\n", 1), unmask, "\n", 1)
+			for _, bad := range []string{"\n--cap-add\n", "\n--privileged\n", "\n--device\n", "--device=", "--net-raw", "--allow-packet-socket-write", "systempaths=", "seccomp=unconfined", "apparmor=unconfined", "--sysctl"} {
 				if strings.Contains(withoutTun, bad) {
 					t.Errorf("create grants %q: %s", bad, a)
 				}
@@ -89,6 +200,7 @@ func TestOCIDockerNetwork(t *testing.T) {
 func TestOCIDockerTunIdentity(t *testing.T) {
 	for _, name := range []string{"native-alias", "net-off", "no-docker", "runsc", "runsc-root", "kata-name-runsc", "runc", "missing-profile", "changed-profile", "unbounded-parent"} {
 		t.Run(name, func(t *testing.T) {
+			fakeGuard(t, nil)
 			o, dir := newFakeOCI(t, "mine")
 			o.runtime, o.root, o.docker = "kata-qemu", true, true
 			native := name != "runsc" && name != "runsc-root" && name != "kata-name-runsc" && name != "runc"
@@ -153,6 +265,7 @@ func TestOCIDockerTunIdentity(t *testing.T) {
 func TestOCIDockerTunMalformedSource(t *testing.T) {
 	for _, name := range []string{"missing", "symlink", "file", "directory", "block", "wrong-major", "wrong-minor", "no-stat"} {
 		t.Run(name, func(t *testing.T) {
+			fakeGuard(t, nil)
 			o, dir := newFakeOCI(t, "mine")
 			o.runtime, o.root, o.docker = "kata-qemu", true, true
 			attachFakeHostParent(t, &o)

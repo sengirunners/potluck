@@ -35,6 +35,8 @@ volume) if [ "$*" = "volume ls -q" ]; then [ -e "$d/ls-fails" ] && { echo "Error
   if [ "$2 $3" = "inspect potluck-cache" ]; then [ -e "$d/cache-inspect-fails" ] && { echo "Error: fake failure" >&2; exit 1; }; [ -e "$d/cache-volume" ]; exit; fi; [ "$2" = inspect ] && [ -e "$d/novol-$3" ] && exit 1; exit 0 ;;
 info) if [ "$3" = "{{json .Runtimes}}" ] && [ -e "$d/runtimes" ]; then cat "$d/runtimes"; exit 0; fi; exit 2 ;;
 container) if [ "$2 $3" = "inspect --format" ]; then [ -d "$d/c/$5" ] || exit 1
+    case "$4" in *SecurityOpt*) o=null; grep -qx 'systempaths=unconfined' "$d/c/$5/args" && o='["systempaths=unconfined"]'
+      printf '%s %s \n' "$o" "$(grep -A1 -x -- --network "$d/c/$5/args" | tail -n 1)"; exit 0 ;; esac
     grep '^type=volume,source=potluck-cache,' "$d/c/$5/args" | while read -r m; do case $m in *,readonly*) echo "potluck-cache /opt/potluck-cache false" ;; *) echo "potluck-cache /opt/potluck-cache true" ;; esac; done; exit 0; fi
   [ -d "$d/c/$3" ]; exit ;;
 create) n=$3; mkdir -p "$d/c/$n"; printf '%s\n' "$@" > "$d/c/$n/args"

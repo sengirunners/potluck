@@ -179,10 +179,14 @@ func (o ociCLI) clone(image, vm string, cpu, memory int, extra []string) error {
 		a = append(a, "--cgroup-parent", o.host.parent.name)
 	}
 	if id.kata && o.docker {
+		if err := ociGuardReady(o.network); err != nil {
+			return err
+		}
 		if err := checkKataTun(); err != nil {
 			return err
 		}
 		a = append(a, "--device", ociGuestTun+":"+ociGuestTun+":rw")
+		a = append(a, ociKataDockerProc...)
 	}
 	if o.root { // root's sudo is setuid (oci_root.go); root holds the bounding set, which needs no device nodes
 		if o.runtime == ociSudoRuntime {
@@ -430,6 +434,9 @@ func (o ociCLI) Boot(vm string, isolated bool, log io.Writer) (*exec.Cmd, io.Wri
 	if id.kata && o.host == nil {
 		return nil, nil, fmt.Errorf("Kata requires an admitted finite host parent")
 	}
+	if err := o.guardBoot(vm); err != nil { // before either path: every Kata box boots through bootHost
+		return nil, nil, err
+	}
 	if o.host != nil {
 		return o.bootHost(vm, isolated, log)
 	}
@@ -437,6 +444,9 @@ func (o ociCLI) Boot(vm string, isolated bool, log io.Writer) (*exec.Cmd, io.Wri
 }
 
 func (o ociCLI) boot(vm string, isolated bool, log io.Writer, deadman string) (*exec.Cmd, io.WriteCloser, error) {
+	if err := o.guardBoot(vm); err != nil {
+		return nil, nil, err
+	}
 	if isolated && !ociIsolatedNet(o.network) {
 		return nil, nil, fmt.Errorf("oci_network %q may reach the host or its LAN: an isolated run needs none or the plain name of a network made for zm with egress filtered", o.network)
 	}

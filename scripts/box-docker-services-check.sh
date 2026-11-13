@@ -43,10 +43,10 @@ docker network create "$prefix"
 docker run -d --name "$prefix-db" --network "$prefix" --network-alias db \
   -e POSTGRES_PASSWORD=potluck-check postgres:17-alpine
 for attempt in $(seq 1 60); do
-  docker exec "$prefix-db" pg_isready -U postgres && break
+  docker exec "$prefix-db" pg_isready -h 127.0.0.1 -U postgres && break
   sleep 1
 done
-docker exec "$prefix-db" pg_isready -U postgres
+docker exec "$prefix-db" pg_isready -h 127.0.0.1 -U postgres
 docker run -d --name "$prefix-web" --network "$prefix" --network-alias web \
   -e PGPASSWORD=potluck-check -p 127.0.0.1::8080 "$prefix"
 # A third service resolves web, whose request resolves db and queries Postgres.
@@ -68,8 +68,10 @@ for target in "$@"; do
   if sudo -n nc -z -w 3 "$host" "$port"; then
     echo "outer root reached forbidden $target" >&2; exit 1
   fi
-  # Even privileged nested Docker gets only its own namespace, not the host.
-  docker run --rm --privileged --network "$prefix" "$prefix" python -c '
+  # Even a nested container holding every capability gets only its own
+  # namespace, not the host. (--privileged also wants a writable /sys, which
+  # a Kata box's read-only /sys refuses: nested privileged mode is unavailable.)
+  docker run --rm --cap-add ALL --network "$prefix" "$prefix" python -c '
 import socket, sys
 try:
     socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=3)
