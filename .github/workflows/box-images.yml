@@ -40,7 +40,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    if: github.repository == 'sengirunners/potluck' && (github.ref == 'refs/heads/main' || inputs.source_commit != '')
+    if: github.repository == 'sengirunners/potluck-private' && (github.ref == 'refs/heads/main' || inputs.source_commit != '')
     runs-on: ${{ vars.RELEASE_RUNNER || 'sengi-standard-4-ubuntu-2404' }}
     timeout-minutes: 120
     steps:

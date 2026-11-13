@@ -31,8 +31,8 @@
 #   with npm and corepack, Python 3 with pip and venv, ripgrep, jq, build-essential and the Claude Code and Codex
 #   CLIs, each pinned. "-" until the workflow first publishes ghcr.io/sengirunners/potluck-box-agent.
 tart darwin ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on min_free_gb=60 pull_minutes=60
-oci linux ghcr.io/sengirunners/potluck-box-linux@sha256:b47c4d9f2e92103e6a64ab4c51642a0328ab599c4580d5c560fb93f0c306c6f0 runner_dir=/home/runner
-oci linux ghcr.io/sengirunners/potluck-box-agent@sha256:84c89bd837e6cc72c575c93c59c4ed0e18e4352a027544a270a7670f30a83594 runner_dir=/home/runner template=agent
+oci linux ghcr.io/sengirunners/potluck-box-linux@sha256:f2176f837d68a9711f503729a109a57b2bb2abcbe7c1ab8a391418d51f8f983c runner_dir=/home/runner
+oci linux ghcr.io/sengirunners/potluck-box-agent@sha256:07526647c94f5d0dfe9e9845299c3d04b449b7803436eacd287249eed38fcc2c runner_dir=/home/runner template=agent
 # Built by box-images run 43289820968 from its freshly published agent/Linux chain.
 oci linux ghcr.io/sengirunners/potluck-box-browser@sha256:28b009beab77de08afbc02a1205085a4e595191f32198e4c8df3e164583b487e runner_dir=/home/runner template=browser
 # min_free_gb budgets download, unpacked disk and box space; pull_minutes bounds the pull.
