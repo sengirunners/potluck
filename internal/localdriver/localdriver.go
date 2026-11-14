@@ -631,7 +631,7 @@ func localRemote(remote string) bool {
 func git(deadline time.Time, remote, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithDeadline(context.Background(), deadline)
 	defer cancel()
-	pre := []string{"-c", "core.hooksPath=/dev/null"}
+	pre := []string{"-c", "core.hooksPath=/dev/null", "-c", "maintenance.auto=false"}
 	if localRemote(remote) {
 		pre = append(pre, "-c", "protocol.file.allow=always")
 	}

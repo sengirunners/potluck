@@ -501,14 +501,20 @@ built from exactly those files, mounted `cow` at `path`, so nothing a box writes
 
 - Kinds are one table (`runtarget/deps.go`). `npm`: the files are `package-lock.json` (lockfile version 2 or 3),
   `package.json`, and the `package.json` of every package the lockfile keeps in the project (its workspaces and
-  local links), no other and none missing. The recipe runs `potluck-deps link .` when the shelf is mounted
+  local links), no other and none missing, and the project's `.npmrc` when it has one. An `.npmrc` is read as
+  `key=value` lines, comments (`#`, `;`) and blank lines, and takes only keys that change resolution and hold no
+  secret: `legacy-peer-deps`, `strict-peer-deps`, `engine-strict`, `install-links`, `save-exact` (`true` or
+  `false`), `include` and `omit` (`dev`, `optional`, `peer`; also as `key[]=`) and `install-strategy`
+  (`hoisted`, `nested`, `shallow`, `linked`). Any other key (a registry, a credential such as `_auth` or
+  `//host/:_authToken`, a script setting) or value is refused by name, its value never shown. The builder gets,
+  and the key holds, only those `key=value` lines; one with none is as no `.npmrc`. The recipe runs `potluck-deps link .` when the shelf is mounted
   (`docs/shelf.md`), then `npm ci --ignore-scripts` and `npm rebuild`, which runs install scripts.
   `scripts: "off"` leaves out `npm rebuild`. The root package's own lifecycle scripts never run in a build; a
   workspace package's own install script may, and fails when it needs the project's sources (only `package.json`
   files are there): use `scripts: "off"` then.
 - The volume is named `deps-<kind>-<52 hex>`, from the key: the sha256 over the kind, the recipe's text, the image
-  digest, the path, the scripts setting and each file's path and bytes (format 3: a layer sealed before seals
-  cleared setuid bits and special files is never found). The answer's `deps`
+  digest, the path, the scripts setting and each file's path and bytes (format 4: a layer built before layers took
+  the `.npmrc` is never found). The answer's `deps`
   (`[{"kind", "key", "hit", "built"?}]`) carry the whole key.
 - Limits: at most 4 layers, 2,000 files and 16 MiB of files in all; layers and volumes together at most 8, their
   paths not overlapping. Trusted hosts only; not with `persist` or `jit_config`; only on a binding that names its

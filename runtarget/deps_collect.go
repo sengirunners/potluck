@@ -28,7 +28,7 @@ func DepsKindNames() []string {
 // os.Root's FS) and checks them as the daemon will. Only regular files are
 // read. The daemon's limits (computeapi.DepsFilesMax and DepsBytesMax) hold
 // all of a box's layers together, so the caller passes what its earlier
-// layers left.
+// layers left. The files come back as the builder gets them (depsKind.canon).
 func CollectDepsFiles(kind string, root fs.FS, filesLeft, bytesLeft int) ([]computeapi.DepsFile, error) {
 	k, ok := depsKinds[kind]
 	if !ok {
@@ -82,5 +82,5 @@ func CollectDepsFiles(kind string, root fs.FS, filesLeft, bytesLeft int) ([]comp
 	if err := k.files(got); err != nil {
 		return nil, err
 	}
-	return files, nil
+	return canonFiles(k, files) // an .npmrc's comments never leave this machine
 }

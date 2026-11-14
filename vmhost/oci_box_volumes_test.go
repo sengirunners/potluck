@@ -76,7 +76,7 @@ func TestSweepDropsLeakedBoxVolumes(t *testing.T) {
 	kept := []string{
 		leased + "-home", released + "-anon0", running + "-home", running + "-anon0", stopped + "-home", mounted + "-home",
 		foreign + "-home", foreign + "-anon0",
-		p + "v0123456789abcdef",         // a layer volume
+		p + "v0123456789abcdef",         // a layer volume its file names (one none names is dropOrphans')
 		gone + "-cow0", gone + "-cow0u", // cow copies: oci-cow names them, and none is noted
 		"3f9c1e0d2b7a6c5e4f3a2b1c0d9e8f7a6b5c", // an anonymous volume: whose, nobody can say
 		p + "x-anon01", p + "x-anon", p + "-home", "potluck-cache",
@@ -88,6 +88,9 @@ func TestSweepDropsLeakedBoxVolumes(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := st.saveVol(volMeta{ID: "v0123456789abcdef", Target: "lx", Owner: "o", Name: "n", Layer: p + "v0123456789abcdef", Used: time.Now().UTC(), Bytes: 1}); err != nil {
+		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 	for _, r := range []record{

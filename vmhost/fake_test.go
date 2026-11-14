@@ -2,6 +2,7 @@ package vmhost
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -348,6 +349,18 @@ func (l dirLayer) VolumeInUse(v string) bool {
 
 func (dirLayer) SweepLeaks(func(string) bool) {} // a cow copy is under its VM's directory: gone with it
 
+func (l dirLayer) LayerVolumes() ([]string, error) {
+	es, err := os.ReadDir(filepath.Join(filepath.Dir(l.root), "fakevols"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	var out []string
+	for _, e := range es {
+		out = append(out, e.Name())
+	}
+	return out, err
+}
+
 func (l dirLayer) COWVolumes(vm string, ms []mount) []string {
 	var out []string
 	for _, m := range ms {
@@ -375,6 +388,10 @@ func (l dirLayer) VolumeBytes(_ string, vs []string) map[string]int64 {
 		dir := l.vol(v)
 		if p, ok := strings.CutPrefix(v, "cow:"); ok {
 			dir = p
+		} else {
+			// As Docker's run --mount type=volume does, the measuring
+			// helper makes a named volume that is not there.
+			_ = os.MkdirAll(dir, 0o700)
 		}
 		_ = filepath.Walk(dir, func(_ string, fi os.FileInfo, err error) error {
 			if err == nil && fi.Mode().IsRegular() {
@@ -718,13 +735,17 @@ func cancelBooting(t *testing.T, kind string) {
 
 // CleanSeal runs the driver's own sealCleanScript on the volume's directory,
 // on the host. "keep-fail" beside the VMs makes it fail.
-func (l dirLayer) CleanSeal(_, v string, keep []string) error {
+func (l dirLayer) CleanSeal(_, v string, keep []string) (int64, error) {
 	if _, err := os.Stat(filepath.Join(filepath.Dir(l.root), "keep-fail")); err == nil {
-		return fmt.Errorf("keep-fail")
+		return 0, fmt.Errorf("keep-fail")
 	}
 	out, err := exec.Command("sh", append([]string{"-c", sealCleanScript, "sh", l.vol(v)}, sealCleanArgs(keep)...)...).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%v: %s", err, out)
+		return 0, fmt.Errorf("%v: %s", err, out)
 	}
-	return nil
+	b, ok := l.VolumeBytes("", []string{v})[v]
+	if !ok {
+		return 0, fmt.Errorf("measure-fail")
+	}
+	return b, nil
 }

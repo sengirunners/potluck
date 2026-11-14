@@ -355,6 +355,9 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 		if err := checkVolumes(a.Volumes); err != nil {
 			return nil, err
 		}
+		if len(a.Volumes) > 0 {
+			d.remeasure(cmp.Or(a.VolumeOwner, a.Actor), a.Volumes) // volume.go
+		}
 	} else if len(a.Volumes) > 0 {
 		return nil, refuse("bad_request", "volumes are a box's")
 	} else if a.Net != "" || a.Persist {

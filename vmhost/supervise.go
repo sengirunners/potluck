@@ -589,7 +589,7 @@ func (s *sup) fetchCheckout(ctx context.Context, r record) error {
 `
 	const co = `git -c advice.detachedHead=false checkout -q -f --detach "$4"`
 	if !s.cfg.HostFetch {
-		const prog = pre + `git fetch -q --depth=1 --no-tags "$3" "$4"; ` + co
+		const prog = pre + `git -c maintenance.auto=false fetch -q --depth=1 --no-tags "$3" "$4"; ` + co
 		return s.guest(ctx, nil, "checkout in the guest", "sh", "-c", prog, "sh", guestDir, srcDir(r), r.Remote, r.Commit)
 	}
 	bundle, err := s.bundle(ctx, r)
@@ -602,7 +602,7 @@ func (s *sup) fetchCheckout(ctx context.Context, r record) error {
 		return err
 	}
 	defer f.Close()
-	const prog = pre + `cat > "$1/in.bundle"; git fetch -q "$1/in.bundle" "$3"; ` + co + `; rm -f "$1/in.bundle"`
+	const prog = pre + `cat > "$1/in.bundle"; git -c maintenance.auto=false fetch -q "$1/in.bundle" "$3"; ` + co + `; rm -f "$1/in.bundle"`
 	return s.guest(ctx, f, "checkout in the guest", "sh", "-c", prog, "sh", guestDir, srcDir(r), "refs/zm-run/"+r.ID, r.Commit)
 }
 
@@ -626,7 +626,7 @@ func (s *sup) guest(ctx context.Context, stdin io.Reader, what string, argv ...s
 func (s *sup) bundle(ctx context.Context, r record) (string, error) {
 	cache := filepath.Join(s.st.dir, "cache", "repo.git")
 	git := func(a ...string) error {
-		cmd := exec.CommandContext(ctx, "git", append([]string{"--git-dir", cache}, a...)...)
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "maintenance.auto=false", "--git-dir", cache}, a...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git %s: %v: %s", strings.Join(a, " "), err, strings.TrimSpace(string(out)))
 		}

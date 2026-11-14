@@ -158,7 +158,7 @@ git --git-dir="$g" config core.bare false
 own
 cd "$dest"
 for s in $5; do grep -qx "$s" "$g/shallow" 2>/dev/null || echo "$s" >>"$g/shallow"; done
-git fetch -q "$b" "+refs/zm/push:refs/zm/push"
+git -c maintenance.auto=false fetch -q "$b" "+refs/zm/push:refs/zm/push"
 git -c advice.detachedHead=false checkout -q -f --detach "$6"
 # Until one clean has finished (a first finish may die before it), remove
 # what an earlier tree left: untracked files and nested repositories, but

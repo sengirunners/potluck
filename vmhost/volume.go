@@ -5,12 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -93,7 +96,7 @@ type volUse struct {
 type volMeta struct {
 	ID, Target, Owner, Name string
 	Project                 string // the owner's project, as the daemon (or the host relaying for it) keys it
-	MeasureFailed           bool   // its last measurement failed: it counts as the whole cap until one succeeds
+	MeasureFailed           bool   // its last measurement failed: it counts as the whole cap until one succeeds (an acquire naming it measures it again: remeasure)
 	Layer                   string
 	Created, Used           time.Time
 	Bytes                   int64 // -1: not measured yet
@@ -140,8 +143,9 @@ type volumer interface {
 	// directories on the way to them (none: keeps all), then clears every
 	// setuid and setgid bit and deletes every device node, FIFO and socket;
 	// an error means it is not clean (image: one the layer may run a helper
-	// from). Never called under the state lock.
-	CleanSeal(image, vol string, keep []string) error
+	// from). It answers the cleaned volume's size in bytes, and an error
+	// when it cannot say. Never called under the state lock.
+	CleanSeal(image, vol string, keep []string) (int64, error)
 	// COWVolumes are the layer volumes a box's cow copies write (OCI: each
 	// overlay's upper and work), for VolumeBytes.
 	COWVolumes(vm string, ms []mount) []string
@@ -150,6 +154,10 @@ type volumer interface {
 	// them, a container removed some other way), except those of the VMs
 	// keep names, and never one a container still mounts.
 	SweepLeaks(keep func(vm string) bool)
+	// LayerVolumes are every named volume the layer lists (the sweep
+	// deletes this state directory's layer volumes that no volume file
+	// names: dropOrphans).
+	LayerVolumes() ([]string, error)
 }
 
 // volumes says whether this binding mounts named volumes (describe's
@@ -262,15 +270,35 @@ func (s store) saveVol(m volMeta) error {
 }
 
 func (s store) allVols() []volMeta {
-	ps, _ := filepath.Glob(filepath.Join(s.dir, "volumes", "v*.json"))
-	var out []volMeta
-	for _, p := range ps {
-		var m volMeta
-		if b, err := os.ReadFile(p); err == nil && json.Unmarshal(b, &m) == nil {
-			out = append(out, m)
-		}
-	}
+	out, _ := s.readVols()
 	return out
+}
+
+// readVols reads every volume file it can, and the first error: a reader
+// that deletes what no file names (dropOrphans) acts only on a whole read.
+func (s store) readVols() ([]volMeta, error) {
+	es, err := os.ReadDir(filepath.Join(s.dir, "volumes"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	var out []volMeta
+	for _, e := range es {
+		n := e.Name()
+		if !strings.HasPrefix(n, "v") || !strings.HasSuffix(n, ".json") {
+			continue
+		}
+		var m volMeta
+		b, rerr := os.ReadFile(filepath.Join(s.dir, "volumes", n))
+		if rerr == nil {
+			rerr = json.Unmarshal(b, &m)
+		}
+		if rerr != nil {
+			err = cmp.Or(err, rerr)
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, err
 }
 
 // volHolders are the modes live boxes hold each volume in. Lock held.
@@ -340,6 +368,58 @@ func (d *drv) takeVolumes(rid, owner, project string, vs []volReq) ([]volUse, er
 		}
 	}
 	return uses, nil
+}
+
+// remeasure measures again, outside the lock, the volumes of owner's an
+// acquire names whose last measurement failed and that no live box writes
+// (a sealed one is the sweep's: sweepVolumes)
+// (a failed one counts as the whole cap: volCount), and records what it
+// reads, so one failed measurement never holds the owner at the cap for
+// good. One it still cannot read stays failed: fail closed.
+func (d *drv) remeasure(owner string, vs []volReq) {
+	v, ok := d.vm.(volumer)
+	if !ok {
+		return
+	}
+	ids := map[string]string{}     // layer volume to volume id
+	used := map[string]time.Time{} // and its last use then: one used since keeps its own measurement
+	_ = d.st.locked(func() error {
+		held := d.volHolders()
+		for _, q := range vs {
+			id := volID(d.cfg.Target, owner, q.Name)
+			if m, found := d.st.loadVol(id); found && m.MeasureFailed && !m.Sealed && m.Build == "" && !writtenLive(held[id]) {
+				ids[m.Layer], used[m.Layer] = id, m.Used
+			}
+		}
+		return nil
+	})
+	if len(ids) == 0 {
+		return
+	}
+	layers := make([]string, 0, len(ids))
+	for l := range ids {
+		layers = append(layers, l)
+	}
+	sizes := v.VolumeBytes(d.cfg.Image, layers)
+	_ = d.st.locked(func() error {
+		held := d.volHolders()
+		now := time.Now().UTC()
+		for layer, id := range ids {
+			b, read := sizes[layer]
+			m, found := d.st.loadVol(id)
+			if !read || b < 0 || !found || !m.MeasureFailed || m.Sealed || m.Layer != layer || !m.Used.Equal(used[layer]) || writtenLive(held[id]) {
+				continue
+			}
+			m.Bytes, m.BytesAt, m.MeasureFailed = b, now, false
+			_ = d.st.saveVol(m)
+		}
+		return nil
+	})
+}
+
+// writtenLive says whether any of a volume's live holders writes it itself.
+func writtenLive(modes []string) bool {
+	return slices.ContainsFunc(modes, writesItself)
 }
 
 // volumeRoom keeps an acquire that writes (rw, cow, or new volumes) under
@@ -505,7 +585,12 @@ func (d *drv) sweepVolumes() {
 	keep := time.Duration(d.cfg.VolumeKeepS) * time.Second
 	var held map[string][]string
 	for _, m := range d.st.allVols() {
-		if m.Target != d.cfg.Target || m.Build != "" || time.Since(m.Used) <= keep {
+		// A sealed volume with no measured size (sealed before seals
+		// measured, or its measurement failed then) is never written
+		// again, so nothing would ever measure it: it goes once no box
+		// holds it, as a layer the next build makes again.
+		unsized := m.Sealed && (m.MeasureFailed || m.Bytes < 0)
+		if m.Target != d.cfg.Target || m.Build != "" || time.Since(m.Used) <= keep && !unsized {
 			continue
 		}
 		if held == nil {
@@ -515,7 +600,52 @@ func (d *drv) sweepVolumes() {
 			d.dropVolume(m)
 		}
 	}
+	d.dropOrphans()
 }
+
+// dropOrphans deletes this state directory's layer volumes (<prefix>v<hex>,
+// volID) that no volume file names: a layer volume is made only after its
+// file is written (takeVolumes, under the lock), so one with none is left
+// from a delete, or made again by a helper that mounted it by name after
+// its delete (the CLIs make a missing named volume on run --mount). Never
+// one a container mounts (DeleteVolume refuses it). Lock held.
+func (d *drv) dropOrphans() {
+	v, ok := d.vm.(volumer)
+	if !ok {
+		return
+	}
+	metas, err := d.st.readVols()
+	if err != nil {
+		return // a file it cannot read may name a volume: nothing is deleted on a guess
+	}
+	names, err := v.LayerVolumes()
+	if err != nil {
+		return
+	}
+	known := map[string]bool{}
+	for _, m := range metas {
+		known[m.Layer] = true
+	}
+	for _, n := range names {
+		if !known[n] && d.st.ownLayerVolume(n) {
+			_ = v.DeleteVolume(n)
+		}
+	}
+}
+
+// ownLayerVolume says whether a layer volume name is one of this state
+// directory's named volumes: either VM prefix, then a volID.
+func (s store) ownLayerVolume(name string) bool {
+	for _, p := range []string{s.vmPrefix(), s.vmPrefixNew()} {
+		if id, ok := strings.CutPrefix(name, p); ok && volIDRe.MatchString(id) {
+			return true
+		}
+	}
+	return false
+}
+
+// volIDRe is volID's form.
+var volIDRe = regexp.MustCompile(`^v[0-9a-f]{16}$`)
 
 // volAnswer is acquire's account of a box's volumes.
 func volAnswer(r record) []map[string]any {
@@ -547,12 +677,30 @@ func (r record) mounts() []mount {
 // the state lock, recorded under it.
 func (s *sup) measureVolumes(r record) {
 	if v, ok := s.vm.(volumer); ok {
+		_ = s.st.locked(func() error { r = endMeasured(s.st, r); return nil })
 		if sizes, _, ok := measure(v, r, false); ok {
 			_ = s.st.locked(func() error { recordRW(s.st, r, sizes); return nil })
 		} else {
 			_ = s.st.locked(func() error { markUnmeasured(s.st, r, s.cfg.volumeCap()); return nil })
 		}
 	}
+}
+
+// endMeasured is an ended box r with only the volumes its end measures: rw
+// volumes that still have their file. A build volume is its seal's to
+// measure (endBuilds) or is deleted, and a volume deleted since is never
+// measured: the helper would mount it by name, and the CLIs make a missing
+// named volume on run --mount, so it would come back with no file to say
+// whose it is. Lock held.
+func endMeasured(st store, r record) record {
+	var keep []volUse
+	for _, u := range r.Volumes {
+		if _, found := st.loadVol(u.ID); found && u.Mode == volRW {
+			keep = append(keep, u)
+		}
+	}
+	r.Volumes = keep
+	return r
 }
 
 // measure measures a record's rw and build volumes (and withCOW its cow copies' upper
@@ -597,7 +745,7 @@ func recordRW(st store, r record, sizes map[string]int64) {
 	for _, u := range r.Volumes {
 		b, ok := sizes[u.Layer]
 		m, found := st.loadVol(u.ID)
-		if !writesItself(u.Mode) || !ok || !found {
+		if !writesItself(u.Mode) || !ok || !found || !measuredBy(m, u, r) {
 			continue
 		}
 		m.Bytes, m.BytesAt, m.Used, m.MeasureFailed = b, now, now, false
@@ -605,11 +753,19 @@ func recordRW(st store, r record, sizes map[string]int64) {
 	}
 }
 
+// measuredBy says whether box r's measurement of its volume u may be
+// recorded on m: never on a sealed volume (its seal measured it, after its
+// cleanup) or on a build volume that is no longer r's (deleted and made
+// again since the measurement began). Lock held.
+func measuredBy(m volMeta, u volUse, r record) bool {
+	return !m.Sealed && (u.Mode != volBuild || m.Build == r.ID)
+}
+
 // markUnmeasured records that a box's measurement failed: its rw volumes and
 // its cow copies count as the whole cap until one succeeds. Lock held.
 func markUnmeasured(st store, r record, limit int64) {
 	for _, u := range r.Volumes {
-		if m, found := st.loadVol(u.ID); found && writesItself(u.Mode) {
+		if m, found := st.loadVol(u.ID); found && writesItself(u.Mode) && measuredBy(m, u, r) {
 			m.MeasureFailed = true
 			_ = st.saveVol(m)
 		}
@@ -642,6 +798,7 @@ func measureLeft(dir, id string) int {
 	if !ok {
 		return 0
 	}
+	_ = st.locked(func() error { r = endMeasured(st, r); return nil })
 	sizes, _, ok := measure(v, r, false)
 	if !ok {
 		_ = st.locked(func() error { markUnmeasured(st, r, c.volumeCap()); return nil })

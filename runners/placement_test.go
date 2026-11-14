@@ -142,15 +142,22 @@ func TestWaitingServeIsServedWhenABoxComes(t *testing.T) {
 	ctx := context.Background()
 	f.deliver(t, "workflow_job", jobEvent("queued", 8101, 140, "acme/app", true, "pool"))
 	eventually(t, "waiting", func() bool { return strings.Contains(f.jobs(t)[8101].Why, "no box took it") })
+	began := time.Now()
 	time.Sleep(1500 * time.Millisecond) // past maxTries retries at WaitMax apart
-	j := f.jobs(t)[8101]
-	if j.State != "waiting" || !strings.Contains(j.Why, "no box") || f.svc.Undone(ctx) != 1 {
+	// A try in progress lists the job as serving; wait for the state between tries.
+	var j runners.JobView
+	eventually(t, "between tries", func() bool {
+		j = f.jobs(t)[8101]
+		return j.State == "waiting" && strings.Contains(j.Why, "no box")
+	})
+	elapsed := time.Since(began)
+	if f.svc.Undone(ctx) != 1 {
 		t.Fatalf("after many tries: %+v (undone %d)", j, f.svc.Undone(ctx))
 	}
 	// A box that says available but refuses is skipped for RefuseCool after
 	// each refusal: a runner minted and deleted at most that often.
-	if n := len(f.minted()); n > 1500/300+2 {
-		t.Errorf("minted %d runners in 1.5 s with RefuseCool 300 ms", n)
+	if n, max := len(f.minted()), int(elapsed/(300*time.Millisecond))+2; n > max {
+		t.Errorf("minted %d runners in %s with RefuseCool 300 ms, want at most %d", n, elapsed.Round(time.Millisecond), max)
 	}
 	f.gh.mu.Lock()
 	jobGets := 0

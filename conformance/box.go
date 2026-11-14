@@ -140,7 +140,9 @@ func (r *run) lifecycleBox() {
 	case time.Since(start) > 6*time.Second:
 		err = fmt.Errorf("answered after %s for timeout_s 1", time.Since(start).Round(time.Second))
 	default:
-		err = r.execExit(h.Handle, 0, "sh", "-c", `p=$(cat "$HOME/zmconf-pid"); ! kill -0 "$p" 2>/dev/null || ps -o stat= -p "$p" | grep -q Z`)
+		// One ps read per try: the child may be reaped between two commands, or
+		// still exiting on a loaded host, so it gets up to 2 s to be gone or a zombie.
+		err = r.execExit(h.Handle, 0, "sh", "-c", `p=$(cat "$HOME/zmconf-pid"); i=0; while [ "$i" -lt 20 ]; do s=$(ps -o stat= -p "$p" 2>/dev/null); case "$s" in ""|Z*) exit 0 ;; esac; sleep 0.1; i=$((i + 1)); done; exit 1`)
 		if err != nil {
 			err = fmt.Errorf("the timed-out command's child is still running: %v", err)
 		}

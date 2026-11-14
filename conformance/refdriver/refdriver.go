@@ -72,9 +72,40 @@ func Install(dir, state, bug string) (string, error) {
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		return "", err
 	}
+	if err := closeTempDirs(dir); err != nil {
+		return "", err
+	}
 	p := filepath.Join(dir, "zm-run-ref")
 	script := fmt.Sprintf("#!/bin/sh\nexec %q %s %q %q\n", self, flagDriver, state, bug)
 	return p, os.WriteFile(p, []byte(script), 0o755)
+}
+
+// closeTempDirs clears group and other write on dir and on each directory
+// between it and the temp directory, which the daemon's pin check refuses to
+// trust the driver through. A umask of 002 (a shared box's) makes them
+// group-writable; the test, not the machine, sets the modes it needs. A
+// directory outside the temp directory is left as it is.
+func closeTempDirs(dir string) error {
+	tmp, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return err
+	}
+	d, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return err
+	}
+	for ; strings.HasPrefix(d, tmp+string(filepath.Separator)); d = filepath.Dir(d) {
+		fi, err := os.Stat(d)
+		if err != nil {
+			return err
+		}
+		if m := fi.Mode().Perm(); m&0o022 != 0 {
+			if err := os.Chmod(d, m&^0o022); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Firewall writes into dir an nc that refuses to connect to any of addrs
@@ -983,7 +1014,7 @@ func (d *drv) checkoutInto(r record) error {
 			return err
 		}
 	}
-	for _, a := range [][]string{{"init", "-q"}, {"fetch", "-q", d.cfg["remote"], r.Commit}, {"-c", "advice.detachedHead=false", "checkout", "-q", "-f", "--detach", r.Commit}} {
+	for _, a := range [][]string{{"init", "-q"}, {"-c", "maintenance.auto=false", "fetch", "-q", d.cfg["remote"], r.Commit}, {"-c", "advice.detachedHead=false", "checkout", "-q", "-f", "--detach", r.Commit}} {
 		cmd := exec.Command("git", a...)
 		cmd.Dir = r.Checkout
 		if out, err := cmd.CombinedOutput(); err != nil {

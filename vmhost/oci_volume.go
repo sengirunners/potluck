@@ -535,21 +535,42 @@ func (o ociCLI) outerVolumeEngine() (ociCLI, error) {
 // with one throwaway helper container from the box's own image under the
 // binding's runtime, like VolumeBytes': no network, a read-only root, every
 // capability dropped but those that let root delete and chmod what the
-// guest's user made private, vol the one mount. Bounded by ociKeepFor. An
-// error leaves the volume unsealed.
-func (o ociCLI) CleanSeal(image, vol string, keep []string) error {
+// guest's user made private, vol the one mount. The same helper then
+// measures it (du -sxb, as VolumeBytes does): no second container, and the
+// release's seal waits for one helper only. Bounded by ociKeepFor. An error
+// leaves the volume unsealed.
+func (o ociCLI) CleanSeal(image, vol string, keep []string) (int64, error) {
 	o, err := o.outerVolumeEngine()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	const target = "/potluck-keep"
 	a := []string{"--network", "none", "--runtime", o.runtime, "--read-only", "--user", "0",
 		"--security-opt", "no-new-privileges", "--cap-drop", "ALL", "--cap-add", "DAC_OVERRIDE", "--cap-add", "DAC_READ_SEARCH", "--cap-add", "FOWNER",
 		"--pids-limit", "64", "--entrypoint", "sh",
 		"--mount", "type=volume,source=" + vol + ",target=" + target + ",volume-nocopy",
-		image, "-c", sealCleanScript, "sh", target}
-	_, err = o.helper(ociKeepPrefix, ociKeepFor, append(a, sealCleanArgs(keep)...))
-	return err
+		image, "-c", sealCleanScript + ociSealMeasure, "sh", target}
+	raw, err := o.helper(ociKeepPrefix, ociKeepFor, append(a, sealCleanArgs(keep)...))
+	if err != nil {
+		return 0, err
+	}
+	return duBytes(raw, target)
+}
+
+// ociSealMeasure follows sealCleanScript in the cleaning helper: the
+// cleaned volume's size, as VolumeBytes reads one.
+const ociSealMeasure = `du -sxb "$1"
+`
+
+// duBytes reads du -sb's line for path out of a helper's stdout.
+func duBytes(raw []byte, path string) (int64, error) {
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		n, p, ok := strings.Cut(line, "\t")
+		if b, err := strconv.ParseInt(strings.TrimSpace(n), 10, 64); ok && err == nil && b >= 0 && strings.TrimSpace(p) == path {
+			return b, nil
+		}
+	}
+	return 0, fmt.Errorf("the cleaning helper did not say %s's size", path)
 }
 
 // ociKeepPrefix begins every cleaning helper's container name; unlike a
@@ -562,3 +583,12 @@ const ociKeepPrefix = "potluck-keep-"
 // directories on the way to its kept trees; the normalising walks are three
 // finds over what is left.
 var ociKeepFor = 45 * time.Second
+
+// LayerVolumes are every volume the CLI lists.
+func (o ociCLI) LayerVolumes() ([]string, error) {
+	o, err := o.outerVolumeEngine()
+	if err != nil {
+		return nil, err
+	}
+	return o.volumeNames()
+}

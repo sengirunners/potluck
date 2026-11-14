@@ -125,7 +125,7 @@ func TestServedMatrix(t *testing.T) {
 				return j.State == "serving" || j.State == "waiting" && j.Why != "being checked with GitHub"
 			}
 			var js map[int64]runners.JobView
-			eventually(t, "every job settled", func() bool {
+			eventuallyBox(t, "every job settled", func() bool { // 56 jobs, each box call a driver process
 				js = f.jobs(t)
 				for _, c := range cases {
 					if j, ok := js[c.job]; !ok || (!c.served && j.State != "ignored") || (c.served && j.State == "ignored") || !settled(c, j) {

@@ -3,7 +3,7 @@ package runtarget
 // Dependency layers (docs/daemon.md, Dependency layers; zm-eakh.12.65): an
 // acquire's deps ask for a holder's sealed volume holding what a kind's
 // recipe built from exactly the files sent (npm: node_modules from the
-// lockfile and package.json files). The daemon names the volume from the
+// lockfile, package.json files and .npmrc's resolution keys). The daemon names the volume from the
 // sha256 of everything the build depended on, so a name is its content's,
 // and a caller never names one (volumes.go refuses deps-*). The box mounts
 // it cow, so nothing it writes reaches the layer or another box.
@@ -134,6 +134,10 @@ type depsKind struct {
 	// inputs names the files (relative paths) a project holds for the kind,
 	// given a reader of its files: what a caller must send (CollectDepsFiles).
 	inputs func(read func(path string) ([]byte, error)) ([]string, error)
+	// canon is a checked file as the builder gets it and the key holds it,
+	// nil to drop the file (npm: .npmrc down to its key=value lines, none
+	// when it has none); nil canon sends every file as it came.
+	canon func(path string, data []byte) ([]byte, error)
 	// keep is all a built layer holds, given its checked files: the paths
 	// (relative to the layer's directory) the builder's release keeps when
 	// it seals (capability volumes-keep). Nothing else the recipe or an
@@ -145,7 +149,7 @@ type depsKind struct {
 // depsKinds is the one table of layer kinds. Go is not one: the shelf
 // already saves its downloads, and a build cache has weak keys.
 var depsKinds = map[string]depsKind{
-	"npm": {files: npmDepsFiles, recipe: npmRecipe, inputs: npmDepsInputs, keep: npmKeep},
+	"npm": {files: npmDepsFiles, recipe: npmRecipe, inputs: npmDepsInputs, keep: npmKeep, canon: npmCanon},
 }
 
 // npmRecipe links what the shelf holds into the builder's npm cache (when
@@ -163,8 +167,9 @@ func npmRecipe(scripts bool) string {
 }
 
 // npmDepsFiles: package-lock.json (lockfile version 2 or 3), package.json,
-// and the package.json of every package the lockfile keeps in the project
-// (its workspaces and local links), none other.
+// the package.json of every package the lockfile keeps in the project (its
+// workspaces and local links), and .npmrc if the project has one
+// (deps_npmrc.go: resolution keys only), none other.
 func npmDepsFiles(files map[string][]byte) error {
 	lock, ok := files["package-lock.json"]
 	if !ok {
@@ -174,9 +179,15 @@ func npmDepsFiles(files map[string][]byte) error {
 	if err != nil {
 		return err
 	}
-	for p := range files {
+	for p, b := range files {
+		if p == npmrcFile {
+			if _, err := npmrcCanon(b); err != nil {
+				return err
+			}
+			continue
+		}
 		if !want[p] {
-			return fmt.Errorf("file %s is not one an npm layer is built from (package-lock.json, package.json, and each workspace's package.json)", p)
+			return fmt.Errorf("file %s is not one an npm layer is built from (package-lock.json, package.json, each workspace's package.json, and .npmrc)", p)
 		}
 	}
 	var missing []string
@@ -218,6 +229,19 @@ func npmWantedFiles(lock []byte) (map[string]bool, error) {
 	return want, nil
 }
 
+// npmCanon is .npmrc's key=value lines (npmrcCanon), nil when it has none;
+// every other file as sent.
+func npmCanon(p string, b []byte) ([]byte, error) {
+	if p != npmrcFile {
+		return b, nil
+	}
+	c, err := npmrcCanon(b)
+	if err != nil || len(c) == 0 {
+		return nil, err
+	}
+	return c, nil
+}
+
 // npmKeep is the node_modules trees an npm layer holds: the root's and each
 // local package's (its workspaces and local links), where npm ci put them.
 // files passed npmDepsFiles.
@@ -232,7 +256,8 @@ func npmKeep(files map[string][]byte) []string {
 	return out
 }
 
-// npmDepsInputs lists the files npmDepsFiles takes, by reading the lockfile.
+// npmDepsInputs lists the files npmDepsFiles takes, by reading the lockfile,
+// and .npmrc when the project has one.
 func npmDepsInputs(read func(string) ([]byte, error)) ([]string, error) {
 	lock, err := read("package-lock.json")
 	if err != nil {
@@ -242,7 +267,32 @@ func npmDepsInputs(read func(string) ([]byte, error)) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	switch _, err := read(npmrcFile); {
+	case err == nil:
+		want[npmrcFile] = true
+	case !errors.Is(err, fs.ErrNotExist):
+		return nil, fmt.Errorf("%s: %w", npmrcFile, err)
+	}
 	return slices.Sorted(maps.Keys(want)), nil
+}
+
+// canonFiles is files as kind k's builder gets them (depsKind.canon), in
+// their order; a file canon drops is left out.
+func canonFiles(k depsKind, files []computeapi.DepsFile) ([]computeapi.DepsFile, error) {
+	if k.canon == nil {
+		return files, nil
+	}
+	out := make([]computeapi.DepsFile, 0, len(files))
+	for _, f := range files {
+		b, err := k.canon(f.Path, f.Data)
+		if err != nil {
+			return nil, err
+		}
+		if b != nil {
+			out = append(out, computeapi.DepsFile{Path: f.Path, Data: b})
+		}
+	}
+	return out, nil
 }
 
 // depsPathOK is the rule for a layer's file path: relative, clean, no ".."
@@ -266,10 +316,10 @@ func (l depsLayer) name() string { return depsPrefix + l.kind + "-" + l.key[:52]
 
 // depsKey is the sha256 over everything a build depends on: the format,
 // kind, recipe, image digest, mount path, scripts setting, and each file's
-// path and bytes, every field length-prefixed so no two inputs meet. The
-// format is 3 since a seal clears setuid and setgid bits and deletes device
-// nodes, FIFOs and sockets (vmhost/volume_keep.go): a layer sealed before
-// then is never found.
+// path and bytes (as canon left them: an .npmrc's key=value lines), every
+// field length-prefixed so no two inputs meet. The format is 4 since an
+// npm layer takes the project's .npmrc (deps_npmrc.go): a layer built
+// before then, without it, is never found.
 func depsKey(kind, recipe, digest, path string, scripts bool, files []computeapi.DepsFile) string {
 	h := sha256.New()
 	put := func(b []byte) {
@@ -282,7 +332,7 @@ func depsKey(kind, recipe, digest, path string, scripts bool, files []computeapi
 	if !scripts {
 		sc = computeapi.DepsScriptsOff
 	}
-	for _, f := range []string{"potluck-deps/3", kind, recipe, digest, path, sc} {
+	for _, f := range []string{"potluck-deps/4", kind, recipe, digest, path, sc} {
 		put([]byte(f))
 	}
 	for _, f := range files {
@@ -354,7 +404,11 @@ func depsLayers(req computeapi.AcquireRunTargetRequest, digest string) ([]depsLa
 		if err := k.files(files); err != nil {
 			return nil, bad("deps %s at %s: %v", d.Kind, d.Path, err)
 		}
-		l := depsLayer{kind: d.Kind, path: d.Path, scripts: d.Scripts != computeapi.DepsScriptsOff, files: slices.Clone(d.Files)}
+		sent, err := canonFiles(k, d.Files)
+		if err != nil {
+			return nil, bad("deps %s at %s: %v", d.Kind, d.Path, err)
+		}
+		l := depsLayer{kind: d.Kind, path: d.Path, scripts: d.Scripts != computeapi.DepsScriptsOff, files: slices.Clone(sent)}
 		slices.SortFunc(l.files, func(a, b computeapi.DepsFile) int { return strings.Compare(a.Path, b.Path) })
 		l.recipe = k.recipe(l.scripts)
 		l.keep = k.keep(files)

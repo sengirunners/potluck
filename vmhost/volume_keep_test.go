@@ -117,18 +117,18 @@ func TestOCICleanSealHelper(t *testing.T) {
 		if fail {
 			exit = "1"
 		}
-		helper := `run) previous=;for arg;do if [ "$previous" = --cidfile ];then printf '%s\n' "` + cid + `" > "$arg";fi;previous=$arg;done; for arg; do printf '%s\n' "$arg"; done > "$d/runargs"; exit ` + exit + `;;`
+		helper := `run) previous=;for arg;do if [ "$previous" = --cidfile ];then printf '%s\n' "` + cid + `" > "$arg";fi;previous=$arg;done; for arg; do printf '%s\n' "$arg"; done > "$d/runargs"; printf '4096\t/potluck-keep\n'; exit ` + exit + `;;`
 		if err := os.WriteFile(o.bin, []byte(fakeOCICase(t, fakeOCI, helper)), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		err := o.CleanSeal("box-img", "lay1", []string{"node_modules", "ws/node_modules"})
-		if fail != (err != nil) {
-			t.Fatalf("fail %v: CleanSeal answered %v", fail, err)
+		b, err := o.CleanSeal("box-img", "lay1", []string{"node_modules", "ws/node_modules"})
+		if fail != (err != nil) || !fail && b != 4096 {
+			t.Fatalf("fail %v: CleanSeal answered %d %v, want the size du said", fail, b, err)
 		}
 		raw, _ := os.ReadFile(filepath.Join(dir, "runargs"))
 		args := string(raw)
 		for _, w := range []string{"--network\nnone\n", "--runtime\n" + o.runtime + "\n", "--read-only\n", "--cap-drop\nALL\n", "--name\n" + ociKeepPrefix,
-			"--mount\ntype=volume,source=lay1,target=/potluck-keep,volume-nocopy\nbox-img\n-c\n" + sealCleanScript + "\nsh\n/potluck-keep\nkeep\nnode_modules\nws/node_modules\nws\n"} {
+			"--mount\ntype=volume,source=lay1,target=/potluck-keep,volume-nocopy\nbox-img\n-c\n" + sealCleanScript + ociSealMeasure + "\nsh\n/potluck-keep\nkeep\nnode_modules\nws/node_modules\nws\n"} {
 			if !strings.Contains(args, w) {
 				t.Errorf("the helper's run lacks %q:\n%s", w, args)
 			}

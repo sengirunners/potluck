@@ -388,6 +388,37 @@ git update-ref refs/replace/` + three + ` "$(printf evil | git hash-object -w --
 	}
 }
 
+// A push leaves no git running in the box once it answers. git fetch starts
+// `git maintenance run --auto --detach` unless told not to, a daemon in its
+// own session that outlives the exec and keeps writing in the push's git
+// directory, so removing the box's files raced with it.
+func TestPushStartsNoBackgroundGit(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	trace := `printf '[trace2]\n\teventTarget = %s/trace2.json\n' "$HOME" > "$HOME/.gitconfig"`
+	if x := boxSh(t, c, target, id, trace); x.Exit != 0 {
+		t.Fatalf("tracing git in the box: %+v", x)
+	}
+	dir := repo(t, 1<<10)
+	b, err := boxpush.Make(ctx, boxpush.MakeOptions{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	if _, err := boxpush.Push(ctx, boxpush.Exec(c, target, id), b, boxpush.PushOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	// The trace names every git the push ran, and each one it started in turn.
+	x := boxSh(t, c, target, id, `grep -c '"event":"start"' "$HOME/trace2.json"; grep -c '"maintenance","run"' "$HOME/trace2.json"; true`)
+	n := strings.Fields(x.Stdout)
+	if x.Exit != 0 || len(n) != 2 || n[0] == "0" {
+		t.Fatalf("the box's git trace: %+v, want the push's gits traced", x)
+	}
+	if n[1] != "0" {
+		t.Errorf("the push started git maintenance in the box (%s trace lines): it outlives the push", n[1])
+	}
+}
+
 // The first push into a directory that already holds a tree (another git's
 // checkout, a dependency layer) leaves it exactly the commit's: a file the
 // commit does not hold goes, node_modules and ignored files stay, even after

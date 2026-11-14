@@ -91,8 +91,10 @@ func volRefusal(v volReq, m volMeta, ok bool, holders []string) error {
 // endBuilds settles a released box's build volumes before release answers:
 // sealed when its release asked seal (record.Seal), once no container
 // references the volume and it is cleaned (volume_keep.go: pruned to the
-// release's keep, if it named one, and normalised; a volume whose cleanup
-// fails is deleted); else deleted. Each pass is under the lock, a cleanup
+// release's keep, if it named one, and normalised) and then measured, so a
+// sealed volume always counts its real size (nothing writes it again, so no
+// later measurement would correct a failed one); a volume whose cleanup or
+// measurement fails is deleted; else deleted. Each pass is under the lock, a cleanup
 // between passes; between passes it waits, up to sealSettle. What it cannot
 // settle is left unsealed for the sweep (sweepBuilds), which deletes it.
 func (d *drv) endBuilds(r record) {
@@ -100,18 +102,14 @@ func (d *drv) endBuilds(r record) {
 		return
 	}
 	v, _ := d.vm.(volumer)
-	kept := map[string]bool{} // volumes cleaned once free of every container: true, or false when that failed
+	kept := map[string]int64{} // volumes cleaned and measured once free of every container: their bytes, or -1 when that failed
 	for deadline := time.Now().Add(sealSettle); ; time.Sleep(200 * time.Millisecond) {
 		left := false
 		var clean []string
 		_ = d.st.locked(func() error { left, clean = d.settleBuilds(r.ID, true, kept); return nil })
 		cleaned := false            // a volume just cleaned gets its pass to seal, past the deadline too
 		for _, vol := range clean { // outside the lock: a helper container, maybe minutes
-			err := v.CleanSeal(r.Image, vol, r.Keep)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "potluck-driver-tart: cleaning %s for its seal (it is deleted, never sealed): %v\n", vol, err)
-			}
-			kept[vol], cleaned = err == nil, true
+			kept[vol], cleaned = cleanAndMeasure(v, r.Image, vol, r.Keep), true
 		}
 		if !left || time.Now().After(deadline) && !cleaned {
 			return
@@ -119,12 +117,24 @@ func (d *drv) endBuilds(r record) {
 	}
 }
 
+// cleanAndMeasure cleans vol for its seal and measures it (CleanSeal),
+// outside the lock: its bytes, or -1 when that failed (it is deleted, never
+// sealed).
+func cleanAndMeasure(v volumer, image, vol string, keep []string) int64 {
+	b, err := v.CleanSeal(image, vol, keep)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "potluck-driver-tart: cleaning and measuring %s for its seal (it is deleted, never sealed): %v\n", vol, err)
+		return -1
+	}
+	return b
+}
+
 // settleBuilds is one pass of endBuilds over record id's build volumes (seal
 // false: never seal, only delete what is not the release's to seal). It
 // answers whether any is left, and the volumes ready to seal but for their
-// cleanup (those not in kept); one whose cleanup failed (false in kept) is
-// deleted. Lock held.
-func (d *drv) settleBuilds(id string, seal bool, kept map[string]bool) (left bool, clean []string) {
+// cleanup and measurement (those not in kept); one whose cleanup or
+// measurement failed (-1 in kept) is deleted. Lock held.
+func (d *drv) settleBuilds(id string, seal bool, kept map[string]int64) (left bool, clean []string) {
 	r, err := d.st.load(id)
 	if err != nil || r.live() {
 		return false, nil
@@ -143,17 +153,20 @@ func (d *drv) settleBuilds(id string, seal bool, kept map[string]bool) (left boo
 		case sealing && !seal: // the release's to seal
 		case sealing && v.VolumeInUse(m.Layer):
 			left = true
-		case sealing && !kept[m.Layer]:
-			if _, tried := kept[m.Layer]; tried { // its cleanup failed: never sealed
-				if !d.dropVolume(m) {
-					left = true
-				}
+		case sealing && kept[m.Layer] < 0: // its cleanup or measurement failed: never sealed
+			if !d.dropVolume(m) {
+				left = true
+			}
+		case sealing:
+			b, tried := kept[m.Layer]
+			if !tried {
+				left = true
+				clean = append(clean, m.Layer)
 				continue
 			}
-			left = true
-			clean = append(clean, m.Layer)
-		case sealing:
-			m.Build, m.Sealed, m.Used = "", true, time.Now().UTC()
+			now := time.Now().UTC()
+			m.Build, m.Sealed, m.Used = "", true, now
+			m.Bytes, m.BytesAt, m.MeasureFailed = b, now, false
 			if d.st.saveVol(m) != nil {
 				left = true
 			}

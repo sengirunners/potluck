@@ -485,3 +485,96 @@ func TestFailedMeasureCountsTheCapAndKeepsTheFloor(t *testing.T) {
 		}
 	}
 }
+
+// zm-eakh.12.65.27: a volume whose measurement failed counts as the whole
+// cap only until an acquire naming it can measure it (no live box writing
+// it), so one failed measurement never holds its owner at the cap for good;
+// while it still cannot be read, it stays at the cap.
+func TestFailedMeasureIsMeasuredAgainByTheNextAcquire(t *testing.T) {
+	m := fakeVolumeBox(t)
+	root := filepath.Dir(filepath.Join(m["state_dir"], "fakevms"))
+	_ = os.MkdirAll(root, 0o700)
+	st := store{m["state_dir"]}
+	h := acquireVol(t, m, volArgs("k1", "fay", vol("c", "c", "rw")))
+	r, err := st.load(idOf(h))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release(t, m, h)
+	supervisorEnded(t, r.Supervisor) // its own measurement is done
+	id := volID("t", "fay", "c")
+	if err := st.locked(func() error {
+		v, _ := st.loadVol(id)
+		v.MeasureFailed = true
+		return st.saveVol(v)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fail := filepath.Join(root, "measure-fail")
+	if err := os.WriteFile(fail, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(t, m, "acquire", "", volArgs("k2", "fay", vol("c", "c", "rw"))); code(err) != "unavailable" || !strings.Contains(err.Error(), "volume quota") {
+		t.Fatalf("a volume that still cannot be measured: %v, want unavailable volume quota", err)
+	}
+	if err := os.Remove(fail); err != nil {
+		t.Fatal(err)
+	}
+	h = acquireVol(t, m, volArgs("k3", "fay", vol("c", "c", "rw")))
+	release(t, m, h)
+	if v, _ := st.loadVol(id); v.MeasureFailed || v.Bytes < 0 {
+		t.Errorf("after an acquire measured it: %+v, want measured", v)
+	}
+}
+
+// zm-eakh.12.65.27: the sweep deletes a layer volume of this state directory
+// that no volume file names (left by a delete, or made again by a helper
+// that mounted it by name), and a sealed volume with no measured size once
+// no box holds it; never another's volume.
+func TestSweepDeletesOrphanAndUnsizedLayerVolumes(t *testing.T) {
+	b := newSealBox(t)
+	h := acquireVol(t, b.m, volArgs("b", "o", build("lay")))
+	if res, err := call(t, b.m, "release", h, map[string]any{"seal": true}); err != nil || res["released"] != true {
+		t.Fatalf("release with seal: %v %v", res, err)
+	}
+	id := volID("t", "o", "lay")
+	if err := b.st.locked(func() error {
+		v, _ := b.st.loadVol(id)
+		v.Bytes, v.MeasureFailed = -1, false // sealed before seals measured
+		return b.st.saveVol(v)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	orphan := b.dir("o", "gone")
+	other := b.fake.vol("someone-else")
+	for _, d := range []string{orphan, other} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bad := filepath.Join(b.st.dir, "volumes", "vbad.json")
+	if err := os.WriteFile(bad, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(t, b.m, "list", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Error("the sweep deleted a layer volume while a volume file it could not read might name it")
+	}
+	if err := os.Remove(bad); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call(t, b.m, "list", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(orphan); err == nil {
+		t.Error("the sweep left a layer volume no volume file names")
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Error("the sweep deleted a volume that is not this state directory's layer volume")
+	}
+	if _, ok := b.st.loadVol(id); ok {
+		t.Error("the sweep left a sealed volume with no measured size that no box holds")
+	}
+}

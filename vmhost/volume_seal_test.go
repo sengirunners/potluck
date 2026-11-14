@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -314,5 +315,60 @@ func TestSweepLeavesABuildToItsSupervisor(t *testing.T) {
 	_ = b.st.locked(func() error { d.sweepBuilds(); return nil })
 	if _, ok := b.st.loadVol(m.ID); ok {
 		t.Fatal("the sweep kept a build volume whose builder and supervisor are gone")
+	}
+}
+
+// zm-eakh.12.65.27: a build released without seal leaves no volume once its
+// supervisor is done, though the layer's measuring helper makes a named
+// volume that is not there (as Docker's run --mount does), so a build of
+// that name works again; and the sealed layer a release with seal makes is
+// measured, never counted as the whole cap.
+func TestUnsealedBuildLeavesNoVolumeAfterItsSupervisor(t *testing.T) {
+	b := newSealBox(t)
+	b.m["volume_max_mb"] = "8"
+	for i := range 2 {
+		h := acquireVol(t, b.m, volArgs("fail"+strconv.Itoa(i), "o", build("lay")))
+		if c, _ := sh(t, b.m, h, `echo part > "$HOME/dep/f"`); c != 0 {
+			t.Fatal("write")
+		}
+		r, err := b.st.load(idOf(h))
+		if err != nil {
+			t.Fatal(err)
+		}
+		release(t, b.m, h)
+		supervisorEnded(t, r.Supervisor)
+		b.gone(t, "o", "lay", "a builder released without seal, after its supervisor ended", 0)
+	}
+
+	h := acquireVol(t, b.m, volArgs("ok", "o", build("lay")))
+	if c, _ := sh(t, b.m, h, `head -c 1024 /dev/zero > "$HOME/dep/f"`); c != 0 {
+		t.Fatal("write")
+	}
+	r, err := b.st.load(idOf(h))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := call(t, b.m, "release", h, map[string]any{"seal": true}); err != nil || res["released"] != true {
+		t.Fatalf("release with seal: %v %v", res, err)
+	}
+	supervisorEnded(t, r.Supervisor)
+	m, ok := b.st.loadVol(volID("t", "o", "lay"))
+	if !ok || !m.Sealed || m.MeasureFailed || m.Bytes != 1024 {
+		t.Fatalf("the sealed layer: %+v (found %v), want sealed and measured at 1024 bytes", m, ok)
+	}
+}
+
+// supervisorEnded waits for a supervisor this test process started to exit,
+// and reaps it.
+func supervisorEnded(t *testing.T, pid int) {
+	t.Helper()
+	for deadline := time.Now().Add(endWait); ; time.Sleep(50 * time.Millisecond) {
+		var ws syscall.WaitStatus
+		if p, _ := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil); p == pid || !alive(pid) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("supervisor %d did not end", pid)
+		}
 	}
 }

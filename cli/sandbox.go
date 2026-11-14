@@ -90,6 +90,8 @@ machines only; repeat for more.
 --deps npm[:path] mounts a dependency layer of yours at path (default: the
 checkout, --dir, plus this directory's place in its repository): node_modules, built once from the package-lock.json and
 package.json files (and each workspace's package.json) of this directory,
+and its .npmrc's resolution keys (legacy-peer-deps and the like; an .npmrc
+with any other key, such as a registry or a token, is refused),
 installed by the machine in a sandbox of yours with the network and no
 secrets, and reused by your later sandboxes on that machine. potluck prints
 whether it was a hit (already built) or built. The sandbox sees it
