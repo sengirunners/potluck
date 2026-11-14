@@ -209,15 +209,23 @@ func (d *drv) progressKey(req request) (string, error) {
 	return a.RequestID, nil
 }
 
-// waitWhileStarting is bugs progress-waits and cancel-waits: the verb waits
-// for key's acquire to end, as a driver with one lock for every verb would.
-func (d *drv) waitWhileStarting(key string) {
-	for start := time.Now(); time.Since(start) < time.Minute; time.Sleep(25 * time.Millisecond) {
-		var p progressFile
-		var ok bool
-		_ = d.progressLocked(func() error { p, ok = d.loadProgress(key); return nil })
-		if !ok || p.State != protocol.AcquireStarting {
-			return
+// answerLocked runs f with the progress lock held. With wait (bugs
+// progress-waits and cancel-waits) it first waits, for at most a minute, until
+// key's acquire is no longer starting, as a driver with one lock for every verb
+// would. The wait looks and f answers under the same lock, so an acquire that
+// begins after the look cannot slip in and be answered at once as starting.
+func (d *drv) answerLocked(key string, wait bool, f func() error) error {
+	for start := time.Now(); ; time.Sleep(25 * time.Millisecond) {
+		starting := false
+		err := d.progressLocked(func() error {
+			if p, ok := d.loadProgress(key); wait && ok && p.State == protocol.AcquireStarting && time.Since(start) < time.Minute {
+				starting = true
+				return nil
+			}
+			return f()
+		})
+		if !starting {
+			return err
 		}
 	}
 }
@@ -227,11 +235,8 @@ func (d *drv) progress(req request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if d.is("progress-waits") {
-		d.waitWhileStarting(key)
-	}
 	var out protocol.AcquireProgress
-	err = d.progressLocked(func() error {
+	err = d.answerLocked(key, d.is("progress-waits"), func() error {
 		p, ok := d.loadProgress(key)
 		if ok && p.State == protocol.AcquireStarting && d.is("progress-not-found-in-flight") {
 			ok = false
@@ -257,11 +262,8 @@ func (d *drv) cancel(req request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if d.is("cancel-waits") {
-		d.waitWhileStarting(key)
-	}
 	var out protocol.CancelAnswer
-	err = d.progressLocked(func() error {
+	err = d.answerLocked(key, d.is("cancel-waits"), func() error {
 		p, ok := d.loadProgress(key)
 		switch {
 		case !ok && d.is("cancel-unknown-not-found"):

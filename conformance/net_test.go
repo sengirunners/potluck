@@ -400,6 +400,29 @@ func TestBoxNetPeersNeedAListener(t *testing.T) {
 	}
 }
 
+// A clean scan counts only if the listener was still up when it ended: a
+// listening box whose listener stops while its exec goes on (bug
+// box-serve-stops: the scan's exec stops it) fails the check.
+func TestBoxNetPeersListenerStops(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ip"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	path, opt := fixture(t, "box", "box-serve-stops")
+	_, free := listeners(t)
+	_, port, _ := net.SplitHostPort(free)
+	opt.Only, opt.NetPeers = []string{"net"}, true
+	opt.NetPeerPort, _ = strconv.Atoi(port)
+	out := Format(Run(context.Background(), path, opt))
+	switch {
+	case strings.Contains(out, "FAIL  the box has nc"):
+		refdriver.NoNC(t, out)
+	case !strings.Contains(out, "FAIL  two boxes cannot reach each other") || !strings.Contains(out, "stopped listening on port "+port+" before the scan ended"):
+		t.Fatalf("a listener that stopped during the scan:\n%s", out)
+	}
+}
+
 // A run guest with bash and timeout but no nc passes the first control and
 // then cannot listen: that FAILs with the plain no-nc message, as for boxes,
 // never a SKIP that would pass the net group untested. PATH is /bin and

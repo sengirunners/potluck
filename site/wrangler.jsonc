@@ -6,14 +6,10 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    // "/" too: a plain form post lands on /?joined=1 or /?error=<code>, and the Worker fills in the result line.
-    "run_worker_first": ["/api/*", "/"]
+    "run_worker_first": ["/api/*"]
   },
-  // Waitlist storage. 769e70d2a2f541068d81f0c3e3af33d4 is a placeholder: create the namespace once with
-  // `npx wrangler kv namespace create WAITLIST`, then paste the id it prints here (README.md, "Deploy").
+  // The closed waitlist's sign-ups, read by GET /api/waitlist/count until the list is deleted (README.md).
   "kv_namespaces": [{ "binding": "WAITLIST", "id": "769e70d2a2f541068d81f0c3e3af33d4" }],
-  // At most 5 waitlist posts a minute per client IP. Nothing to create: it exists once deployed.
-  "ratelimits": [{ "name": "WAITLIST_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } }],
   "routes": [
     { "pattern": "potluck.sh", "custom_domain": true },
     { "pattern": "www.potluck.sh", "custom_domain": true }

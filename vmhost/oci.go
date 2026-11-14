@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sengirunners/potluck/vmhost/shelfhelper"
 )
 
 // ociCLI is the Linux VM layer (vm=oci, zm-eakh.12.2): each run is a
@@ -252,7 +254,7 @@ func (o ociCLI) clone(image, vm string, cpu, memory int, extra []string) error {
 // started with its tools/ in use (jitLaunch), and every box reads its
 // goproxy/ through GOPROXY (cacheArgs). No such volume, no mount: that is the
 // default.
-const ShelfVolume, ociCacheDir = "potluck-cache", "/opt/potluck-cache"
+const ShelfVolume, ociCacheDir = "potluck-cache", shelfhelper.BoxDir
 
 // ociCacheMount is the one mount every box with the shelf gets.
 const ociCacheMount = "type=volume,source=" + ShelfVolume + ",target=" + ociCacheDir + ",readonly,volume-nocopy"

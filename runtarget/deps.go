@@ -49,6 +49,7 @@ import (
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget/rt"
+	"github.com/sengirunners/potluck/vmhost/shelfhelper"
 )
 
 // depsPrefix starts every layer's volume name, and no caller's.
@@ -159,7 +160,7 @@ var depsKinds = map[string]depsKind{
 // package's own install scripts, which fail here when they need the
 // project's sources (only package.json files are sent): scripts off then.
 func npmRecipe(scripts bool) string {
-	r := "if [ -x /opt/potluck-cache/bin/potluck-deps ]; then /opt/potluck-cache/bin/potluck-deps link . || true; fi\nnpm ci --ignore-scripts --no-audit --no-fund"
+	r := "if [ -x " + shelfhelper.BoxPath + " ]; then " + shelfhelper.BoxPath + " link . || true; fi\nnpm ci --ignore-scripts --no-audit --no-fund"
 	if scripts {
 		r += " && npm rebuild"
 	}

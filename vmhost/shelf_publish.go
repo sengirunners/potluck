@@ -580,6 +580,8 @@ func (o ociCLI) publishLocked(image, staging string) (res shelfPublished, err er
 		return res, fmt.Errorf("the publisher said %q", strings.TrimSpace(out))
 	}
 	res.Dropped = dropped + gone
+	// The spool carried the current helper (shelf_helper.go).
+	stampShelfHelper(o.stateDir)
 	if res.Stats, err = parseShelfStats(out); err == nil { // a failed count leaves describe to measure
 		_ = saveShelfStats(o.stateDir, res.Stats)
 	}

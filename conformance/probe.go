@@ -43,17 +43,34 @@ tcp() {
 	exit 65
 }
 hostport() { h=${1%:*}; p=${1##*:}; h=${h#[}; h=${h%]}; }
-# listening PORT: start one listener with whichever -l form this nc takes, see it
-# answer, and set form for the next ones; exit 66 if neither form listens.
+# listening PORT [k]: start one listener with whichever -l form this nc takes, see it
+# answer, and set form for the next ones; exit 66 if no form listens. A listener that
+# takes one connection is waited for. With k, nc -k (one socket that stays listening
+# between connections) is tried first, and is left running as $lp.
 listening() {
 	command -v nc >/dev/null 2>&1 || exit 65
-	for form in p n; do
-		if [ "$form" = p ]; then nc -l -p "$1" </dev/null >/dev/null 2>&1 & else nc -l "$1" </dev/null >/dev/null 2>&1 & fi
+	for form in $2 p n; do
+		case $form in
+		k) nc -k -l "$1" </dev/null >/dev/null 2>&1 & ;;
+		p) nc -l -p "$1" </dev/null >/dev/null 2>&1 & ;;
+		n) nc -l "$1" </dev/null >/dev/null 2>&1 & ;;
+		esac
 		lp=$!; sleep 0.5
-		if kill -0 "$lp" 2>/dev/null && tcp 127.0.0.1 "$1"; then wait "$lp" 2>/dev/null; return 0; fi
+		if kill -0 "$lp" 2>/dev/null && tcp 127.0.0.1 "$1"; then
+			[ "$form" = k ] || wait "$lp" 2>/dev/null
+			return 0
+		fi
 		kill "$lp" 2>/dev/null
 	done
 	exit 66
+}
+# listen PORT: one listener of the form listening found, in the foreground.
+listen() {
+	case $form in
+	k) nc -k -l "$1" </dev/null >/dev/null 2>&1 ;;
+	p) nc -l -p "$1" </dev/null >/dev/null 2>&1 ;;
+	n) nc -l "$1" </dev/null >/dev/null 2>&1 ;;
+	esac
 }
 case "$1" in
 net)
@@ -71,11 +88,12 @@ net)
 		listening "$3"
 		if tcp 127.0.0.1 1; then exit 66; fi ;;
 	serve)
-		listening "$3"
-		while :; do
-			if [ "$form" = p ]; then nc -l -p "$3" </dev/null >/dev/null 2>&1 || sleep 0.2
-			else nc -l "$3" </dev/null >/dev/null 2>&1 || sleep 0.2; fi
-		done ;;
+		# A one-connection nc leaves the port closed while the next one starts, and
+		# on a loaded machine a connection then reads nothing listening; nc -k
+		# keeps one socket open. The loop restarts whatever listener ends.
+		listening "$3" k
+		[ "$form" = k ] && wait "$lp" 2>/dev/null
+		while :; do listen "$3" || sleep 0.2; done ;;
 	peers)
 		command -v ip >/dev/null 2>&1 || exit 65
 		hits=$(mktemp); port=$3

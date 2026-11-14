@@ -28,7 +28,11 @@ potluck host shelf status
 `shelf_fill` and `volume_max_gb` ([hosts.md](hosts.md), "The package shelf"). They bind the same value on every
 size the run binds (`shelf_max_gb` and `shelf_fill` must match across the engine; `volume_max_gb` is each size's
 own). The default shelf fill is `seed`, so box fill is on only when the owner passed `--shelf-fill boxes` (a re-run
-keeps it). `potluck host shelf status` prints the shelf's path, bytes and files (never a name), the fill
+keeps it). Once the volume exists and `shelf_fill` is not `off`, the driver's next sweep starts the filler,
+which has the publisher put `bin/potluck-deps` on the shelf before anything is filled: boxes ask for packages
+only through the helper, so a fresh shelf needs it first. The filler reads the helper on the volume back (its
+sha512, read-only) when the driver carries a different one and at least hourly otherwise, and publishes again
+when it is missing or not this driver's: after an upgrade, or when the volume was made again. `potluck host shelf status` prints the shelf's path, bytes and files (never a name), the fill
 mode, the limits and the queue, and warns where sizes of one engine carry different
 `shelf_max_gb`, `shelf_fill` or `shelf_keep_s`.
 
@@ -56,8 +60,12 @@ has no index and records nothing about who asked for what.
 npm ci                                           # or npm ci --offline
 ```
 
-The driver's own checkout runs the link step for you. A workflow or script that does not use it (a job that
-checks out for itself, a sandbox) adds one line before its install; `;` and not `&&`, so a box without the shelf
+The driver's own checkout runs the link step for you, and so does every push of the renter's code into a box
+(`potluck run`, `potluck sandbox push`, and any client built on `boxpush`): right after the checkout, in the
+checkout, with its output dropped, at most 20 s, its failure never failing the push. (On a target whose jobs
+run on the machine itself, the local driver, it runs `/opt/potluck-cache/bin/potluck-deps` only if the owner
+put one there.) A workflow or script that does neither (a job that checks out for itself) adds one line before
+its install; `;` and not `&&`, so a box without the shelf
 (no such file) goes on to install as it always did:
 
 ```sh
@@ -213,7 +221,8 @@ host collects what boxes ask for:
 
 - A box acquired with a commit (the driver's own checkout) gets `potluck-deps link <checkout>` run in it
   right after the checkout, as the box's user, for at most 30 s, whatever `shelf_fill` is. A failure goes to
-  the run log and the box carries on. Other boxes (sandboxes, runner jobs) run the helper themselves.
+  the run log and the box carries on. A push into a box (above) runs the same step after its checkout; the
+  host reads that box's wants as it ends. Other boxes (runner jobs) run the helper themselves.
 - The host reads the box's `$HOME/.potluck/wants` by running `cat` inside the box (at most 4 MiB, for at most
   5 s): after that link step, and once more as the box ends (release, expiry, or its run's end), while it still
   runs. The path is the box's own `$HOME`, read through the box; the host never reads a wants file from its

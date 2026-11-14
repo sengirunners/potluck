@@ -1,45 +1,47 @@
 # potluck.sh
 
-One static page (`public/index.html`) served by a Cloudflare Worker (`src/worker.js`; the waitlist code is in
-`src/waitlist.js`, since a Worker's entry module may export only handlers) with static assets. The Worker handles
-the waitlist API and the page's no-JavaScript result line; every other path is a static file. No framework, no
-dependencies, no tracking scripts, and no third-party requests: the font (Newsreader, OFL, latin subset,
-variable, one file each for roman and italic) is self-hosted in `public/fonts` with its licence. The page's only script is the
-inline one that posts the waitlist form.
+One static page (`public/index.html`) served by a Cloudflare Worker (`src/worker.js`) with static assets. The Worker
+answers the two routes of the closed waitlist (`src/waitlist.js`, kept apart because a Worker's entry module may
+export only handlers); every other path is a static file. No framework, no dependencies, no tracking scripts, and no
+third-party requests: the font (Newsreader, OFL, latin subset, variable, one file each for roman and italic) is
+self-hosted in `public/fonts` with its licence. The picnic scene at the top is built in CSS 3D: the machines are boxes
+whose sides darken as they turn away from a fixed sun (CSS `cos()`, with fixed shading where that is missing), and the
+people, food and cloud are inline SVG cut-outs that keep facing the reader. The page's only script is inline: it runs
+the scene (pick a machine, drag the lawn or press the arrows to turn it), places the machines' labels in a flat layer
+from where each machine lands on screen (front to back, each at the cheapest spot: never over another label, the card
+or the arrows, and off every machine's body where there is room), the cost slider and the copy button. Without
+JavaScript the page still reads in full; the labels, turn arrows and copy button stay hidden. With
+`prefers-reduced-motion`, nothing moves on its own. The card's numbers are half of each machine's cores and memory,
+because `potluck host` shares half unless told otherwise (`--share`).
 
-## Waitlist
+## The closed waitlist
 
-For a 30-day demand test. Everyone who signs up hears
-when Potluck can be installed. Two optional ticks, counted independently:
+The page had a waitlist for a 30-day demand test; it has no form now. The addresses it collected stay in KV until
+they are deleted (the page promised within 12 months of sign-up), and their counts can still be read.
 
-| field | on the page |
-| --- | --- |
-| `hub` | I'd pay for Sengi to run our pool's hub (the machine that hands out work), so none of ours has to stay on |
-| `capacity` | I'd pay for extra machines when ours are busy |
-
-- `POST /api/waitlist`: form or JSON body with `email`, `hub`, `capacity` and the honeypot `website`. A tick is
-  `on`, `yes`, `1`, `true` or JSON `true`; anything else is unticked. Neither tick is a valid sign-up. Bodies over
-  2 KB, bad emails and posts from another site's page are refused. A filled honeypot gets a fake success. At
-  most 5 posts a minute per IP (the `WAITLIST_LIMITER` binding; the IP is never stored).
-- Answers: when the Accept header names `application/json` (the page's script), `{"ok":true}` or
-  `{"ok":false,"error":"..."}`. Any other post (a plain form post, curl's default `*/*`) gets a 303 to
-  `/?joined=1#waitlist` or `/?error=<code>#waitlist`, and the Worker fills in the page's result line from fixed
-  words (so `/` runs the Worker first, `run_worker_first` in `wrangler.jsonc`). Neither ever echoes what is
-  stored, nor whether the address was already on the list.
-- Email: trimmed and lower-cased for the key. Printable ASCII only, at most 254 characters; the local part is
-  `` [A-Za-z0-9._%+'!#$&*/=?^`{|}~-]{1,64} `` and may not start with `=`, `+` or `-` (spreadsheet formulas); the
-  domain is letters, digits, hyphens and at least one dot.
+- `POST /api/waitlist` answers 410 `{"ok":false,"error":"closed"}` and stores nothing (an old copy of the page
+  may still post).
+- `GET /api/waitlist/count` with `Authorization: Bearer <WAITLIST_ADMIN_TOKEN>`: `{"total","hub","capacity","both"}`,
+  no emails. Refuses everyone if the secret is not set. Any KV error answers 503 `unavailable`.
 - Storage: KV namespace `WAITLIST`, one key per address, `email:<address>` →
   `{"hub":bool,"capacity":bool,"joined","updated"}` (ISO times), with `hub` and `capacity` also in the key's
-  metadata. A repeat sign-up may add a tick but never clears one, so nobody can zero someone else's answers; it
-  writes (and moves `updated`) only when it adds one.
-- Any KV or rate-limiter error answers 503 `unavailable` (or `/?error=unavailable`), never Cloudflare's error page.
-- `GET /api/waitlist/count` with `Authorization: Bearer <WAITLIST_ADMIN_TOKEN>`: `{"total","hub","capacity","both"}`,
-  no emails. Refuses everyone if the secret is not set.
+  metadata. `hub` meant "I'd pay for Sengi to run our pool's hub"; `capacity`, "I'd pay for extra machines when
+  ours are busy".
+
+```sh
+curl -s -H "authorization: Bearer $WAITLIST_ADMIN_TOKEN" https://potluck.sh/api/waitlist/count
+# {"total":42,"hub":8,"capacity":11,"both":3}
+```
+
+`total` is every sign-up; `hub` and `capacity` each count everyone who ticked that box, and `both` those who
+ticked the two. Entries are unverified: before acting on the counts, read the list's domains
+(`npx wrangler kv key list --binding WAITLIST --remote`) and discount throwaway, test and repeated look-alike
+addresses.
 
 Removal: people email ops@sengi.run. Delete their key with
-`npx wrangler kv key delete --binding WAITLIST --remote "email:<address>"`. The page promises the list is deleted
-within 12 months.
+`npx wrangler kv key delete --binding WAITLIST --remote "email:<address>"`. To delete the whole list, delete each
+`email:` key the same way, then remove the `kv_namespaces` entry from `wrangler.jsonc` and the two routes from
+`src/worker.js`.
 
 ## Develop
 
@@ -52,58 +54,29 @@ npx wrangler dev --local        # http://localhost:8787 with a local KV store
 If the local runtime is older than `compatibility_date`, add `--compatibility-date <the date it names>` for the
 local run; do not lower it in `wrangler.jsonc`.
 
-```sh
-curl -H 'accept: application/json' -X POST localhost:8787/api/waitlist -d 'email=you@example.com&hub=yes'
-curl -i -X POST localhost:8787/api/waitlist -d 'email=bad'   # 303 to /?error=email#waitlist
-curl -H 'authorization: Bearer local-dev-token' localhost:8787/api/waitlist/count
-```
+Look at the page at desktop (1440 wide) and phone (390 wide) widths before shipping a change, turned to both ends
+(the arrows step 15 degrees; the lawn turns at most 45 either way): the scene is sized in container units (`cqw`), so
+it scales as one picture, and on a phone the labels use short names. A machine is a `.m` with `data-id`, a `.pin`
+with `data-pin` where its label points, and a label with `data-for` (`npm test` checks the three match).
+
+`npm test` does not run a browser, so label overlap is checked by hand with Playwright before shipping a change to the
+scene: at 1440x900, 1280x720, 390x844 and 320x640, turn the lawn from -45 to 45 degrees in 5 degree steps (drag it),
+with Leo away and back, and at each step check that no label's box overlaps another label, the card, or the box of
+any machine's face (`.f`, `.lid > *`, or a machine's `.cut`), and that `elementFromPoint` at each label's centre is
+that label.
 
 ## Deploy
 
-Account `246355770c9ff4630b40496b282a7b46` (set in `wrangler.jsonc`). Before the first deploy, confirm:
-
-- The account is on the Workers Paid plan. The free plan allows 1,000 KV writes a day, and one abuser rotating
-  addresses can use them up (the page then answers "unavailable" until the next day).
-- No git-triggered build (Workers Builds, or a Pages project on this repo) deploys this Worker: deploys are by hand,
-  from this directory, only.
-
-One-time setup, from this directory:
-
-1. Create the KV namespace and put the id it prints into `wrangler.jsonc` in place of `REPLACE_WITH_KV_ID`,
-   then commit that:
-   `npx wrangler kv namespace create WAITLIST`
-2. Set the admin token (keep a copy somewhere safe; it is needed to read the counts):
-   `openssl rand -hex 32 | npx wrangler secret put WAITLIST_ADMIN_TOKEN`
-3. Deploy: `npx wrangler deploy`
-4. Smoke test both hostnames, then delete the test keys:
-
-   ```sh
-   for h in potluck.sh www.potluck.sh; do
-     curl -s -o /dev/null -w "$h page %{http_code}\n" "https://$h/"
-     curl -s -H 'accept: application/json' -X POST "https://$h/api/waitlist" -d "email=smoke-test@$h&hub=yes"; echo
-     curl -s -o /dev/null -w "$h form %{http_code} %header{location}\n" -X POST "https://$h/api/waitlist" -d 'email=bad'
-   done
-   curl -s -H "authorization: Bearer $WAITLIST_ADMIN_TOKEN" https://potluck.sh/api/waitlist/count; echo
-   for h in potluck.sh www.potluck.sh; do
-     npx wrangler kv key delete --binding WAITLIST --remote "email:smoke-test@$h"
-   done
-   ```
-
-   Expect 200, `{"ok":true}`, and a 303 to `/?error=email#waitlist` for each host.
-
-The rate limit binding needs no setup; it exists once the Worker is deployed. Later deploys are steps 3 and 4.
-
-## Read the counts
+Account `246355770c9ff4630b40496b282a7b46` (set in `wrangler.jsonc`). Deploys are by hand, from this directory,
+only: no git-triggered build (Workers Builds, or a Pages project on this repo) deploys this Worker.
 
 ```sh
-curl -s -H "authorization: Bearer $WAITLIST_ADMIN_TOKEN" https://potluck.sh/api/waitlist/count
-# {"total":42,"hub":8,"capacity":11,"both":3}
+npx wrangler deploy
+for h in potluck.sh www.potluck.sh; do
+  curl -s -o /dev/null -w "$h page %{http_code}\n" "https://$h/"
+  curl -s -o /dev/null -w "$h waitlist post %{http_code}\n" -X POST "https://$h/api/waitlist"
+done
+curl -s -H "authorization: Bearer $WAITLIST_ADMIN_TOKEN" https://potluck.sh/api/waitlist/count; echo
 ```
 
-`total` is every sign-up; `hub` and `capacity` each count everyone who ticked that box, and `both` those who
-ticked the two. The plan's bar: under about 20 `hub` sign-ups in 30 days, pause the paid-path work. KV lists can
-lag writes by up to a minute.
-
-Entries are unverified: nobody confirms they own the address. Before acting on the counts, read the list's
-domains (`npx wrangler kv key list --binding WAITLIST --remote`) and discount throwaway, test and repeated
-look-alike addresses.
+Expect 200 for the page, 410 for the post, and the counts.

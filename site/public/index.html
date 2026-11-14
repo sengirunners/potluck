@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Potluck by Sengi</title>
-<meta name="description" content="Potluck will run your Mac and Linux GitHub Actions jobs and your coding agents in fresh VMs or sandboxes on your team's idle machines. Early: not ready to install yet. Made by Sengi.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%231A1814'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%23B42D1A'/></svg>">
+<title>Potluck: run coding agents and builds on the computers you already own</title>
+<meta name="description" content="Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
 <link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
 <style>
 /* Newsreader by Production Type, SIL Open Font License 1.1 (fonts/OFL-Newsreader.txt).
@@ -16,593 +17,1088 @@
   src:url(/fonts/newsreader-italic.woff2) format("woff2")}
 
 :root{
-  --paper:#F4EFE4; --ink:#1A1814; --hair:#CFC8B8; --soft:#5C564B; --red:#B42D1A;
-  --gut:24px; --side:64px; --max:1312px;
   color-scheme:light;
+  --cream:#FBF7EE; --card:#FFFFFF; --line:#E5DCCA;
+  --ink:#1D261D; --soft:#4B5648; --green:#2F6B34; --leaf:#7CB24E; --red:#C8402F;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --gutter:max(16px,calc((100vw - 1200px) / 2));
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{-webkit-text-size-adjust:100%;scroll-padding-top:24px}
-body{background:var(--paper);color:var(--ink);font-family:Newsreader,"Iowan Old Style","Palatino Linotype",Georgia,serif;
-  font-size:19px;line-height:1.5;font-optical-sizing:auto;font-kerning:normal;text-rendering:optimizeLegibility}
-a{color:inherit;text-decoration-thickness:1px;text-underline-offset:.18em}
-a:hover{text-decoration-color:var(--red)}
-:focus-visible{outline:2px solid var(--red);outline-offset:3px}
-.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:16px}
+body{background:var(--cream);color:var(--ink);font-family:Newsreader,"Iowan Old Style","Palatino Linotype",Georgia,serif;
+  font-size:19px;line-height:1.5;font-optical-sizing:auto}
+main,header,footer{overflow-x:clip}
+a{color:var(--green);text-underline-offset:.18em;text-decoration-thickness:1px}
+a:hover{color:var(--ink)}
+/* The focus ring is ink: at least 3:1 against every background on the page (cream, white, lawn). */
+:focus-visible{outline:3px solid var(--ink);outline-offset:3px;border-radius:4px}
+code,pre{font-family:var(--mono);font-size:14px}
+.wrap{padding:0 var(--gutter)}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+svg.defs{position:absolute;width:0;height:0;overflow:hidden}
 
-/* The page is a galley proof with crop marks at its four corners. */
-.sheet{position:relative;max-width:calc(var(--max) + 2*var(--side));margin:0 auto;padding:0 var(--side)}
-.crop{position:absolute;width:28px;height:28px;pointer-events:none}
-.crop::before,.crop::after{content:"";position:absolute;background:var(--ink)}
-.crop::before{width:22px;height:1px}
-.crop::after{width:1px;height:22px}
-.crop.tl{left:18px;top:44px}.crop.tl::before{right:12px;top:0}.crop.tl::after{left:0;bottom:12px}
-.crop.tr{right:18px;top:44px}.crop.tr::before{left:12px;top:0}.crop.tr::after{right:0;bottom:12px}
-.crop.bl{left:18px;bottom:28px}.crop.bl::before{right:12px;bottom:0}.crop.bl::after{left:0;top:12px}
-.crop.br{right:18px;bottom:28px}.crop.br::before{left:12px;bottom:0}.crop.br::after{right:0;top:12px}
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:17px;font-weight:600;line-height:1;
+  padding:13px 20px;border-radius:999px;text-decoration:none;cursor:pointer;border:1.5px solid var(--ink)}
+.btn svg{width:18px;height:18px;flex:none}
+.btn.solid{background:var(--ink);color:var(--cream)}
+.btn.solid:hover{background:var(--green);border-color:var(--green);color:#fff}
+.btn.line{background:transparent;color:var(--ink)}
+.btn.line:hover{background:#fff}
 
-.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:var(--gut)}
+/* Header */
+.masthead{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:22px;padding-bottom:10px}
+.logo{display:flex;align-items:center;gap:9px;font-size:26px;font-weight:700;letter-spacing:-.02em;color:var(--ink);text-decoration:none}
+.logo svg{width:30px;height:30px}
+.masthead nav{display:flex;align-items:center;gap:26px;font-size:17px}
+.masthead nav a{color:var(--ink);text-decoration:none}
+.masthead nav a:hover{text-decoration:underline}
+.masthead nav .btn{padding:10px 16px;font-size:16px}
 
-/* Printer's slug, outside the trim. */
-.slug{display:flex;justify-content:space-between;gap:24px;font-size:14px;line-height:1.3;color:var(--soft);
-  padding:14px 0 0;height:44px;font-style:italic}
+/* Hero: the words on the left, the picnic on the right. On a phone the picnic comes straight after the lede. */
+.hero{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);grid-template-areas:"say stage" "get stage";
+  grid-template-rows:auto 1fr;column-gap:24px;padding-top:20px;padding-bottom:24px}
+.say{grid-area:say;padding-top:12px}
+.get{grid-area:get}
+.stage{grid-area:stage}
+.hero h1{font-size:clamp(40px,4.3vw,62px);line-height:1.02;font-weight:600;letter-spacing:-.028em;margin-bottom:20px}
+.hero h1 em{font-style:italic;font-weight:500;color:var(--green)}
+.lede{font-size:21px;line-height:1.45;color:var(--soft);max-width:31em;margin-bottom:22px}
+.lede strong{color:var(--ink);font-weight:600}
+.install{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:12px 12px 12px 16px;max-width:560px;
+  box-shadow:0 1px 0 var(--line),0 14px 30px -22px rgba(29,38,29,.45)}
+.install .label{font-size:15px;color:var(--soft);margin-bottom:6px}
+.install .row{display:flex;gap:12px;align-items:center}
+/* One line that scrolls sideways, so the command never breaks mid-word. */
+.install .line{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;padding:4px 0 8px;scrollbar-width:thin}
+.install code{color:var(--ink);line-height:1.5}
+.install .line::before{content:"$ ";font-family:var(--mono);font-size:14px;color:var(--green);font-weight:700}
+.copy{font:inherit;font-size:15px;font-weight:600;background:#F2EEE3;border:1px solid var(--line);color:var(--ink);border-radius:8px;
+  padding:6px 12px;cursor:pointer;flex:none}
+.copy:hover{background:#E9E3D3}
+.ctas{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}
+.jump{display:none;font-size:17px;font-weight:600}
+.fine{font-size:16px;color:var(--soft);margin-top:16px;max-width:34em}
 
-/* Running head: scrolls away with the page. */
-.runhead{border-bottom:1px solid var(--ink);box-shadow:0 3px 0 -1px var(--paper),0 4px 0 -1px var(--ink)}
-.runhead .grid{align-items:baseline;padding:14px 0 12px}
-.mark{grid-column:1/4;display:flex;align-items:baseline;gap:10px;font-size:26px;line-height:1;font-weight:600;
-  font-style:italic;letter-spacing:-.01em}
-.mark .home{display:flex;align-items:baseline;gap:10px;text-decoration:none}
-.mark svg{width:22px;height:22px;align-self:center;flex:none}
-.mark small{font-size:16px;font-style:normal;font-weight:400;color:var(--soft);letter-spacing:0}
-.mark small a{color:var(--ink)}
-.status{grid-column:4/10;font-size:17px;line-height:1.3;text-align:center;justify-self:center;font-style:italic}
-.status strong{font-style:normal;font-weight:650}
-.toc{grid-column:10/13;display:flex;justify-content:flex-end;gap:18px;font-size:16px;line-height:1.3;list-style:none;white-space:nowrap}
-.tocnav{grid-column:10/13}
-.toc a{text-decoration:none;border-bottom:1px solid transparent}
-.toc a:hover{border-bottom-color:var(--red)}
-.toc li:last-child a{font-weight:650;border-bottom-color:var(--ink)}
+/* The picnic: a round lawn in CSS 3D. Machines are lit boxes that turn with the lawn; people, food and the cloud are
+   flat cut-outs that keep facing you. Sizes are in cqw (the scene's width) so it scales as one picture.
+   --light is where the sun is, as a direction on the lawn seen from the camera. */
+.stage{position:relative;align-self:start}
+.scene{position:relative;container-type:inline-size;aspect-ratio:100/70;--tilt:56deg;--spin:-12deg;--light:-38deg;
+  perspective:170cqw;perspective-origin:50% 0%;touch-action:pan-y;user-select:none;-webkit-user-select:none;cursor:grab}
+.scene.dragging{cursor:grabbing}
+.world{position:absolute;left:50%;top:56%;width:80cqw;height:80cqw;margin:-40cqw 0 0 -40cqw;transform-style:preserve-3d;
+  transform:rotateX(var(--tilt)) rotateZ(var(--spin))}
+.world > *{position:absolute}
+.soil{inset:0;border-radius:50%}
+.soil.s1{transform:translateZ(-.8cqw);background:#8C5B35}
+.soil.s2{transform:translateZ(-1.6cqw);background:#7A4D2C}
+.soil.s3{transform:translateZ(-2.4cqw);background:#6A4226}
+.soil.s4{transform:translateZ(-3.2cqw);background:#5C3920;box-shadow:0 0 5cqw .5cqw rgba(60,50,30,.25)}
+.lawn{inset:0;border-radius:50%;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='46' height='46'%3E%3Cg stroke='%235E9A3A' stroke-width='1.3' stroke-linecap='round' opacity='.55'%3E%3Cpath d='M6 10l2-5M9 10l-1-6M30 30l2-5M33 30l-1-6M20 42l1-5M38 12l2-4M14 26l-2-4'/%3E%3C/g%3E%3C/svg%3E"),
+    radial-gradient(circle at 40% 36%,#A3D06A 0,#88BE54 45%,#71A845 80%,#5E9238 100%)}
+.blanket{left:13%;top:20%;width:74%;height:62%;transform:translateZ(.05cqw) rotateZ(-6deg);border-radius:1cqw;
+  background:
+    linear-gradient(90deg,rgba(200,64,47,.55) 50%,transparent 50%) 0 0/5.2cqw 5.2cqw,
+    linear-gradient(rgba(200,64,47,.55) 50%,transparent 50%) 0 0/5.2cqw 5.2cqw,
+    #FFF3E2;
+  box-shadow:0 0 0 .5cqw #FFF3E2,0 .6cqw 1.6cqw rgba(40,60,20,.35)}
 
-/* Front page. Column guides show only in the top and bottom margins, never behind text. */
-.front{position:relative;padding:76px 0 72px}
-.colrules{position:absolute;left:0;right:0;top:0;height:52px;pointer-events:none;
-  -webkit-mask-image:linear-gradient(#000,transparent);mask-image:linear-gradient(#000,transparent)}
-.colrules.bot{top:auto;bottom:0;height:44px;-webkit-mask-image:linear-gradient(transparent,#000);mask-image:linear-gradient(transparent,#000)}
-.colrules span{border-left:1px solid var(--hair);border-right:1px solid var(--hair)}
-h1{grid-column:1/10;grid-row:1;font-style:italic;font-weight:380;font-size:128px;line-height:.92;letter-spacing:-.025em;
-  margin:4px 0 0;white-space:nowrap}
-.ins{position:relative;display:inline-block}
-.ins .caret{position:absolute;left:-.16em;top:.7em;width:.26em;height:.3em;overflow:visible}
-.ins .soon{position:absolute;left:-.5em;bottom:1.95em;font-size:.36em;font-weight:420;color:var(--red);letter-spacing:0;white-space:nowrap}
-.stand{grid-column:1/7;grid-row:2;font-size:27px;line-height:1.34;margin-top:56px;font-weight:380;max-width:30em}
-.stet-words{text-decoration:underline dotted var(--red);text-decoration-thickness:2px;text-underline-offset:.24em}
-.stet{grid-column:7/9;grid-row:2;align-self:end;margin:0 0 16px 4px;color:var(--red);font-style:italic;font-size:22px;
-  line-height:1.25;position:relative;padding-left:34px}
-.stet svg{position:absolute;left:-6px;top:-12px;width:96px;height:54px;overflow:visible}
-.jump{grid-column:1/7;grid-row:3;margin-top:40px;display:flex;flex-wrap:wrap;gap:12px 28px;align-items:baseline;font-size:19px}
-.jump .go{font-weight:650;font-size:21px;text-decoration-thickness:2px;text-underline-offset:.22em}
-.jump .go::after{content:" \2192";color:var(--red)}
+/* A machine: .m stands at (--x, --y) on the lawn; its .body turns by --rot; faces are --w wide, --d deep, --h tall. */
+.m{left:var(--x);top:var(--y);width:0;height:0;transform-style:preserve-3d;--rot:0deg;cursor:pointer}
+.m > *{position:absolute}
+.body{transform-style:preserve-3d;transform:rotateZ(var(--rot))}
+.f{position:absolute;left:calc(var(--fw) / -2);top:calc(var(--fh) / -2);width:var(--fw);height:var(--fh);
+  background:var(--face);backface-visibility:hidden;-webkit-backface-visibility:hidden;box-shadow:inset 0 0 0 1px var(--edge);overflow:hidden}
+.f svg{position:absolute;inset:0;width:100%;height:100%}
+.f::after{content:"";position:absolute;inset:0;background:#1A1408;pointer-events:none;opacity:.16}
+.up{--fw:var(--w);--fh:var(--d);transform:translateZ(var(--h));background:var(--upc)}
+.up::after{opacity:0}
+.fr{--fw:var(--w);--fh:var(--h);--phi:0deg;transform:translateZ(calc(var(--h) / 2)) rotateX(-90deg) translateZ(calc(var(--d) / 2))}
+.bk{--fw:var(--w);--fh:var(--h);--phi:180deg;transform:translateZ(calc(var(--h) / 2)) rotateZ(180deg) rotateX(-90deg) translateZ(calc(var(--d) / 2))}
+.rt{--fw:var(--d);--fh:var(--h);--phi:90deg;transform:translateZ(calc(var(--h) / 2)) rotateZ(-90deg) rotateX(-90deg) translateZ(calc(var(--w) / 2))}
+.lf{--fw:var(--d);--fh:var(--h);--phi:270deg;transform:translateZ(calc(var(--h) / 2)) rotateZ(90deg) rotateX(-90deg) translateZ(calc(var(--w) / 2))}
+/* The shadow falls away from the sun, so it moves as the lawn turns. */
+.cast{left:calc(var(--sw) / -2);top:calc(var(--sw) * -.35);width:var(--sw);height:calc(var(--sw) * .7);border-radius:50%;
+  background:radial-gradient(closest-side,rgba(24,40,12,.5),rgba(24,40,12,0));
+  transform:translateZ(.1cqw) translate(calc(var(--sl) * -.5),calc(var(--sl) * -.6))}
+.ring{left:calc(var(--sw) * -.6);top:calc(var(--sw) * -.42);width:calc(var(--sw) * 1.2);height:calc(var(--sw) * .84);border-radius:50%;
+  border:.45cqw solid #FFFBEF;transform:translateZ(.12cqw);opacity:0;transition:opacity .2s}
+.m.sel .ring{opacity:.95}
+.pin{position:absolute;left:-1px;top:-1px;width:2px;height:2px}
+/* A cut-out: turns back against the lawn's spin and tilt, so it always faces you. */
+.bb{left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform:translateZ(.15cqw) rotateZ(calc(var(--spin) * -1)) rotateX(calc(var(--tilt) * -1))}
+.bb > *{position:absolute;bottom:0;left:0;transform:translateX(-50%)}
+.cut{width:var(--cw);pointer-events:none}
+.m[data-id] > .bb > .cut{pointer-events:auto}
+.cut svg{display:block;width:100%;height:auto;overflow:visible}
 
-/* Boxed notice: the example sign-up sheet, set like a listing. */
-.notice{grid-column:10/13;grid-row:1/4;align-self:start;margin-top:14px;border:1px solid var(--ink);
-  padding:4px;background:var(--paper)}
-.notice > div{border:1px solid var(--ink);padding:16px 14px 14px}
-.notice h2{font-size:22px;line-height:1.1;font-weight:650;text-align:center;letter-spacing:-.005em}
-.notice .eg{display:block;text-align:center;font-size:15px;font-style:italic;color:var(--soft);margin:4px 0 12px;
-  padding-bottom:10px;border-bottom:1px solid var(--ink);box-shadow:0 2px 0 -1px var(--paper),0 3px 0 -1px var(--ink)}
-.notice dl{font-size:16px;line-height:1.3;margin-top:4px}
-.notice .row{position:relative;display:flex;align-items:baseline;gap:6px;padding:8px 0 7px 28px;border-bottom:1px solid var(--hair)}
-.notice dt{font-weight:650;font-size:15px;letter-spacing:.02em;white-space:nowrap}
-.notice .lead{flex:1 1 12px;min-width:12px;border-bottom:1px dotted var(--soft);transform:translateY(-4px)}
-.notice dd{text-align:right;max-width:75%}
-.notice .heads{font-size:13px;font-style:italic;color:var(--soft);border-bottom:1px solid var(--ink)}
-.notice .heads dt{font-weight:400;font-size:13px;letter-spacing:0}
-.notice .you{border-bottom:0}
-.notice .you dd a{font-style:italic;font-weight:500}
-.notice .you .blank{flex:1 1 auto;border-bottom:1px solid var(--ink);transform:translateY(-4px)}
+/* Machine colours and front panels */
+.m.tower{--face:#2A2D34;--upc:#3A3E47;--edge:#111317}
+.m.server{--face:#BEC5CD;--upc:#DDE2E7;--edge:#59616B}
+.m.mac{--face:#C9CED5;--upc:#E8EBEE;--edge:#6E767F}
+.m.mac .up{border-radius:.8cqw}
+.m.minipc{--face:#454B53;--upc:#5C636C;--edge:#23272C}
+.m.laptop{--face:#B3B9C1;--upc:#D9DDE2;--edge:#5E666F}
+.lid{position:absolute;left:calc(var(--w) / -2);top:calc(var(--lid) * -1);width:var(--w);height:var(--lid);transform-style:preserve-3d;transform-origin:50% 100%;
+  transform:translateY(calc(var(--d) / -2)) translateZ(var(--h)) rotateX(-76deg)}
+.lid > *{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:.6cqw .6cqw 0 0}
+.lid .scr{background:#2A3037;padding:.55cqw .55cqw .4cqw}
+.lid .scr svg{display:block;width:100%;height:100%;border-radius:.25cqw}
+.lid .back{transform:rotateY(180deg);background:#C3C8CF;box-shadow:inset 0 0 0 1px #5E666F}
+.lid .back::after{content:"";position:absolute;inset:0;background:#1A1408;border-radius:inherit;opacity:.2}
+/* Light that follows the turn: each side darkens as it turns from the sun, and shadows swing round. Browsers without
+   CSS trigonometry keep the fixed shading above. */
+@supports (opacity:calc(cos(0deg))){
+  .f::after{opacity:calc(.03 + .46 * (1 - cos(var(--phi) - var(--rot) - var(--spin) - var(--light))) / 2)}
+  .up::after{opacity:0}
+  .lid .back::after{opacity:calc(.03 + .46 * (1 - cos(180deg - var(--rot) - var(--spin) - var(--light))) / 2)}
+  .cast{transform:translateZ(.1cqw) translate(calc(sin(var(--light) + 180deg + var(--spin)) * var(--sl)),calc(cos(var(--light) + 180deg + var(--spin)) * var(--sl)))}
+}
+.own,.scene.leo-back .lent{display:none}
+.scene.leo-back .own{display:block}
 
-/* The toy: tick a Mac row to sit its owner down. The row is struck in red and marked "handed back".
-   These boxes have no name and sit outside the form, so they are never posted. */
-.sit-l{cursor:pointer}
-.sit{appearance:none;-webkit-appearance:none;position:absolute;left:-3px;top:6px;width:24px;height:24px;margin:0;
-  border:0;box-shadow:inset 0 0 0 3px var(--paper),inset 0 0 0 4.5px var(--ink);background:var(--paper);cursor:pointer;display:grid;place-content:center}
-.sit::after{content:"";width:12px;height:12px;transform:scale(0);transition:transform .12s;
-  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2 14 14M14 2 2 14' stroke='%23B42D1A' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat}
-.sit:checked::after{transform:scale(1)}
-.sit:focus-visible{outline:2px solid var(--red);outline-offset:2px}
-.sit-l:hover .sit{box-shadow:inset 0 0 0 3px var(--paper),inset 0 0 0 4.5px var(--red)}
-.notice .x{text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:transparent;transition:text-decoration-color .25s}
-.notice .back{display:none;width:100%;color:var(--red);font-style:italic;font-size:16px;font-weight:500;letter-spacing:0;margin-top:2px}
-.notice .row:has(.sit:checked) .x{text-decoration-color:var(--red)}
-.notice .row:has(.sit:checked) .lead{border-bottom:2px solid var(--red);transform:translateY(-6px)}
-.notice .row:has(.sit:checked) .back{display:block}
-.toycap{font-size:15.5px;line-height:1.4;font-style:italic;color:var(--soft);margin-top:12px;padding-top:10px;border-top:1px solid var(--ink)}
+/* Busy and idle */
+.pulse{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.scroll{animation:scroll 2.4s linear infinite}
+@keyframes scroll{to{transform:translateY(-16px)}}
+.zz{animation:zz 3s ease-in-out infinite}
+@keyframes zz{0%,100%{opacity:.35;transform:translateY(2px)}50%{opacity:1;transform:translateY(-2px)}}
+.leo{opacity:0;transform:translate(-50%,12%);transition:opacity .45s,transform .45s cubic-bezier(.3,1.5,.5,1)}
+.scene.leo-back .leo{opacity:1;transform:translateX(-50%)}
+
+/* Labels: a flat layer over the scene, placed from where each machine lands on screen. */
+.labels{position:absolute;inset:0;pointer-events:none;z-index:2}
+.labels[hidden]{display:none}
+.tag{position:absolute;left:0;top:0;pointer-events:auto;display:inline-flex;align-items:center;gap:.4em;background:#fff;border:1px solid #D9CFBA;
+  border-radius:8px;padding:3px 9px 4px 7px;white-space:nowrap;font:inherit;font-size:14px;font-style:italic;font-weight:500;line-height:1.15;
+  color:var(--ink);cursor:pointer;text-decoration:none;box-shadow:0 2px 0 #E9E0CC,0 6px 10px -6px rgba(30,40,20,.5)}
+.tag:hover{border-color:var(--ink);color:var(--ink)}
+.tag:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.tag[aria-pressed="true"]{background:var(--ink);color:var(--cream);border-color:var(--ink);box-shadow:0 2px 0 #000,0 6px 10px -6px rgba(30,40,20,.6)}
+.tag .short{display:none}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:#3FA34D}
+.dot.busy{box-shadow:0 0 0 0 rgba(63,163,77,.5);animation:ping 1.6s ease-out infinite}
+@keyframes ping{70%{box-shadow:0 0 0 5px rgba(63,163,77,0)}100%{box-shadow:0 0 0 0 rgba(63,163,77,0)}}
+.dot.idle{background:transparent;border:1.5px solid #8C958A}
+.tag.soon{font-style:normal;font-size:13px;background:#FFFBEF;border-style:dashed;border-color:#B99A62;color:#5A4520}
+.tag.soon::before{content:"";width:7px;height:7px;flex:none;border-radius:2px;background:#E2A23B}
+.tag.back .name{text-decoration:line-through;text-decoration-thickness:1px}
+.tag.back .dot{background:#C8402F;animation:none}
+.leader{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1;overflow:visible}
+.leader .stem{stroke:#3A4437;stroke-width:1.2;fill:none;opacity:.7}
+.tag.chip{font-style:normal;font-size:13px;font-weight:600;background:#EAF3F9;border-color:#2F6B8F;color:#1F4A63;box-shadow:0 2px 0 #C7DCE9}
+.tag.chip:hover{border-color:#1F4A63}
+
+.under{display:flex;align-items:flex-start;gap:20px;margin-top:-34px;position:relative}
+.turn{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;padding-top:44px;position:relative;z-index:4}
+.turn[hidden]{display:none}
+.turn button{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--ink);background:var(--cream);color:var(--ink);cursor:pointer;
+  display:grid;place-items:center}
+.turn button:hover{background:#fff}
+.turn button[aria-disabled="true"]{opacity:.35;cursor:default;background:var(--cream)}
+.turn svg{width:16px;height:16px}
+.hint{font-size:15px;font-style:italic;color:var(--soft);line-height:1.35;text-align:center}
+
+/* The card: what the chosen machine shares. It sits below the lawn, off the grass; its notch points at the chosen label. */
+.dish{position:relative;flex:none;width:310px;z-index:5;background:var(--card);border:1.5px solid var(--ink);border-radius:14px;
+  padding:12px 16px 12px;box-shadow:5px 5px 0 var(--ink)}
+.dish::before{content:"";position:absolute;top:-11px;left:calc(var(--notch,50%) - 10px);width:18px;height:18px;background:var(--card);
+  border-left:1.5px solid var(--ink);border-top:1.5px solid var(--ink);transform:rotate(45deg);border-radius:3px 0 0 0}
+.dish .kicker{font-size:14px;color:var(--soft);display:flex;justify-content:space-between;gap:8px}
+.dish h2{font-size:23px;line-height:1.1;font-weight:600;letter-spacing:-.01em;margin:3px 0 1px}
+.dish .sub{font-size:16px;color:var(--soft);font-style:italic;margin-bottom:7px}
+.dish dl{display:grid;grid-template-columns:auto 1fr;gap:1px 12px;font-size:15.5px;line-height:1.35;border-top:1px solid var(--line);padding-top:7px}
+.dish dt{color:var(--soft)}
+.dish dd{font-weight:500}
+.dish .now{margin-top:8px;font-size:15px;line-height:1.4;background:#F3F7EC;border-radius:8px;padding:7px 10px}
+.dish .now b{font-weight:600}
+.dish .toggle{margin-top:9px;width:100%;justify-content:center;font-size:15px;padding:9px 14px}
+.dish .toggle[hidden]{display:none}
+.pool{margin-top:7px;font-size:14.5px;color:var(--soft)}
+.pool b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 
 /* Sections */
-.sec{border-top:2px solid var(--ink);padding:22px 0 88px;position:relative}
-.sec::before{content:"";position:absolute;left:0;right:0;top:3px;border-top:1px solid var(--ink)}
-.sec h2{grid-column:1/-1;font-size:58px;line-height:1.02;font-weight:560;letter-spacing:-.018em;margin:26px 0 0}
+section.block{padding-top:84px;padding-bottom:16px}
+.block h2.big{font-size:clamp(32px,3.4vw,46px);line-height:1.08;font-weight:600;letter-spacing:-.02em;margin-bottom:12px;max-width:22em}
+.block .intro{font-size:20px;color:var(--soft);max-width:36em;margin-bottom:28px}
+h3{font-size:24px;font-weight:600;line-height:1.2;letter-spacing:-.01em;margin-bottom:6px}
+.step{font-size:15px;font-weight:600;color:var(--green);letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px}
+pre.cmd{margin-top:14px;background:#F6F2E8;border-radius:10px;padding:10px 12px;white-space:pre;overflow-x:auto;line-height:1.6;color:var(--ink)}
+pre.cmd .c{color:#5F675A}
+pre.cmd .p{color:var(--green);font-weight:700}
 
-/* The plan: four paragraphs in two columns on a common top line, figures hung in the margin. */
-.plan{grid-column:2/12;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;grid-auto-flow:column;
-  column-gap:120px;margin-top:48px;list-style:none;counter-reset:step}
-.plan li{position:relative;margin-bottom:34px;counter-increment:step;max-width:30em;font-size:21px;line-height:1.45}
-.plan li::before{content:counter(step);position:absolute;left:-62px;top:-.18em;font-style:italic;font-weight:300;
-  font-size:64px;line-height:1;color:var(--ink);width:44px;text-align:right}
-.plan b{font-weight:650}
+/* How it works: three moments at the picnic, one after another. */
+.story{list-style:none;display:flex;flex-direction:column;gap:20px;margin-top:8px}
+.beat{display:grid;grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:48px;align-items:center}
+.beat:nth-child(2){grid-template-columns:minmax(0,5fr) minmax(0,6fr)}
+.beat:nth-child(2) figure{order:2}
+.beat figure svg{display:block;width:100%;height:auto}
+.beat p{font-size:18px;color:var(--soft);max-width:30em}
 
-figure.fig{grid-column:1/-1;margin-top:40px;border:1px solid var(--ink);padding:4px}
-figure.fig > div{border:1px solid var(--hair);padding:28px 32px 12px}
-figure.fig svg{display:block;width:100%;height:auto}
-figure.fig .tall{display:none}
-figcaption{display:flex;gap:16px;align-items:baseline;border-top:1px solid var(--ink);padding:10px 12px 8px;font-size:16px;line-height:1.4}
-figcaption b{flex:none;font-weight:650;border:1px solid var(--ink);padding:0 6px;font-size:14px}
-.f-line{fill:none;stroke:var(--ink);stroke-width:1.25}
-.f-thin{fill:none;stroke:var(--ink);stroke-width:1}
-.f-hair{fill:none;stroke:var(--soft);stroke-width:1}
-.f-dash{fill:none;stroke:var(--ink);stroke-width:1;stroke-dasharray:4 4}
-.f-vm{fill:var(--paper);stroke:var(--ink);stroke-width:1;stroke-dasharray:3 3}
-.f-fill{fill:var(--paper)}
-.f-hatch{fill:url(#hatch)}
-.f-t{font-family:Newsreader,Georgia,serif;font-size:17px;fill:var(--ink)}
-.f-b{font-weight:650}
-.f-s{font-size:14.5px;fill:var(--soft);font-style:italic}
-.f-vmt{font-family:Newsreader,Georgia,serif;font-size:12.5px;fill:var(--ink);font-style:italic}
+/* Uses: one wide, one narrow; the Actions one is drawn in pencil because it has not run live yet. */
+.uses{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:24px;align-items:start}
+.use{border-radius:18px;padding:26px}
+.use.agents{background:var(--card);border:1.5px solid var(--ink);box-shadow:6px 6px 0 #DCEBCB}
+.use.actions{border:1.5px dashed #9C9282;margin-top:40px}
+.use p{font-size:17px;color:var(--soft);line-height:1.5}
+.use p + p{margin-top:10px}
+.use .kind{font-size:14px;font-weight:600;color:var(--green);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.notyet{font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;color:#6B4A10;background:#FCEFCF;border-radius:999px;padding:2px 10px}
+.diff{margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;font-family:var(--mono);font-size:13.5px;line-height:1.6;background:#fff}
+.diff div{padding:4px 12px;white-space:pre;overflow-x:auto}
+.diff .file{background:#F6F2E8;color:var(--soft);border-bottom:1px solid var(--line)}
+.diff .del{background:#FCEBE7;color:#7C2417}
+.diff .add{background:#E9F4E1;color:#1E4D22}
+.use .exact{font-size:15px;margin-top:8px}
 
-/* What you agree to: who can read what, set large, then the rest of the terms. */
-.pull{grid-column:2/10;position:relative;margin-top:48px;font-size:41px;line-height:1.2;font-weight:400;letter-spacing:-.01em}
-.pull::before{content:"";position:absolute;left:-36px;top:.2em;bottom:.2em;width:12px;border:2px solid var(--red);border-right:0}
-.qnote{grid-column:10/13;align-self:start;margin-top:62px;color:var(--red);font-style:italic;font-size:21px;line-height:1.3;
-  padding-left:14px;border-left:2px solid var(--red)}
-.terms{grid-column:2/12;margin-top:56px;border-top:1px solid var(--ink)}
-.terms > div{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,7fr);column-gap:var(--gut);padding:16px 0 18px;border-bottom:1px solid var(--hair)}
-.terms dt{font-weight:650;font-size:20px;line-height:1.35}
-.terms dd{font-size:20px;line-height:1.45;max-width:36em}
+/* The savings band: full width, on grass. */
+.band{margin-top:84px;background:#E4EFD6;border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);padding-top:48px;padding-bottom:48px}
+.band .in{display:grid;grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:48px;align-items:center}
+.band h2{font-size:clamp(30px,3vw,42px);line-height:1.08;font-weight:600;letter-spacing:-.02em;margin-bottom:10px}
+.band label{display:block;font-size:17px;margin-top:18px}
+.band output{font-weight:700;font-variant-numeric:tabular-nums}
+.band input[type=range]{width:100%;margin:10px 0 6px;accent-color:var(--green);height:28px}
+.band .src{font-size:15px;margin-top:10px;color:#3A4437;max-width:38em}
+.totals{list-style:none;display:grid;gap:14px}
+.totals li{background:#fff;border:1.5px solid var(--ink);border-radius:14px;padding:16px 20px;display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.totals li span{font-size:18px}
+.totals li small{display:block;font-size:14px;color:var(--soft)}
+.totals b{font-size:clamp(30px,3.2vw,44px);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.totals li.you{background:var(--ink);color:var(--cream)}
+.totals li.you small{color:#C9CFC4}
+.totals li.you b{color:#B6E08C}
+.totals li.you{flex-wrap:wrap}
+.totals .when{flex-basis:100%;font-size:15px;line-height:1.4;color:#DDE3D8}
+.totals .when a{color:#B6E08C}
+.totals .when a:hover{color:#fff}
 
-/* Back page: notices and the waitlist coupon */
-.back{align-items:start}
-.legal{grid-column:1/5;grid-row:1;margin-top:48px;border:3px double var(--ink);padding:22px 24px 20px;font-size:17px;line-height:1.45;
-  text-wrap:pretty}
-.legal.pub{grid-row:2;margin-top:28px;border:1px solid var(--ink);box-shadow:inset 0 0 0 3px var(--paper),inset 0 0 0 4px var(--ink)}
-.sec .legal h2{font-size:28px;font-weight:650;text-align:center;margin:0 0 12px;line-height:1.1;letter-spacing:-.005em}
-.legal p + p{margin-top:10px}
-.legal .last{text-align:center;font-style:italic;border-top:1px solid var(--hair);padding-top:10px;margin-top:14px}
+/* House rules: a sign on two posts. */
+.sign{max-width:860px;margin:8px auto 0;position:relative;padding-bottom:70px}
+.board{position:relative;z-index:1;background:linear-gradient(#B9844A,#A8733C);border:3px solid #6E4520;border-radius:16px;padding:16px;
+  box-shadow:0 10px 0 -2px #6E4520,0 22px 30px -16px rgba(60,40,10,.6)}
+.board::before,.board::after{content:"";position:absolute;top:12px;width:12px;height:12px;border-radius:50%;background:#5B3A1C;box-shadow:inset 0 2px 0 #3E2712}
+.board::before{left:12px}
+.board::after{right:12px}
+.paper{background:#FFFBF0;border-radius:6px;padding:26px 34px 22px;box-shadow:inset 0 0 0 1px #E8DCC0}
+.paper h2{font-size:clamp(34px,3.6vw,48px);font-style:italic;font-weight:600;letter-spacing:-.02em;text-align:center;line-height:1}
+.paper .intro{text-align:center;margin:8px auto 18px;font-size:17px}
+.rules{list-style:none;counter-reset:r;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 40px}
+.rules li{counter-increment:r;position:relative;padding-left:40px}
+.rules li::before{content:counter(r);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;border:1.5px solid var(--ink);
+  display:grid;place-items:center;font-weight:700;font-size:16px}
+.rules h3{font-size:20px}
+.rules p{font-size:16.5px;color:var(--soft);line-height:1.45}
+.post{position:absolute;bottom:0;width:22px;height:100px;background:linear-gradient(90deg,#8A5A2B,#A8733C 40%,#7A4D22);border:2px solid #6E4520;border-radius:3px}
+.post.l{left:18%}
+.post.r{right:18%}
+.sign .grass{position:absolute;left:8%;right:8%;bottom:-4px;height:22px;border-radius:50%;background:#9CCB62;z-index:-1}
 
-.coupon{grid-column:6/-1;grid-row:1/4;margin-top:48px;position:relative;padding:40px 44px 34px;
-  --d:var(--ink);
-  background:
-    linear-gradient(90deg,var(--d) 50%,transparent 0) top left/12px 1.5px repeat-x,
-    linear-gradient(90deg,var(--d) 50%,transparent 0) bottom left/12px 1.5px repeat-x,
-    linear-gradient(var(--d) 50%,transparent 0) top left/1.5px 12px repeat-y,
-    linear-gradient(var(--d) 50%,transparent 0) top right/1.5px 12px repeat-y}
-.coupon:focus-within{animation:cut 1.2s linear infinite}
-@keyframes cut{to{background-position:12px 0,-12px 100%,0 -12px,100% 12px}}
-.scissors{position:absolute;left:36px;top:-13px;width:34px;height:26px;background:var(--paper);padding:0 4px}
-.sec .coupon h2{font-size:46px;line-height:1;font-weight:560;letter-spacing:-.015em;margin:0}
-.waitlist{margin-top:22px;display:grid;gap:18px}
-.waitlist .intro{font-size:19px}
-.waitlist fieldset{border:0;border-top:1px solid var(--ink);padding-top:12px}
-.waitlist legend{float:left;width:100%;font-weight:650;font-size:19px;margin-bottom:8px}
-.opt{clear:both;display:grid;grid-template-columns:30px 1fr;gap:12px;align-items:start;padding:10px 0;cursor:pointer;
-  border-bottom:1px solid var(--hair)}
-.opt:last-child{border-bottom:0}
-.opt input{appearance:none;-webkit-appearance:none;width:24px;height:24px;margin-top:2px;border:1.5px solid var(--ink);
-  background:var(--paper);cursor:pointer;display:grid;place-content:center}
-.opt input::after{content:"";width:16px;height:16px;transform:scale(0);transition:transform .12s;
-  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 2 14 14M14 2 2 14' stroke='%231A1814' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat}
-.opt input:checked::after{transform:scale(1)}
-.opt input:focus-visible{outline:2px solid var(--red);outline-offset:3px}
-.opt small{display:block;font-size:16px;color:var(--soft);font-style:italic;margin-top:4px;line-height:1.4}
-.sign{display:grid;grid-template-columns:1fr auto;gap:20px;align-items:end;border-top:1px solid var(--ink);padding-top:14px}
-.field label{display:block;font-weight:650;font-size:17px;margin-bottom:2px}
-.field input{width:100%;font:inherit;font-size:22px;padding:6px 2px 6px;border:0;border-bottom:1.5px solid var(--ink);
-  background:transparent;color:var(--ink);border-radius:0}
-.field input::placeholder{color:#6E685C;font-style:italic}
-.field input:focus-visible{outline:none;border-bottom-color:var(--red);box-shadow:0 1.5px 0 var(--red)}
-.waitlist button{font:inherit;font-size:19px;font-weight:600;background:var(--ink);color:var(--paper);border:0;border-radius:0;
-  padding:13px 24px 14px;cursor:pointer;white-space:nowrap}
-.waitlist button:hover{background:#000;box-shadow:inset 0 -3px 0 var(--red)}
-.waitlist button:focus-visible{outline:2px solid var(--red);outline-offset:3px}
-.waitlist button:disabled{opacity:.6;cursor:default}
-.waitlist .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
-.result{font-weight:600;min-height:1.5em;font-size:18px}
-.result.bad{color:var(--red)}
-.privacy{font-size:16px;line-height:1.45;color:var(--soft);margin-top:6px;padding-top:12px;border-top:1px solid var(--hair)}
-.privacy a{color:var(--ink)}
+/* Founders and Potluck Dish: two different things, drawn differently. */
+.pair{display:grid;grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:32px;align-items:center}
+.founders{background:#FFE9C7;border-radius:22px;padding:28px 30px;display:grid;grid-template-columns:180px minmax(0,1fr);gap:22px;align-items:center}
+.founders svg{width:100%;height:auto;display:block}
+.founders h2{font-size:30px;line-height:1.1;font-weight:600;letter-spacing:-.015em;margin-bottom:8px}
+.founders p{font-size:18px;color:#3A4437;max-width:30em}
+.founders .btn{margin-top:14px}
+.addr{display:block;font-size:15px;color:#3A4437;margin-top:8px}
+.recipe{background:#fff;border:1px solid #D9CFBA;border-radius:4px;padding:22px 26px 22px 30px;transform:rotate(1.2deg);
+  box-shadow:0 14px 26px -16px rgba(40,30,10,.5);
+  background-image:linear-gradient(transparent 66px,#E2B4A8 66px,#E2B4A8 68px,transparent 68px),repeating-linear-gradient(transparent 0 29px,#DCE6EE 29px 30px);
+  background-position:0 0,0 71px;background-repeat:no-repeat,repeat}
+.recipe .head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;height:40px}
+.recipe h2{font-size:26px;font-weight:600;letter-spacing:-.01em;line-height:1}
+.stamp{font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--red);border:2px solid var(--red);border-radius:6px;padding:2px 8px;transform:rotate(-4deg)}
+.recipe .body{display:grid;grid-template-columns:minmax(0,1fr) 104px;gap:14px;align-items:start;margin-top:14px}
+/* Text sits on the ruled lines: 30px lines, nudged so each baseline lands just above a rule. */
+.recipe p,.recipe a{position:relative;top:3px}
+.recipe p{font-size:17px;line-height:30px;color:#3A4437}
+.recipe svg{width:100%;height:auto;display:block}
+.recipe a{display:inline-block;margin-top:0;font-size:17px;line-height:30px}
 
-/* Imprint */
-.imprint{border-top:2px solid var(--ink);position:relative;padding:22px 0 96px}
-.imprint::before{content:"";position:absolute;left:0;right:0;top:3px;border-top:1px solid var(--ink)}
-.imprint .grid{align-items:baseline}
-.imprint h2{grid-column:1/4;font-size:22px;font-style:italic;font-weight:500;margin-top:12px}
-.imprint p{grid-column:4/11;font-size:17px;line-height:1.5;margin-top:12px}
-.imprint p + p{color:var(--soft);font-size:16px;margin-top:10px}
-.imprint .bowl{grid-column:11/13;grid-row:1;justify-self:end;align-self:start;margin-top:14px;width:44px;height:44px}
+.cloth{height:28px;margin-top:84px;
+  background:linear-gradient(90deg,rgba(200,64,47,.55) 50%,transparent 50%) 0 0/28px 28px,linear-gradient(rgba(200,64,47,.55) 50%,transparent 50%) 0 0/28px 28px,#FFF3E2}
+footer{padding-top:26px;padding-bottom:40px;display:flex;flex-wrap:wrap;gap:12px 32px;justify-content:space-between;font-size:16px;color:var(--soft)}
+footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
 
-/* Red marks draw themselves once. */
-.mk{fill:none;stroke:var(--red);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;
-  stroke-dasharray:1;stroke-dashoffset:1;animation:draw .6s ease-out forwards}
-.mk.d2{animation-delay:.35s}
-@keyframes draw{to{stroke-dashoffset:0}}
-.ink-in{opacity:0;animation:show .4s ease-out .5s forwards}
-@keyframes show{to{opacity:1}}
-@media (prefers-reduced-motion:reduce){
-  .mk{animation:none;stroke-dashoffset:0}
-  .ink-in{animation:none;opacity:1}
-  .coupon:focus-within{animation:none}
-  .opt input::after,.sit::after,.notice .x{transition:none}
+@media (max-width:1020px){
+  .hero{grid-template-columns:minmax(0,1fr);grid-template-areas:"say" "stage" "get";grid-template-rows:auto;column-gap:0}
+  .stage{max-width:760px;width:100%;justify-self:center;margin-bottom:24px}
+  .jump{display:inline-block;margin-bottom:4px}
+  .under{flex-direction:column;align-items:stretch;margin-top:0;gap:0}
+  .turn{padding-top:6px}
+  .dish{width:auto;max-width:520px;margin:10px auto 0}
+  .uses,.pair,.band .in{grid-template-columns:minmax(0,1fr)}
+  .use.actions{margin-top:0}
 }
-
-/* Tablet */
-@media (max-width:1180px){
-  :root{--side:40px}
-  h1{font-size:min(104px,8.6vw)}
-  .status{font-size:16px}
-  .toc{gap:12px;font-size:15px}
-  .plan{grid-column:2/-1;column-gap:96px}
-}
-@media (max-width:980px){
-  .runhead .grid{row-gap:6px}
-  .mark{grid-column:1/7}
-  .tocnav{grid-column:7/13}
-  .status{grid-column:1/-1;grid-row:2;text-align:left;justify-self:start}
-  h1{grid-column:1/-1;font-size:clamp(64px,11vw,104px);line-height:.98;white-space:normal}
-  .stand{grid-column:1/9}
-  .stet{grid-column:9/13}
-  .notice{grid-column:1/8;grid-row:4;margin-top:48px}
-  .jump{grid-row:3}
-  .legal,.legal.pub{grid-column:1/-1;grid-row:auto}
-  .coupon{grid-column:1/-1;grid-row:auto}
-  .pull{grid-column:2/-1}
-  .qnote{grid-column:2/-1;margin-top:24px;justify-self:start}
-  .terms{grid-column:2/-1}
-}
-
-@media (max-width:1100px){
-  figure.fig .wide{display:none}
-  figure.fig .tall{display:block;max-width:460px;margin:0 auto}
-}
-
-/* Phone: one column, one rule down the left where the column guides were. */
-@media (max-width:640px){
-  :root{--side:16px;--gut:16px}
+@media (max-width:700px){
   body{font-size:18px}
-  .grid{grid-template-columns:minmax(0,1fr)}
-  .grid > *{grid-column:1/-1 !important;grid-row:auto !important}
-  .crop{display:none}
-  .slug{font-size:13px;height:38px;padding-top:12px}
-  .runhead .grid{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;padding:12px 0 10px;row-gap:0}
-  .mark{font-size:24px;gap:8px}
-  .mark .home{gap:8px}
-  .mark small{font-size:15px}
-  .status{order:3;width:100%;font-size:16px;padding-top:8px;border-top:1px solid var(--hair);margin-top:10px;text-align:left}
-  .toc{gap:14px;font-size:16px}
-  .toc li:nth-child(2){display:none}
-  .front{padding:40px 0 48px 14px}
-  .colrules{display:none}
-  .front::before{content:"";position:absolute;left:0;top:28px;bottom:28px;border-left:1px solid var(--hair)}
-  h1{font-size:64px;line-height:.98;white-space:normal;margin-top:14px}
-  .ins .soon{bottom:1.9em;font-size:.4em;left:-.7em}
-  .stand{font-size:21px;line-height:1.38;margin-top:30px}
-  .stet{margin:14px 0 0;padding-left:30px}
-  .jump{margin-top:22px}
-  .notice{margin-top:32px}
-  .sec{padding:16px 0 60px}
-  .sec h2{font-size:40px;margin-top:20px}
-  .plan{grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-auto-flow:row;margin-top:32px;padding-left:44px}
-  .plan li{margin-bottom:22px;font-size:19px}
-  .plan li::before{left:-46px;font-size:46px;width:34px}
-  figure.fig > div{padding:14px 10px 6px}
-  figure.fig .wide{display:none}
-  figure.fig .tall{display:block}
-  figcaption{flex-direction:column;gap:6px;font-size:15px}
-  .pull{font-size:27px;line-height:1.26;margin-top:32px;padding-left:22px}
-  .pull::before{left:0;width:9px}
-  .qnote{margin-left:22px;font-size:19px;margin-top:18px}
-  .terms{margin-top:36px}
-  .terms > div{grid-template-columns:minmax(0,1fr);row-gap:4px;padding:14px 0 16px}
-  .terms dt,.terms dd{font-size:18px}
-  .legal{margin-top:32px;padding:18px 16px;text-align:left}
-  .coupon{margin-top:44px;padding:30px 20px 24px}
-  .sec .coupon h2{font-size:38px}
-  .sec .legal h2{font-size:26px}
-  .scissors{left:20px}
-  .sign{grid-template-columns:1fr}
-  .waitlist button{width:100%}
-  .imprint{padding-bottom:80px}
-  .imprint .bowl{justify-self:start;order:-1;margin-top:16px}
+  .masthead nav .sec{display:none}
+  .masthead nav{gap:12px}
+  .hero{padding-top:6px}
+  .hero h1{margin-bottom:14px}
+  .lede{font-size:19px;margin-bottom:6px}
+  .scene{aspect-ratio:100/90;margin:0 -16px}
+  .world{width:88cqw;height:88cqw;margin:-44cqw 0 0 -44cqw;top:51%}
+  .tag{font-size:12px;padding:2px 7px 3px 5px;gap:.35em;border-radius:6px}
+  .tag.soon{font-size:11.5px}
+  .tag .long,.tag.chip{display:none}
+  .tag .short{display:inline}
+  .dot{width:6px;height:6px}
+  .dish{box-shadow:4px 4px 0 var(--ink);margin-top:12px}
+  .beat,.beat:nth-child(2){grid-template-columns:minmax(0,1fr);gap:8px}
+  .beat:nth-child(2) figure{order:0}
+  .story{gap:36px}
+  .rules{grid-template-columns:minmax(0,1fr)}
+  .paper{padding:22px 18px 18px}
+  .board{padding:10px}
+  .founders{grid-template-columns:minmax(0,1fr);padding:24px 20px}
+  .founders svg{max-width:150px}
+  .recipe{padding:22px 18px 20px 20px;transform:none}
+  .recipe .body{grid-template-columns:minmax(0,1fr) 80px}
+  .use{padding:22px 18px}
+  section.block{padding-top:64px}
+  .band{margin-top:64px}
+}
+@media (prefers-reduced-motion:reduce){
+  .pulse,.scroll,.zz,.dot.busy{animation:none}
+  .leo,.ring{transition:none}
+  html{scroll-behavior:auto}
 }
 </style>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<!-- Shared drawings: the people, the gingham and the lawn. -->
+<svg class="defs" aria-hidden="true" focusable="false">
   <defs>
-    <pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-      <line x1="0" y1="0" x2="0" y2="5" stroke="#1A1814" stroke-width="1"/>
-    </pattern>
-    <symbol id="m-linux" viewBox="0 0 64 92">
-      <rect class="f-fill" x="1" y="1" width="62" height="90" rx="3"/>
-      <path class="f-hatch" d="M50 4h10v84H50z" opacity=".55"/>
-      <rect class="f-line" x="1" y="1" width="62" height="90" rx="3"/>
-      <path class="f-thin" d="M50 1v90M9 14h32M9 20h32M9 26h32"/>
-      <circle class="f-thin" cx="25" cy="74" r="5"/>
-      <path class="f-thin" d="M25 70v3"/>
+    <pattern id="gingham" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="12" height="12" fill="#FFF3E2"/><rect width="6" height="12" fill="#C8402F" opacity=".5"/><rect width="12" height="6" fill="#C8402F" opacity=".5"/></pattern>
+    <radialGradient id="fan-pink"><stop offset="0" stop-color="#FFC2F0"/><stop offset=".45" stop-color="#FF5DD8"/><stop offset="1" stop-color="#FF5DD8" stop-opacity="0"/></radialGradient>
+    <radialGradient id="fan-cyan"><stop offset="0" stop-color="#C9F4FF"/><stop offset=".45" stop-color="#4FD2FF"/><stop offset="1" stop-color="#4FD2FF" stop-opacity="0"/></radialGradient>
+    <radialGradient id="grass" cx="45%" cy="40%" r="60%"><stop offset="0" stop-color="#A3D06A"/><stop offset=".7" stop-color="#83BA50"/><stop offset="1" stop-color="#6A9F40"/></radialGradient>
+    <!-- Sitting side-on, reaching for a keyboard on the right -->
+    <symbol id="p-work" viewBox="0 0 60 66">
+      <path d="M10 60c0-6 8-9 20-9s20 3 20 7c0 4-5 6-20 6S10 63 10 60z" fill="var(--pants,#3E5C8A)"/>
+      <path d="M14 57c-2-15 2-28 12-30 7 0 10 7 10 15l-1 15z" fill="var(--shirt,#2F6B34)"/>
+      <path d="M28 34c2 7 6 11 14 12" fill="none" stroke="var(--shirt,#2F6B34)" stroke-width="5.5" stroke-linecap="round"/>
+      <circle cx="44" cy="46" r="3" fill="var(--skin,#E0AC82)"/>
+      <rect x="24" y="21" width="7" height="8" rx="2" fill="var(--skin,#E0AC82)"/>
+      <circle cx="29" cy="15" r="9" fill="var(--skin,#E0AC82)"/>
+      <path d="M20 17c-2-9 3-14 10-14 6 0 9 3 9 7-5-1-8 0-10 3s-4 6-6 7z" fill="var(--hair,#2B211B)"/>
+      <circle cx="34.5" cy="14.5" r="1.1" fill="#2B211B"/>
+      <path d="M38 15l1.8 2.6-2 .4" fill="var(--skin,#E0AC82)"/>
     </symbol>
-    <symbol id="m-studio" viewBox="0 0 120 54">
-      <path class="f-fill" d="M1 14h118v32a6 6 0 0 1-6 6H7a6 6 0 0 1-6-6z"/>
-      <path class="f-line" d="M1 14h118v32a6 6 0 0 1-6 6H7a6 6 0 0 1-6-6z"/>
-      <path class="f-line" d="M1 14 9 3h102l8 11"/>
-      <path class="f-hatch" d="M10 5h100l5 7H5z" opacity=".5"/>
-      <path class="f-thin" d="M12 38h4M20 38h4M28 38h10"/>
-      <circle class="f-thin" cx="104" cy="38" r="2.5"/>
+    <!-- Asleep on a cushion -->
+    <symbol id="p-sleep" viewBox="0 0 90 44">
+      <ellipse cx="15" cy="37" rx="13" ry="5" fill="#FFFDF7" stroke="#D9CFBA"/>
+      <path d="M22 38c0-8 6-12 16-12h28c9 0 15 4 15 10 0 3-2 5-5 5H25c-2 0-3-1-3-3z" fill="var(--shirt,#7E5BA6)"/>
+      <path d="M44 27h22c9 0 15 4 15 10 0 3-2 5-5 5H44z" fill="#F2C94C" opacity=".9"/>
+      <circle cx="16" cy="29" r="8" fill="var(--skin,#E0AC82)"/>
+      <path d="M8 30c-1-8 4-11 9-11 4 0 7 2 7 5-4-1-7 0-9 2s-4 4-7 4z" fill="var(--hair,#2B211B)"/>
+      <path d="M17 30c1.2 1 2.8 1 4 0" stroke="#2B211B" stroke-width="1.1" fill="none" stroke-linecap="round"/>
+      <g class="zz"><path d="M42 3a7 7 0 1 0 6 10 5.5 5.5 0 1 1-6-10z" fill="#F2C94C" stroke="#C89B20" stroke-width=".8"/>
+        <text x="27" y="16" font-family="Newsreader,Georgia,serif" font-style="italic" font-size="9" font-weight="700" fill="#4B5648">z</text>
+        <text x="33" y="9" font-family="Newsreader,Georgia,serif" font-style="italic" font-size="6.5" font-weight="700" fill="#4B5648">z</text></g>
     </symbol>
-    <symbol id="m-laptop" viewBox="0 0 128 80">
-      <rect class="f-fill" x="14" y="1" width="100" height="66" rx="4"/>
-      <rect class="f-line" x="14" y="1" width="100" height="66" rx="4"/>
-      <rect class="f-thin" x="20" y="7" width="88" height="54"/>
-      <path class="f-fill" d="M1 67h126l-6 11H7z"/>
-      <path class="f-line" d="M1 67h126l-6 11H7z"/>
-      <path class="f-thin" d="M54 67v4h20v-4"/>
+    <!-- Standing -->
+    <symbol id="p-stand" viewBox="0 0 40 90">
+      <path d="M15 60v26M25 60v26" stroke="var(--pants,#3E5C8A)" stroke-width="7" stroke-linecap="round"/>
+      <path d="M9 62c0-21 3-35 11-35s11 14 11 35z" fill="var(--shirt,#C8402F)"/>
+      <path d="M11 35c-3 8-3 16-2 22M29 35c3 8 3 16 2 22" stroke="var(--shirt,#C8402F)" stroke-width="5.5" stroke-linecap="round" fill="none"/>
+      <circle cx="9" cy="58" r="3" fill="var(--skin,#E0AC82)"/><circle cx="31" cy="58" r="3" fill="var(--skin,#E0AC82)"/>
+      <rect x="16.5" y="21" width="7" height="8" rx="2" fill="var(--skin,#E0AC82)"/>
+      <circle cx="20" cy="15" r="9" fill="var(--skin,#E0AC82)"/>
+      <path d="M11 16c-1-8 4-12 9-12s10 4 9 12c-2-5-6-6-9-6s-7 1-9 6z" fill="var(--hair,#2B211B)"/>
+      <circle cx="16.5" cy="16.5" r="1.1" fill="#2B211B"/><circle cx="23.5" cy="16.5" r="1.1" fill="#2B211B"/>
+      <path d="M17.5 20.2c1.5 1 3.5 1 5 0" stroke="#7A4B35" stroke-width="1" fill="none" stroke-linecap="round"/>
     </symbol>
-    <symbol id="m-hub" viewBox="0 0 96 40">
-      <rect class="f-fill" x="1" y="1" width="94" height="38" rx="3"/>
-      <rect class="f-line" x="1" y="1" width="94" height="38" rx="3"/>
-      <path class="f-thin" d="M10 12h40M10 18h40M10 24h40"/>
-      <circle class="f-thin" cx="80" cy="20" r="4"/>
+    <!-- Standing, arms out to carry something -->
+    <symbol id="p-carry" viewBox="0 0 40 90">
+      <path d="M15 60v26M25 60l2 26" stroke="var(--pants,#3E5C8A)" stroke-width="7" stroke-linecap="round"/>
+      <path d="M9 62c0-21 3-35 11-35s11 14 11 35z" fill="var(--shirt,#C8402F)"/>
+      <path d="M11 35c-3 6-1 12 5 14M29 35c3 6 1 12-5 14" stroke="var(--shirt,#C8402F)" stroke-width="5.5" stroke-linecap="round" fill="none"/>
+      <rect x="16.5" y="21" width="7" height="8" rx="2" fill="var(--skin,#E0AC82)"/>
+      <circle cx="20" cy="15" r="9" fill="var(--skin,#E0AC82)"/>
+      <path d="M11 16c-1-8 4-12 9-12s10 4 9 12c-2-5-6-6-9-6s-7 1-9 6z" fill="var(--hair,#2B211B)"/>
+      <circle cx="16.5" cy="16.5" r="1.1" fill="#2B211B"/><circle cx="23.5" cy="16.5" r="1.1" fill="#2B211B"/>
+      <path d="M17.5 20.2c1.5 1 3.5 1 5 0" stroke="#7A4B35" stroke-width="1" fill="none" stroke-linecap="round"/>
     </symbol>
-    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0 1 9 5 0 9" fill="none" stroke="#1A1814" stroke-width="1.4"/>
-    </marker>
+    <!-- Standing, waving -->
+    <symbol id="p-wave" viewBox="0 0 40 90">
+      <path d="M15 60v26M25 60v26" stroke="var(--pants,#3E5C8A)" stroke-width="7" stroke-linecap="round"/>
+      <path d="M9 62c0-21 3-35 11-35s11 14 11 35z" fill="var(--shirt,#C8402F)"/>
+      <path d="M11 35c-3 8-3 16-2 22M29 35c4-4 6-10 6-17" stroke="var(--shirt,#C8402F)" stroke-width="5.5" stroke-linecap="round" fill="none"/>
+      <circle cx="9" cy="58" r="3" fill="var(--skin,#E0AC82)"/><circle cx="35" cy="15" r="3.2" fill="var(--skin,#E0AC82)"/>
+      <rect x="16.5" y="21" width="7" height="8" rx="2" fill="var(--skin,#E0AC82)"/>
+      <circle cx="20" cy="15" r="9" fill="var(--skin,#E0AC82)"/>
+      <path d="M11 16c-1-8 4-12 9-12s10 4 9 12c-2-5-6-6-9-6s-7 1-9 6z" fill="var(--hair,#2B211B)"/>
+      <circle cx="16.5" cy="16.5" r="1.1" fill="#2B211B"/><circle cx="23.5" cy="16.5" r="1.1" fill="#2B211B"/>
+      <path d="M17 20c1.6 1.4 4.4 1.4 6 0" stroke="#7A4B35" stroke-width="1" fill="none" stroke-linecap="round"/>
+    </symbol>
   </defs>
 </svg>
 
-<div class="sheet">
-  <span class="crop tl" aria-hidden="true"></span><span class="crop tr" aria-hidden="true"></span>
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a class="sec" href="#how">How it works</a>
+    <a class="sec" href="#uses">What it's for</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="#founders">Email the founders</a>
+  </nav>
+</header>
 
-  <div class="slug" aria-hidden="true">
-    <span>potluck.sh</span>
+<main>
+<section class="hero wrap" aria-labelledby="headline">
+  <div class="say">
+    <h1 id="headline">Run your coding agents and builds on the computers you <em>already own</em>.</h1>
+    <p class="lede">Builds and agents make your laptop crawl. Potluck pools your team's spare machines and runs <strong>coding agents</strong> and <strong>builds</strong> on them, each in a fresh VM or sandbox. When someone needs their machine back, it's theirs.</p>
+    <a class="jump" href="#install">Install</a>
   </div>
 
-  <header class="runhead">
-    <div class="grid">
-      <div class="mark"><a href="/" class="home">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#1A1814"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#B42D1A"/></svg>
-        Potluck</a> <small>by <a href="https://sengi.run">Sengi</a></small></div>
-      <p class="status"><strong>Early: not ready to install yet.</strong> This is the plan, not a manual.</p>
-      <nav aria-label="On this page" class="tocnav">
-        <ul class="toc">
-          <li><a href="#how">The plan</a></li>
-          <li><a href="#promise">Small print</a></li>
-          <li><a href="#waitlist">Waitlist</a></li>
-        </ul>
-      </nav>
-    </div>
-  </header>
+  <div class="stage" id="stage">
+    <div class="scene" id="scene">
+      <div class="world" id="world">
+        <div class="soil s4" aria-hidden="true"></div><div class="soil s3" aria-hidden="true"></div>
+        <div class="soil s2" aria-hidden="true"></div><div class="soil s1" aria-hidden="true"></div>
+        <div class="lawn" aria-hidden="true"></div>
+        <div class="blanket" aria-hidden="true"></div>
 
-  <main>
-    <section class="front" aria-labelledby="headline">
-      <div class="colrules grid" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-      <div class="colrules bot grid" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-      <div class="grid">
-        <h1 id="headline">Bring a machine<span class="ins">.<svg class="caret" viewBox="0 0 40 50" aria-hidden="true"><path class="mk" pathLength="1" d="M4 46 20 8l16 38"/></svg><span class="soon ink-in" aria-hidden="true">(soon)</span></span></h1>
+        <!-- Grass and daisies at the lawn's edge, and the picnic food -->
+        <div class="m" style="--x:11%;--y:42%" aria-hidden="true"><div class="bb"><div class="cut" style="--cw:4.6cqw"><svg viewBox="0 0 40 30"><g fill="#5E9A3A"><path d="M8 30C7 20 4 14 1 10c5 3 9 10 10 20z"/><path d="M15 30c0-12 2-20 6-26-1 8-2 16-2 26z"/><path d="M22 30c2-9 6-15 12-18-4 5-7 11-8 18z"/></g><path d="M18 30c-1-7-3-11-6-14 4 2 7 6 8 14z" fill="#4C8530"/></svg></div></div></div>
+        <div class="m" style="--x:90%;--y:52%" aria-hidden="true"><div class="bb"><div class="cut" style="--cw:4.6cqw"><svg viewBox="0 0 40 30"><g fill="#5E9A3A"><path d="M8 30C7 20 4 14 1 10c5 3 9 10 10 20z"/><path d="M15 30c0-12 2-20 6-26-1 8-2 16-2 26z"/><path d="M22 30c2-9 6-15 12-18-4 5-7 11-8 18z"/></g></svg></div></div></div>
+        <div class="m" style="--x:33%;--y:91%" aria-hidden="true"><div class="bb"><div class="cut" style="--cw:4cqw"><svg viewBox="0 0 30 34"><path d="M15 34V14" stroke="#4C8530" stroke-width="2"/><g fill="#fff" stroke="#E2DACB" stroke-width=".6"><ellipse cx="15" cy="6" rx="3" ry="5"/><ellipse cx="15" cy="18" rx="3" ry="5"/><ellipse cx="9" cy="12" rx="5" ry="3"/><ellipse cx="21" cy="12" rx="5" ry="3"/><ellipse cx="10.5" cy="7.5" rx="3" ry="4.6" transform="rotate(-45 10.5 7.5)"/><ellipse cx="19.5" cy="16.5" rx="3" ry="4.6" transform="rotate(-45 19.5 16.5)"/><ellipse cx="19.5" cy="7.5" rx="3" ry="4.6" transform="rotate(45 19.5 7.5)"/><ellipse cx="10.5" cy="16.5" rx="3" ry="4.6" transform="rotate(45 10.5 16.5)"/></g><circle cx="15" cy="12" r="3.4" fill="#F2B632"/></svg></div></div></div>
+        <div class="m" style="--x:70%;--y:91%" aria-hidden="true"><div class="bb"><div class="cut" style="--cw:3.4cqw"><svg viewBox="0 0 30 34"><path d="M15 34V14" stroke="#4C8530" stroke-width="2"/><g fill="#fff" stroke="#E2DACB" stroke-width=".6"><ellipse cx="15" cy="6" rx="3" ry="5"/><ellipse cx="15" cy="18" rx="3" ry="5"/><ellipse cx="9" cy="12" rx="5" ry="3"/><ellipse cx="21" cy="12" rx="5" ry="3"/></g><circle cx="15" cy="12" r="3.4" fill="#F2B632"/></svg></div></div></div>
+        <div class="m" style="--x:82%;--y:20%" aria-hidden="true"><div class="bb"><div class="cut" style="--cw:3.8cqw"><svg viewBox="0 0 40 30"><g fill="#5E9A3A"><path d="M8 30C7 20 4 14 1 10c5 3 9 10 10 20z"/><path d="M15 30c0-12 2-20 6-26-1 8-2 16-2 26z"/><path d="M22 30c2-9 6-15 12-18-4 5-7 11-8 18z"/></g></svg></div></div></div>
+        <div class="m" style="--x:48%;--y:47%;--sw:13cqw;--sl:.7cqw" aria-hidden="true"><div class="cast"></div><div class="bb"><div class="cut" style="--cw:13cqw"><svg viewBox="0 0 90 40">
+          <ellipse cx="45" cy="28" rx="43" ry="11" fill="#fff" stroke="#D8CFBF" stroke-width="1.2"/>
+          <path d="M8 24c0-8 16-14 37-14s37 6 37 14v3c0 6-17 9-37 9S8 33 8 27z" fill="#D88E3E"/>
+          <ellipse cx="45" cy="21" rx="36" ry="10" fill="#E9A956"/>
+          <g stroke="#F6CF8A" stroke-width="3" stroke-linecap="round"><path d="M22 15l14 14M36 12l18 18M52 12l14 14M30 28l-8 4M52 13l-22 18M68 16l-22 15M80 20l-14 10"/></g>
+        </svg></div></div></div>
+        <div class="m" style="--x:9%;--y:71%;--sw:5cqw;--sl:1cqw" aria-hidden="true"><div class="cast"></div><div class="bb"><div class="cut" style="--cw:6cqw"><svg viewBox="0 0 40 70">
+          <path d="M6 14h24l2 50c0 3-2 5-5 5H9c-3 0-5-2-5-5z" fill="#F4F8FA" fill-opacity=".85" stroke="#B8C6CC" stroke-width="1.4"/>
+          <path d="M5 30h26l1 34c0 3-2 5-5 5H9c-3 0-5-2-5-5z" fill="#F6D65A"/>
+          <path d="M30 22c9 0 9 22 0 22" fill="none" stroke="#B8C6CC" stroke-width="3"/>
+          <circle cx="16" cy="44" r="6" fill="#FBEA9A" stroke="#E2BE2E" stroke-width="1.2"/><path d="M16 38v12M10 44h12" stroke="#E2BE2E"/>
+          <path d="M8 14h22" stroke="#B8C6CC" stroke-width="2"/>
+        </svg></div></div></div>
+        <div class="m" style="--x:20%;--y:83%;--sw:10cqw;--sl:1cqw" aria-hidden="true"><div class="cast"></div><div class="bb"><div class="cut" style="--cw:11.5cqw"><svg viewBox="0 0 120 80">
+          <path d="M14 30h92l-10 46H24z" fill="#C88B4A" stroke="#8E5A29" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M16 40h88M18 50h84M20 60h80M22 70h76" stroke="#A86F37" stroke-width="2"/>
+          <path d="M30 30l4 46M46 30l2 46M62 30v46M78 30l-2 46M94 30l-4 46" stroke="#A86F37" stroke-width="1.4" opacity=".7"/>
+          <path d="M22 30c6-6 20-9 38-9s32 3 38 9z" fill="#FFF3E2"/><path d="M30 28l14-6M52 25l14-4M74 26l12-3" stroke="#C8402F" stroke-width="4" opacity=".6"/>
+        </svg></div></div></div>
 
-        <p class="stand">Potluck will run your Mac and Linux GitHub Actions jobs and your coding agents in fresh VMs or sandboxes, on your team's idle machines. <span class="stet-words">A Mac will hand itself back when its owner sits down; a Linux box, at the hours its owner sets.</span></p>
-
-        <p class="stet" aria-hidden="true">
-          <svg viewBox="0 0 96 54"><path class="mk d2" pathLength="1" d="M58 10C40 2 8 6 6 22c-2 16 36 22 60 16 18-5 20-20 4-26-8-3-18-3-26-1"/></svg>
-          <span>stet</span>
-        </p>
-
-        <p class="jump"><a class="go" href="#waitlist">Join the waitlist</a> <a href="#how">Read the plan</a></p>
-
-        <aside class="notice" aria-labelledby="sheet-h">
-          <div>
-            <h2 id="sheet-h">Tonight's sheet</h2>
-            <span class="eg">An example</span>
-            <dl>
-              <div class="row heads"><dt>Who</dt><span class="lead" aria-hidden="true"></span><dd>Bringing</dd></div>
-              <div class="row"><dt>Backend</dt><span class="lead" aria-hidden="true"></span><dd>Linux box, 32 GB</dd></div>
-              <div class="row"><dt><label class="sit-l"><input class="sit" type="checkbox"><span class="x">Design</span><span class="vh"> sits down</span></label></dt><span class="lead" aria-hidden="true"></span><dd><span class="x">MacBook Pro, evenings</span><span class="back">handed back</span></dd></div>
-              <div class="row"><dt><label class="sit-l"><input class="sit" type="checkbox"><span class="x">iOS</span><span class="vh"> sits down</span></label></dt><span class="lead" aria-hidden="true"></span><dd><span class="x">Mac Studio, 64 GB</span><span class="back">handed back</span></dd></div>
-              <div class="row"><dt>Support</dt><span class="lead" aria-hidden="true"></span><dd>No spare machine, sends jobs</dd></div>
-              <div class="row you"><dt>You</dt><span class="blank" aria-hidden="true"></span><dd><a href="#waitlist">sign up</a></dd></div>
-            </dl>
-            <p class="toycap">Tick a Mac to sit its owner down. Its VMs end and it takes no new work. A Linux box does the same at hours its owner sets.</p>
+        <!-- The machines people brought. Each .pin marks where its label points: the top of the machine. -->
+        <div class="m tower" data-id="tower" style="--x:27%;--y:31%;--w:7.4cqw;--d:13cqw;--h:19cqw;--rot:6deg;--sw:20cqw;--sl:6cqw">
+          <div class="cast"></div><div class="ring"></div>
+          <div class="body">
+            <div class="f bk"></div><div class="f lf"><svg viewBox="0 0 100 150" preserveAspectRatio="none"><rect x="6" y="6" width="88" height="138" rx="3" fill="#0E1117" stroke="#555B66" stroke-width="1.5"/><circle cx="30" cy="40" r="17" fill="url(#fan-pink)"/><circle cx="30" cy="40" r="11" fill="none" stroke="#FF8BE6" stroke-width="2"/><circle cx="30" cy="84" r="17" fill="url(#fan-cyan)"/><circle cx="30" cy="84" r="11" fill="none" stroke="#7FE3FF" stroke-width="2"/><rect x="52" y="74" width="36" height="12" rx="2" fill="#2B303A" stroke="#7FE3FF" stroke-width="1"/><rect x="58" y="24" width="24" height="24" rx="2" fill="#1C2028" stroke="#3A404B"/><path d="M12 136l70-128" stroke="#fff" stroke-width="5" opacity=".07"/></svg></div><div class="f rt"><svg viewBox="0 0 100 150" preserveAspectRatio="none"><rect x="6" y="6" width="88" height="138" rx="3" fill="#0E1117" stroke="#555B66" stroke-width="1.5"/><circle cx="30" cy="40" r="17" fill="url(#fan-pink)"/><circle cx="30" cy="40" r="11" fill="none" stroke="#FF8BE6" stroke-width="2"/><circle cx="30" cy="84" r="17" fill="url(#fan-cyan)"/><circle cx="30" cy="84" r="11" fill="none" stroke="#7FE3FF" stroke-width="2"/><rect x="52" y="74" width="36" height="12" rx="2" fill="#2B303A" stroke="#7FE3FF" stroke-width="1"/><rect x="58" y="24" width="24" height="24" rx="2" fill="#1C2028" stroke="#3A404B"/><path d="M12 136l70-128" stroke="#fff" stroke-width="5" opacity=".07"/></svg></div>
+            <div class="f fr"><svg viewBox="0 0 56 150" preserveAspectRatio="none">
+              <rect x="5" y="6" width="46" height="138" rx="2" fill="#1E2127"/>
+              <g fill="#3A3F49"><circle cx="16" cy="40" r="1.6"/><circle cx="24" cy="40" r="1.6"/><circle cx="32" cy="40" r="1.6"/><circle cx="40" cy="40" r="1.6"/><circle cx="16" cy="48" r="1.6"/><circle cx="24" cy="48" r="1.6"/><circle cx="32" cy="48" r="1.6"/><circle cx="40" cy="48" r="1.6"/><circle cx="16" cy="56" r="1.6"/><circle cx="24" cy="56" r="1.6"/><circle cx="32" cy="56" r="1.6"/><circle cx="40" cy="56" r="1.6"/></g>
+              <path d="M9 12v126" stroke="#FF6FD8" stroke-width="2.2" opacity=".85"/><path d="M47 12v126" stroke="#6FD8FF" stroke-width="2.2" opacity=".85"/>
+              <circle cx="28" cy="20" r="4.5" fill="none" stroke="#6FD8FF" stroke-width="1.4"/><circle cx="28" cy="20" r="1.6" fill="#3FC255" class="pulse"/>
+              <g transform="rotate(-8 34 96)"><rect x="24" y="88" width="20" height="17" fill="#FFE27A"/><path d="M27 94h13M27 98h10" stroke="#8D7A2A" stroke-width="1.1"/></g>
+            </svg></div>
+            <div class="f up"></div>
+            <div class="pin" data-pin="tower" style="transform:translateZ(19cqw)"></div>
           </div>
-        </aside>
-      </div>
-    </section>
+        </div>
 
-    <section class="sec" aria-labelledby="how">
-      <div class="grid">
-        <h2 id="how">The plan, in four paragraphs</h2>
-
-        <ol class="plan">
-          <li><b>Set up a pool.</b> Install Potluck on one machine and make a pool for your team. No account and no card.</li>
-          <li><b>Add machines.</b> Each person adds a Mac or Linux box. Potluck checks it first and says what it can safely run.</li>
-          <li><b>Send it work.</b> Point a GitHub Actions job or a coding agent at the pool. Each one gets a fresh VM or sandbox, thrown away after.</li>
-          <li><b>Get your machine back.</b> On a Mac, when you sit down, its VMs end and it takes no new work. On Linux, the same happens at hours you set.</li>
-        </ol>
-
-        <figure class="fig">
-          <div>
-            <svg class="wide" viewBox="0 0 1180 380" role="img" aria-labelledby="fig1">
-              <text class="f-t f-s" x="0" y="22">Work comes in</text>
-              <rect class="f-line f-fill" x="0" y="44" width="230" height="64"/>
-              <text class="f-t f-b" x="16" y="72">A GitHub Actions job</text>
-              <text class="f-t f-s" x="16" y="94">sent by Support</text>
-              <rect class="f-line f-fill" x="0" y="150" width="230" height="64"/>
-              <text class="f-t f-b" x="16" y="178">A coding agent</text>
-              <text class="f-t f-s" x="16" y="200">needs a box to work in</text>
-              <path class="f-thin" d="M230 76h70q20 0 20 20v30" marker-end="url(#arr)"/>
-              <path class="f-thin" d="M230 182h40q10 0 20-10l28-30" marker-end="url(#arr)"/>
-              <use href="#m-hub" x="292" y="130" width="96" height="40"/>
-              <text class="f-t f-b" x="290" y="196">The hub</text>
-              <text class="f-t f-s" x="290" y="216">one machine in the pool</text>
-              <text class="f-t f-s" x="290" y="234">that hands out work</text>
-              <path class="f-thin" d="M388 150h70q22 0 22-22V78q0-20 20-20h86" marker-end="url(#arr)"/>
-              <path class="f-thin" d="M388 150h70q22 0 22 22v22q0 20 20 20h86" marker-end="url(#arr)"/>
-              <path class="f-dash" d="M480 210v90q0 20 20 20h40"/>
-              <path class="f-thin" d="M540 308l14 14M554 308l-14 14"/>
-              <use href="#m-linux" x="600" y="10" width="64" height="92"/>
-              <rect class="f-vm" x="690" y="30" width="96" height="42"/>
-              <text class="f-vmt" x="702" y="56">fresh VM</text>
-              <path class="f-hair" d="M664 51h26"/>
-              <text class="f-t f-b" x="812" y="40">Backend: Linux box, 32 GB</text>
-              <text class="f-t f-s" x="812" y="62">trusted, so jobs with keys may run here</text>
-              <use href="#m-studio" x="586" y="186" width="92" height="42"/>
-              <rect class="f-vm" x="690" y="168" width="96" height="36"/>
-              <text class="f-vmt" x="702" y="191">fresh VM</text>
-              <rect class="f-vm" x="690" y="212" width="96" height="36"/>
-              <text class="f-vmt" x="702" y="235">sandbox</text>
-              <path class="f-hair" d="M678 207h12"/>
-              <text class="f-t f-b" x="812" y="200">iOS: Mac Studio, 64 GB</text>
-              <text class="f-t f-s" x="812" y="222">each one thrown away after its job</text>
-              <use href="#m-laptop" x="584" y="282" width="110" height="69"/>
-              <text class="f-t f-b" x="812" y="310">Design: MacBook Pro, evenings</text>
-              <text class="f-t f-s" x="812" y="332">its owner sat down, so its VMs ended</text>
-              <text class="f-t f-s" x="812" y="352">and it takes no new work</text>
-            </svg>
-            <svg class="tall" viewBox="0 0 340 660" role="img" aria-labelledby="fig1">
-              <rect class="f-line f-fill" x="0" y="0" width="160" height="62"/>
-              <text class="f-t f-b" x="12" y="26" style="font-size:16px">A GitHub Actions</text>
-              <text class="f-t f-b" x="12" y="46" style="font-size:16px">job, from Support</text>
-              <rect class="f-line f-fill" x="180" y="0" width="160" height="62"/>
-              <text class="f-t f-b" x="192" y="26" style="font-size:16px">A coding agent</text>
-              <text class="f-t f-s" x="192" y="46">needs a box</text>
-              <path class="f-thin" d="M80 62v24q0 14 14 14h46" marker-end="url(#arr)"/>
-              <path class="f-thin" d="M260 62v24q0 14-14 14h-46" marker-end="url(#arr)"/>
-              <use href="#m-hub" x="122" y="106" width="96" height="40"/>
-              <text class="f-t f-b" x="236" y="124" style="font-size:16px">The hub</text>
-              <text class="f-t f-s" x="236" y="142">hands out work</text>
-              <path class="f-thin" d="M170 146v44H20V392"/>
-              <path class="f-thin" d="M20 258h16" marker-end="url(#arr)"/>
-              <path class="f-dash" d="M20 392v136h10"/>
-              <path class="f-thin" d="M30 522l12 12M42 522l-12 12"/>
-              <use href="#m-linux" x="40" y="222" width="52" height="75"/>
-              <rect class="f-vm" x="104" y="238" width="80" height="34"/>
-              <text class="f-vmt" x="114" y="259">fresh VM</text>
-              <text class="f-t f-b" x="40" y="322" style="font-size:16px">Backend: Linux box, 32 GB</text>
-              <text class="f-t f-s" x="40" y="341">trusted: jobs with keys may run here</text>
-              <path class="f-thin" d="M20 392h16" marker-end="url(#arr)"/>
-              <use href="#m-studio" x="40" y="376" width="84" height="38"/>
-              <rect class="f-vm" x="136" y="372" width="80" height="30"/>
-              <text class="f-vmt" x="146" y="391">fresh VM</text>
-              <rect class="f-vm" x="224" y="372" width="80" height="30"/>
-              <text class="f-vmt" x="234" y="391">sandbox</text>
-              <text class="f-t f-b" x="40" y="440" style="font-size:16px">iOS: Mac Studio, 64 GB</text>
-              <text class="f-t f-s" x="40" y="459">each thrown away after its job</text>
-              <use href="#m-laptop" x="52" y="496" width="100" height="62"/>
-              <text class="f-t f-b" x="40" y="586" style="font-size:16px">Design: MacBook Pro, evenings</text>
-              <text class="f-t f-s" x="40" y="605">its owner sat down: VMs ended,</text>
-              <text class="f-t f-s" x="40" y="624">no new work</text>
-            </svg>
+        <div class="m server" data-id="server" style="--x:26%;--y:59%;--w:22cqw;--d:11cqw;--h:5.6cqw;--rot:8deg;--sw:27cqw;--sl:2cqw">
+          <div class="cast"></div><div class="ring"></div>
+          <div class="body">
+            <div class="f bk"></div><div class="f lf"></div><div class="f rt"></div>
+            <div class="f fr"><svg viewBox="0 0 170 44" preserveAspectRatio="none">
+              <g fill="#8E97A2"><rect x="7" y="7" width="18" height="12" rx="1"/><rect x="28" y="7" width="18" height="12" rx="1"/><rect x="49" y="7" width="18" height="12" rx="1"/><rect x="7" y="23" width="18" height="12" rx="1"/><rect x="28" y="23" width="18" height="12" rx="1"/><rect x="49" y="23" width="18" height="12" rx="1"/></g>
+              <circle cx="21" cy="11" r="1.7" fill="#3FC255" class="pulse"/><circle cx="42" cy="11" r="1.7" fill="#3FC255"/><circle cx="63" cy="27" r="1.7" fill="#3FC255" class="pulse"/>
+              <g stroke="#7D8691" stroke-width="1.6"><path d="M76 10h50M76 16h50M76 22h50M76 28h50M76 34h50"/></g>
+              <g transform="rotate(-6 146 22)"><rect x="131" y="11" width="30" height="20" rx="2" fill="#FFF7E3" stroke="#B9A57C"/><text x="146" y="25" text-anchor="middle" font-family="Newsreader,Georgia,serif" font-size="9.5" font-weight="700" fill="#3B3528">$40/mo</text></g>
+            </svg></div>
+            <div class="f up"><svg viewBox="0 0 170 85" preserveAspectRatio="none"><path d="M10 12h150M10 73h150" stroke="#C3C9D0" stroke-width="2"/></svg></div>
+            <div class="pin" data-pin="server" style="transform:translateZ(5.6cqw)"></div>
           </div>
-          <figcaption id="fig1"><b>Fig. 1</b><span>An example pool, using the sheet on the front page. The hub hands each job to a free machine, in a fresh VM or sandbox that is thrown away after. Design's MacBook takes nothing while its owner is at it.</span></figcaption>
-        </figure>
-      </div>
-    </section>
+        </div>
 
-    <section class="sec" aria-labelledby="promise">
-      <div class="grid">
-        <h2 id="promise">Before you add a machine</h2>
-        <p class="pull">The machine that runs a job can read everything in it, secrets included. Until commands are sealed to each machine's key, so can the machine that runs your pool's hub. Pool only with people you would trust with that.</p>
-        <p class="qnote">Commands are not sealed yet.</p>
-        <dl class="terms">
-          <div><dt>Where the work runs</dt><dd>Work will run in a throwaway VM or sandboxed container, not directly on your system.</dd></div>
-          <div><dt>Trusted and public machines</dt><dd>Each machine will be marked trusted or public. Jobs that need your keys and tokens run only on trusted ones. Public machines get only plain sandboxes.</dd></div>
-          <div><dt>Free, at your own risk</dt><dd>Running it on your own machines will be free, with no account. Use it at your own risk; there are no promises.</dd></div>
-        </dl>
-      </div>
-    </section>
+        <div class="m minipc" data-id="mini-pc" style="--x:73%;--y:33%;--w:9.4cqw;--d:9.4cqw;--h:4.4cqw;--rot:-10deg;--sw:13cqw;--sl:1.8cqw">
+          <div class="cast"></div><div class="ring"></div>
+          <div class="body">
+            <div class="f bk"></div><div class="f lf"></div><div class="f rt"></div>
+            <div class="f fr"><svg viewBox="0 0 70 34" preserveAspectRatio="none"><circle cx="9" cy="17" r="2.6" fill="#6CC4FF"/><circle cx="9" cy="17" r="5" fill="#6CC4FF" opacity=".3" class="pulse"/><g fill="#1F2327"><rect x="36" y="13" width="9" height="5" rx="1"/><rect x="49" y="13" width="9" height="5" rx="1"/></g></svg></div>
+            <div class="f up"><svg viewBox="0 0 70 70" preserveAspectRatio="none"><path d="M12 14h46" stroke="#737B85" stroke-width="2"/></svg></div>
+            <div class="pin" data-pin="mini-pc" style="transform:translateZ(4.4cqw)"></div>
+          </div>
+        </div>
 
-    <section class="sec" aria-label="A note on Macs, and the waitlist">
-      <div class="grid back">
-        <aside class="legal" aria-labelledby="macs">
-          <h2 id="macs">A note on Macs</h2>
-          <p>Apple's licence limits macOS VMs. Lending a macOS guest to your team or to friends you invite is fine; selling Mac time to the public is not.</p>
-          <p>Linux guests on a Mac are not affected.</p>
-          <p class="last">This is not legal advice.</p>
-        </aside>
-        <aside class="legal pub" aria-labelledby="by-sengi">
-          <h2 id="by-sengi">From the publisher</h2>
-          <p>Potluck is made by Sengi. Sengi sells hosted Linux runners for GitHub Actions. Potluck will run without Sengi and without a Sengi account.</p>
-          <p class="last"><a href="https://sengi.run">sengi.run</a></p>
-        </aside>
+        <div class="m mac sel" data-id="mini-mac" style="--x:72%;--y:57%;--w:11.4cqw;--d:11.4cqw;--h:3.4cqw;--rot:-14deg;--sw:16cqw;--sl:1.5cqw">
+          <div class="cast"></div><div class="ring"></div>
+          <div class="body">
+            <div class="f bk"></div><div class="f lf"></div><div class="f rt"></div>
+            <div class="f fr"><svg viewBox="0 0 86 26" preserveAspectRatio="none"><circle cx="9" cy="16" r="2" fill="#3FC255" class="pulse"/></svg></div>
+            <div class="f up"><svg viewBox="0 0 86 86"><circle cx="43" cy="43" r="10" fill="#DCE0E5"/></svg></div>
+            <div class="pin" data-pin="mini-mac" style="transform:translateZ(3.4cqw)"></div>
+          </div>
+        </div>
 
-        <div class="coupon">
-          <svg class="scissors" viewBox="0 0 34 26" aria-hidden="true"><g fill="none" stroke="#1A1814" stroke-width="1.5"><circle cx="6" cy="6" r="4.5"/><circle cx="6" cy="20" r="4.5"/><path d="M9.6 8.6 32 21M9.6 17.4 32 5" stroke-linecap="round"/></g></svg>
-          <h2 id="waitlist">The waitlist</h2>
-          <form class="waitlist" method="post" action="/api/waitlist">
-            <label class="hp" aria-hidden="true">Leave this field empty <input type="text" name="website" tabindex="-1" autocomplete="off"></label>
-            <p class="intro">Everyone on the list hears when Potluck can be installed. Tick either, both or neither:</p>
-            <fieldset>
-              <legend>Would you pay for these?</legend>
-              <label class="opt"><input type="checkbox" name="hub" value="yes"> <span>I'd pay for Sengi to run our pool's hub (the machine that hands out work), so none of ours has to stay on.<small>Not offered until commands are sealed, so Sengi could not read your jobs.</small></span></label>
-              <label class="opt"><input type="checkbox" name="capacity" value="yes"> <span>I'd pay for extra machines when ours are busy.</span></label>
-            </fieldset>
-            <div class="sign">
-              <div class="field">
-                <label for="waitlist-email">Email address</label>
-                <input id="waitlist-email" type="email" name="email" required maxlength="254" autocomplete="email" placeholder="you@company.com">
+        <!-- Leo's laptop, front and centre, and Leo's cushion beside it -->
+        <div class="m laptop" data-id="laptop" style="--x:46%;--y:72%;--w:18cqw;--d:12cqw;--h:1.1cqw;--lid:11.5cqw;--rot:-5deg;--sw:23cqw;--sl:3cqw">
+          <div class="cast"></div><div class="ring"></div>
+          <div class="body">
+            <div class="f bk"></div><div class="f lf"></div><div class="f rt"></div><div class="f fr"></div>
+            <div class="f up"><svg viewBox="0 0 135 90" preserveAspectRatio="none"><rect x="12" y="10" width="111" height="42" rx="3" fill="#C2C7CE"/><g stroke="#AEB4BC" stroke-width="2"><path d="M14 20h107M14 30h107M14 40h107"/></g><rect x="48" y="58" width="39" height="24" rx="3" fill="#CBD0D6"/></svg></div>
+            <div class="lid">
+              <div class="scr">
+                <svg class="lent" viewBox="0 0 120 80" preserveAspectRatio="none"><rect width="120" height="80" fill="#18201A"/><g class="scroll"><g stroke="#9BE07A" stroke-width="3.4" stroke-linecap="round"><path d="M10 12h40M10 20h70M10 28h30M10 36h58M10 44h44M10 52h76M10 60h36M10 68h60M10 76h50M10 84h70M10 92h40"/></g></g></svg>
+                <svg class="own" viewBox="0 0 120 80" preserveAspectRatio="none"><rect width="120" height="80" fill="#FDF6E8"/><g stroke-width="3.6" stroke-linecap="round"><path d="M10 12h22" stroke="#C8402F"/><path d="M38 12h30" stroke="#2F6B34"/><path d="M10 24h50" stroke="#4B5648"/><path d="M16 36h36" stroke="#2F6B34"/><path d="M16 48h56" stroke="#4B5648"/><path d="M10 60h22" stroke="#C8402F"/></g></svg>
               </div>
-              <button type="submit">Join the waitlist</button>
+              <div class="back"></div>
             </div>
-            <p class="result" role="status" aria-live="polite"></p>
-          </form>
-          <p class="privacy">We store your email, your answers and the time. Sengi keeps the list on Cloudflare, shares it with nobody, sends one email when there is news, and deletes it within 12 months. To be removed, email <a href="mailto:ops@sengi.run?subject=Remove%20me%20from%20the%20Potluck%20waitlist">ops@sengi.run</a>.</p>
+            <div class="pin" data-pin="laptop" style="transform:translateY(-8.8cqw) translateZ(12.3cqw)"></div>
+          </div>
+        </div>
+        <div class="m" style="--x:61%;--y:80%;--sw:11cqw;--sl:.8cqw" aria-hidden="true">
+          <div class="cast"></div>
+          <div class="bb"><div class="cut seat" style="--cw:10cqw"><svg viewBox="0 0 80 36">
+            <path d="M5 19c-3-9 3-15 13-15h44c10 0 16 6 13 15 3 8-3 14-13 14H18C8 33 2 27 5 19z" fill="#3D82AB" stroke="#24536F" stroke-width="1.4"/>
+            <path d="M9 25c10 5 52 5 62 0" stroke="#2F6B8F" stroke-width="3" fill="none" stroke-linecap="round" opacity=".8"/>
+            <ellipse cx="40" cy="15" rx="27" ry="7" fill="#6FA8CC" opacity=".5"/>
+            <path d="M40 17l-11-6M40 17l11-6M40 17l-12 5M40 17l12 5" stroke="#2F6B8F" stroke-width="1.1" stroke-linecap="round" opacity=".8"/>
+            <circle cx="40" cy="17" r="2.2" fill="#24536F"/>
+          </svg></div><div class="cut leo" style="--cw:10.5cqw;bottom:1.6cqw"><svg viewBox="0 0 60 66" style="transform:scaleX(-1);--shirt:#2F6B34;--skin:#C68A5E;--hair:#3A2A1E;--pants:#3E4A5E"><use href="#p-work"/></svg></div></div>
+        </div>
+
+        <!-- People by their machines -->
+        <div class="m" style="--x:14%;--y:40%;--sw:9cqw;--sl:1.4cqw" aria-hidden="true"><div class="cast"></div><div class="bb"><div class="cut" style="--cw:10cqw"><svg viewBox="0 0 60 66" style="--shirt:#C8402F;--skin:#F0C29E;--hair:#8A5A2B;--pants:#3E5C8A"><use href="#p-work"/></svg></div></div></div>
+        <div class="m" style="--x:86%;--y:42%;--sw:9cqw;--sl:1.4cqw" aria-hidden="true"><div class="cast"></div><div class="bb"><div class="cut" style="--cw:10cqw"><svg viewBox="0 0 60 66" style="transform:scaleX(-1);--shirt:#E2A23B;--skin:#9C6644;--hair:#1E1611;--pants:#4B5648"><use href="#p-work"/></svg></div></div></div>
+        <div class="m" style="--x:84%;--y:67%;--sw:13cqw;--sl:1cqw" aria-hidden="true"><div class="cast"></div><div class="bb"><div class="cut" style="--cw:13.5cqw"><svg viewBox="0 0 90 44" style="--shirt:#7E5BA6;--skin:#E8B48F;--hair:#5A3A22"><use href="#p-sleep"/></svg></div></div></div>
+
+        <!-- Kai's cloud VM floats in from elsewhere -->
+        <div class="m cloud" data-id="cloud" style="--x:55%;--y:19%;--sw:14cqw;--sl:1.2cqw">
+          <div class="cast"></div><div class="ring"></div>
+          <div class="bb"><div class="cut" style="--cw:17cqw;bottom:4.3cqw"><svg viewBox="0 14 110 54">
+            <g>
+              <path d="M24 62c-12 0-16-16-4-20 0-14 18-20 26-10 4-14 28-14 32 2 14-2 20 16 8 22 4 8-4 14-12 10H24z" fill="#fff" stroke="#A9C3D6" stroke-width="1.4" stroke-linejoin="round"/>
+              <path d="M22 60c10 4 54 4 66-2-4 8-58 10-66 2z" fill="#DCEAF4"/>
+              <rect x="36" y="34" width="38" height="22" rx="3" fill="#2A3037"/>
+              <text x="55" y="49" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="9" fill="#8C958A">idle</text>
+            </g>
+          </svg><div class="pin" data-pin="cloud" style="left:50%;top:0;bottom:auto"></div></div></div>
+        </div>
+
+        <!-- Potluck Dish: a covered dish at the edge of the blanket, not out yet -->
+        <div class="m" data-id="dish" style="--x:86%;--y:79%;--sw:12cqw;--sl:1.2cqw">
+          <div class="cast"></div>
+          <div class="bb"><div class="cut" style="--cw:12.5cqw"><svg viewBox="0 0 80 60">
+            <ellipse cx="38" cy="52" rx="34" ry="7" fill="#fff" stroke="#D8CFBF" stroke-width="1.2"/>
+            <path d="M10 50c0-20 12-32 28-32s28 12 28 32z" fill="#E6E9EC" stroke="#8D949C" stroke-width="1.4"/>
+            <path d="M18 44c1-12 8-20 18-22" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" opacity=".9"/>
+            <circle cx="38" cy="15" r="4" fill="#C9CED4" stroke="#8D949C" stroke-width="1.2"/>
+            <g transform="rotate(8 66 40)"><rect x="56" y="30" width="22" height="16" rx="1.5" fill="#FFFBEF" stroke="#B99A62"/><path d="M60 36h14M60 40h10" stroke="#B99A62" stroke-width="1.2"/></g>
+          </svg><div class="pin" data-pin="dish" style="left:50%;top:0;bottom:auto"></div></div></div>
         </div>
       </div>
-    </section>
-  </main>
-
-  <footer class="imprint">
-    <div class="grid">
-      <h2>Imprint</h2>
-      <p>Potluck will be open source under Apache-2.0. Once the code is public, anyone can suggest changes. Letters to <a href="mailto:ops@sengi.run?subject=Potluck">ops@sengi.run</a>.</p>
-      <p>Set in Newsreader, by Production Type, under the SIL Open Font License. This page has no tracking and makes no third-party requests. &copy; 2026 Sengi, Inc.</p>
-      <svg class="bowl" viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#1A1814"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#B42D1A"/></svg>
     </div>
-  </footer>
-  <span class="crop bl" aria-hidden="true"></span><span class="crop br" aria-hidden="true"></span>
-</div>
+
+    <div class="labels" id="labels" hidden>
+      <button class="tag" type="button" data-for="tower" aria-pressed="false"><span class="dot busy"></span><span class="name"><span class="long">Sam's old gaming PC</span><span class="short">Sam's PC</span></span></button>
+      <button class="tag" type="button" data-for="cloud" aria-pressed="false"><span class="dot idle"></span><span class="name"><span class="long">Kai's AWS VM</span><span class="short">Kai's VM</span></span></button>
+      <button class="tag" type="button" data-for="mini-pc" aria-pressed="false"><span class="dot busy"></span><span class="name"><span class="long">Priya's mini PC</span><span class="short">Priya's PC</span></span></button>
+      <button class="tag" type="button" data-for="server" aria-pressed="false"><span class="dot busy"></span><span class="name"><span class="long">The rented server</span><span class="short">Server</span></span></button>
+      <button class="tag" type="button" data-for="mini-mac" aria-pressed="true"><span class="dot busy"></span><span class="name"><span class="long">Ana's Mac mini</span><span class="short">Ana's Mac</span></span></button>
+      <button class="tag" type="button" data-for="laptop" aria-pressed="false"><span class="dot busy"></span><span class="name"><span class="long">Leo's MacBook Pro</span><span class="short">Leo's laptop</span></span></button>
+      <a class="tag soon" href="#dish" data-for="dish"><span class="long">Potluck Dish, coming soon</span><span class="short">Coming soon</span></a>
+      <button class="tag chip" type="button" id="leo-chip">Leo sits back down</button>
+    </div>
+    <svg class="leader" id="leader" aria-hidden="true"></svg>
+
+    <div class="under">
+    <div class="turn" id="turn" hidden>
+      <button type="button" data-turn="1" aria-label="Turn the lawn left"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <p class="hint" id="hint">Pick a machine to see what it brings. Drag the grass to turn it.</p>
+      <button type="button" data-turn="-1" aria-label="Turn the lawn right"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+
+    <aside class="dish" id="card" aria-labelledby="dish-name">
+      <p class="kicker"><span id="dish-who">Brought by Ana</span><span>An example pool</span></p>
+      <h2 id="dish-name">Ana's Mac mini</h2>
+      <p class="sub" id="dish-sub">Left on at night while Ana sleeps</p>
+      <dl>
+        <dt>Shares</dt><dd id="dish-brings">5 of 10 cores, 16 of 32 GB</dd>
+        <dt>Lent</dt><dd id="dish-lent">Whenever Ana isn't using it</dd>
+        <dt>Runs</dt><dd id="dish-runs">Fresh macOS and Linux VMs</dd>
+      </dl>
+      <p class="now" id="dish-now"><b>Right now:</b> a coding agent building the iOS app, in a fresh macOS VM.</p>
+      <button class="btn line toggle" id="dish-toggle" type="button" hidden></button>
+      <p class="pool">Shared in the pool now: <b id="pool-total">6 machines, 29 cores, 98 GB</b></p>
+    </aside>
+    <span class="vh" role="status" id="pick-status"></span>
+    </div>
+  </div>
+  <div class="get">
+    <div class="install" id="install">
+      <div class="label">Install on macOS or Linux</div>
+      <div class="row">
+        <div class="line" tabindex="0" role="region" aria-label="The install command"><code id="install-cmd">curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></div>
+        <button class="copy" type="button" data-copy="install-cmd" hidden>Copy</button>
+        <span class="vh" role="status" id="copy-status"></span>
+      </div>
+    </div>
+    <div class="ctas">
+      <a class="btn solid" href="https://github.com/sengirunners/potluck">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0z"/></svg>
+        Code on GitHub
+      </a>
+      <a class="btn line" href="#how">How it works</a>
+    </div>
+    <p class="fine">Free and open source (Apache-2.0). Releases are signed: the installer checks the signature when it can (it needs OpenSSL 3) and says so when it can't. It's early: see <a href="https://github.com/sengirunners/potluck#what-works-today">what works today</a>.</p>
+  </div>
+</section>
+
+<section class="block wrap" id="how" aria-labelledby="how-h">
+  <h2 class="big" id="how-h">How it works</h2>
+  <p class="intro">One machine runs the pool. Everyone else brings theirs. Work goes to whichever machine is free, and each job gets a fresh VM or sandbox that is thrown away after.</p>
+  <ol class="story">
+    <li class="beat">
+      <figure aria-hidden="true"><svg viewBox="0 0 420 240">
+        <ellipse cx="205" cy="184" rx="200" ry="50" fill="url(#grass)"/>
+        <path d="M40 196l190-34 76 14-190 36z" fill="url(#gingham)" stroke="#E9D9BE" stroke-width="2"/>
+        <g transform="translate(300 160) rotate(10)"><rect width="58" height="26" rx="13" fill="url(#gingham)" stroke="#E9D9BE" stroke-width="2"/><ellipse cx="53" cy="13" rx="6" ry="12" fill="#F4E4C8" stroke="#E2CFAE"/></g>
+        <g transform="translate(96 150)"><path d="M2 0h52l-6 34H-4z" fill="#2B3138"/><path d="M6 3h44l-5 28H2z" fill="#18201A"/><path d="M10 9h18M9 15h28M8 21h14" stroke="#9BE07A" stroke-width="2.4" stroke-linecap="round"/><path d="M-6 34h58l8 7H-14z" fill="#C7CCD2" stroke="#8C939B"/></g>
+        <g transform="translate(150 70) rotate(-8)"><rect width="90" height="40" rx="4" fill="#fff" stroke="#1D261D" stroke-width="1.4"/><text x="9" y="17" font-family="Newsreader,Georgia,serif" font-size="11" font-style="italic" fill="#4B5648">invite for Sam</text><text x="9" y="32" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#1D261D">k7f-2qp…</text></g>
+        <path d="M140 140c4-14 10-22 18-28" stroke="#4B5648" stroke-width="1.3" fill="none" stroke-dasharray="3 4"/>
+        <g style="--shirt:#3E5C8A;--skin:#E8B48F;--hair:#6B4425;--pants:#2B3138"><use href="#p-stand" x="340" y="70" width="56" height="126"/></g>
+        <g transform="translate(60 196)"><path d="M0 0h40l-5 20H5z" fill="#C88B4A" stroke="#8E5A29"/><path d="M2 7h36M4 14h32" stroke="#A86F37" stroke-width="1.6"/></g>
+      </svg></figure>
+      <div>
+        <p class="step">Step 1</p>
+        <h3>Lay out the blanket</h3>
+        <p>On one machine, start a pool for your team and make invite codes. The first time, it gives you a Tailscale login link so your machines can find each other.</p>
+        <pre class="cmd"><span class="p">$</span> potluck create team
+<span class="p">$</span> potluck invite sam --host   <span class="c"># invite code for Sam</span></pre>
+      </div>
+    </li>
+    <li class="beat">
+      <figure aria-hidden="true"><svg viewBox="0 0 500 240">
+        <ellipse cx="220" cy="186" rx="212" ry="50" fill="url(#grass)"/>
+        <path d="M50 200l240-36 120 22-240 38z" fill="url(#gingham)" stroke="#E9D9BE" stroke-width="2"/>
+        <g style="--shirt:#3E5C8A;--skin:#E8B48F;--hair:#6B4425;--pants:#2B3138"><use href="#p-work" x="56" y="118" width="74" height="82"/></g>
+        <g transform="translate(128 150)"><path d="M2 0h52l-6 34H-4z" fill="#2B3138"/><path d="M6 3h44l-5 28H2z" fill="#18201A"/><path d="M10 9h18M9 15h28M8 21h14" stroke="#9BE07A" stroke-width="2.4" stroke-linecap="round"/><path d="M-6 34h58l8 7H-14z" fill="#C7CCD2" stroke="#8C939B"/></g>
+        <g transform="translate(222 168)"><ellipse cx="28" cy="12" rx="30" ry="8" fill="#fff" stroke="#D8CFBF"/><ellipse cx="28" cy="9" rx="24" ry="7" fill="#E9A956"/><path d="M12 7l10 6M26 4l12 8M38 5l8 5" stroke="#F6CF8A" stroke-width="2.4" stroke-linecap="round"/></g>
+        <g style="--shirt:#E2A23B;--skin:#9C6644;--hair:#1E1611;--pants:#4B5648"><use href="#p-carry" x="304" y="66" width="58" height="132"/></g>
+        <g transform="translate(314 108)"><path d="M0 9 9 3h26l-9 6z" fill="#5C636C" stroke="#23272C"/><path d="M0 9h26v13H0z" fill="#454B53" stroke="#23272C"/><path d="M26 9l9-6v13l-9 6z" fill="#30353B" stroke="#23272C"/><circle cx="5" cy="15.5" r="1.8" fill="#6CC4FF"/></g>
+        <g transform="translate(340 52)"><circle r="12" fill="#2F6B34"/><path d="M-5 0l3.5 3.5L5-4" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>
+        <g style="--shirt:#C8402F;--skin:#F0C29E;--hair:#8A5A2B;--pants:#3E5C8A"><use href="#p-carry" x="398" y="60" width="58" height="132"/></g>
+        <g transform="translate(410 100)"><path d="M0 7 7 2h22l-7 5z" fill="#3A3E47" stroke="#111317"/><path d="M0 7h22v36H0z" fill="#2A2D34" stroke="#111317"/><path d="M22 7l7-5v36l-7 5z" fill="#0E1117" stroke="#111317"/><circle cx="25.5" cy="17" r="2.6" fill="#FF5DD8"/><circle cx="25.5" cy="27" r="2.6" fill="#4FD2FF"/><path d="M3 10v30" stroke="#FF6FD8" stroke-width="1.2"/><circle cx="11" cy="13" r="1.8" fill="#3FC255"/></g>
+        <g transform="translate(432 40)"><circle r="12" fill="#2F6B34"/><path d="M-5 0l3.5 3.5L5-4" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>
+        <path d="M466 176c10-2 18-2 28 0M462 188c12-2 20-2 32 0" stroke="#4B5648" stroke-width="1.3" stroke-dasharray="3 4" fill="none"/>
+      </svg></figure>
+      <div>
+        <p class="step">Step 2</p>
+        <h3>Friends bring their machines</h3>
+        <p>On each machine you want to lend, check what it can safely run, then lend it with the code. If a check fails, the machine doesn't join and the code stays unspent.</p>
+        <pre class="cmd"><span class="p">$</span> potluck doctor
+<span class="p">$</span> potluck host '&lt;code&gt;'</pre>
+      </div>
+    </li>
+    <li class="beat">
+      <figure aria-hidden="true"><svg viewBox="0 0 440 240">
+        <ellipse cx="220" cy="186" rx="212" ry="50" fill="url(#grass)"/>
+        <path d="M50 200l230-34 110 22-230 36z" fill="url(#gingham)" stroke="#E9D9BE" stroke-width="2"/>
+        <g transform="translate(150 144)"><path d="M2 0h52l-6 34H-4z" fill="#2B3138"/><path d="M6 3h44l-5 28H2z" fill="#FDF6E8"/><path d="M10 9h10M23 9h14M9 15h26M12 21h18" stroke="#2F6B34" stroke-width="2.4" stroke-linecap="round"/><path d="M9 15h6" stroke="#C8402F" stroke-width="2.4" stroke-linecap="round"/><path d="M-6 34h58l8 7H-14z" fill="#C7CCD2" stroke="#8C939B"/></g>
+        <g style="--shirt:#2F6B34;--skin:#C68A5E;--hair:#3A2A1E;--pants:#3E4A5E" transform="translate(296 104) scale(-1 1)"><use href="#p-work" width="86" height="96"/></g>
+        <rect x="236" y="186" width="56" height="12" rx="4" fill="#3D82AB" stroke="#24536F"/>
+        <g transform="translate(310 186)"><path d="M0 8c6-8 28-8 34 0l-4 6H4z" fill="#E8C27A" stroke="#B9833F"/><path d="M6 6c6-3 16-3 22 0" stroke="#7CB24E" stroke-width="2.4" fill="none"/></g>
+        <g transform="translate(70 150)" opacity=".75"><rect width="46" height="30" rx="4" fill="none" stroke="#C8402F" stroke-width="1.6" stroke-dasharray="4 3"/><text x="23" y="19" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10" fill="#C8402F">VM</text><path d="M38-6l14 14M52-6 38 8" stroke="#C8402F" stroke-width="2" stroke-linecap="round"/></g>
+        <g transform="translate(36 36)"><rect width="200" height="62" rx="12" fill="#fff" stroke="#1D261D" stroke-width="1.5"/><path d="M150 62l10 16 4-16" fill="#fff" stroke="#1D261D" stroke-width="1.5" stroke-linejoin="round"/><path d="M151 61h12" stroke="#fff" stroke-width="3"/>
+          <text x="16" y="27" font-family="Newsreader,Georgia,serif" font-size="17" font-weight="600" fill="#1D261D">Leo's back.</text>
+          <text x="16" y="48" font-family="Newsreader,Georgia,serif" font-size="14" font-style="italic" fill="#4B5648">The VM ended. No new work.</text></g>
+      </svg></figure>
+      <div>
+        <p class="step">Step 3</p>
+        <h3>Leo comes back from lunch</h3>
+        <p>On a Mac, the moment its owner types or moves the mouse, its VMs end and it takes no new work. A Linux box doesn't notice its owner yet: it can be limited to set hours in its driver's settings.</p>
+        <pre class="cmd"><span class="p">$</span> potluck host stop   <span class="c"># stop lending this machine</span></pre>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="block wrap" id="uses" aria-labelledby="uses-h">
+  <h2 class="big" id="uses-h">What you can do with it</h2>
+  <div class="uses">
+    <article class="use agents">
+      <p class="kind">Coding agents</p>
+      <h3>Give your agent a computer of its own</h3>
+      <p>Your agent's commands run in a throwaway sandbox on a pool machine, not on your laptop.</p>
+      <pre class="cmd"><span class="p">$</span> potluck sandbox create   <span class="c"># prints its id</span>
+<span class="p">$</span> potluck sandbox exec &lt;id&gt; -- make test
+<span class="p">$</span> potluck sandbox rm &lt;id&gt;</pre>
+      <p style="margin-top:16px">Or hand it the sandbox tools over MCP:</p>
+      <pre class="cmd">{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}</pre>
+      <p style="margin-top:16px">Using Claude Code's self-hosted runner? Run it in fresh sandboxes:</p>
+      <pre class="cmd"><span class="p">$</span> potluck agent-runner claude --secret-file &lt;key-file&gt;</pre>
+    </article>
+
+    <article class="use actions">
+      <p class="kind">GitHub Actions <span class="notyet">Not run live yet</span></p>
+      <h3>Move a macOS job onto your own Mac</h3>
+      <p>Potluck is built to run your GitHub Actions jobs, but no job has run live on a pool machine yet: see <a href="https://github.com/sengirunners/potluck#what-works-today">what works today</a>.</p>
+      <p>One command prepares a change to one line of your workflow; then open the pull request it prepares. Your own branches would run on the lent Mac. Pull requests from forks keep using GitHub's runner.</p>
+      <pre class="cmd"><span class="p">$</span> potluck ci pr acme/app</pre>
+      <div class="diff" role="img" aria-label="The change: runs-on macos-15 becomes your Mac, with GitHub's runner kept for forks">
+        <div class="file">.github/workflows/ci.yml</div>
+        <div class="del">- runs-on: macos-15</div>
+        <div class="add">+ runs-on: your Mac (GitHub's for forks)</div>
+      </div>
+      <p class="exact">Simplified. <a href="https://github.com/sengirunners/potluck/blob/main/docs/ci-pr.md#L15-L18">The exact line it writes</a>.</p>
+    </article>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="save-h">
+  <div class="in wrap">
+    <div>
+      <h2 id="save-h">What a Mac you already own could save</h2>
+      <label for="minutes">macOS build minutes a month, for a private repository, after your plan's included minutes: <output id="minutes-out" for="minutes">5,000</output></label>
+      <input id="minutes" type="range" min="500" max="30000" step="500" value="5000">
+      <p class="src">At GitHub's listed rate for its standard macOS runner, $0.062 a minute as of November 2026 (<a href="https://docs.github.com/en/billing/reference/actions-runner-pricing">GitHub's price list</a>). Public repositories run on GitHub's runners for free. Potluck is free, and GitHub doesn't charge per minute on your own runners; you pay for the electricity.</p>
+    </div>
+    <ul class="totals">
+      <li><span>GitHub's macOS runner<small>a month</small></span><b id="cost-gh">$310</b></li>
+      <li class="you"><span>Your Mac, with Potluck<small>a month, plus electricity</small></span><b>$0</b>
+        <p class="when">Once Potluck runs your GitHub Actions jobs (not yet: see <a href="https://github.com/sengirunners/potluck#what-works-today">what works today</a>).</p></li>
+    </ul>
+  </div>
+</section>
+
+<section class="block wrap" id="rules" aria-labelledby="rules-h">
+  <div class="sign">
+    <div class="board"><div class="paper">
+      <h2 id="rules-h">House rules</h2>
+      <p class="intro">Read these before you lend a machine. The <a href="https://github.com/sengirunners/potluck#what-you-should-know-before-trusting-it">full list is on GitHub</a>.</p>
+      <ol class="rules">
+        <li><h3>Work stays in a box</h3><p>Every job runs in a throwaway VM or sandboxed container, not directly on your system, and is deleted after.</p></li>
+        <li><h3>Pool with people you trust</h3><p>The machine that runs a job can read everything in it, secrets included. For now, so can the machine that runs the pool.</p></li>
+        <li><h3>Trusted or public</h3><p>You mark each machine trusted or public. Jobs that need your keys and tokens only go to trusted ones.</p></li>
+        <li><h3>Macs: lend, don't sell</h3><p>Apple's licence forbids selling Mac time. Our reading: lending a macOS VM to your team or friends is fine, and selling it to the public is not. Read the licence yourself. Linux VMs on a Mac are not affected.</p></li>
+      </ol>
+    </div></div>
+    <span class="post l" aria-hidden="true"></span><span class="post r" aria-hidden="true"></span><span class="grass" aria-hidden="true"></span>
+  </div>
+</section>
+
+<section class="block wrap" id="founders" aria-label="Contact and what's next">
+  <div class="pair">
+    <div class="founders">
+      <svg viewBox="0 0 150 140" aria-hidden="true">
+        <ellipse cx="75" cy="128" rx="72" ry="11" fill="url(#grass)"/>
+        <svg x="22" y="24" width="48" height="108" viewBox="0 0 40 90" style="--shirt:#2F6B34;--skin:#E8B48F;--hair:#6B4425;--pants:#3E4A5E"><use href="#p-wave"/></svg>
+        <svg x="78" y="28" width="46" height="104" viewBox="0 0 40 90" style="--shirt:#C8402F;--skin:#D9A47E;--hair:#2B211B;--pants:#4B5648"><use href="#p-stand"/></svg>
+        <g transform="translate(110 82)"><path d="M0 4h18a9 6 0 0 1-18 0z" fill="#C8402F"/><rect x="6" y="0" width="6" height="3" rx="1.5" fill="#2F6B34"/></g>
+      </svg>
+      <div>
+        <h2>Jackson and Clay, who make Potluck</h2>
+        <p>Tell us what you'd run on it, what broke, or that you want to help build it.</p>
+        <a class="btn solid" href="mailto:ops@sengi.run?subject=Potluck">Email the founders</a>
+        <span class="addr">ops@sengi.run</span>
+      </div>
+    </div>
+    <div class="recipe" id="dish">
+      <div class="head"><h2>Potluck Dish</h2><span class="stamp">Coming soon</span></div>
+      <div class="body">
+        <div>
+          <p>For teams running lots of coding agents: one shared list of work, messages between your agents and your people, and a desktop app to watch it all. It runs on Potluck.</p>
+          <a href="mailto:ops@sengi.run?subject=Potluck%20Dish">Ask to try it early</a>
+        </div>
+        <svg viewBox="0 0 80 60" aria-hidden="true">
+          <ellipse cx="40" cy="52" rx="36" ry="7" fill="#fff" stroke="#D8CFBF" stroke-width="1.2"/>
+          <path d="M10 50c0-20 12-32 30-32s30 12 30 32z" fill="#E6E9EC" stroke="#8D949C" stroke-width="1.4"/>
+          <path d="M18 44c1-12 8-20 18-22" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
+          <circle cx="40" cy="15" r="4" fill="#C9CED4" stroke="#8D949C" stroke-width="1.2"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
+
+<div class="cloth" aria-hidden="true"></div>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This page has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="mailto:ops@sengi.run?subject=Potluck">ops@sengi.run</a>
+  </nav>
+</footer>
+
 <script>
-// Sends the form without leaving the page. Without JavaScript the form still posts: the API answers with a 303
-// back to /?joined=1 or /?error=<code>, and the Worker fills in the result line (src/waitlist.js, MESSAGES).
 (() => {
-  const form = document.querySelector("form.waitlist");
-  const out = form.querySelector(".result");
-  const button = form.querySelector("button");
-  const said = {
-    email: "That email address doesn't look right.",
-    rate: "Too many tries. Wait a minute and try again.",
+  // The machines on the blanket. An example pool: the numbers show what each kind of machine might have.
+  const MACHINES = {
+    "mini-mac": { who: "Ana", name: "Ana's Mac mini", sub: "Left on at night while Ana sleeps", cores: 10, gb: 32, lent: "Whenever Ana isn't using it",
+      runs: "Fresh macOS and Linux VMs", now: "a coding agent building the iOS app, in a fresh macOS VM." },
+    server: { who: "the team", name: "The rented server", sub: "Paid for anyway, so keep it busy", cores: 16, gb: 64, lent: "All the time",
+      runs: "Linux sandboxes and VMs", now: "three coding agents, one sandbox each." },
+    tower: { who: "Sam", name: "Sam's old gaming PC", sub: "Was gathering dust under a desk", cores: 8, gb: 16, lent: "All the time",
+      runs: "Linux sandboxes", now: "make test for Sam's branch, in a sandbox." },
+    cloud: { who: "Kai", name: "Kai's AWS VM", sub: "A cloud VM with spare hours", cores: 4, gb: 16, lent: "Weekdays, set in its driver",
+      runs: "Linux sandboxes", now: "idle, waiting for work." },
+    "mini-pc": { who: "Priya", name: "Priya's mini PC", sub: "Small, quiet, always on", cores: 8, gb: 32, lent: "All the time",
+      runs: "Linux sandboxes and VMs", now: "a coding agent fixing a flaky test, in its own sandbox." },
+    laptop: { who: "Leo", name: "Leo's MacBook Pro", sub: "Lent while Leo is at lunch", cores: 12, gb: 36, lent: "When Leo steps away",
+      runs: "Fresh macOS and Linux VMs", now: "a coding agent's tests, in a fresh macOS VM.", toggle: true },
   };
-  form.addEventListener("submit", async (ev) => {
-    ev.preventDefault();
-    button.disabled = true;
-    out.className = "result";
-    out.textContent = "Sending…";
-    try {
-      const res = await fetch(form.action, {
-        method: "POST",
-        headers: { accept: "application/json" },
-        body: new URLSearchParams(new FormData(form)),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data.ok) {
-        out.textContent = "You're on the list. Thanks.";
-        form.reset();
-      } else {
-        out.className = "result bad";
-        out.textContent = said[data.error] ?? "That didn't work. Try again, or email ops@sengi.run.";
-      }
-    } catch {
-      out.className = "result bad";
-      out.textContent = "That didn't work. Try again, or email ops@sengi.run.";
-    } finally {
-      button.disabled = false;
+  // potluck host shares half of a machine's cores and memory unless told otherwise (--share).
+  const SHARE = 0.5;
+  const $ = (id) => document.getElementById(id);
+  const stage = $("stage"), scene = $("scene"), card = $("card"), leader = $("leader"), labels = $("labels"), turnRow = $("turn");
+  const chip = $("leo-chip"), seat = scene.querySelector(".seat");
+  const tags = [...labels.querySelectorAll(".tag[data-for]")];
+  const buttons = tags.filter((t) => t.tagName === "BUTTON");
+  const machines = [...scene.querySelectorAll(".m[data-id]")];
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
+  let chosen = "mini-mac", leoBack = false;
+
+  function total() {
+    let n = 0, cores = 0, gb = 0;
+    for (const [id, m] of Object.entries(MACHINES)) {
+      if (id === "laptop" && leoBack) continue;
+      n++; cores += m.cores * SHARE; gb += m.gb * SHARE;
     }
+    $("pool-total").textContent = `${n} machines, ${cores} cores, ${gb} GB`;
+  }
+
+  // Fill the card for one machine. `say` is a short line for screen readers, sent only when the reader acted.
+  function show(id, say) {
+    chosen = id;
+    const m = MACHINES[id];
+    const back = id === "laptop" && leoBack;
+    for (const t of buttons) t.setAttribute("aria-pressed", String(t.dataset.for === id));
+    for (const el of machines) el.classList.toggle("sel", el.dataset.id === id);
+    $("dish-who").textContent = `Brought by ${m.who}`;
+    $("dish-name").textContent = m.name;
+    $("dish-sub").textContent = back ? "Leo is back and using it" : m.sub;
+    $("dish-brings").textContent = `${m.cores * SHARE} of ${m.cores} cores, ${m.gb * SHARE} of ${m.gb} GB`;
+    $("dish-lent").textContent = m.lent;
+    $("dish-runs").textContent = m.runs;
+    $("dish-now").innerHTML = back
+      ? "<b>Handed back.</b> Leo touched the keyboard, so its VM ended and it takes no new work."
+      : `<b>Right now:</b> ${m.now}`;
+    const toggle = $("dish-toggle");
+    toggle.hidden = !m.toggle;
+    if (m.toggle) toggle.textContent = back ? "Leo steps away again" : "Leo sits back down";
+    if (say) $("pick-status").textContent = say;
+    layout();
+  }
+
+  function setLeo(back) {
+    leoBack = back;
+    scene.classList.toggle("leo-back", back);
+    buttons.find((t) => t.dataset.for === "laptop").classList.toggle("back", back);
+    chip.textContent = back ? "Leo steps away" : "Leo sits back down";
+    total();
+    show(chosen, back ? "Leo is back. His laptop's VM ended and it takes no new work." : "Leo stepped away. His laptop is lent again.");
+  }
+
+  // Labels sit in a flat layer over the scene. Each time the scene moves, find where every machine lands on screen,
+  // then place labels front to back, each at the cheapest spot: covering another label, the card or the arrows costs
+  // most, a machine's body (its own included) less, a person or the food a little, and every pixel from its pin a
+  // little more, and sitting much nearer another machine's pin than its own costs a lot. Spots above the pin are tried first.
+  const pins = new Map([...scene.querySelectorAll("[data-pin]")].map((p) => [p.dataset.pin, p]));
+  // A machine's body is its faces (or its cut-out): one box per face fits a turned box closer than one box round it.
+  const bodies = machines.map((m) => [...m.querySelectorAll(".f, .lid > *, .cut")]);
+  const props = [...scene.querySelectorAll(".m:not([data-id]) .cut")];
+  const area = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  const grow = (r, p) => ({ x: r.x - p, y: r.y - p, w: r.w + 2 * p, h: r.h + 2 * p });
+  const nearest = (r, x, y) => ({ x: Math.max(r.x, Math.min(r.x + r.w, x)), y: Math.max(r.y, Math.min(r.y + r.h, y)) });
+  const rel = (el, s) => { const r = el.getBoundingClientRect(); return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height }; };
+  const union = (rs) => {
+    const x = Math.min(...rs.map((r) => r.x)), y = Math.min(...rs.map((r) => r.y));
+    return { x, y, w: Math.max(...rs.map((r) => r.x + r.w)) - x, h: Math.max(...rs.map((r) => r.y + r.h)) - y };
+  };
+
+  let queued = false;
+  function layout() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; place(); });
+  }
+  function place() {
+    const s = stage.getBoundingClientRect();
+    const sceneBox = rel(scene, s), cardBox = rel(card, s), turnBox = rel(turnRow, s);
+    const faces = bodies.map((els) => els.map((el) => rel(el, s)).filter((r) => r.w > 0 && r.h > 0));
+    const propBoxes = props.map((el) => rel(el, s));
+    const items = tags.map((el) => {
+      const id = el.dataset.for, p = pins.get(id).getBoundingClientRect();
+      const body = union(faces[machines.findIndex((m) => m.dataset.id === id)]);
+      return { el, id, ax: p.left + p.width / 2 - s.left, ay: p.top - s.top, body };
+    });
+    items.sort((a, b) => (b.body.y + b.body.h) - (a.body.y + a.body.h));
+    // Leo's chip goes last: it takes whatever room the machines' labels leave. Phones hide it (the card is right below).
+    const sb = rel(seat, s);
+    if (chip.offsetWidth) items.push({ el: chip, ax: sb.x + sb.w / 2, ay: sb.y + sb.h * .3, body: sb });
+    for (const it of items) { it.w = it.el.offsetWidth; it.h = it.el.offsetHeight; }
+
+    const hard = [cardBox, turnBox];
+    const machineFaces = faces.flat();
+    const minX = sceneBox.x + 2, maxX = sceneBox.x + sceneBox.w - 2, minY = sceneBox.y + 2, maxY = sceneBox.y + sceneBox.h - 2;
+    const stems = [];
+    items.forEach((it, i) => {
+      const { ax, ay, w, h, body } = it;
+      const g = 8, row = h + 6;
+      const top = Math.min(ay, body.y) - g - h;
+      const xs = [0, -1, 1, -2, 2, -3, 3].map((k) => ax - w / 2 + k * w / 3).concat(body.x - w - g, body.x + body.w + g);
+      const ys = [top, top - row, top - 2 * row, top - 3 * row, ay - h / 2, body.y + body.h + g];
+      let best = null, bestCost = Infinity;
+      const tryAt = (cx, cy) => {
+        const r = { x: Math.round(Math.max(minX, Math.min(maxX - w, cx))), y: Math.round(Math.max(minY, Math.min(maxY - h, cy))), w, h };
+        const pad = grow(r, 3), edge = grow(r, 1);
+        let cost = 0;
+        for (const q of hard) if (area(pad, q) > 0) cost += 10000 + area(pad, q);
+        for (const q of machineFaces) if (area(edge, q) > 0) cost += 1000 + area(edge, q);
+        for (const q of propBoxes) cost += area(r, q) * .1;
+        const e = nearest(r, ax, ay), d = Math.hypot(e.x - ax, e.y - ay);
+        cost += 2 * d + (r.y > ay ? 60 : 0);
+        // A label much nearer another machine's pin than its own reads as that machine's.
+        for (const o of items) if (o !== it && o.id) { const n = nearest(r, o.ax, o.ay); if (Math.hypot(n.x - o.ax, n.y - o.ay) < d * .6) { cost += 400; break; } }
+        if (cost < bestCost) { best = r; bestCost = cost; }
+      };
+      for (const cy of ys) for (const cx of xs) tryAt(cx, cy);
+      // Nothing clear and clearly its own nearby: search a wider grid round the pin.
+      if (bestCost >= 400) {
+        for (let j = -6; j <= 4; j++) for (let k = -7; k <= 7; k++) tryAt(ax - w / 2 + k * w / 3, ay - h / 2 + j * row / 2);
+      }
+      hard.push(best);
+      it.el.style.transform = `translate(${best.x}px,${best.y}px)`;
+      it.el.style.zIndex = String(items.length - i);
+      it.box = best;
+      if (it.el === chip) return;
+      const end = nearest(best, ax, ay);
+      if (Math.hypot(end.x - ax, end.y - ay) > 6) stems.push(`<path class="stem" d="M${end.x} ${end.y}L${ax} ${ay}"/><circle cx="${ax}" cy="${ay}" r="2" fill="#3A4437"/>`);
+    });
+    // The card's notch points up at the chosen machine's label.
+    const sel = items.find((it) => it.id === chosen);
+    if (sel) card.style.setProperty("--notch", `${Math.max(24, Math.min(cardBox.w - 24, sel.box.x + sel.box.w / 2 - cardBox.x))}px`);
+    leader.innerHTML = stems.join("");
+  }
+
+  for (const t of buttons) {
+    t.addEventListener("click", () => show(t.dataset.for, `${MACHINES[t.dataset.for].name}.`));
+    t.addEventListener("keydown", (ev) => {
+      if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft") return;
+      ev.preventDefault();
+      const i = buttons.indexOf(t) + (ev.key === "ArrowRight" ? 1 : -1);
+      buttons[(i + buttons.length) % buttons.length].focus();
+    });
+  }
+  for (const m of machines) {
+    if (m.dataset.id === "dish") m.addEventListener("click", () => { if (!dragged) location.hash = "dish"; });
+    else m.addEventListener("click", () => { if (!dragged) show(m.dataset.id, `${MACHINES[m.dataset.id].name}.`); });
+  }
+  $("dish-toggle").addEventListener("click", () => setLeo(!leoBack));
+  chip.addEventListener("click", () => setLeo(!leoBack));
+
+  // Turn the lawn: drag it, or use the arrow buttons. Dragging right moves the front of the lawn right. A drag of a
+  // few pixels or more is not a click. `goal` is where the lawn is heading, so quick clicks add up.
+  let spin = -12, goal = -12, startX = 0, startSpin = 0, dragging = false, dragged = false, anim = 0;
+  const LIMIT = 45;
+  const clamp = (deg) => Math.max(-LIMIT, Math.min(LIMIT, deg));
+  const arrows = [...turnRow.querySelectorAll("[data-turn]")];
+  const markEnds = () => {
+    for (const b of arrows) b.setAttribute("aria-disabled", String(Number(b.dataset.turn) > 0 ? goal >= LIMIT : goal <= -LIMIT));
+  };
+  // `now`: place the labels in this frame (during an animation), not the next.
+  const setSpin = (deg, now) => {
+    spin = clamp(deg);
+    scene.style.setProperty("--spin", `${spin}deg`);
+    if (now) place(); else layout();
+  };
+  const turnTo = (target, ms) => {
+    cancelAnimationFrame(anim);
+    goal = clamp(target);
+    markEnds();
+    if (reduce.matches || ms === 0) { setSpin(goal); return; }
+    const from = spin, to = goal, t0 = performance.now();
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / ms);
+      setSpin(from + (to - from) * (1 - Math.pow(1 - k, 3)), true);
+      if (k < 1) anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  };
+  scene.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) return;
+    cancelAnimationFrame(anim);
+    dragging = true; dragged = false; startX = ev.clientX; startSpin = spin;
   });
+  addEventListener("pointermove", (ev) => {
+    if (!dragging) return;
+    const dx = ev.clientX - startX;
+    if (!dragged && Math.abs(dx) > 4) { dragged = true; scene.classList.add("dragging"); }
+    if (dragged) { setSpin(startSpin - dx * 80 / scene.clientWidth); goal = spin; markEnds(); }
+  });
+  const end = () => { dragging = false; scene.classList.remove("dragging"); setTimeout(() => { dragged = false; }, 0); };
+  addEventListener("pointerup", end);
+  addEventListener("pointercancel", end);
+  for (const b of arrows) {
+    b.addEventListener("click", () => {
+      if (b.getAttribute("aria-disabled") === "true") return;
+      turnTo(goal + Number(b.dataset.turn) * 15, 450);
+    });
+  }
+  if (matchMedia("(hover: none)").matches) $("hint").textContent = "Tap a machine to see what it brings. Drag the grass to turn it.";
+
+  labels.hidden = false;
+  turnRow.hidden = false;
+  new ResizeObserver(layout).observe(stage);
+  document.fonts?.ready.then(layout);
+
+  // A slow turn into place on load, unless the reader asked for less motion.
+  markEnds();
+  if (!reduce.matches) { setSpin(-32); turnTo(-12, 1600); }
+
+  // The cost band.
+  const minutes = $("minutes");
+  const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const count = new Intl.NumberFormat("en-US");
+  const bill = () => {
+    const n = Number(minutes.value);
+    $("minutes-out").textContent = count.format(n);
+    $("cost-gh").textContent = money.format(n * 0.062);
+  };
+  minutes.addEventListener("input", bill);
+
+  // Copy buttons, shown only with script. If the clipboard refuses, the command is selected for the keyboard.
+  const copyKey = /Mac|iPhone|iPad/.test(navigator.userAgentData?.platform ?? navigator.platform) ? "⌘C" : "Ctrl+C";
+  for (const b of document.querySelectorAll("[data-copy]")) {
+    b.hidden = false;
+    b.addEventListener("click", async () => {
+      const text = $(b.dataset.copy).textContent;
+      let said;
+      try {
+        await navigator.clipboard.writeText(text);
+        b.textContent = said = "Copied";
+      } catch {
+        getSelection().selectAllChildren($(b.dataset.copy));
+        b.textContent = `Press ${copyKey}`;
+        said = `Selected. Press ${copyKey} to copy`;
+      }
+      $("copy-status").textContent = said;
+      setTimeout(() => { b.textContent = "Copy"; $("copy-status").textContent = ""; }, 1800);
+    });
+  }
+
+  show(chosen);
+  total();
+  bill();
 })();
 </script>
 </body>

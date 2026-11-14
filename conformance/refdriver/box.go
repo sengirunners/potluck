@@ -103,6 +103,9 @@ func (d *drv) exec(req request) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	argv = d.ownTmp(r, argv) // hosttmp.go
+	if d.is("box-serve-stops") {
+		argv = d.serveStops(argv) // servestops.go
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	tmp := d.boxTmp(r) // volumes.go

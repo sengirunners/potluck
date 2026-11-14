@@ -519,3 +519,51 @@ func TestPushRefusesHomeAsTheCheckout(t *testing.T) {
 		t.Errorf("HOME after refused pushes: %q", x.Stdout)
 	}
 }
+
+// A push's finish runs the shelf's link step in the checkout, as the
+// driver's own checkout does: the shelf's helper, from the shelf, in dest,
+// with Go naming off. Its output does not reach the finish's answer and its
+// failure does not fail the push. A box without the helper skips it.
+func TestPushRunsTheShelfLinkStep(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	shelf := t.TempDir()
+	helper := filepath.Join(shelf, "bin", "potluck-deps")
+	write(t, helper, "#!/bin/sh\nprintf '%s|%s|%s\\n' \"$PWD\" \"$*\" \"$POTLUCK_DEPS_GO\" >>\"$HOME/linked\"\necho noise\necho more noise >&2\nexit 3\n")
+	if err := os.Chmod(helper, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	withShelf := func(dir string) boxpush.ExecFunc {
+		return func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
+			if len(req.Argv) == 10 { // finish: sh -c script sh key n sum dest shallow head
+				req.Argv = append([]string{"env", "POTLUCK_SHELF=" + dir}, req.Argv...)
+			}
+			return computeclient.ExecRunTarget(ctx, c, target, id, req)
+		}
+	}
+	b, err := boxpush.Make(ctx, boxpush.MakeOptions{Dir: repo(t, 1<<10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	res, err := boxpush.Push(ctx, withShelf(shelf), b, boxpush.PushOptions{})
+	if err != nil || !strings.HasSuffix(res.Dest, "/checkout") || strings.Contains(res.Dest, "noise") {
+		t.Fatalf("push with a failing, noisy helper: %+v %v", res, err)
+	}
+	x := boxSh(t, c, target, id, `cat linked`)
+	if got, want := strings.TrimSpace(x.Stdout), res.Dest+"|link "+res.Dest+"|off"; got != want {
+		t.Fatalf("link step ran as %q, want %q", got, want)
+	}
+	// Pushed again with no helper where the shelf would be: the push goes on.
+	b2, err := boxpush.Make(ctx, boxpush.MakeOptions{Dir: repo(t, 1<<10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b2.Close()
+	if _, err := boxpush.Push(ctx, withShelf(t.TempDir()), b2, boxpush.PushOptions{Dest: "other"}); err != nil {
+		t.Fatalf("push without a shelf: %v", err)
+	}
+	if x := boxSh(t, c, target, id, `wc -l < linked`); strings.TrimSpace(x.Stdout) != "1" {
+		t.Errorf("the link step ran without a helper: %q", x.Stdout)
+	}
+}

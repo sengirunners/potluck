@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/protocol"
+	"github.com/sengirunners/potluck/vmhost/shelfhelper"
 )
 
 // Boxes' wants (shelf_fill=boxes). The in-box helper (shelfhelper) appends
@@ -85,16 +86,15 @@ func (c config) shelfFromBoxes() bool { return c.Shelf.MaxGB > 0 && c.Shelf.Fill
 
 // shelfLink runs the in-box helper's link step in the checkout, as the
 // box's user, when the layer has a shelf; it does nothing in a box without
-// the shelf mounted. Its failure is the run log's, never the box's. It
-// names no Go module (POTLUCK_DEPS_GO=off): it runs before the run's script,
-// which may set GOPRIVATE itself, so it cannot know which modules are
-// private. A run that calls the helper names its own.
+// the shelf mounted. Its failure is the run log's, never the box's. The step
+// itself (shelfhelper.LinkSh) names no Go module: a run that calls the
+// helper names its own.
 func shelfLink(vm vmLayer, name, dir string, log io.Writer) {
 	if _, ok := vm.(shelfer); !ok {
 		return
 	}
 	const prog = `base=$2
-` + baseInHome + `h=$1/` + shelfHelperPath + `; [ -x "$h" ] || exit 0; POTLUCK_DEPS_GO=off exec "$h" link "$base"`
+` + baseInHome + shelfhelper.LinkSh + `potluck_shelf_link "$1" "$base"`
 	ctx, cancel := context.WithTimeout(context.Background(), shelfLinkFor)
 	defer cancel()
 	out := &capped{max: 4 << 10}
@@ -401,6 +401,8 @@ func shelfFiller(stateDir string, stdin io.Reader, log io.Writer) int {
 		return 1
 	}
 	err = tryFlocked(shelfFillLock(stateDir), func() error {
+		// The helper first: boxes ask for anything only through it (shelf_helper.go).
+		ensureShelfHelper(cfg, sh, log)
 		if cfg.Shelf.MaxGB > 0 { // the keep time, though nothing was published (shelf_evict.go)
 			logShelfEvict(cfg, sh, log)
 		}
@@ -429,7 +431,9 @@ func shelfFiller(stateDir string, stdin io.Reader, log io.Writer) int {
 // starts the filler when the queue has unread lines and none runs; with any
 // other setting it drops the queue, so nothing a box asked for is fetched.
 // With any setting it starts the filler, which evicts as it starts, every
-// shelfEvictEvery while shelf_max_gb is above 0.
+// shelfEvictEvery while shelf_max_gb is above 0, and which publishes the
+// helper as it starts when this state directory has not published the
+// current one (shelf_helper.go).
 func (d *drv) sweepShelfQueue() {
 	boxes := d.cfg.shelfFromBoxes()
 	if !boxes {
@@ -437,12 +441,15 @@ func (d *drv) sweepShelfQueue() {
 			_ = flocked(shelfQueueLock(d.cfg.StateDir), func() error { return os.RemoveAll(shelfQueueDir(d.cfg.StateDir)) })
 		}
 	}
-	evict := shelfEvictDue(d.cfg)
-	if !evict && !(boxes && shelfPending(d.cfg.StateDir)) || flockHeld(shelfFillLock(d.cfg.StateDir)) {
+	evict, helper := shelfEvictDue(d.cfg), shelfHelperDue(d.cfg)
+	if !evict && !helper && !(boxes && shelfPending(d.cfg.StateDir)) || flockHeld(shelfFillLock(d.cfg.StateDir)) {
 		return
 	}
 	if evict {
 		stampShelfEvict(d.cfg.StateDir)
+	}
+	if helper {
+		stampShelfHelperTry(d.cfg.StateDir)
 	}
 	d.spawnShelfFiller()
 }

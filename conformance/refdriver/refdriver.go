@@ -53,6 +53,8 @@ func Main() (code int, handled bool) {
 			return 2, true
 		}
 		return supervise(os.Args[2], os.Args[3], os.Args[4]), true
+	case flagListen:
+		return listenUntil(os.Args[2], os.Args[3]), true // servestops.go
 	case flagHold:
 		if len(os.Args) < 6 {
 			return 2, true

@@ -42,6 +42,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/vmhost/shelfhelper"
 )
 
 // ExecFunc runs one exec in the box (client.ExecRunTarget for one handle).
@@ -134,11 +135,17 @@ own() {
   if [ -d "$dest/.git" ] && [ ! -L "$dest/.git" ]; then mv "$dest/.git" "$g.replaced.$$" || rm -rf "$dest/.git"; else rm -rf "$dest/.git"; fi
   printf 'gitdir: %s\n' "$g" >"$dest/.git"
 }
+# The package shelf's link step (docs/shelf.md), as the driver's own checkout
+# runs it: in a box with the shelf mounted, the shelf's helper links the
+# tarballs dest's lockfile names into the box's own npm cache and notes them
+# in the box's wants. A box without the shelf has no helper and skips it. Its
+# output is dropped and its failure never fails the push.
+` + shelfhelper.LinkSh + `shelflink() { potluck_shelf_link "${POTLUCK_SHELF:-` + shelfhelper.BoxDir + `}" "$dest" >/dev/null 2>&1 || :; }
 # Done already (this call's answer was lost and it is sent again): the
 # chunks are gone and the push's own git directory is at the commit.
 if [ ! -e "$d/c.0" ] && [ -d "$dest" ]; then
   mkdir -p "$HOME/.potluck/push"; gdir
-  if [ "$(git --git-dir="$g" rev-parse -q --verify HEAD 2>/dev/null)" = "$6" ]; then own; printf '%s\n' "$dest"; exit 0; fi
+  if [ "$(git --git-dir="$g" rev-parse -q --verify HEAD 2>/dev/null)" = "$6" ]; then own; shelflink; printf '%s\n' "$dest"; exit 0; fi
 fi
 mkdir -p "$d"
 b="$d/bundle"
@@ -166,6 +173,7 @@ git -c advice.detachedHead=false checkout -q -f --detach "$6"
 [ -f "$g/potluck-cleaned" ] || [ -f "$g/zm-cleaned" ] || { git clean -ffdq -e node_modules; : >"$g/potluck-cleaned"; }
 [ "$(git rev-parse HEAD)" = "$6" ] || { echo "HEAD is not $6 after the checkout" >&2; exit 65; }
 rm -rf "$d"
+shelflink
 printf '%s\n' "$dest"
 `
 

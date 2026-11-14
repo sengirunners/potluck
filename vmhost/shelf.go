@@ -26,7 +26,7 @@ import (
 //	goproxy/<module>/@v/<version>.{zip,ziphash,mod,info}  a GOPROXY tree (paths escaped as Go escapes them), files 0444
 //	npm/content-v2/sha512/<aa>/<bb>/<rest of hex>    one file per tarball, mode 0444, named by its sha512
 //	npm/.tmp/                                        the publisher's staging, same filesystem, root 0700
-//	bin/potluck-deps                                 the in-box helper, written by the publisher
+//	bin/potluck-deps                                 the in-box helper, written by the publisher (shelf_helper.go)
 //
 // A blob's path is its hash, so presence means complete: there is no index
 // and no marker, and nothing in the volume says who asked for what. In the driver only
@@ -163,6 +163,9 @@ type shelfer interface {
 	// relative to the shelf) that are older than shelfTouchAge(keepS),
 	// through the publisher's container.
 	TouchShelfFiles(image string, rels []string, keepS int) (int, error)
+	// ShelfHelperSum reads the sha512 (hex) of the helper on the shelf,
+	// read-only: "" when there is none (shelf_helper.go).
+	ShelfHelperSum(image string) (string, error)
 	// FetchGo runs the Go fetch container (shelf_go.go): lines in, a tar of
 	// module cache files out.
 	FetchGo(ctx context.Context, image string, lines io.Reader, out io.Writer) error
