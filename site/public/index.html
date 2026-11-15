@@ -71,6 +71,10 @@ svg.defs{position:absolute;width:0;height:0;overflow:hidden}
 .install .row{display:flex;gap:12px;align-items:center}
 /* One line that scrolls sideways, so the command never breaks mid-word. */
 .install .line{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;padding:4px 0 8px;scrollbar-width:thin}
+/* While more of it is out of sight, its right edge fades (macOS hides the scrollbar). Not while focused: the mask
+   would hide the focus ring. */
+.install .line.more{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 44px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 44px),transparent)}
+.install .line.more:focus-visible{-webkit-mask-image:none;mask-image:none}
 .install code{color:var(--ink);line-height:1.5}
 .install .line::before{content:"$ ";font-family:var(--mono);font-size:14px;color:var(--green);font-weight:700}
 .copy{font:inherit;font-size:15px;font-weight:600;background:#F2EEE3;border:1px solid var(--line);color:var(--ink);border-radius:8px;
@@ -128,6 +132,7 @@ svg.defs{position:absolute;width:0;height:0;overflow:hidden}
   border:.45cqw solid #FFFBEF;transform:translateZ(.12cqw);opacity:0;transition:opacity .2s}
 .m.sel .ring{opacity:.95}
 .pin{position:absolute;left:-1px;top:-1px;width:2px;height:2px}
+.corner{position:absolute;width:0;height:0}
 /* A cut-out: turns back against the lawn's spin and tilt, so it always faces you. */
 .bb{left:0;top:0;width:0;height:0;transform-style:preserve-3d;transform:translateZ(.15cqw) rotateZ(calc(var(--spin) * -1)) rotateX(calc(var(--tilt) * -1))}
 .bb > *{position:absolute;bottom:0;left:0;transform:translateX(-50%)}
@@ -218,8 +223,9 @@ svg.defs{position:absolute;width:0;height:0;overflow:hidden}
 .dish .now b{font-weight:600}
 .dish .toggle{margin-top:9px;width:100%;justify-content:center;font-size:15px;padding:9px 14px}
 .dish .toggle[hidden]{display:none}
-.pool{margin-top:7px;font-size:14.5px;color:var(--soft)}
-.pool b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+/* The numbers stay on one line: beside the words when they fit, under them when not. */
+.pool{margin-top:7px;font-size:14.5px;color:var(--soft);display:flex;flex-wrap:wrap;column-gap:.3em}
+.pool b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 /* Sections */
 section.block{padding-top:84px;padding-bottom:16px}
@@ -366,7 +372,6 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
 @media (prefers-reduced-motion:reduce){
   .pulse,.scroll,.zz,.dot.busy{animation:none}
   .leo,.ring{transition:none}
-  html{scroll-behavior:auto}
 }
 </style>
 </head>
@@ -495,7 +500,8 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
           <path d="M22 30c6-6 20-9 38-9s32 3 38 9z" fill="#FFF3E2"/><path d="M30 28l14-6M52 25l14-4M74 26l12-3" stroke="#C8402F" stroke-width="4" opacity=".6"/>
         </svg></div></div></div>
 
-        <!-- The machines people brought. Each .pin marks where its label points: the top of the machine. -->
+        <!-- The machines people brought. Each .pin marks where its label points: the top of the machine, or partway up
+             the laptop's lid (its top edge sits against the server at some turns). -->
         <div class="m tower" data-id="tower" style="--x:27%;--y:31%;--w:7.4cqw;--d:13cqw;--h:19cqw;--rot:6deg;--sw:20cqw;--sl:6cqw">
           <div class="cast"></div><div class="ring"></div>
           <div class="body">
@@ -560,7 +566,7 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
               </div>
               <div class="back"></div>
             </div>
-            <div class="pin" data-pin="laptop" style="transform:translateY(-8.8cqw) translateZ(12.3cqw)"></div>
+            <div class="pin" data-pin="laptop" style="transform:translateY(-7.7cqw) translateZ(7.8cqw)"></div>
           </div>
         </div>
         <div class="m" style="--x:61%;--y:80%;--sw:11cqw;--sl:.8cqw" aria-hidden="true">
@@ -636,7 +642,7 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
       </dl>
       <p class="now" id="dish-now"><b>Right now:</b> a coding agent building the iOS app, in a fresh macOS VM.</p>
       <button class="btn line toggle" id="dish-toggle" type="button" hidden></button>
-      <p class="pool">Shared in the pool now: <b id="pool-total">6 machines, 29 cores, 98 GB</b></p>
+      <p class="pool"><span>Shared in the pool now:</span> <b id="pool-total">6 machines, 29 cores, 98 GB</b></p>
     </aside>
     <span class="vh" role="status" id="pick-status"></span>
     </div>
@@ -697,7 +703,6 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
         <g style="--shirt:#C8402F;--skin:#F0C29E;--hair:#8A5A2B;--pants:#3E5C8A"><use href="#p-carry" x="398" y="60" width="58" height="132"/></g>
         <g transform="translate(410 100)"><path d="M0 7 7 2h22l-7 5z" fill="#3A3E47" stroke="#111317"/><path d="M0 7h22v36H0z" fill="#2A2D34" stroke="#111317"/><path d="M22 7l7-5v36l-7 5z" fill="#0E1117" stroke="#111317"/><circle cx="25.5" cy="17" r="2.6" fill="#FF5DD8"/><circle cx="25.5" cy="27" r="2.6" fill="#4FD2FF"/><path d="M3 10v30" stroke="#FF6FD8" stroke-width="1.2"/><circle cx="11" cy="13" r="1.8" fill="#3FC255"/></g>
         <g transform="translate(432 40)"><circle r="12" fill="#2F6B34"/><path d="M-5 0l3.5 3.5L5-4" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></g>
-        <path d="M466 176c10-2 18-2 28 0M462 188c12-2 20-2 32 0" stroke="#4B5648" stroke-width="1.3" stroke-dasharray="3 4" fill="none"/>
       </svg></figure>
       <div>
         <p class="step">Step 2</p>
@@ -886,7 +891,7 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
     $("dish-who").textContent = `Brought by ${m.who}`;
     $("dish-name").textContent = m.name;
     $("dish-sub").textContent = back ? "Leo is back and using it" : m.sub;
-    $("dish-brings").textContent = `${m.cores * SHARE} of ${m.cores} cores, ${m.gb * SHARE} of ${m.gb} GB`;
+    $("dish-brings").textContent = back ? "Nothing while Leo uses it" : `${m.cores * SHARE} of ${m.cores} cores, ${m.gb * SHARE} of ${m.gb} GB`;
     $("dish-lent").textContent = m.lent;
     $("dish-runs").textContent = m.runs;
     $("dish-now").innerHTML = back
@@ -910,20 +915,91 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
 
   // Labels sit in a flat layer over the scene. Each time the scene moves, find where every machine lands on screen,
   // then place labels front to back, each at the cheapest spot: covering another label, the card or the arrows costs
-  // most, a machine's body (its own included) less, a person or the food a little, and every pixel from its pin a
-  // little more, and sitting much nearer another machine's pin than its own costs a lot. Spots above the pin are tried first.
+  // most; covering a machine's body (its own included) or a leader line, drawing its own leader through another
+  // machine, another label or across another leader, or sitting much nearer another machine's pin than its own each
+  // cost as much as a body; a person or the food a little, and every pixel from its pin a little more. Spots above
+  // the pin are tried first.
   const pins = new Map([...scene.querySelectorAll("[data-pin]")].map((p) => [p.dataset.pin, p]));
-  // A machine's body is its faces (or its cut-out): one box per face fits a turned box closer than one box round it.
-  const bodies = machines.map((m) => [...m.querySelectorAll(".f, .lid > *, .cut")]);
   const props = [...scene.querySelectorAll(".m:not([data-id]) .cut")];
   const area = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
   const grow = (r, p) => ({ x: r.x - p, y: r.y - p, w: r.w + 2 * p, h: r.h + 2 * p });
+  // A machine's shape on screen, as convex parts: its box (the hull of the corners of its front and back faces) and
+  // its lid, read from zero-size marks in those corners. A cut-out's shape is its box.
+  const mark = (face) => ["0% 0%", "100% 0%", "100% 100%", "0% 100%"].map((at) => {
+    const i = document.createElement("i");
+    i.className = "corner";
+    [i.style.left, i.style.top] = at.split(" ");
+    face.append(i);
+    return i;
+  });
+  const marks = machines.map((m) => [[...m.querySelectorAll(".body > .fr, .body > .bk")].flatMap(mark), ...[...m.querySelectorAll(".lid .scr")].map(mark)]
+    .filter((group) => group.length));
+  const bounds = (pts) => {
+    const x = Math.min(...pts.map((p) => p[0])), y = Math.min(...pts.map((p) => p[1]));
+    return { x, y, w: Math.max(...pts.map((p) => p[0])) - x, h: Math.max(...pts.map((p) => p[1])) - y };
+  };
+  const corners = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+  // A convex polygon with its bounding box, which lets most tests stop early.
+  const polygon = (pts) => ({ pts, box: bounds(pts) }), rectangle = (r) => ({ pts: corners(r), box: r });
+  const hull = (pts) => {
+    pts = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const turn = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const half = (ps) => {
+      const out = [];
+      for (const p of ps) { while (out.length > 1 && turn(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop(); out.push(p); }
+      return out.slice(0, -1);
+    };
+    return half(pts).concat(half(pts.reverse()));
+  };
+  // The part of the segment [x1, y1, x2, y2] inside a convex polygon, as [t0, t1] along it (Cyrus-Beck clipping),
+  // or null.
+  const clip = ([x1, y1, x2, y2], { pts: poly, box }) => {
+    if (Math.max(x1, x2) < box.x || Math.min(x1, x2) > box.x + box.w || Math.max(y1, y2) < box.y || Math.min(y1, y2) > box.y + box.h) return null;
+    let t0 = 0, t1 = 1, wind = 0;
+    poly.forEach(([ax, ay], i) => { const [bx, by] = poly[(i + 1) % poly.length]; wind += ax * by - bx * ay; });
+    for (let i = 0; i < poly.length; i++) {
+      const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length];
+      const f = (x, y) => Math.sign(wind) * ((bx - ax) * (y - ay) - (by - ay) * (x - ax));
+      const f1 = f(x1, y1), f2 = f(x2, y2);
+      if (f1 < 0 && f2 < 0) return null;
+      if (f1 < 0) t0 = Math.max(t0, f1 / (f1 - f2));
+      else if (f2 < 0) t1 = Math.min(t1, f1 / (f1 - f2));
+      if (t0 >= t1) return null;
+    }
+    return [t0, t1];
+  };
+  // The parts of the segment inside any of the polygons, merged, and their length in pixels.
+  const spans = (seg, polys) => {
+    const out = [];
+    for (const t of polys.map((p) => clip(seg, p)).filter(Boolean).sort((a, b) => a[0] - b[0])) {
+      const last = out[out.length - 1];
+      if (last && t[0] <= last[1]) last[1] = Math.max(last[1], t[1]); else out.push(t);
+    }
+    return out;
+  };
+  const length = (seg, ts) => ts.reduce((n, t) => n + t[1] - t[0], 0) * Math.hypot(seg[2] - seg[0], seg[3] - seg[1]);
+  // How much of box r a convex polygon covers: the polygon clipped to the box (Sutherland-Hodgman), then its area.
+  const cover = (r, { pts: poly, box }) => {
+    if (!area(r, box)) return 0;
+    for (const inside of [(p) => p[0] - r.x, (p) => r.x + r.w - p[0], (p) => p[1] - r.y, (p) => r.y + r.h - p[1]]) {
+      const out = [];
+      poly.forEach((p, i) => {
+        const q = poly[(i + 1) % poly.length], a = inside(p), b = inside(q);
+        if (a >= 0) out.push(p);
+        if ((a >= 0) !== (b >= 0)) { const t = a / (a - b); out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]); }
+      });
+      poly = out;
+      if (!poly.length) return 0;
+    }
+    return Math.abs(poly.reduce((n, p, i) => { const q = poly[(i + 1) % poly.length]; return n + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
+  };
+  // Whether two segments [x1, y1, x2, y2] cross (touching ends do not count).
+  const crosses = (a, b) => {
+    const side = (s, x, y) => Math.sign((s[2] - s[0]) * (y - s[1]) - (s[3] - s[1]) * (x - s[0]));
+    return side(a, b[0], b[1]) * side(a, b[2], b[3]) < 0 && side(b, a[0], a[1]) * side(b, a[2], a[3]) < 0;
+  };
   const nearest = (r, x, y) => ({ x: Math.max(r.x, Math.min(r.x + r.w, x)), y: Math.max(r.y, Math.min(r.y + r.h, y)) });
   const rel = (el, s) => { const r = el.getBoundingClientRect(); return { x: r.left - s.left, y: r.top - s.top, w: r.width, h: r.height }; };
-  const union = (rs) => {
-    const x = Math.min(...rs.map((r) => r.x)), y = Math.min(...rs.map((r) => r.y));
-    return { x, y, w: Math.max(...rs.map((r) => r.x + r.w)) - x, h: Math.max(...rs.map((r) => r.y + r.h)) - y };
-  };
 
   let queued = false;
   function layout() {
@@ -934,55 +1010,104 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
   function place() {
     const s = stage.getBoundingClientRect();
     const sceneBox = rel(scene, s), cardBox = rel(card, s), turnBox = rel(turnRow, s);
-    const faces = bodies.map((els) => els.map((el) => rel(el, s)).filter((r) => r.w > 0 && r.h > 0));
     const propBoxes = props.map((el) => rel(el, s));
+    const shapes = machines.map((m, k) => marks[k].length
+      ? marks[k].map((group) => polygon(hull(group.map((i) => { const r = rel(i, s); return [r.x, r.y]; }))))
+      : [rectangle(rel(m.querySelector(".cut"), s))]);
     const items = tags.map((el) => {
       const id = el.dataset.for, p = pins.get(id).getBoundingClientRect();
-      const body = union(faces[machines.findIndex((m) => m.dataset.id === id)]);
-      return { el, id, ax: p.left + p.width / 2 - s.left, ay: p.top - s.top, body };
+      const k = machines.findIndex((m) => m.dataset.id === id);
+      return { el, id, ax: p.left + p.width / 2 - s.left, ay: p.top - s.top, body: bounds(shapes[k].flatMap((q) => q.pts)), shape: shapes[k] };
     });
     items.sort((a, b) => (b.body.y + b.body.h) - (a.body.y + a.body.h));
     // Leo's chip goes last: it takes whatever room the machines' labels leave. Phones hide it (the card is right below).
     const sb = rel(seat, s);
     if (chip.offsetWidth) items.push({ el: chip, ax: sb.x + sb.w / 2, ay: sb.y + sb.h * .3, body: sb });
-    for (const it of items) { it.w = it.el.offsetWidth; it.h = it.el.offsetHeight; }
+    for (const it of items) ({ width: it.w, height: it.h } = it.el.getBoundingClientRect());
 
-    const hard = [cardBox, turnBox];
-    const machineFaces = faces.flat();
-    const minX = sceneBox.x + 2, maxX = sceneBox.x + sceneBox.w - 2, minY = sceneBox.y + 2, maxY = sceneBox.y + sceneBox.h - 2;
+    const parts = shapes.flat();
+    // Labels keep 8px in from the scene's edge: on a phone the scene runs to the screen's edge.
+    const minX = sceneBox.x + 8, maxX = sceneBox.x + sceneBox.w - 8, minY = sceneBox.y + 8, maxY = sceneBox.y + sceneBox.h - 8;
+    const leaderOf = (it, box) => {
+      const e = nearest(box, it.ax, it.ay);
+      return it.el !== chip && Math.hypot(e.x - it.ax, e.y - it.ay) > 6 ? [e.x, e.y, it.ax, it.ay] : null;
+    };
+    // Place labels in this order, each at its cheapest spot given the ones before it.
+    const solve = (order) => {
+      const hard = [cardBox, turnBox], placed = [], lines = [], spots = new Map();
+      let total = 0;
+      for (const it of order) {
+        const { ax, ay, w, h, body, shape } = it;
+        const g = 8, row = h + 6;
+        const top = Math.min(ay, body.y) - g - h;
+        const xs = [0, -1, 1, -2, 2, -3, 3].map((k) => ax - w / 2 + k * w / 3).concat(body.x - w - g, body.x + body.w + g);
+        const ys = [top, top - row, top - 2 * row, top - 3 * row, ay - h / 2, body.y + body.h + g];
+        let best = null, bestCost = Infinity;
+        const tryAt = (cx, cy) => {
+          const r = { x: Math.round(Math.max(minX, Math.min(maxX - w, cx))), y: Math.round(Math.max(minY, Math.min(maxY - h, cy))), w, h };
+          const pad = grow(r, 3), edge = grow(r, 2);
+          // Cheap terms first; a spot stops counting once it costs more than the best so far.
+          let cost = 0;
+          for (const q of hard) if (area(pad, q) > 0) cost += 10000 + area(pad, q);
+          const e = nearest(r, ax, ay), d = Math.hypot(e.x - ax, e.y - ay);
+          cost += 2 * d + (r.y > ay ? 60 : 0);
+          for (const q of propBoxes) cost += area(r, q) * .1;
+          // A label much nearer another machine's pin than its own reads as that machine's.
+          for (const o of items) if (o !== it && o.id) { const n = nearest(r, o.ax, o.ay); if (Math.hypot(n.x - o.ax, n.y - o.ay) < d * .6) { cost += 1000; break; } }
+          if (cost >= bestCost) return;
+          // Its leader must not run through another machine or label, or cross a leader; nor may the label sit on
+          // a leader already drawn.
+          for (const l of lines) if (clip(l, rectangle(edge))) cost += 1000;
+          const seg = leaderOf(it, r);
+          if (seg) {
+            for (const q of placed) if (length(seg, spans(seg, [rectangle(q)])) > 2) cost += 1000;
+            for (const l of lines) if (crosses(seg, l)) cost += 1000;
+            if (cost >= bestCost) return;
+            for (const o of shapes) { const t = o === shape ? 0 : length(seg, spans(seg, o)); if (t > 2) cost += 1000 + 10 * t; }
+          }
+          if (cost >= bestCost) return;
+          for (const q of parts) { const a = cover(edge, q); if (a > 0) { cost += 1000 + a; if (cost >= bestCost) return; } }
+          best = r; bestCost = cost;
+        };
+        for (const cy of ys) for (const cx of xs) tryAt(cx, cy);
+        // Nothing clear and clearly its own nearby: search a wider grid round the pin.
+        if (bestCost >= 400) {
+          for (let j = -6; j <= 8; j++) for (let k = -8; k <= 8; k++) tryAt(ax - w / 2 + k * w / 3, ay - h / 2 + j * row / 2);
+        }
+        // Still covering a machine or crossing one: anywhere in the scene, with a longer leader, is better. Search it
+        // coarsely, then finely round the best spot.
+        if (bestCost >= 1000) {
+          for (let y = minY; y <= maxY - h; y += 24) for (let x = minX; x <= maxX - w; x += 24) tryAt(x, y);
+          const b = best;
+          for (let dy = -18; dy <= 18; dy += 6) for (let dx = -18; dx <= 18; dx += 6) tryAt(b.x + dx, b.y + dy);
+        }
+        hard.push(best);
+        placed.push(best);
+        const seg = leaderOf(it, best);
+        if (seg) lines.push(seg);
+        spots.set(it, { box: best, cost: bestCost });
+        total += bestCost;
+      }
+      return { order, spots, total };
+    };
+    // Front to back first. If a label is left covering a machine or with its leader through one, try again with
+    // that label first, a few times, and keep the cheapest layout. Leo's chip always goes last.
+    let sol = solve(items);
+    for (let n = 0; n < 3; n++) {
+      const worst = sol.order.filter((it) => it.el !== chip).reduce((a, b) => (sol.spots.get(b).cost > sol.spots.get(a).cost ? b : a));
+      if (sol.spots.get(worst).cost < 1000) break;
+      const next = solve([worst, ...sol.order.filter((it) => it !== worst)]);
+      if (next.total >= sol.total) break;
+      sol = next;
+    }
     const stems = [];
     items.forEach((it, i) => {
-      const { ax, ay, w, h, body } = it;
-      const g = 8, row = h + 6;
-      const top = Math.min(ay, body.y) - g - h;
-      const xs = [0, -1, 1, -2, 2, -3, 3].map((k) => ax - w / 2 + k * w / 3).concat(body.x - w - g, body.x + body.w + g);
-      const ys = [top, top - row, top - 2 * row, top - 3 * row, ay - h / 2, body.y + body.h + g];
-      let best = null, bestCost = Infinity;
-      const tryAt = (cx, cy) => {
-        const r = { x: Math.round(Math.max(minX, Math.min(maxX - w, cx))), y: Math.round(Math.max(minY, Math.min(maxY - h, cy))), w, h };
-        const pad = grow(r, 3), edge = grow(r, 1);
-        let cost = 0;
-        for (const q of hard) if (area(pad, q) > 0) cost += 10000 + area(pad, q);
-        for (const q of machineFaces) if (area(edge, q) > 0) cost += 1000 + area(edge, q);
-        for (const q of propBoxes) cost += area(r, q) * .1;
-        const e = nearest(r, ax, ay), d = Math.hypot(e.x - ax, e.y - ay);
-        cost += 2 * d + (r.y > ay ? 60 : 0);
-        // A label much nearer another machine's pin than its own reads as that machine's.
-        for (const o of items) if (o !== it && o.id) { const n = nearest(r, o.ax, o.ay); if (Math.hypot(n.x - o.ax, n.y - o.ay) < d * .6) { cost += 400; break; } }
-        if (cost < bestCost) { best = r; bestCost = cost; }
-      };
-      for (const cy of ys) for (const cx of xs) tryAt(cx, cy);
-      // Nothing clear and clearly its own nearby: search a wider grid round the pin.
-      if (bestCost >= 400) {
-        for (let j = -6; j <= 4; j++) for (let k = -7; k <= 7; k++) tryAt(ax - w / 2 + k * w / 3, ay - h / 2 + j * row / 2);
-      }
-      hard.push(best);
-      it.el.style.transform = `translate(${best.x}px,${best.y}px)`;
+      const { box } = sol.spots.get(it);
+      it.box = box;
+      it.el.style.transform = `translate(${box.x}px,${box.y}px)`;
       it.el.style.zIndex = String(items.length - i);
-      it.box = best;
-      if (it.el === chip) return;
-      const end = nearest(best, ax, ay);
-      if (Math.hypot(end.x - ax, end.y - ay) > 6) stems.push(`<path class="stem" d="M${end.x} ${end.y}L${ax} ${ay}"/><circle cx="${ax}" cy="${ay}" r="2" fill="#3A4437"/>`);
+      const seg = leaderOf(it, box);
+      if (seg) stems.push(`<path class="stem" d="M${seg[0]} ${seg[1]}L${seg[2]} ${seg[3]}"/><circle cx="${seg[2]}" cy="${seg[3]}" r="2" fill="#3A4437"/>`);
     });
     // The card's notch points up at the chosen machine's label.
     const sel = items.find((it) => it.id === chosen);
@@ -1075,6 +1200,13 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
     $("cost-gh").textContent = money.format(n * 0.062);
   };
   minutes.addEventListener("input", bill);
+
+  // The install line fades at its right edge while more of it is out of sight.
+  const line = document.querySelector(".install .line");
+  const fade = () => line.classList.toggle("more", line.scrollLeft + line.clientWidth < line.scrollWidth - 1);
+  line.addEventListener("scroll", fade, { passive: true });
+  new ResizeObserver(fade).observe(line);
+  document.fonts?.ready.then(fade);
 
   // Copy buttons, shown only with script. If the clipboard refuses, the command is selected for the keyboard.
   const copyKey = /Mac|iPhone|iPad/.test(navigator.userAgentData?.platform ?? navigator.platform) ? "⌘C" : "Ctrl+C";

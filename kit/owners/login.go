@@ -35,6 +35,7 @@ const (
 	PurposeLink = "link" // link the starting identity to the approving account
 	PurposeJoin = "join" // admit the starting tailnet node to a project (join.go)
 	PurposeBind = "bind" // bind @owner/name to a project (names.go)
+	PurposeKey  = "key"  // bind a signing key to the starting identity (keylogin.go)
 )
 
 // login is one login in flight.
@@ -61,9 +62,14 @@ type login struct {
 	bindOwnerAcc                     Account
 	bindMember                       bool
 	bindErr                          error
-	expires                          time.Time // the device code's (a reservation's until GitHub answers)
+	key                              *core.KeyStart // key: the key to bind, and where from
+	keySeq                           uint64         // key: start order, for latest wins
+	started                          bool           // GitHub gave it a code (begin)
+	expires                          time.Time      // the device code's (a reservation's until GitHub answers)
 	done                             chan struct{}
-	act                              sync.Mutex // one collector at a time
+	ctx                              context.Context    // ends when the login is dropped or replaced
+	stop                             context.CancelFunc // ends ctx
+	act                              sync.Mutex         // one collector at a time
 
 	// Set once, before done closes: who GitHub says approved, which of the
 	// join's candidate orgs it is an active member of, or why not.
@@ -83,17 +89,25 @@ func hashSecret(s string) [32]byte { return sha256.Sum256([]byte(s)) }
 // sweep drops logins past their code's expiry or uncollected past Collect.
 // Called with s.mu held.
 func (s *Service) sweep(now time.Time) {
-	for id, l := range s.logins {
+	for _, l := range s.logins {
 		select {
 		case <-l.done:
 			if l.collected || now.Sub(l.finished) > s.Collect {
-				delete(s.logins, id)
+				s.drop(l)
 			}
 		default:
 			if now.After(l.expires.Add(time.Minute)) {
-				delete(s.logins, id)
+				s.drop(l)
 			}
 		}
+	}
+}
+
+// drop forgets l and ends its wait on GitHub. Called with s.mu held.
+func (s *Service) drop(l *login) {
+	delete(s.logins, l.id)
+	if l.stop != nil {
+		l.stop()
 	}
 }
 
@@ -102,12 +116,26 @@ func (s *Service) handleStart(r *http.Request) (any, error) {
 	if err := api.DecodeJSON(r, &req); err != nil {
 		return nil, err
 	}
-	return s.StartLogin(r.Context(), core.SubjectOf(r.Context()), req)
+	// A key login names its project on the route too, which a team
+	// replica routes by; the body may repeat it, never contradict it.
+	if q := r.URL.Query().Get("project"); q != "" && req.Purpose == PurposeKey {
+		if req.Project != "" && req.Project != q {
+			return nil, api.Errorf(api.CodeBadRequest, "the body names project %q and the route %q", req.Project, q)
+		}
+		req.Project = q
+	}
+	return s.startLogin(r.Context(), core.SubjectOf(r.Context()), r.Header, req)
 }
 
 // StartLogin begins a login for sub. The answer carries the poll secret, the
 // only copy: the authority keeps its hash.
 func (s *Service) StartLogin(ctx context.Context, sub *authz.Subject, req api.GitHubLoginRequest) (api.GitHubLoginStart, error) {
+	return s.startLogin(ctx, sub, nil, req)
+}
+
+// startLogin is StartLogin with the request's headers (nil when the start
+// did not come over HTTP), which a key login's check reads.
+func (s *Service) startLogin(ctx context.Context, sub *authz.Subject, hdr http.Header, req api.GitHubLoginRequest) (api.GitHubLoginStart, error) {
 	switch req.Purpose {
 	case "", PurposeLink:
 		if err := linkable(sub); err != nil {
@@ -127,19 +155,38 @@ func (s *Service) StartLogin(ctx context.Context, sub *authz.Subject, req api.Gi
 		}
 		return s.begin(ctx, &login{purpose: PurposeBind, identity: sub.Identity, from: sub.Address,
 			local: sub.Via == authz.ViaLocal && sub.TokenID == "", bindProject: p.ID, bindOwner: owner, bindName: name})
+	case PurposeKey:
+		if s.d.KeyLogin != nil {
+			return s.startKey(ctx, sub, hdr, req)
+		}
+		return api.GitHubLoginStart{}, unknownPurpose(req.Purpose)
 	default:
-		return api.GitHubLoginStart{}, api.Errorf(api.CodeBadRequest, "unknown login purpose %q", req.Purpose)
+		return api.GitHubLoginStart{}, unknownPurpose(req.Purpose)
 	}
-	from := "this machine (" + s.d.Config.Machine + ")"
-	if sub.Node != "" {
-		from = "machine " + sub.Machine + " (tailnet node " + sub.Node + ")"
-	}
-	return s.begin(ctx, &login{purpose: PurposeLink, identity: sub.Identity, from: from,
+	return s.begin(ctx, &login{purpose: PurposeLink, identity: sub.Identity, from: s.from(sub),
 		local: sub.Via == authz.ViaLocal && sub.TokenID == ""})
+}
+
+// unknownPurpose is the answer to a purpose this authority does not run.
+func unknownPurpose(p string) error {
+	return api.Errorf(api.CodeBadRequest, "unknown login purpose %q", p)
+}
+
+// from names where a linkable sub started a login, for the mail.
+func (s *Service) from(sub *authz.Subject) string {
+	if sub.Node != "" {
+		return "machine " + sub.Machine + " (tailnet node " + sub.Node + ")"
+	}
+	return "this machine (" + s.d.Config.Machine + ")"
 }
 
 // owner keys a login's limits: the identity or the node that started it.
 func (l *login) owner() string {
+	if l.key != nil {
+		// Key logins keep their own limits, so other logins of the same
+		// identity (an agent's links) never use them up.
+		return "key:" + l.identity.ID + "@" + l.key.Node
+	}
 	if l.node != "" {
 		return "node:" + l.node
 	}
@@ -164,6 +211,9 @@ func (l *login) who() string {
 	if l.purpose == PurposeBind {
 		return "identity " + l.identity.Name + " to name a project @" + l.bindOwner + "/" + l.bindName
 	}
+	if l.purpose == PurposeKey {
+		return "identity " + l.identity.Name + ", for a signing key on machine " + l.key.Machine + " to answer in project " + l.key.Project.Slug
+	}
 	return "identity " + l.identity.Name
 }
 
@@ -183,7 +233,9 @@ func (s *Service) reserve(l *login) error {
 		if x.owner() == l.owner() {
 			mine++
 		}
-		if x.local == l.local && x.tunnel == l.tunnel {
+		// Key logins are outside the pools: latest wins keeps at most one
+		// per identity and node once GitHub answers (replaceKeyLogins).
+		if x.local == l.local && x.tunnel == l.tunnel && x.key == nil {
 			pool++
 		}
 		if l.addr != "" && x.addr == l.addr {
@@ -202,7 +254,9 @@ func (s *Service) reserve(l *login) error {
 	if l.addr != "" {
 		byAddr = withinHour(s.starts["addr:"+l.addr], now)
 	}
-	if pool >= limit || mine >= s.MaxPerOwner || len(recent) >= s.MaxStarts ||
+	// Key logins skip the in-flight limits too: replaceKeyLogins keeps one
+	// per bucket, and MaxStarts bounds how often GitHub is asked.
+	if (l.key == nil && (pool >= limit || mine >= s.MaxPerOwner)) || len(recent) >= s.MaxStarts ||
 		(l.addr != "" && (there >= s.MaxPerAddr || len(byAddr) >= s.MaxAddrStarts)) {
 		s.keepStarts(l.owner(), recent)
 		if l.addr != "" {
@@ -215,6 +269,11 @@ func (s *Service) reserve(l *login) error {
 		s.starts["addr:"+l.addr] = append(byAddr, now)
 	}
 	l.id, l.expires, l.done = ids.New(), now.Add(time.Minute), make(chan struct{})
+	l.ctx, l.stop = context.WithCancel(s.ctx)
+	if l.key != nil {
+		s.keySeq++
+		l.keySeq = s.keySeq
+	}
 	s.logins[l.id] = l
 	return nil
 }
@@ -263,7 +322,7 @@ func (s *Service) begin(ctx context.Context, l *login) (api.GitHubLoginStart, er
 	}
 	release := func() {
 		s.mu.Lock()
-		delete(s.logins, l.id)
+		s.drop(l)
 		s.mu.Unlock()
 	}
 	code, err := s.dev.Start(ctx)
@@ -278,8 +337,12 @@ func (s *Service) begin(ctx context.Context, l *login) (api.GitHubLoginStart, er
 	}
 	secret := base64.RawURLEncoding.EncodeToString(b[:])
 	s.mu.Lock()
-	l.secret, l.expires = hashSecret(secret), code.Expires
+	l.secret, l.expires, l.started = hashSecret(secret), code.Expires, true
+	replaced := s.logins[l.id] != l || (l.key != nil && s.replaceKeyLogins(l))
 	s.mu.Unlock()
+	if replaced {
+		return api.GitHubLoginStart{}, replacedLogin()
+	}
 	go s.run(l, code)
 	return api.GitHubLoginStart{ID: l.id, Secret: secret, UserCode: code.UserCode, VerificationURI: code.VerificationURI,
 		Expires: code.Expires.UTC(), Authority: s.d.Config.Machine, For: l.who()}, nil
@@ -288,8 +351,9 @@ func (s *Service) begin(ctx context.Context, l *login) (api.GitHubLoginStart, er
 // run waits for the person, asks GitHub who approved, and drops the
 // token. It acts on nothing: Poll does, when the outcome is collected.
 func (s *Service) run(l *login, code DeviceCode) {
-	ctx, cancel := context.WithDeadline(s.ctx, l.expires)
+	ctx, cancel := context.WithDeadline(l.ctx, l.expires)
 	defer cancel()
+	defer l.stop()
 	var orgs map[string]bool
 	acc, err := func() (Account, error) {
 		token, err := s.dev.Wait(ctx, code)
@@ -338,6 +402,10 @@ func (l *login) startedBy(ctx context.Context, sub *authz.Subject) bool {
 	if l.node != "" {
 		rm := core.RemoteOf(ctx)
 		return rm != nil && rm.NodeID == l.node && !core.IsLocal(ctx)
+	}
+	if l.key != nil {
+		node, ok := keyNode(sub)
+		return ok && node == l.key.Node && sub.Identity.ID == l.identity.ID
 	}
 	return sub != nil && sub.Identity.ID == l.identity.ID
 }
@@ -390,8 +458,9 @@ func (s *Service) Poll(ctx context.Context, sub *authz.Subject, id string, req a
 	defer l.act.Unlock()
 	s.mu.Lock()
 	collected, acc, err := l.collected, l.acc, l.err
+	dropped := l.key != nil && s.logins[l.id] != l // a key login replaced while it waited
 	s.mu.Unlock()
-	if collected {
+	if collected || dropped {
 		return api.GitHubLoginOutcome{}, missing
 	}
 	out := api.GitHubLoginOutcome{}
@@ -423,6 +492,9 @@ func (s *Service) act(ctx context.Context, l *login, acc Account) (api.GitHubLog
 			return api.GitHubLoginOutcome{}, err
 		}
 		return api.GitHubLoginOutcome{Bind: &b}, nil
+	}
+	if l.purpose == PurposeKey {
+		return s.bindKey(ctx, l, acc)
 	}
 	if l.purpose == PurposeJoin {
 		join, err := s.admit(ctx, l, acc)

@@ -83,6 +83,9 @@ type Deps struct {
 	// linked to ("github:<numeric id>") and its login, or "", "" (the owners
 	// brick sets it; nil in a module's tests).
 	LinkedAccount func(ctx context.Context, identity string) (account, login string)
+	// KeyLogin binds signing keys through GitHub logins of purpose "key"
+	// (keylogin.go; the approvals brick sets it; nil in a module's tests).
+	KeyLogin KeyLogin
 	// Aliases is an identity's exact inbox aliases here, sorted (the
 	// approvals brick sets it; nil in a module's tests).
 	Aliases func(ctx context.Context, identity string) []string

@@ -104,6 +104,7 @@ type Service struct {
 	logins       map[string]*login
 	starts       map[string][]time.Time // owner (or "addr:<client address>") -> start times in the last hour
 	startsPruned time.Time
+	keySeq       uint64                 // the last key login's start order (keylogin.go)
 	lookups      map[string][]time.Time // caller -> uncached name lookups in the last minute
 }
 
@@ -130,7 +131,7 @@ func (s *Service) Close() error {
 // Routes registers the owners routes (API.md "Owners").
 func (s *Service) Routes(r *core.Router) {
 	r = r.For("owners")
-	r.HandleFunc("POST /v0/login/github/start", core.Authed, "link: the caller's own human identity, by the socket owner or a replica's node-bound token only (never a minted token or a tailnet login); at most 4 logins in flight per identity; bind: admin on the project, the approver must be the identity's linked account", jsonH(s.handleStart))
+	r.HandleFunc("POST /v0/login/github/start", core.Authed, "link: the caller's own human identity, by the socket owner or a replica's node-bound token only (never a minted token or a tailnet login); at most 4 logins in flight per identity; bind: admin on the project, the approver must be the identity's linked account; key: a person's own identity as for link, read on ?project=, and core.Deps.KeyLogin's check (else unknown purpose)", jsonH(s.handleStart))
 	r.HandleFunc("GET /v0/owner", core.Authed, "read on the project named by ?project= (else not_found); answers the caller's own owner right (core.Deps.ProjectAdmin) and GitHub link", jsonH(s.handleOwner))
 	s.grantRoutes(r)
 	s.joinRoutes(r)

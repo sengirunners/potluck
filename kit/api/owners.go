@@ -12,11 +12,38 @@ import (
 // GitHubLoginRequest is POST /v0/login/github/start: start a GitHub login that
 // this authority runs (GitHub's device flow with its own client id).
 type GitHubLoginRequest struct {
-	Purpose string `json:"purpose,omitempty"` // "link" (the default) or "bind"
-	// A bind (zm names bind): @Owner/Name for Project.
+	Purpose string `json:"purpose,omitempty"` // "link" (the default), "bind" or "key"
+	// A bind (zm names bind): @Owner/Name for Project. A key login: the
+	// project the key answers in (or ?project= on the route).
 	Project string `json:"project,omitempty"`
 	Owner   string `json:"owner,omitempty"`
 	Name    string `json:"name,omitempty"`
+	// A key login: the signing key to bind and its proof.
+	KeyAttach
+}
+
+// KeyAttach is a key login's payload (purpose "key"). The authority's
+// owners brick carries it unread to core.Deps.KeyLogin, which checks it.
+type KeyAttach struct {
+	Key     string `json:"key,omitempty"`     // the public key, X9.63, base64
+	Device  string `json:"device,omitempty"`  // a label for people
+	Install string `json:"install,omitempty"` // the client's install id, shown only
+	Nonce   string `json:"nonce,omitempty"`   // single use
+	Time    string `json:"time,omitempty"`    // when Proof was made, RFC 3339, as signed
+	Proof   string `json:"proof,omitempty"`   // the key's signature over the bind statement
+}
+
+// KeyBinding is a key login's outcome: the approver the key now is.
+// Account, Login and Machine are the authority's: GitHub's answer and the
+// node the login came from.
+type KeyBinding struct {
+	Approver    string `json:"approver"`
+	Fingerprint string `json:"fingerprint"`
+	State       string `json:"state"`
+	ReceiptKey  string `json:"receipt_key"`
+	Account     string `json:"account"` // "github:<numeric id>"
+	Login       string `json:"login"`
+	Machine     string `json:"machine"`
 }
 
 // GitHubLoginStart is what the person needs to approve, who is asking,
@@ -48,6 +75,8 @@ type GitHubLoginOutcome struct {
 	Join *RedeemResponse `json:"join,omitempty"`
 	// Bind is a bind's new (or current again) @owner/name.
 	Bind *NameBinding `json:"bind,omitempty"`
+	// Key is a key login's bound key.
+	Key *KeyBinding `json:"key,omitempty"`
 }
 
 // GitHubGrantRequest is POST /v0/grants/github (and the body of DELETE):

@@ -89,7 +89,9 @@ func (r *mailRec) to(project, to string) []string {
 	return out
 }
 
-func newOX(t *testing.T, clientID string) *ox {
+// newOX is an authority with the kit's modules; each of set runs on its
+// deps while it is wired (a test's core.Deps hooks).
+func newOX(t *testing.T, clientID string, set ...func(*core.Deps)) *ox {
 	t.Helper()
 	gh := githubfake.New(t)
 	home, err := os.MkdirTemp("", "zm")
@@ -112,6 +114,9 @@ func newOX(t *testing.T, clientID string) *ox {
 	wire := func(d *core.Deps) ([]core.Module, error) {
 		mods, err := wiring.Kit(d)
 		d.AddNotifier(rec.notify)
+		for _, f := range set {
+			f(d)
+		}
 		return mods, err
 	}
 	dm, err := server.New(context.Background(), cfg, slog.New(slog.NewTextHandler(log, &slog.HandlerOptions{Level: slog.LevelDebug})), wire)

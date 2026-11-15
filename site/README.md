@@ -9,7 +9,8 @@ whose sides darken as they turn away from a fixed sun (CSS `cos()`, with fixed s
 people, food and cloud are inline SVG cut-outs that keep facing the reader. The page's only script is inline: it runs
 the scene (pick a machine, drag the lawn or press the arrows to turn it), places the machines' labels in a flat layer
 from where each machine lands on screen (front to back, each at the cheapest spot: never over another label, the card
-or the arrows, and off every machine's body where there is room), the cost slider and the copy button. Without
+or the arrows, and, where there is room, off every machine and with a leader line that runs over no other machine,
+label or leader), the cost slider and the copy button. Without
 JavaScript the page still reads in full; the labels, turn arrows and copy button stay hidden. With
 `prefers-reduced-motion`, nothing moves on its own. The card's numbers are half of each machine's cores and memory,
 because `potluck host` shares half unless told otherwise (`--share`).
@@ -59,11 +60,17 @@ Look at the page at desktop (1440 wide) and phone (390 wide) widths before shipp
 it scales as one picture, and on a phone the labels use short names. A machine is a `.m` with `data-id`, a `.pin`
 with `data-pin` where its label points, and a label with `data-for` (`npm test` checks the three match).
 
-`npm test` does not run a browser, so label overlap is checked by hand with Playwright before shipping a change to the
-scene: at 1440x900, 1280x720, 390x844 and 320x640, turn the lawn from -45 to 45 degrees in 5 degree steps (drag it),
-with Leo away and back, and at each step check that no label's box overlaps another label, the card, or the box of
-any machine's face (`.f`, `.lid > *`, or a machine's `.cut`), and that `elementFromPoint` at each label's centre is
-that label.
+`npm test` does not run a browser, so label placement is checked by hand with Playwright before shipping a change to
+the scene: at 1440x900, 1280x720, 390x844 and 320x640, turn the lawn from -45 to 45 degrees in 1 degree steps (drag
+it), with Leo away and back, and at each step check that:
+
+- no label's box overlaps another label, the card or the turn arrows, and each sits at least 8px inside the scene;
+- no label covers any part of a machine: with the labels set to `pointer-events: none`, `elementFromPoint` across each
+  label's box finds no machine's face (`.f`, `.lid > *`, or a machine's `.cut`);
+- leader lines don't cross each other or another machine: no two stems intersect, and `elementFromPoint` along each
+  stem (labels again out of the way) finds no other machine's face or another label;
+- no label sits much nearer another machine's pin than its own (it would read as that machine's);
+- `elementFromPoint` at each label's centre is that label, and each machine has a point that hits it.
 
 ## Deploy
 
