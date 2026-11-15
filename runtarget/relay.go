@@ -584,6 +584,12 @@ func hostAnswer(verb string, res json.RawMessage, err error) (json.RawMessage, e
 		if verb == verbStatus && rt.IsNoHandle(err) && api.IsCode(err, api.CodeNotFound) {
 			return json.RawMessage(noHandleMark), err
 		}
+		var e *api.Error
+		if errors.As(err, &e) && e.Code == api.CodeUnavailable {
+			if bz := busyData(e.Data); bz != nil {
+				return bz, err // the authority's deps waiter reads it (relayAnswer)
+			}
+		}
 		return nil, err
 	}
 	if len(res) == 0 {
@@ -596,7 +602,10 @@ func hostAnswer(verb string, res json.RawMessage, err error) (json.RawMessage, e
 }
 
 // relayAnswer is a host's result as the authority's call returns it: a
-// not_found that carries the mark is rt.NoHandle, still a not_found.
+// not_found that carries the mark is rt.NoHandle, still a not_found; an
+// unavailable whose payload is a driver's "building" answer carries it as
+// its data, as a driver of this machine's would (driver.go), so an acquire
+// with deps waits for a layer the host is building instead of failing.
 func relayAnswer(r teamlink.OpResult) (json.RawMessage, error) {
 	err := r.Err()
 	if err == nil {
@@ -607,6 +616,11 @@ func relayAnswer(r teamlink.OpResult) (json.RawMessage, error) {
 	}
 	if e, ok := err.(*api.Error); ok && e.Code == api.CodeNotFound && json.Unmarshal(r.Raw, &mark) == nil && mark.NoHandle {
 		return nil, rt.NoHandle(e)
+	}
+	if e, ok := err.(*api.Error); ok && e.Code == api.CodeUnavailable {
+		if bz := busyData(r.Raw); bz != nil {
+			e.Data = bz
+		}
 	}
 	return nil, err
 }

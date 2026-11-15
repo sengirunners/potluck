@@ -1,43 +1,16 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { TOPICS } from "../src/contact.js";
 import { handleCount } from "../src/waitlist.js";
 import worker from "../src/worker.js";
+import { fakeKV } from "./fakekv.js";
 
 const PUBLIC = new URL("../public/", import.meta.url);
-const INDEX = readFileSync(new URL("index.html", PUBLIC), "utf8");
-
-// A KV namespace in memory: get, put with metadata, and list with prefix and cursor pages. `fail` names the
-// calls that throw.
-function fakeKV(pageSize = 1000, fail = []) {
-  const store = new Map();
-  const check = (op) => {
-    if (fail.includes(op)) throw new Error(`KV ${op}() failed.`);
-  };
-  return {
-    store,
-    async get(k) {
-      check("get");
-      return store.get(k)?.value ?? null;
-    },
-    async put(k, value, opts = {}) {
-      check("put");
-      store.set(k, { value, metadata: opts.metadata });
-    },
-    async list({ prefix = "", cursor } = {}) {
-      check("list");
-      const names = [...store.keys()].filter((k) => k.startsWith(prefix)).sort();
-      const start = cursor ? Number(cursor) : 0;
-      const slice = names.slice(start, start + pageSize);
-      const done = start + pageSize >= names.length;
-      return {
-        keys: slice.map((name) => ({ name, metadata: store.get(name).metadata })),
-        list_complete: done,
-        cursor: done ? undefined : String(start + pageSize),
-      };
-    },
-  };
-}
+// The page is index.html with its stylesheet and script beside it; the checks read the three as one.
+const read = (name) => readFileSync(new URL(name, PUBLIC), "utf8");
+const HTML = read("index.html"), CSS = read("site.css"), JS = read("site.js");
+const INDEX = [HTML, CSS, JS].join("\n");
 
 const env = (extra = {}) => ({ WAITLIST: fakeKV(), ...extra });
 
@@ -113,7 +86,7 @@ test("sign-ups are closed: a post gets 410 and stores nothing", async () => {
 // "//host" is protocol-relative and goes elsewhere. url(#id) points into the page, and data: is inline.
 const THIRD_PARTY = [
   /<link[^>]+href=(?!["']?(?:\/(?!\/)|data:|#))/i,
-  /<script[^>]+src=/i,
+  /<script[^>]+src=(?!["']?\/(?!\/))/i,
   /<img[^>]+src=(?!["']?(?:\/(?!\/)|data:))/i,
   /url\((?!\s*['"]?(?:\/(?!\/)|data:|#))/i,
   /\s(?:src|href)=["']?\/\//i,
@@ -126,12 +99,20 @@ test("the third-party check refuses other hosts, protocol-relative ones included
     'a{background:url("//evil.com/x")}', "a{background:url(//evil.com/x)}", "a{background:url(https://evil.com/x)}",
     "a{background:url('https://evil.com/x')}", '<link rel="stylesheet" href="//evil.com/x.css">',
     '<link rel="stylesheet" href="https://evil.com/x.css">', '<img src="//evil.com/x.png">', '<video src="//evil.com/x">',
-    '<script src="/x.js"></script>', "@import 'x.css';",
+    '<script src="data:text/javascript,x"></script>', "@import 'x.css';", '<script src="https://evil.com/x.js"></script>', '<script src="//evil.com/x.js"></script>',
   ]) assert.ok(fetchesElsewhere(bad), bad);
   for (const ok of [
     "a{background:url(/fonts/x.woff2)}", 'a{background:url("/fonts/x.woff2")}', "a{fill:url(#hatch)}",
-    'a{background:url("data:image/svg+xml,x")}', '<link rel="preload" href="/fonts/x.woff2">', '<img src="/x.png">',
+    'a{background:url("data:image/svg+xml,x")}', '<link rel="preload" href="/fonts/x.woff2">', '<img src="/x.png">', '<script src="/site.js" defer></script>',
   ]) assert.ok(!fetchesElsewhere(ok), ok);
+});
+
+test("the page loads its own stylesheet and script, and keeps no inline ones", () => {
+  assert.match(HTML, /<link rel="stylesheet" href="\/site\.css">/);
+  assert.match(HTML, /<script src="\/site\.js" defer><\/script>/);
+  assert.doesNotMatch(HTML, /<style|<script>/);
+  assert.doesNotMatch(CSS, /<\/?style/);
+  assert.doesNotMatch(JS, /<\/?script/);
 });
 
 test("the page makes no third-party requests and loads its fonts from /fonts", () => {
@@ -144,12 +125,16 @@ test("the page makes no third-party requests and loads its fonts from /fonts", (
   assert.doesNotMatch(INDEX, /—/, "no em dashes");
 });
 
-test("the page offers the install line, the founders' address and Potluck Dish, and no waitlist", () => {
+test("the page offers the install line, the founders' form and address, Potluck Dish and Sengi, and no waitlist", () => {
   assert.match(INDEX, /<code id="install-cmd">curl -fsSL https:\/\/raw\.githubusercontent\.com\/sengirunners\/potluck\/main\/install\.sh \| sh<\/code>/);
   assert.match(INDEX, /href="https:\/\/github\.com\/sengirunners\/potluck"/);
-  assert.match(INDEX, /href="mailto:ops@sengi\.run/);
+  assert.match(HTML, /<form class="talk" id="talk" method="post" action="\/api\/contact"/);
+  assert.equal((HTML.match(/<form/g) ?? []).length, 1, "one form: the founders'");
+  assert.match(HTML, /ops@sengi\.run/);
+  assert.doesNotMatch(HTML, /mailto:/, "mailto links fail for people with no mail app set up");
   assert.match(INDEX, /Potluck Dish/);
-  assert.doesNotMatch(INDEX, /<form|\/api\/waitlist|waitlist/i);
+  assert.match(HTML, /href="https:\/\/sengi\.run"/);
+  assert.doesNotMatch(INDEX, /\/api\/waitlist|waitlist/i);
   assert.doesNotMatch(INDEX, /\(soon\)|stet|not ready/i);
 });
 
@@ -176,17 +161,16 @@ test("every machine in the picnic has one label and one pin, and every label has
 });
 
 // Claims a review found false or misleading (README.md "What works today" and install.sh are the sources).
-test("the page hedges what does not work yet and names who to email", () => {
+test("the page's claims stay within what Potluck does, and it names who to write to", () => {
   assert.doesNotMatch(INDEX, /checked before anything runs/i, "a first install on macOS's LibreSSL is not verified");
   assert.match(INDEX, /checks the signature when it can/);
   assert.doesNotMatch(INDEX, /One command opens a pull request/i, "potluck ci pr prepares a script; it does not open the PR");
-  assert.match(INDEX, /Not run live yet/, "no Actions job has run live on a pool machine");
-  assert.match(INDEX, /Once Potluck runs your GitHub Actions jobs \(not yet/, "the savings band says Actions jobs don't run yet");
   assert.match(INDEX, /potluck agent-runner claude/, "agent-runner takes the adapter's name");
   assert.match(INDEX, /href="https:\/\/github\.com\/sengirunners\/potluck#what-works-today"/);
   assert.doesNotMatch(INDEX, /Apple's licence lets you/i, "the lending rule is our reading, not Apple's");
   assert.match(INDEX, /Jackson and Clay/);
-  assert.ok((INDEX.match(/>Email the founders</g) ?? []).length <= 2, "at most two founders buttons");
+  assert.match(INDEX, /Apple's licence forbids selling Mac time/);
+  assert.match(INDEX, /our reading of Apple's macOS licence/, "the lending rule is footnoted as our reading");
   assert.doesNotMatch(INDEX, /A person reads every email/);
 });
 
@@ -203,4 +187,14 @@ test("the worker routes the two waitlist paths, and sends everything else to the
   assert.equal((await worker.fetch(new Request("https://potluck.sh/api/waitlist", { method: "POST" }), e)).status, 410);
   assert.equal((await worker.fetch(countReq(), e)).status, 401);
   assert.deepEqual(seen, ["/", "/", "/api/other"]);
+});
+
+test("the form's topics are the ones the server takes, and its fields have the server's names", () => {
+  const form = HTML.slice(HTML.indexOf('<form class="talk"'), HTML.indexOf("</form>"));
+  const offered = [...form.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]);
+  assert.match(form, /<option value="" disabled selected>/, "no topic is picked for the reader");
+  assert.deepEqual(offered, TOPICS);
+  const names = [...form.matchAll(/name="([^"]+)"/g)].map((m) => m[1]).sort();
+  assert.deepEqual(names, ["email", "leave_empty", "message", "name", "team", "topic"]);
+  assert.match(HTML, /data-topic="dish"/);
 });

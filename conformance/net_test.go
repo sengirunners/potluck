@@ -2,8 +2,10 @@ package conformance
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -420,6 +422,49 @@ func TestBoxNetPeersListenerStops(t *testing.T) {
 		refdriver.NoNC(t, out)
 	case !strings.Contains(out, "FAIL  two boxes cannot reach each other") || !strings.Contains(out, "stopped listening on port "+port+" before the scan ended"):
 		t.Fatalf("a listener that stopped during the scan:\n%s", out)
+	}
+}
+
+// A loaded guest's nc can take over a second to listen (zm-eakh.12.82): the
+// probe's self and serve wait for their listener instead of reading "cannot
+// listen" half a second in. An nc on PATH that sleeps 1 s before any -l
+// stands in for it; ip names no /24, so each peers scan finds nothing.
+func TestNetSlowListener(t *testing.T) {
+	ncPath, err := exec.LookPath("nc")
+	if err != nil {
+		refdriver.NoNC(t, "a slow nc wraps the real one")
+	}
+	bin := t.TempDir()
+	slow := "#!/bin/sh\nfor a in \"$@\"; do case $a in -h) ;; -*l*) sleep 1; break ;; esac; done\nexec " + ncPath + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "nc"), []byte(slow), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "ip"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for kind, peers := range map[string]string{"box": "boxes", "run": "runs"} {
+		t.Run(kind, func(t *testing.T) {
+			path, opt := fixture(t, kind, "")
+			_, free := listeners(t)
+			_, port, _ := net.SplitHostPort(free)
+			_, closed := listeners(t)
+			opt.Only, opt.NetForbid, opt.NetPeers = []string{"net"}, []string{closed}, true
+			opt.NetPeerPort, _ = strconv.Atoi(port)
+			out := Format(Run(context.Background(), path, opt))
+			for _, want := range []string{"PASS  the net probe sees a port open in the guest", "PASS  " + fmt.Sprintf(peersCheck, peers)} {
+				if !strings.Contains(out, want) {
+					t.Fatalf("an nc slow to listen: no %q:\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
+// serveListen is the probe's own serve deadline: the peers checks wait it out.
+func TestServeListenIsTheProbes(t *testing.T) {
+	if want := fmt.Sprintf(`listening "$3" %d k`, int(serveListen/time.Second)); !strings.Contains(ProbeScript, want) {
+		t.Fatalf("ProbeScript's serve has no %q: serveListen and the script disagree", want)
 	}
 }
 

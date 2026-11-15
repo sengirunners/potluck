@@ -9,7 +9,11 @@
     "run_worker_first": ["/api/*"]
   },
   // The closed waitlist's sign-ups, read by GET /api/waitlist/count until the list is deleted (README.md).
-  "kv_namespaces": [{ "binding": "WAITLIST", "id": "769e70d2a2f541068d81f0c3e3af33d4" }],
+  // CONTACT: the founders form's messages, read by GET /api/contact (README.md).
+  "kv_namespaces": [
+    { "binding": "WAITLIST", "id": "769e70d2a2f541068d81f0c3e3af33d4" },
+    { "binding": "CONTACT", "id": "05663cbc62124bdb9df76f0bf93933e3" }
+  ],
   "routes": [
     { "pattern": "potluck.sh", "custom_domain": true },
     { "pattern": "www.potluck.sh", "custom_domain": true }

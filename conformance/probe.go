@@ -24,7 +24,7 @@ const ProbeScript = `#!/bin/sh
 #   net allow H:P  exit 0 if a TCP connection to H:P opens, 7 if not
 #   net forbid H:P exit 0 if it does not open, 5 if it does
 #   net self PORT  exit 0 if this guest's tools see a port they listen on as open and port 1 as closed, 66 if not
-#   net serve PORT listen on PORT until killed (66 if it cannot)
+#   net serve PORT listen on PORT until killed (66, within 4 s, if it cannot)
 #   net peers PORT exit 0 if no other machine on this run's IPv4 /24 or IPv6 link-local neighbours that answer
 #                  ping accepts on PORT, 6 if one does
 #   net resolve NAME PORT  exit 0 if NAME resolves (getent hosts), 8 if not; without getent, 0 if NAME:PORT opens, 7 if not
@@ -43,24 +43,30 @@ tcp() {
 	exit 65
 }
 hostport() { h=${1%:*}; p=${1##*:}; h=${h#[}; h=${h%]}; }
-# listening PORT [k]: start one listener with whichever -l form this nc takes, see it
-# answer, and set form for the next ones; exit 66 if no form listens. A listener that
-# takes one connection is waited for. With k, nc -k (one socket that stays listening
-# between connections) is tried first, and is left running as $lp.
+# listening PORT SECONDS [k]: start one listener with whichever -l form this nc takes,
+# see it answer, and set form for the next ones; exit 66 if no form answers within
+# SECONDS of the start (a loaded machine's nc can take a while to listen; a form whose
+# nc exits is dropped at once). A listener that takes one connection is waited for.
+# With k, nc -k (one socket that stays listening between connections) is tried first,
+# and is left running as $lp.
 listening() {
 	command -v nc >/dev/null 2>&1 || exit 65
-	for form in $2 p n; do
+	end=$(($(date +%s) + $2))
+	for form in $3 p n; do
 		case $form in
 		k) nc -k -l "$1" </dev/null >/dev/null 2>&1 & ;;
 		p) nc -l -p "$1" </dev/null >/dev/null 2>&1 & ;;
 		n) nc -l "$1" </dev/null >/dev/null 2>&1 & ;;
 		esac
-		lp=$!; sleep 0.5
-		if kill -0 "$lp" 2>/dev/null && tcp 127.0.0.1 "$1"; then
-			[ "$form" = k ] || wait "$lp" 2>/dev/null
-			return 0
-		fi
-		kill "$lp" 2>/dev/null
+		lp=$!
+		while kill -0 "$lp" 2>/dev/null; do
+			if tcp 127.0.0.1 "$1"; then
+				[ "$form" = k ] || wait "$lp" 2>/dev/null
+				return 0
+			fi
+			[ "$(date +%s)" -lt "$end" ] || { kill "$lp" 2>/dev/null; exit 66; }
+			sleep 0.1
+		done
 	done
 	exit 66
 }
@@ -85,13 +91,15 @@ net)
 		if command -v getent >/dev/null 2>&1; then getent hosts "$3" >/dev/null 2>&1 || exit 8
 		else tcp "$3" "$4" || exit 7; fi ;;
 	self)
-		listening "$3"
+		listening "$3" 10
 		if tcp 127.0.0.1 1; then exit 66; fi ;;
 	serve)
 		# A one-connection nc leaves the port closed while the next one starts, and
 		# on a loaded machine a connection then reads nothing listening; nc -k
 		# keeps one socket open. The loop restarts whatever listener ends.
-		listening "$3" k
+		# 4 s is serveListen in net.go: the peers checks wait that long for this
+		# verdict, so it must not grow alone.
+		listening "$3" 4 k
 		[ "$form" = k ] && wait "$lp" 2>/dev/null
 		while :; do listen "$3" || sleep 0.2; done ;;
 	peers)

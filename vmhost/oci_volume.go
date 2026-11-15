@@ -38,16 +38,26 @@ import (
 // fails to start.
 //
 // A view gives its box no privilege a fresh box lacks from a setuid or
-// setgid file or a device node a build left in the volume. The cleanup at
-// seal deletes those from a sealed volume (volume_keep.go), and the views
-// are inert to any that are there:
+// setgid file or a device node a build left in the volume. What holds:
+//   - The cleanup at seal clears every setuid and setgid bit and deletes
+//     every device node, FIFO and socket, and a volume it could not clean
+//     so is never sealed (volume_keep.go). This is the guarantee on every
+//     runtime. It does not remove file capabilities (security.capability).
+//   - A cow box's writes go to an upper volume of its own, which no other
+//     box mounts, so nothing one box makes in its view reaches another.
 //   - The CLI's mount of each view is nosuid,nodev on the host.
 //   - Only runsc and Kata pass verifyEngine, and Kata mounts no outer
 //     volumes, so every view is the gVisor sentry's own mount, which a
-//     Docker volume mount cannot mark nosuid. The sentry ignores setuid and
-//     setgid bits unless its runtime has --allow-suid, which only root's
-//     runsc-root has, and its box's user has sudo already; no box can make
-//     a device node (root's lack MKNOD, the others any capability).
+//     Docker volume mount cannot mark nosuid or nodev (--mount carries no
+//     such option): in the box it is a plain 9p mount, rw for cow, and a
+//     layer that holds the box's checkout is that same one mount.
+//   - What makes a setuid or setgid bit or a file capability inert there is
+//     the box, not the mount: a box without root runs no-new-privileges
+//     (oci.go), and the sentry ignores setuid and setgid bits unless its
+//     runtime has --allow-suid (runsc-root's); a box with root has sudo
+//     already. A box with root drops MKNOD; one without root whose image
+//     runs as root keeps Docker's default MKNOD, but any node it makes is
+//     in its own cow upper, and the seal deletes any in a build.
 //   - Any other runtime would run its programs on the host's kernel, where
 //     the container's bind of the CLI's mount keeps nosuid,nodev unless the
 //     runtime drops them: once the guest answers, checkViews reads the
@@ -303,8 +313,9 @@ while [ $# -gt 1 ]; do k=$1 t=$2; shift 2; o=
 done`
 
 // checkViews fails unless the guest mounts each ro and cow view nosuid,nodev
-// (and an ro one ro), as CloneVolumes made it; not on gVisor, whose mount
-// table never shows them and which needs them not (see the top of this file).
+// (and an ro one ro), as CloneVolumes made it; not on gVisor, whose views
+// never carry them (Docker cannot ask it to) and which ignores setuid
+// without --allow-suid (see the top of this file).
 func (o ociCLI) checkViews(vm, home string, ms []mount) error {
 	if o.gvisor() {
 		return nil

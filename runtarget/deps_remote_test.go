@@ -3,7 +3,9 @@ package runtarget_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -129,5 +131,91 @@ func TestDepsBuilderOffTheAdvertisedDigestIsNotSealed(t *testing.T) {
 	h, err := computeclient.AcquireRunTarget(ctx, rp.owner, lent, computeapi.AcquireRunTargetRequest{RequestID: "s2", Deps: deps})
 	if err != nil || len(h.Deps) != 1 || !h.Deps[0].Built {
 		t.Fatalf("once the host boots the advertised image: %+v %v, want a fresh build", h.Deps, err)
+	}
+}
+
+// Acquires with deps that come in together on a binding another machine
+// serves, for a layer nobody has built: one builds it on the host, and the
+// others wait for it (the host's "building" answer crosses the relay) and
+// then mount it; with deps_wait_s 0 one does not wait but takes a box
+// without the layer at once.
+func TestDepsConcurrentAsksOnALentBindingWait(t *testing.T) {
+	var mu sync.Mutex
+	builds := 0
+	rp, _ := newDepsRelay(t, func(op computeapi.RunTargetOp, res json.RawMessage) json.RawMessage {
+		if op.Verb == "acquire" && strings.Contains(string(op.Args), `"mode":"build"`) {
+			mu.Lock()
+			builds++
+			mu.Unlock()
+		}
+		return res
+	})
+	runtarget.SetDepsRecipe(t, "npm", func(bool) string { return "sleep 2; mkdir -p node_modules\n" })
+	ctx := context.Background()
+	deps := []computeapi.BoxDeps{npmDeps("app")}
+	hs := make([]computeapi.RunTargetHandle, 4)
+	errs := make([]error, 4)
+	var wg sync.WaitGroup
+	for i := range hs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			hs[i], errs[i] = computeclient.AcquireRunTarget(ctx, rp.owner, lent, computeapi.AcquireRunTargetRequest{RequestID: fmt.Sprintf("c%d", i), Deps: deps})
+		}()
+	}
+	wg.Wait()
+	built, hit := 0, 0
+	for i, h := range hs {
+		if errs[i] != nil {
+			t.Fatalf("acquire %d: %v, want it to wait for the build", i, errs[i])
+		}
+		if len(h.Deps) != 1 || h.Deps[0].Hit == h.Deps[0].Built {
+			t.Fatalf("acquire %d's deps: %+v", i, h.Deps)
+		}
+		if h.Deps[0].Built {
+			built++
+		} else {
+			hit++
+		}
+	}
+	if builds != 1 || built != 1 || hit != 3 {
+		t.Fatalf("builders asked of the host: %d, answers built %d hit %d: want one build and three hits", builds, built, hit)
+	}
+
+	// deps_wait_s 0 while the host builds another layer: a box without it,
+	// before the build ends.
+	runtarget.SetDepsRecipe(t, "npm", func(bool) string { return "sleep 15; mkdir -p node_modules\n" })
+	slow := []computeapi.BoxDeps{npmDeps("slow")}
+	done := make(chan error, 1)
+	go func() {
+		_, err := computeclient.AcquireRunTarget(ctx, rp.owner, lent, computeapi.AcquireRunTargetRequest{RequestID: "builder", Deps: slow})
+		done <- err
+	}()
+	for by := time.Now().Add(20 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		mu.Lock()
+		n := builds
+		mu.Unlock()
+		if n == 2 {
+			break
+		}
+		if time.Now().After(by) {
+			t.Fatal("no second build started")
+		}
+	}
+	zero := 0
+	h, err := computeclient.AcquireRunTarget(ctx, rp.owner, lent, computeapi.AcquireRunTargetRequest{RequestID: "plain", DepsWaitS: &zero, Deps: slow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Deps) != 1 || h.Deps[0].Hit || h.Deps[0].Built || len(h.Volumes) != 0 {
+		t.Errorf("deps_wait_s 0 during a build on the host: deps %+v volumes %+v, want a box without the layer", h.Deps, h.Volumes)
+	}
+	select {
+	case err := <-done:
+		t.Errorf("the build ended (%v) before the deps_wait_s 0 acquire answered: it waited for the build", err)
+	default:
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("the building acquire: %v", err)
 	}
 }

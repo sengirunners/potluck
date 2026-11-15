@@ -23,8 +23,10 @@ import (
 //     device node, FIFO and socket deleted, then the volume is walked again
 //     and any left (or a walk that cannot finish) fails the seal. A build box
 //     on a binding with root runs sudo, so its install scripts could leave a
-//     setuid-root file that every later box of the owner mounts; the views
-//     of a sealed volume are mounted nosuid,nodev too (oci_volume.go).
+//     setuid-root file that every later box of the owner mounts. This is
+//     what holds on every runtime: on gVisor the views of a sealed volume
+//     carry no nosuid or nodev in the box (oci_volume.go). File
+//     capabilities (security.capability) are not removed.
 
 // sealCleanScript cleans the directory $1: with $2 "keep", first prunes it to
 // the paths in $3 (one per line), with $4 the directories on the way to them

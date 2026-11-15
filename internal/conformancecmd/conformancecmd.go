@@ -148,7 +148,7 @@ func run(argv []string) int {
 		target, argv = fs.Arg(0), fs.Args()[1:]
 	}
 	if printProbe {
-		fmt.Fprint(stdout, conformance.ProbeScript)
+		_, _ = io.WriteString(stdout, conformance.ProbeScript) // the script's "date +%s" is no format
 		return 0
 	}
 	if target == "" {

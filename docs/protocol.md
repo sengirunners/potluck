@@ -714,8 +714,11 @@ readers can tell it was filled to the end.
   box has ended (and after any `keep`), the driver clears every setuid and setgid bit and deletes every such entry,
   never following a link, then seals; what the files hold stays. A volume it could not clean so (an entry left, or
   a directory it could not walk) is deleted, never sealed. So nothing a build box made, even with `root`, gives a
-  later box of the owner a privilege a fresh box lacks. A driver should also mount `ro` and `cow` views of a volume
-  so that a setuid bit or device node in it is inert (`nosuid,nodev`, or a runtime that ignores them).
+  later box of the owner a privilege a fresh box lacks. The cleanup does not remove file capabilities
+  (`security.capability`). A driver should also make a setuid or setgid bit, a file capability or a device node in
+  an `ro` or `cow` view inert: `nosuid,nodev` on the view, boxes that run with `no-new-privileges`, or a runtime
+  that ignores them. A view's mount need not carry `nosuid,nodev` itself (the OCI layer's under gVisor carry neither
+  in the box; see daemon.md).
 - An acquire that is refused, or whose box never starts, leaves no volume it would have made in `build`.
 - A sealed volume refuses `rw` and `build` for good. `ro` and `cow` read it as any volume. It is deleted only whole,
   by the keep time and the caps, its sealed record first.

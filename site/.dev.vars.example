@@ -1,2 +1,3 @@
 # Copy to .dev.vars for `npm run dev`. Never commit .dev.vars.
 WAITLIST_ADMIN_TOKEN=local-dev-token
+CONTACT_ADMIN_TOKEN=local-dev-token

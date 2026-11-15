@@ -429,6 +429,10 @@ const (
 	serveTimeout = 120
 	// listenWait is how long the listening box's exec may take to listen.
 	listenWait = 10 * time.Second
+	// serveListen is how long the probe's net serve gives its own listener to
+	// answer before it exits 66 (the 4 in ProbeScript's serve). Nothing outside
+	// a run sees that verdict but its exit, so the peers checks wait it out.
+	serveListen = 4 * time.Second
 )
 
 const peersCheck = "two %s cannot reach each other (same IPv4 /24; IPv6 link-local neighbours that answer ping)"
@@ -449,9 +453,11 @@ func (r *run) peers() {
 			delete(r.live, a.Handle)
 		}
 	}()
-	// serve checks its own listener answers, and exits 66 if it cannot: a
-	// run still going after that has had time to listen.
-	r.sleep(3 * time.Second)
+	// serve checks its own listener answers, and exits 66 if it cannot within
+	// serveListen: a run still going after that (and 2 s for the run to start)
+	// is listening. The scan must not run before then: it would pass with
+	// nothing listening yet.
+	r.sleep(serveListen + 2*time.Second)
 	st, err := r.status(a.Handle)
 	switch {
 	case err != nil:
@@ -536,10 +542,11 @@ func (r *run) peersBox(in func(...string) (int, error)) {
 	// the scan with nothing listening.
 	local := "127.0.0.1:" + ps
 	up := func() bool { code, err := r.boxNet(l.Handle, "allow", local); return err == nil && code == 0 }
-	// serve first checks its own listener (half a second in, one connection);
-	// a check of ours inside that window takes that one connection, and
-	// serve exits 66 as if it could not listen. As peers waits for a run's.
-	r.sleep(2 * time.Second)
+	// serve first checks its own listener (for up to serveListen; a listener
+	// of the one-connection forms takes one connection); a check of ours
+	// inside that window can take that connection, and serve exits 66 as if
+	// it could not listen. As peers waits for a run's.
+	r.sleep(serveListen + time.Second)
 	for deadline := time.Now().Add(listenWait); !up(); r.sleep(500 * time.Millisecond) {
 		if ended() {
 			return

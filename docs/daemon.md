@@ -537,9 +537,14 @@ built from exactly those files, mounted `cow` at `path`, so nothing a box writes
   everything else in the layer before it seals it, so nothing the recipe or an install script wrote elsewhere (a
   `.git`, a config file, the files sent) reaches a later box, and clears every setuid and setgid bit and deletes
   every device node, FIFO and socket in what is kept, so an install script run with `sudo` (on a binding with `root`)
-  leaves no setuid-root file for later boxes. On the OCI layer each box's `ro` and `cow` view of a volume is a
-  mount of its own, `nosuid,nodev` on the host; gVisor, the one runtime that mounts volumes there, ignores setuid
-  bits except under root's `runsc-root`, whose boxes have `sudo` already. Any other end deletes the volume, so a failed or partial
+  leaves no setuid-root file for later boxes. That cleanup is what keeps a layer safe on every runtime; it does not
+  remove file capabilities (`security.capability`). On the OCI layer each box's `ro` and `cow` view of a volume is
+  a mount of its own, `nosuid,nodev` on the host, but in the box gVisor (the one runtime that mounts volumes there)
+  shows it as a plain 9p mount, `rw` for `cow`, with neither option: Docker's `--mount` cannot carry them. A layer
+  that holds the box's checkout is that same mount. A setuid bit or file capability there is inert because of the
+  box: a box without `root` runs with `no-new-privileges`, and gVisor ignores setuid bits except under root's
+  `runsc-root`, whose boxes have `sudo` already. Each `cow` box writes to an overlay upper of its own, which no other
+  box mounts, so nothing it makes there (a device node included) reaches another box. Any other end deletes the volume, so a failed or partial
   build is never there for a reader; the acquire is refused with the recipe's last lines. The builder counts
   against the holder's handles and budget like any box, and is listed, but is the daemon's alone: exec, release,
   acquire progress and cancel, and every other call on it answer as for a missing handle, and a caller's `request_id` may not start
