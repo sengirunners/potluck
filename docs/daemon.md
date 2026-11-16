@@ -968,7 +968,7 @@ its own) that lets the unmodified E2B SDKs run on boxes.
 - A sandbox's `envVars` and a command's `envs` go to the box as that command's `exec` secrets (the command's own
   win), never in argv: a fixed `sh` wrapper in the guest reads each file under `POTLUCK_SECRETS` into the
   command's environment. So the secrets rules apply: a trusted host whose driver lists `secrets`, under a grant;
-  a public host answers `permission_denied`; a guest with no memory filesystem, or with swap on disk, fails such a
+  a public host answers `permission_denied`, and so does a host whose swap is not safe for secrets (`docs/hosts.md`); a guest with no memory filesystem, or with swap on disk, fails such a
   command (exit 125). Like any exec with secrets, a command with envs gets its own secrets directory in
   `POTLUCK_SECRETS`, not the box's (`secrets` verb). A name is a secret's name, `[A-Z][A-Z0-9_]{0,63}` (an E2B lower-case
   name is refused), and all of one command's envs are at most 64 KiB.
@@ -1435,10 +1435,13 @@ machine's socket (`POST /v0/runners/setup`, local):
 `issuers/`. An issuer mints a credential on the authority for one box, cut down to what the request names and
 inside the issuer's config ceiling, renews it while the box lives and revokes it at the issuer when the box ends. It
 hands the value to the box through a delivery interface (the sealed transport and the landing in the guest are
-separate parts) and never writes it anywhere itself. One kind exists: `github-token`. The daemon (`wiring.Compute`)
-runs one when `config.json` names exactly one `github-app` issuer; with none, two or more, or one it cannot build (a
-key it cannot read), it logs why and mints nothing. Its callers are the runner broker's job grants (below) and,
-later, identities asking through the door.
+separate parts) and never writes it anywhere itself. Two kinds exist: `github-token` (a `github-app` issuer) and
+`potluck-token` (a `potluck` issuer). The daemon (`wiring.Compute`) runs at most one issuer of each: two of one kind,
+or one it cannot build (a key it cannot read), leave that kind unminted, and the daemon logs why. Both kinds share
+one lifecycle (`issuers.Minted`: admission, renewal, revocation, ledger, restarts); a kind's own part is a backend. Each
+issuer starts on its own, so one whose source is down holds up neither the other's issues nor its renewals; the
+runner broker passes over a job grant of a kind no issuer here mints.
+Their callers are the runner broker's job grants (below) and, later, identities asking through the door.
 
 - It writes into a box as the authority (`rt.Door`: the box secrets verb without the holder check and reserved names,
   every other gate kept: a ready box on a pinned image before its expiry, a trusted host, a driver listing
@@ -1528,6 +1531,46 @@ What the plain and elevated permissions amount to, so a ceiling is written knowi
 - A 5xx, a 429 or a rate-limit 403 from GitHub is tried 3 times in all, waiting at most 30 s; a limit that resets
   later fails at once. A failed mint, a failed delivery or a ledger that refuses the row fails closed, and whatever
   was minted is revoked.
+
+### What a box can get (`potluck-token`)
+
+A token of the pool's own (the same tokens table `potluck token mint` writes and every caller authenticates
+against), for a box to call its authority back: to comment on a work item, say, with no long-lived login anywhere.
+
+```json
+"secrets": {"issuers": {
+  "pool": {"kind": "potluck", "as": "ci",
+           "ceiling": [{"project": "oncall", "role": "member"},
+                       {"project": "oncall", "area": "ci", "role": "member",
+                        "workflows": [".github/workflows/nightly.yml"], "events": ["schedule"]}]}}}
+```
+
+- A rule is a project (slug or ULID; a slug is looked up at each issue, so a rule follows the slug), optionally one
+  area of it (none: any area), and the most a token's role may be:
+  `guest` or `member`. `owner` is never minted for a box. `workflows` and `events` limit a rule to GitHub jobs as for
+  `github-token`. With no rule it mints nothing.
+- A grant's ceiling is `{"role": "member"}`; a request's params `{"role": "member"}`. Both the grant and a config rule
+  must allow the role.
+- The token is capped to exactly the box's project, the box's area (none: the whole project) and the asked role.
+  A person's token acts as that person; a GitHub job's acts as the issuer's `as` identity (no `as`: jobs get none).
+  That identity must already hold the role there (`potluck grant`): the token only narrows it, and an identity that
+  does not hold it is refused before anything is minted.
+- It lives at most an hour, never past the box's lease, and for a person who authenticated with a token never past
+  that token (so one box's token cannot be traded for a longer-lived one); with less than a minute left it is not
+  issued. It is renewed at two thirds of its life, like `github-token`; each renewal re-reads the lease and asks the
+  kind's whole check again (the identity still exists and holds the role, the caller's token still works): a renewal
+  it refuses ends the token; one the registry cannot answer is tried again each minute, the old token staying. A mint
+  whose registry stamp lands past the cap (the mint stalled) is revoked and refused.
+- A token minted for a caller who used another token (one box's, say) is not revoked when that token is: it lives
+  at most until that token would have expired, and is not renewed once it is revoked. A caller on the local socket
+  or the tailnet without a token is bounded by the lease and the hour only.
+- Revoking is `token revoke` on the token's row, at every way a box ends (below). The tokens table outlives the
+  authority, so after a crash the next start revokes every token an earlier run held (by its hash, recorded
+  `revoked`), rather than leaving it to lapse.
+- The ledger names it by `hashed_token`: the SHA-256 (hex) the tokens table looks a secret up by. The value is
+  never stored or logged.
+- The box gets the token under the grant's name. Reaching the authority from inside a box with it is the
+  daemon-less tunnel client's part, not this kind's.
 
 ### Renewal and revocation
 

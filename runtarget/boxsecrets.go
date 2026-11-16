@@ -83,11 +83,18 @@ func (s *Service) boxSecrets(r *http.Request) (any, error) {
 // is called, in this order: a ready box; a trusted host (a public host gets
 // nothing, whatever a grant says, and the grants are never asked); no name
 // the authority mints; the grant for what it sets (scope box, kind value;
-// unsetting one's own names needs none); a driver listing box-secrets. It
+// unsetting one's own names needs none); a driver listing box-secrets. Swap
+// on the host that could put what it sets on disk (swap.go) is refused
+// before the grants are read, as a public host is. It
 // answers the ledger's decision when anything is set.
 func (s *Service) boxSecretsGate(ctx context.Context, pid string, b computeapi.RunTarget, rw row, a protocol.BoxSecretsArgs) (*grants.Decision, error) {
 	if err := s.boxTakesSecrets(ctx, b, rw); err != nil {
 		return nil, err
+	}
+	if len(a.Secrets) > 0 { // unsetting writes nothing: it is never held back
+		if err := s.hostSwapSafe(ctx, b); err != nil { // swap that could put them on disk (swap.go); no grant is read for it
+			return nil, err
+		}
 	}
 	class := s.boxClass(ctx, b)
 	sizes := map[string]int{}

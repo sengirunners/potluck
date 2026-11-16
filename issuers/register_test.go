@@ -93,7 +93,7 @@ func TestRegisterAndGrantCheck(t *testing.T) {
 		t.Fatalf("add a github-token grant: %d %s", rec.Code, rec.Body)
 	}
 
-	check := GrantCheck(d, func(context.Context, Box) (string, error) { return ClassTrusted, nil })
+	check := GrantCheck(d, func(context.Context, Box) (string, error) { return ClassTrusted, nil }, KindGitHubToken)
 	box := Box{Project: ref.ID, ID: "box:b/1"}
 	req := Request{Name: "GH_TOKEN", Subject: Subject{IdentityID: ctl.ID}, Box: box, Repo: "acme/app", Permissions: write}
 	req.Caller = caller(authz.Member)

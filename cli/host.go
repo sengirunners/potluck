@@ -26,6 +26,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/project"
@@ -140,7 +141,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				if err := a.printJSON(out); err != nil {
 					return err
 				}
-				if out.Best == "" {
+				if out.Best == "" || !hostswap.Safe(r.Swap) {
 					return exitSilently(1)
 				}
 				return nil
@@ -208,11 +209,28 @@ func (a *app) doctorCmd() *cobra.Command {
 			if out.Best == "" {
 				return exitWith{1, errors.New("no layer here is ready, so this machine cannot share sandboxes yet (the problems are listed above)")}
 			}
+			if !hostswap.Safe(r.Swap) {
+				return exitWith{1, errors.New(swapProblem(r))}
+			}
 			fmt.Fprintf(w, "next: potluck host   (layer %s; the default image unless --image name@sha256:<digest>)\n", out.Best)
 			return nil
 		}}
 	f.add(cmd)
 	return cmd
+}
+
+// swapProblem is doctor's failure for swap that is not safe for box secrets.
+// A note that already names the fix (Linux) is not followed by it again.
+func swapProblem(r hostprobe.Report) string {
+	state := r.Swap
+	if state == "" {
+		state = "not reported"
+	}
+	msg := "swap is " + state + ": a pool gives a machine like this no box secrets, only secret-free work, until that is fixed"
+	if r.OS == "linux" && !strings.Contains(r.SwapNote, hostswap.Fix) {
+		msg += "; " + hostswap.Fix
+	}
+	return msg
 }
 
 // rootStep is how potluck host runs doctor's root step itself: sudo asks

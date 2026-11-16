@@ -7,11 +7,60 @@ import (
 	"testing"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/teamlink"
 )
+
+// lendsWithSwap makes "lender" a heard host of project P advertising binding
+// b with its swap in state.
+func lendsWithSwap(s *Service, state string) {
+	s.link = &teamlink.Service{}
+	s.enrolled = func(context.Context, string, string) bool { return true }
+	s.adverts.set("P", "lender", []computeapi.RunTargetAdvert{{Binding: "b", Describe: computeapi.RunTargetDescribe{
+		Kind: computeapi.RunTargetKindBox, Swap: state}}})
+}
+
+// A relayed op carrying secrets is handed to its host only while its swap is
+// still safe: one that began swapping to a plain disk after the check at the
+// call gets nothing, and the refusal names the fix and no secret.
+func TestOpArgsAsksTheSwapAgain(t *testing.T) {
+	s := &Service{d: &core.Deps{Config: &config.Config{Machine: "mini"}}, opClass: func(context.Context, string, string) string { return api.MachineTrusted }}
+	args := json.RawMessage(`{"argv":["true"],"secrets":{"API_KEY":"swap-canary-value"}}`)
+	for _, c := range []struct {
+		state string
+		want  string // in the refusal; "" lets the op on
+	}{
+		{hostswap.PlainDisk, "swaps to a plain disk"},
+		{"", "does not report its swap state"},
+		{hostswap.Zram, ""},
+	} {
+		lendsWithSwap(s, c.state)
+		s.rtmem.Put("op-swap", args)
+		s.secretOps.Store("op-swap", "lender")
+		m := &api.MachineOp{ID: "op-swap", Kind: opRunTarget}
+		setRTOp(m, &computeapi.RunTargetOp{Binding: "b", Verb: verbExec, ID: "box:b/1"})
+		err := s.opArgs(context.Background(), "P", m)
+		switch {
+		case c.want == "" && err != nil && strings.Contains(err.Error(), "swap"):
+			t.Errorf("%q: refused for swap: %v", c.state, err)
+		case c.state == hostswap.PlainDisk && (err == nil || !strings.Contains(err.Error(), hostswap.Fix)):
+			t.Errorf("a plain disk: the refusal does not name the fix: %v", err)
+		case c.want != "" && (code(err) != api.CodeForbidden || !strings.Contains(err.Error(), c.want) ||
+			strings.Contains(err.Error(), "swap-canary-value") || strings.Contains(string(m.Payload), "swap-canary-value")):
+			t.Errorf("%q: %v %s", c.state, err, m.Payload)
+		}
+	}
+	s.adverts.set("P", "lender", nil) // no longer advertised: nothing is known of its swap
+	s.rtmem.Put("op-swap", args)
+	m := &api.MachineOp{ID: "op-swap", Kind: opRunTarget}
+	setRTOp(m, &computeapi.RunTargetOp{Binding: "b", Verb: verbExec, ID: "box:b/1"})
+	if err := s.opArgs(context.Background(), "P", m); code(err) != api.CodeUnavailable || !strings.Contains(err.Error(), "advertises no run target") {
+		t.Errorf("a host that advertises nothing: %v, want unavailable, not an older build's refusal", err)
+	}
+}
 
 // A relayed op carrying secrets is handed to its host only while the host
 // is still trusted: one demoted after the grant check gets nothing, and the
@@ -21,7 +70,8 @@ func TestOpArgsAsksTheClassAgain(t *testing.T) {
 	class := api.MachineTrusted
 	// No seal key module here: a trusted host's op goes on to sealing,
 	// which refuses it for want of a key; the class check comes first.
-	s := &Service{d: &core.Deps{}, opClass: func(context.Context, string, string) string { return class }}
+	s := &Service{d: &core.Deps{Config: &config.Config{Machine: "mini"}}, opClass: func(context.Context, string, string) string { return class }}
+	lendsWithSwap(s, hostswap.Encrypted)
 	args := json.RawMessage(`{"argv":["true"],"secrets":{"API_KEY":"class-canary-value"}}`)
 	var call *teamlink.OpCall
 	op := func(id string) *api.MachineOp {
@@ -78,7 +128,8 @@ func TestOpArgsNeverAnswersTheCaller(t *testing.T) {
 		{"demoted", api.MachinePublic},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			s := &Service{d: &core.Deps{}, opClass: func(context.Context, string, string) string { return c.class }}
+			s := &Service{d: &core.Deps{Config: &config.Config{Machine: "mini"}}, opClass: func(context.Context, string, string) string { return c.class }}
+			lendsWithSwap(s, hostswap.Encrypted)
 			ctx := core.WithRemote(context.Background(), core.Remote{Node: "lender", Via: core.ViaTunnel})
 			args := json.RawMessage(`{"argv":["true"],"secrets":{"API_KEY":"sent-canary-value"}}`)
 			call := s.rtmem.Put("op-1", args)

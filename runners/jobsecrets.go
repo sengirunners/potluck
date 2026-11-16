@@ -152,7 +152,7 @@ func (s *Service) jobOf(ctx context.Context, cl *ghapp.Client, d delivery, candi
 	}
 	maybe := j
 	maybe.Ref = "refs/heads/" + repo.DefaultBranch
-	if len(matching(candidates, maybe)) == 0 {
+	if len(matching(issuers.From(s.d), candidates, maybe)) == 0 {
 		return j, nil
 	}
 	on, tip, err := cl.OnBranch(ctx, d.Installation.ID, d.Repo.FullName, repo.DefaultBranch, run.HeadSHA)
@@ -196,12 +196,16 @@ func (s *Service) jobOf(ctx context.Context, cl *ghapp.Client, d delivery, candi
 	return j, nil
 }
 
-// matching is the candidates that name job, of the kind the daemon's issuer
-// mints.
-func matching(candidates []computeapi.SecretGrant, job jobrule.Job) []computeapi.SecretGrant {
+// matching is the candidates that name job, of a kind an issuer of iss
+// mints here (a grant of a kind no issuer runs for is passed over, so it
+// never fails the job's other grants).
+func matching(iss issuers.Minter, candidates []computeapi.SecretGrant, job jobrule.Job) []computeapi.SecretGrant {
 	var out []computeapi.SecretGrant
+	if iss == nil {
+		return nil
+	}
 	for _, g := range candidates {
-		if g.Kind == issuers.KindGitHubToken && grants.JobMatches(g, job) {
+		if iss.Mints(g.Kind) && grants.JobMatches(g, job) {
 			out = append(out, g)
 		}
 	}
@@ -234,7 +238,7 @@ func (s *Service) secretsRun(ctx context.Context, cl *ghapp.Client, l link, d de
 	if err != nil {
 		return nil, err
 	}
-	if len(matching(candidates, job)) == 0 {
+	if len(matching(issuers.From(s.d), candidates, job)) == 0 {
 		return unguarded()
 	}
 	run := &protocol.JITRun{ID: job.RunID, WorkflowRef: job.Repo + "/" + job.Workflow + "@" + job.Ref, Ref: job.Ref, HoldS: holdS}
@@ -395,7 +399,7 @@ func (s *Service) issueSecrets(ctx context.Context, d delivery, owner int64) {
 		fail("its run is not the one its box was guarded to")
 		return
 	}
-	gs := matching(candidates, job)
+	gs := matching(iss, candidates, job)
 	if len(gs) == 0 {
 		fail("no grant names its run now")
 		return

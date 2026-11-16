@@ -4,14 +4,18 @@
 // lives and revoked at the issuer on every way the box ends. The ledger records
 // who got what, never a value.
 //
-// GitHubToken is the github-token kind: an installation token of a GitHub App
-// for exactly one repository and the requested permissions.
+// Minted is one issuer: the lifecycle every minted kind shares (admission,
+// holding, renewal, revocation on every end, the ledger, restarts) over a
+// backend that holds the kind's own part (what it checks, how it mints and
+// revokes at its source, its grant ceilings). The github-token kind is an
+// installation token of a GitHub App for exactly one repository and the
+// requested permissions (github.go).
 //
 // The policy (grants) and the way a value reaches a box (sealed transport, the
 // guest's landing) are other packages'. This one takes them as interfaces:
 // Deliverer, ClassOf and Ledger. The grants check's side of a kind
-// (grants.Issuer: Kind, Ceiling, Within) is GitHubToken's too; Register hooks
-// an issuer to the grants package (grants.go).
+// (grants.Issuer: Kind, Ceiling, Within) is Minted's too; Register hooks an
+// issuer to the grants package (grants.go).
 package issuers
 
 import (
@@ -28,7 +32,7 @@ import (
 	"github.com/sengirunners/potluck/kit/secrets"
 )
 
-// KindGitHubToken is the credential kind GitHubToken issues.
+// KindGitHubToken is the credential kind a github-app issuer mints.
 const KindGitHubToken = computeapi.SecretKindGitHubToken
 
 // Issuer is a minted kind. The lifecycle owner calls Issue when a box is
@@ -130,11 +134,12 @@ type Subject struct {
 // jobrule's, shared with the grants check.
 type Job = jobrule.Job
 
-// Request asks for one credential for one box. Repo and Permissions are the
-// kind's params, the same schema a grant's ceiling is read with (Params,
-// GrantCeiling).
+// Request asks for one credential for one box. Repo and Permissions are
+// github-token's params, Role potluck-token's: the same schema a grant's
+// ceiling is read with (ParamsFor).
 type Request struct {
-	Name         string            `json:"name"` // the file name in the box, [A-Z][A-Z0-9_]{0,63}
+	Kind         string            `json:"kind,omitempty"` // KindGitHubToken or KindPotluckToken; set by Issue for the issuer's own
+	Name         string            `json:"name"`           // the file name in the box, [A-Z][A-Z0-9_]{0,63}
 	Subject      Subject           `json:"subject"`
 	Box          Box               `json:"box"`
 	Grant        string            `json:"grant,omitempty"`        // set by Issue from Check's Decision; a caller's is ignored
@@ -142,6 +147,7 @@ type Request struct {
 	Permissions  map[string]string `json:"permissions"`            // permission -> read|write; metadata read is added
 	Installation int64             `json:"installation,omitempty"` // the App's installation on Repo's account; 0 asks GitHub
 	Reason       string            `json:"reason,omitempty"`       // required for an elevated permission at write
+	Role         string            `json:"role,omitempty"`         // potluck-token: guest or member
 	// Caller is who asks for an identity's credential, as authenticated
 	// (its token's cap included): the grant check judges it, never the
 	// identity's whole rights. Kept in memory only: an identity's assignment
@@ -168,6 +174,7 @@ const (
 	EndReclaimed    EndReason = "reclaimed"
 	EndLost         EndReason = "lost"
 	EndHostDemoted  EndReason = "host_demoted"
+	EndSwapUnsafe   EndReason = "swap_unsafe" // the box's host swaps where a secret could reach a disk (renewal)
 	EndJobCompleted EndReason = "job_completed"
 	EndJobTaken     EndReason = "job_taken"
 	EndGone         EndReason = "gone"     // a sweep found no such box

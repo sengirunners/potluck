@@ -13,6 +13,7 @@ package runtarget
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
@@ -69,6 +70,9 @@ func (s *Service) BoxSecret(ctx context.Context, project, handle, name string, v
 	if err := s.boxTakesSecrets(ctx, b, rw); err != nil {
 		return err
 	}
+	if err := s.hostSwapSafe(ctx, b); err != nil { // swap that could put it on disk (swap.go)
+		return err
+	}
 	if err := s.keepsBoxSecrets(ctx, b); err != nil {
 		return err
 	}
@@ -106,4 +110,17 @@ func (s *Service) BoxLive(ctx context.Context, project, handle string) (bool, er
 		return false, err
 	}
 	return !terminal(rw.State), nil
+}
+
+// BoxExpires is when project's box handle's lease ends, from its record
+// (zero: the record names no end).
+func (s *Service) BoxExpires(ctx context.Context, project, handle string) (time.Time, error) {
+	rw, err := s.rowOf(ctx, project, handle)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if rw.ExpiresAt == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339Nano, rw.ExpiresAt)
 }

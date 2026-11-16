@@ -29,9 +29,16 @@ detected at run time or given in flags (`hostprobe/`).
 - With admission keys bound: `admission: <bindings> take a lease from <url> (lease N s, token from PATH) before each
   box`, one line per controller (`admission` in `--json`).
 - On docker: whether Potluck's filtered network and its filter unit are there (`docs/network.md`).
-- When this machine's swap is not encrypted, or it cannot tell (`swap_note` in `--json`): a box's memory, the
-  secrets in its memory filesystem included, can be paged out to that disk. A Mac's swap is encrypted. On Linux,
-  zram and swap on a dm-crypt device count as safe; encrypt the rest or use zram.
+- This machine's swap (`swap` in `--json`: `off`, `zram`, `encrypted`, `plain-disk` or `unknown`) and, when it is not
+  safe (`swap_note`): a box's memory, the secrets in its memory filesystem included, can be paged out to that disk.
+  A Mac's swap is encrypted. On Linux, no swap, zram and swap on a dm-crypt device are safe. `plain-disk` and
+  `unknown` (it cannot tell) make `potluck doctor` fail, and the fix is: turn swap off (`swapoff -a`, and remove
+  it from `/etc/fstab`), use zram, or encrypt swap (dm-crypt).
+  The host reports the same state in its advert, and the pool gives box secrets (the `secrets` verb, an exec's
+  secrets, a minted credential) only to a host whose state is safe: any other is refused with the fix named, and
+  its secret-free work is not held back. A host on a build from before the field reports none, which counts as not
+  safe: update Potluck on it, and it is given secrets again. A box binding on the pool's own machine is not
+  gated by the pool; nothing refuses it but `potluck doctor` failing there.
 - When a layer is ready, the next step: `next: potluck host   (layer <layer>; the default image unless --image
   name@sha256:<digest>)`.
 

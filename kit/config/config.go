@@ -385,9 +385,12 @@ func (s Secrets) Err() error { return s.err }
 // SecretsIssuer is one issuer. Kind "github-app" mints github-token: one
 // repository, the requested permissions, GitHub's hour, from a GitHub App
 // named here (app_id, private_key, api_url) or by Use ("runners.github": the
-// runner broker's App).
+// runner broker's App). Kind "potluck" mints potluck-token: a token of this
+// pool's own, capped to one role on a box's project and area, for at most the
+// box's lease; As names the identity a GitHub job's token acts as.
 type SecretsIssuer struct {
 	Kind       string `json:"kind,omitempty"`
+	As         string `json:"as,omitempty"` // potluck: the identity a job's token acts as
 	Use        string `json:"use,omitempty"`
 	AppID      int64  `json:"app_id,omitempty"`
 	PrivateKey string `json:"private_key,omitempty"` // secret reference
@@ -405,9 +408,16 @@ type SecretsIssuer struct {
 // workflow_dispatch and repository_dispatch only when listed). Elevated lists
 // the elevated permissions (package issuers) the rule may grant at write;
 // a rule with any needs a Reason.
+//
+// A potluck issuer's rule is instead a project (slug or ULID), optionally one
+// area of it (none: any), and the most a token's role may be (Role); Repo,
+// Permissions, Elevated and Reason are left unset.
 type SecretsCeiling struct {
-	Repo        string            `json:"repo"`
-	Permissions map[string]string `json:"permissions"`
+	Repo        string            `json:"repo,omitempty"`
+	Permissions map[string]string `json:"permissions,omitempty"`
+	Project     string            `json:"project,omitempty"`
+	Area        string            `json:"area,omitempty"`
+	Role        string            `json:"role,omitempty"`
 	Workflows   []string          `json:"workflows,omitempty"`
 	Events      []string          `json:"events,omitempty"`
 	Elevated    []string          `json:"elevated,omitempty"`

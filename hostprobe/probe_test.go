@@ -330,3 +330,12 @@ func TestDoctorRunsDriverEngineCheck(t *testing.T) {
 		}
 	}
 }
+
+// Detect carries the swap state beside its note, for the advert and doctor.
+func TestDetectReportsSwap(t *testing.T) {
+	r := Detect(context.Background(), &fakeRunner{out: map[string]Result{
+		"swapon --show=NAME,TYPE --noheadings --raw": ok("/dev/sda2 partition\n"), "lsblk -nso TYPE /dev/sda2": ok("part\ndisk\n")}}, fakeFacts{os: "linux"}, "")
+	if r.Swap != "plain-disk" || !strings.Contains(r.SwapNote, "swap on /dev/sda2") {
+		t.Errorf("swap %q, note %q", r.Swap, r.SwapNote)
+	}
+}

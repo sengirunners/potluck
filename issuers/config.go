@@ -17,8 +17,9 @@ import (
 // Spec is one validated issuer of config.json's secrets.issuers.
 type Spec struct {
 	Name       string
-	Kind       string // KindGitHubApp
+	Kind       string // KindGitHubApp or KindPotluck
 	Use        string // "" or UseRunners
+	As         string // KindPotluck: the identity a GitHub job's token acts as ("": jobs get none)
 	AppID      int64
 	PrivateKey string // a secret reference, never a value
 	APIURL     string
@@ -29,7 +30,13 @@ type Spec struct {
 // each permission may be, optionally the workflow files of the default branch
 // it serves (then only GitHub jobs, never an identity), the job events it
 // serves, the elevated permissions it may grant at write, and why.
+//
+// A potluck rule is instead a project (slug or ULID), an area of it ("": any)
+// and the most a token's role may be; Workflows and Events limit it as above.
 type Rule struct {
+	Project     string
+	Area        string
+	Role        string
 	Repo        string
 	Permissions map[string]string
 	Workflows   []string
@@ -41,6 +48,7 @@ type Rule struct {
 // Issuer config kinds and uses.
 const (
 	KindGitHubApp = "github-app" // mints KindGitHubToken
+	KindPotluck   = "potluck"    // mints KindPotluckToken
 	UseRunners    = "runners.github"
 )
 
@@ -133,8 +141,15 @@ func spec(name string, is config.SecretsIssuer, broker config.RunnersGitHub) (Sp
 	if !issuerNameRE.MatchString(name) {
 		return Spec{}, fmt.Errorf("secrets.issuers: %q is not an issuer name (lower case letters, digits and -)", name)
 	}
-	if is.Kind != KindGitHubApp {
-		return bad("kind %q: the only kind is %q", is.Kind, KindGitHubApp)
+	switch is.Kind {
+	case KindGitHubApp:
+	case KindPotluck:
+		return potluckSpec(name, is)
+	default:
+		return bad("kind %q: %q or %q", is.Kind, KindGitHubApp, KindPotluck)
+	}
+	if is.As != "" {
+		return bad("as is a %q issuer's", KindPotluck)
 	}
 	s := Spec{Name: name, Kind: is.Kind, Use: is.Use, AppID: is.AppID, PrivateKey: is.PrivateKey, APIURL: is.APIURL}
 	switch is.Use {
@@ -204,6 +219,9 @@ func apiURL(v string) error {
 }
 
 func checkRule(r config.SecretsCeiling) (Rule, error) {
+	if r.Project != "" || r.Area != "" || r.Role != "" {
+		return Rule{}, fmt.Errorf("repo %q: project, area and role are a %q issuer's", r.Repo, KindPotluck)
+	}
 	o, n, ok := strings.Cut(r.Repo, "/")
 	if !ok || !ghNameRE.MatchString(o) || strings.Contains(o, "..") || (n != "*" && (!ghNameRE.MatchString(n) || strings.Contains(n, ".."))) {
 		return Rule{}, fmt.Errorf("repo %q: owner/name or owner/*", r.Repo)

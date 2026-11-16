@@ -77,34 +77,6 @@ func ParseGrantCeiling(raw json.RawMessage) (GrantCeiling, []Rule, error) {
 	return c, rules, nil
 }
 
-// Ceiling checks a grant's ceiling when the grant is added and answers it in
-// its stored form (grants.Issuer). One not inside the config ceiling is
-// refused.
-func (g *GitHubToken) Ceiling(raw json.RawMessage) (json.RawMessage, error) {
-	c, rules, err := ParseGrantCeiling(raw)
-	if err != nil {
-		return nil, err
-	}
-	if err := g.spec.InsideConfig(rules); err != nil {
-		return nil, err
-	}
-	return json.Marshal(c)
-}
-
-// Within reports whether a request's params sit inside a stored grant
-// ceiling (nil: they do; grants.Issuer). It never mints.
-func (g *GitHubToken) Within(ceiling, params json.RawMessage) error {
-	_, rules, err := ParseGrantCeiling(ceiling)
-	if err != nil {
-		return err
-	}
-	var p Params
-	if err := strict(params, &p); err != nil {
-		return fmt.Errorf("github-token params: %w", err)
-	}
-	return WithinRules(rules, p)
-}
-
 // WithinRules is Within on parsed rules.
 func WithinRules(rules []Rule, p Params) error {
 	if !validRepo(p.Repo) || strings.Contains(p.Repo, "*") {
@@ -163,19 +135,30 @@ func repoCovers(outer, inner string) bool {
 }
 
 // JobRequest is the request the runner broker sends for job's box under a
-// job grant g it matched (grants.JobMatches): the grant's name, the job's
-// own repository, and the grant's permissions and reason. Issue still
-// decides it whole (the config ceiling, the box's class, the grant check
-// with the job as subject).
+// job grant g it matched (grants.JobMatches): the grant's kind and name, and
+// for github-token the job's own repository and the grant's permissions and
+// reason, for potluck-token the grant's role. Issue still decides it whole
+// (the config ceiling, the box's class, the grant check with the job as
+// subject).
 func JobRequest(g computeapi.SecretGrant, job Job, box Box) (Request, error) {
-	if g.Kind != KindGitHubToken || g.To.Job == nil {
-		return Request{}, errors.New("issuers: not a github-token job grant")
-	}
-	c, _, err := ParseGrantCeiling(g.Ceiling)
-	if err != nil {
-		return Request{}, err
+	if g.To.Job == nil {
+		return Request{}, errors.New("issuers: not a job grant")
 	}
 	j := job
-	return Request{Name: g.Name, Subject: Subject{Job: &j}, Box: box, Repo: job.Repo, Permissions: maps.Clone(c.Permissions),
-		Reason: c.Reason}, nil
+	switch g.Kind {
+	case KindGitHubToken:
+		c, _, err := ParseGrantCeiling(g.Ceiling)
+		if err != nil {
+			return Request{}, err
+		}
+		return Request{Kind: g.Kind, Name: g.Name, Subject: Subject{Job: &j}, Box: box, Repo: job.Repo, Permissions: maps.Clone(c.Permissions),
+			Reason: c.Reason}, nil
+	case KindPotluckToken:
+		c, _, err := parsePotluckCeiling(g.Ceiling)
+		if err != nil {
+			return Request{}, err
+		}
+		return Request{Kind: g.Kind, Name: g.Name, Subject: Subject{Job: &j}, Box: box, Role: c.Role}, nil
+	}
+	return Request{}, fmt.Errorf("issuers: %s is not a minted kind", g.Kind)
 }

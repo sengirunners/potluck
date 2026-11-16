@@ -124,6 +124,7 @@ func cleanAdverts(in []computeapi.RunTargetAdvert) []computeapi.RunTargetAdvert 
 		d.Capabilities = capStrings(d.Capabilities, 16, 64)
 		d.Verbs = capStrings(d.Verbs, 16, 32)
 		d.Images = advertImages(d.Images)
+		d.Swap = cutLine(d.Swap, 20)
 		sz := *d.Size
 		d.Size = &sz
 		out = append(out, computeapi.RunTargetAdvert{Binding: ad.Binding, Describe: d})
@@ -330,6 +331,14 @@ func (s *Service) opArgs(ctx context.Context, project string, op *api.MachineOp)
 		// gets no secret (the waiting call is answered this refusal).
 		if s.classAtHandOver(ctx, project, m.(string)) != api.MachineTrusted {
 			return &api.Error{Code: api.CodeForbidden, Message: m.(string) + " is a public host: it is given no secrets, only secret-free work"}
+		}
+		// Swap again too, for an op that sets a secret (a jit_config or an
+		// unset writes none): it may have changed since the check at the call.
+		if setsSecrets(args) {
+			host := computeapi.RunTarget{Host: m.(string), HostBinding: rop.Binding, HostProject: project}
+			if err := s.hostSwapSafe(ctx, host); err != nil {
+				return err
+			}
 		}
 	}
 	rop.Sealing = 1

@@ -31,7 +31,7 @@
 //     until then no grant of its kind can be added and a request for it is
 //     refused. OnGrantRemoved registers a hook told when a grant is removed
 //     (or the defaults turned off), so an issuer ends what it issued.
-//     issuers.Register does both for the github-token issuer, and
+//     issuers.Register does both for each minted kind's issuer, and
 //     issuers.GrantCheck is its Options.Check over Check.
 //
 // The ledger is the project's event log (kit/events): secret.granted,

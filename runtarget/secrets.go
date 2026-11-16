@@ -35,6 +35,9 @@ func (s *Service) secretsAllowed(ctx context.Context, b computeapi.RunTarget, se
 	if err := s.hostTrusted(ctx, b, "secrets"); err != nil { // a public host: never, whatever its driver lists
 		return err
 	}
+	if err := s.hostSwapSafe(ctx, b); err != nil { // swap that could put them on disk (swap.go)
+		return err
+	}
 	if err := s.callerSealed(ctx, "secrets"); err != nil { // sent in the clear by a machine that cannot seal
 		return err
 	}

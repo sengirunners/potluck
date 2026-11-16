@@ -157,6 +157,11 @@ type RunTargetDescribe struct {
 	// Host is the host switch as the driver reads it now; nil from a driver
 	// that has none.
 	Host *protocol.HostStatus `json:"host,omitempty"`
+	// Swap (an advert's only) is the state of the host machine's swap, read
+	// by its daemon, never a driver's word (hostswap: off, zram, encrypted,
+	// plain-disk or unknown). The authority gives box secrets only to a host
+	// whose state is safe; "" is a host on a build from before the field.
+	Swap string `json:"swap,omitempty"`
 }
 
 // RunTargetSize is a box binding's size.

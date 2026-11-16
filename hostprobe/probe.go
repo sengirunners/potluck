@@ -149,8 +149,11 @@ type Report struct {
 	// KVMRootSteps fixes KVMProblem when root can (the kvm group).
 	KVMRootSteps []string `json:"kvm_root_steps,omitempty"`
 	Layers       []Layer  `json:"layers"`
-	// SwapNote says when this machine's swap is not encrypted, or cannot be
-	// told (swap.go): a box's memory can be paged out to it.
+	// Swap is the state of this machine's swap (hostswap: off, zram,
+	// encrypted, plain-disk or unknown), and SwapNote says in plain words
+	// when it is not safe for box secrets: a box's memory can be paged out
+	// to it.
+	Swap     string `json:"swap,omitempty"`
 	SwapNote string `json:"swap_note,omitempty"`
 }
 
@@ -253,7 +256,8 @@ func Detect(ctx context.Context, run Runner, f Facts, stateDir string) Report {
 	for i := range r.Layers {
 		r.Layers[i].Supported = Supported[r.Layers[i].Name]
 	}
-	r.SwapNote = swapNote(ctx, run, r.OS)
+	sw := readSwap(ctx, run, r.OS)
+	r.Swap, r.SwapNote = sw.State, sw.Note
 	return r
 }
 

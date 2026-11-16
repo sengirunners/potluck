@@ -233,7 +233,7 @@ type env struct {
 	logs  *bytes.Buffer
 	cfg   config.File
 	opt   Options
-	iss   *GitHubToken
+	iss   *Minted
 	alive map[string]bool // box key -> the owner says it lives
 	errs  []string        // every error any call answered, for the canary
 	// grantOf is the grant the fake grant check names per box id (default
@@ -315,7 +315,7 @@ func (w lockedWriter) Write(p []byte) (int, error) {
 	return w.b.Write(p)
 }
 
-func (e *env) load() *GitHubToken {
+func (e *env) load() *Minted {
 	e.t.Helper()
 	g, err := Load(context.Background(), e.cfg, "gh", e.opt)
 	if err != nil {
@@ -696,6 +696,83 @@ func TestRefusalsComeBeforeAnyGitHubCall(t *testing.T) {
 	}
 }
 
+// A box whose host's swap is not safe for secrets gets no token minted: the
+// door would refuse the delivery, so GitHub is never asked.
+func TestNoTokenIsMintedForAHostWithUnsafeSwap(t *testing.T) {
+	e := newEnv(t, appCeiling, config.SecretsCeiling{Repo: "acme/web", Permissions: map[string]string{"contents": "read"}})
+	e.iss.o.BoxTakesSecrets = func(context.Context, Box) error {
+		return api.Errorf(api.CodeForbidden, "lender swaps to a plain disk: fix swap there")
+	}
+	_, err := e.issue(ident(trustedBox, write))
+	if codeOf(err) != api.CodeForbidden || !strings.Contains(err.Error(), "plain disk") {
+		t.Errorf("unsafe swap: %v, want forbidden naming it", err)
+	}
+	if calls, _, _, _ := e.gh.snapshot(); len(calls) != 0 {
+		t.Errorf("unsafe swap called GitHub: %v", calls)
+	}
+	if len(e.bx.vals) != 0 {
+		t.Errorf("unsafe swap delivered %v", e.bx.vals)
+	}
+	e.iss.o.BoxTakesSecrets = func(context.Context, Box) error { return nil }
+	if _, err := e.issue(ident(trustedBox, write)); err != nil {
+		t.Errorf("safe swap: %v", err)
+	}
+}
+
+// An answer that is not a refusal (no host has said anything yet, right after
+// a restart) is unavailable, never forbidden: a re-issue after a restart waits
+// and tries again instead of dropping the box's assignment. A held token whose
+// host's swap turns unsafe is not renewed (nothing is minted) and is ended.
+func TestSwapUnknownIsNotARefusalAndRenewalStopsOnUnsafeSwap(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, appCeiling)
+	e.iss.o.BoxTakesSecrets = func(context.Context, Box) error {
+		return api.Errorf(api.CodeUnavailable, "lender advertises no run target now")
+	}
+	if _, err := e.issue(ident(trustedBox, write)); codeOf(err) != api.CodeUnavailable {
+		t.Errorf("a host not heard from yet: %v, want unavailable", err)
+	}
+	if calls, _, _, _ := e.gh.snapshot(); len(calls) != 0 {
+		t.Errorf("an unknown swap called GitHub: %v", calls)
+	}
+	e.iss.o.BoxTakesSecrets = func(context.Context, Box) error { return nil }
+	e.mustIssue(ident(trustedBox, write))
+	e.iss.o.BoxTakesSecrets = func(context.Context, Box) error {
+		return api.Errorf(api.CodeForbidden, "lender swaps to a plain disk: fix swap there")
+	}
+	e.clk.add(40 * time.Minute)
+	e.iss.Tick(ctx)
+	if _, mints, _, revoked := e.gh.snapshot(); len(mints) != 1 || len(revoked) != 1 {
+		t.Errorf("unsafe swap at renewal: %d mints, %d revoked, want 1 and the held token revoked", len(mints), len(revoked))
+	}
+}
+
+// At renewal a host not heard from now (its advert went stale) is not an unsafe
+// one: nothing is revoked, the assignment stays, and the renewal is tried
+// again a minute later.
+func TestRenewalWaitsWhenTheHostsSwapIsNotKnown(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, appCeiling)
+	first := e.mustIssue(ident(trustedBox, write))
+	e.iss.o.BoxTakesSecrets = func(context.Context, Box) error {
+		return api.Errorf(api.CodeUnavailable, "lender advertises no run target now")
+	}
+	e.clk.add(40 * time.Minute)
+	e.iss.Tick(ctx)
+	if _, mints, _, revoked := e.gh.snapshot(); len(mints) != 1 || len(revoked) != 0 {
+		t.Fatalf("an unknown swap at renewal: %d mints, %d revoked, want the token left alone", len(mints), len(revoked))
+	}
+	e.iss.o.BoxTakesSecrets = func(context.Context, Box) error { return nil }
+	e.clk.add(time.Minute)
+	e.iss.Tick(ctx)
+	if _, mints, _, _ := e.gh.snapshot(); len(mints) != 2 {
+		t.Errorf("the renewal was not tried again: %d mints", len(mints))
+	}
+	if again, err := e.issue(ident(trustedBox, write)); err != nil || again.HashedToken == "" || again.HashedToken == first.HashedToken {
+		t.Errorf("the assignment did not survive: %v %v", again, err)
+	}
+}
+
 func TestBroaderAnswerIsRevokedAndNothingDelivered(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t, appCeiling)
@@ -924,7 +1001,7 @@ func TestRenewalsAreConcurrentAndBounded(t *testing.T) {
 
 func TestEveryEndRevokes(t *testing.T) {
 	ctx := context.Background()
-	for _, why := range []EndReason{EndReleased, EndExpired, EndReclaimed, EndLost, EndJobCompleted, EndJobTaken, EndHostDemoted} {
+	for _, why := range []EndReason{EndReleased, EndExpired, EndReclaimed, EndLost, EndJobCompleted, EndJobTaken, EndHostDemoted, EndSwapUnsafe} {
 		e := newEnv(t, appCeiling)
 		e.mustIssue(ident(trustedBox, write))
 		e.mustIssue(ident(otherBox, write))

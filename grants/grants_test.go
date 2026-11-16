@@ -16,6 +16,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/conformance/refdriver"
+	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
@@ -30,6 +31,8 @@ func TestMain(m *testing.M) {
 	if code, ok := refdriver.Main(); ok {
 		os.Exit(code)
 	}
+	// A host's adverts carry its swap state: not this machine's, whatever runs the tests.
+	hostswap.Local = func(context.Context) hostswap.Reading { return hostswap.Reading{State: hostswap.Encrypted} }
 	os.Exit(m.Run())
 }
 

@@ -55,6 +55,8 @@ type hostState struct {
 	legacy    map[string]string    // host_keys.json's legacy_keys, once migrated
 	idOf      map[string]string    // legacy inverted: old slug -> project id
 	done      atomic.Bool          // migrated, legacy and idOf set (ledgerLoad reads it)
+	swapMu    sync.Mutex           // swap
+	swap      swapCache            // this machine's swap, last read (swap.go)
 	logMu     sync.Mutex           // hostLog
 	logged    map[string]time.Time // by message
 }
@@ -258,6 +260,7 @@ func (s *Service) HostAdverts(ctx context.Context, project string) []computeapi.
 	}
 	var out []computeapi.RunTargetAdvert
 	live := map[string]bool{}
+	swap := s.localSwap(ctx) // one reading for every binding of this beat (swap.go)
 	for _, t := range ts {
 		if !sharedWith(t, project) {
 			continue
@@ -275,6 +278,7 @@ func (s *Service) HostAdverts(ctx context.Context, project string) []computeapi.
 		// Describe may be cached across a rebind; advertise the current image name.
 		ad.ImageName = t.Config["image_name"]
 		ad.Images = slices.Clone(t.Images) // the binding's pins, never what a driver's describe says
+		ad.Swap = swap                     // this machine's own reading, never a driver's word (swap.go)
 		ad.Name, ad.Kind, ad.Isolation, ad.Credentials = t.Name, computeapi.RunTargetKindBox, eff.Isolation, eff.Credentials
 		if lc := lifetimeCap(t.RunTarget, d); lc > 0 {
 			ad.TTLMaxS = lc

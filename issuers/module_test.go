@@ -31,7 +31,9 @@ type fakeRunTargets struct {
 	mu     sync.Mutex
 	onEnd  []rt.EndFunc
 	writes []string
-	class  string // every box's machine class (default trusted)
+	class  string            // every box's machine class (default trusted)
+	vals   map[string]string // handle name -> the last value written
+	lease  time.Time         // every box's lease end (zero: none)
 }
 
 func (f *fakeRunTargets) setClass(c string) { f.mu.Lock(); f.class = c; f.mu.Unlock() }
@@ -45,7 +47,23 @@ func (f *fakeRunTargets) BoxSecret(_ context.Context, project, handle, name stri
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.writes = append(f.writes, handle+" "+name)
+	if f.vals == nil {
+		f.vals = map[string]string{}
+	}
+	f.vals[handle+" "+name] = v.Reveal()
 	return nil
+}
+
+func (f *fakeRunTargets) value(handle, name string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.vals[handle+" "+name]
+}
+
+func (f *fakeRunTargets) BoxExpires(context.Context, string, string) (time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lease, nil
 }
 func (f *fakeRunTargets) BoxClass(context.Context, string, string) (string, error) {
 	f.mu.Lock()
@@ -55,6 +73,7 @@ func (f *fakeRunTargets) BoxClass(context.Context, string, string) (string, erro
 	}
 	return ClassTrusted, nil
 }
+func (f *fakeRunTargets) BoxSwapSafe(context.Context, string, string) error     { return nil }
 func (f *fakeRunTargets) BoxLive(context.Context, string, string) (bool, error) { return true, nil }
 
 // moduleDeps is a daemon's Deps with project orchid, run targets faked, and

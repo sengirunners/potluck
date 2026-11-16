@@ -1,12 +1,17 @@
-// Package secrets is the one way zm and its adapters read a secret (an API
-// key, a token, a password). A Ref names where the secret lives; a Driver per
-// scheme reads it; the Value that comes back masks itself when printed,
-// logged or encoded, so a secret leaves only through Reveal (see Value for
-// the one fmt hole).
+// Package secrets is the one way zm, Potluck and their adapters read and
+// store a secret (an API key, a token, a password). A Ref names where the
+// secret lives; a Driver per scheme reads it; the Value that comes back masks
+// itself when printed, logged or encoded, so a secret leaves only through
+// Reveal (see Value for the one fmt hole).
 //
-// ReadFile, CopyFile and WriteFile (files.go) are the password-file helpers
-// the work and homes modules share, so a binding's secret is stored one way;
-// Store (store.go) is a set of them by name, homes' password slots.
+// A driver that can store also implements Putter (put.go): Put never writes
+// over a different value, Replace is the one way to (rotation), Delete
+// removes. Every built-in driver reports its Info: the key inventory's class
+// (P, S, O, E) and whether it works headless.
+//
+// ReadFile, CopyFile and WriteFile (files.go) are the older password-file
+// helpers the work and homes modules share; WriteFile writes over whatever is
+// there, so new writers use Put.
 //
 // Known reads outside it: the CLI's ZM_TOKEN (kit/client, the caller's
 // own bearer token from its environment) and the beads adapter's
@@ -20,8 +25,7 @@
 //
 // The daemon and serve-mode adapters must work headless and with the
 // keychain locked, so the keychain is for interactive hosts only; files are
-// the default everywhere else. A 1Password (op) driver with a service-account
-// token is the planned next one; a driver is any type with Get, added with
+// the default everywhere else. A driver is any type with Get, added with
 // Reader.With.
 //
 // Why not go-keyring: on macOS it shells out to /usr/bin/security as this
@@ -138,14 +142,25 @@ func (f DriverFunc) Get(ctx context.Context, r Ref) (Value, error) { return f(ct
 // error itself is an *api.Error with code unavailable and a hint).
 var ErrNotFound = errors.New("secret not found")
 
+// ErrExists is what errors.Is matches when Put finds a different value
+// already stored (the error itself is an *api.Error with code conflict).
+var ErrExists = errors.New("secret already holds another value")
+
 // NotFound wraps an *api.Error so it also matches ErrNotFound.
-func NotFound(e *api.Error) error { return missing{e} }
+func NotFound(e *api.Error) error { return marked{e, ErrNotFound} }
 
-type missing struct{ e *api.Error }
+// Exists wraps an *api.Error so it also matches ErrExists.
+func Exists(e *api.Error) error { return marked{e, ErrExists} }
 
-func (m missing) Error() string        { return m.e.Error() }
-func (m missing) Unwrap() error        { return m.e }
-func (m missing) Is(target error) bool { return target == ErrNotFound }
+// marked is an *api.Error that also matches one sentinel.
+type marked struct {
+	e    *api.Error
+	mark error
+}
+
+func (m marked) Error() string        { return m.e.Error() }
+func (m marked) Unwrap() error        { return m.e }
+func (m marked) Is(target error) bool { return target == m.mark }
 
 // Recode returns err with its api code replaced by code, keeping its message
 // and hint (a missing or loose secret file named in a request is the
@@ -170,16 +185,18 @@ func Prefix(err error, prefix string) error {
 	if errors.As(err, &e) {
 		c := *e
 		c.Message = prefix + c.Message
-		if errors.Is(err, ErrNotFound) {
-			return NotFound(&c)
+		for _, mark := range []error{ErrNotFound, ErrExists} {
+			if errors.Is(err, mark) {
+				return marked{&c, mark}
+			}
 		}
 		return &c
 	}
 	return fmt.Errorf("%s%w", prefix, err)
 }
 
-// Reader reads Refs through its drivers. The zero Reader has none; Default
-// has file, keychain and env.
+// Reader reads (and, through Putter drivers, stores) Refs through its
+// drivers. The zero Reader has none; Default has file, keychain and env.
 type Reader struct{ drivers map[string]Driver }
 
 // Default is a Reader with the built-in drivers.
@@ -201,17 +218,26 @@ func (r *Reader) With(scheme string, d Driver) *Reader {
 
 // Get reads ref. Errors never contain the secret.
 func (r *Reader) Get(ctx context.Context, ref Ref) (Value, error) {
+	d, err := r.driver(ref)
+	if err != nil {
+		return Value{}, err
+	}
+	return d.Get(ctx, ref)
+}
+
+// driver is the driver serving ref, which must name something.
+func (r *Reader) driver(ref Ref) (Driver, error) {
 	var d Driver
 	if r != nil {
 		d = r.drivers[ref.Scheme]
 	}
 	if d == nil {
-		return Value{}, api.Errorf(api.CodeUnavailable, "no secret driver for %q", ref.Scheme)
+		return nil, api.Errorf(api.CodeUnavailable, "no secret driver for %q", ref.Scheme)
 	}
 	if ref.Name == "" {
-		return Value{}, api.Errorf(api.CodeBadRequest, "secret reference %s names nothing", ref.Scheme)
+		return nil, api.Errorf(api.CodeBadRequest, "secret reference %s names nothing", ref.Scheme)
 	}
-	return d.Get(ctx, ref)
+	return d, nil
 }
 
 // Get reads ref with the Default drivers.

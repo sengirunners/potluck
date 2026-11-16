@@ -1039,6 +1039,42 @@ func (r *Registry) RevokeToken(ctx context.Context, id string) (api.Token, error
 	return t, err
 }
 
+// TokenExpiry is when token id expires (zero: never). A token that is
+// revoked, expired or unknown is an unauthenticated error. Local callers
+// only.
+func (r *Registry) TokenExpiry(ctx context.Context, id string) (time.Time, error) {
+	var exp, rev sql.NullInt64
+	err := r.st.Registry().QueryRowContext(ctx, `SELECT expires, revoked FROM tokens WHERE id = ?`, strings.ToUpper(strings.TrimSpace(id))).Scan(&exp, &rev)
+	gone := api.Errorf(api.CodeUnauthenticated, "token %s is revoked, expired or unknown", id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, gone
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	if rev.Valid || (exp.Valid && exp.Int64 <= store.Millis(time.Now())) {
+		return time.Time{}, gone
+	}
+	if !exp.Valid {
+		return time.Time{}, nil
+	}
+	return store.FromMillis(exp.Int64), nil
+}
+
+// RevokeTokenHash revokes the token whose secret hashes to hash
+// (authz.HashToken). Local callers only. Idempotent; false when no token
+// has that hash.
+func (r *Registry) RevokeTokenHash(ctx context.Context, hash string) (bool, error) {
+	res, err := r.st.Registry().ExecContext(ctx, `UPDATE tokens SET revoked = coalesce(revoked, ?) WHERE hash = ?`,
+		store.Millis(time.Now()), hash)
+	r.forgetMachines()
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // ---- subjects ----
 
 // Local is the subject for an unauthenticated call on the Unix socket: the

@@ -99,7 +99,12 @@ type Door interface {
 	// box; any other error, that nothing was written.
 	BoxSecret(ctx context.Context, project, handle, name string, v secrets.Value) error
 	BoxClass(ctx context.Context, project, handle string) (string, error)
+	// BoxSwapSafe refuses when the box's host swaps where a box secret could
+	// reach a disk: nil when it is safe, and for a box on this machine.
+	BoxSwapSafe(ctx context.Context, project, handle string) error
 	BoxLive(ctx context.Context, project, handle string) (bool, error)
+	// BoxExpires is when the box's lease ends (zero: it has no end).
+	BoxExpires(ctx context.Context, project, handle string) (time.Time, error)
 }
 
 // ErrMaybeDelivered: a door write failed after it was sent (the driver did

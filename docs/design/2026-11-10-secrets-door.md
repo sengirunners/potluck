@@ -449,7 +449,7 @@ public hosts; this design does not use that room until there is a need and a thr
 | 6 | Code in the box exfiltrates the token (a prompt-injected agent, a bad dependency) | Cannot be prevented. Bounded: one repository, the fewest permissions, an hour, revoked at box end, no `workflows` by default; the ledger's token hash finds its uses in GitHub's audit log | The window between theft and box end |
 | 7 | A member asks for a token on a repository that is not theirs | A grant names only repositories of installations linked to its area; the request must sit inside the ceiling | - |
 | 8 | A credential outlives its box (crash, lost host, reclaim) | Revocation on every end state, a retrying sweep, an hour's expiry as the backstop, tokens capped to the lease | An authority restart loses the handle to revoke: up to an hour |
-| 9 | A value leaks through env, argv, logs or disk | The landing rule; the conformance checks that exist, extended to box scope; no `TMPDIR` fallback; clients moved onto the door, E2B included | Memory can be swapped: a trusted host should encrypt swap (a `host doctor` note) |
+| 9 | A value leaks through env, argv, logs or disk | The landing rule; the conformance checks that exist, extended to box scope; no `TMPDIR` fallback; clients moved onto the door, E2B included | Memory can be swapped: a host reports its swap in its advert, `potluck doctor` fails on plain disk swap, and the authority gives box secrets only to a host with safe swap (off, zram or encrypted; `docs/hosts.md`) |
 | 10 | A long-lived key on a weak machine is stolen | App keys only on the authority; box hosts hold none; host-side `github_token_file` retired | The authority is the one place to protect |
 | 11 | The authority is compromised | It can mint within every App's permissions. Keep the App's own permission set small; one repository and named permissions per token; the ledger; `value` sealed past it (bead 8) | Not closed. It is the root of trust |
 | 12 | Mail or a note asks for a secret | A request is an authenticated API call checked against a grant. Mail is data and grants nothing | - |
@@ -531,7 +531,7 @@ it. Bead 11; [A] it must check how a parent address from another project is carr
 8. **potluck: client-to-host sealing for `value`**, so the authority relays what it cannot read.
 9. **potluck: the `potluck-token` issuer and a daemon-less tunnel client** for a box to reach its authority.
 10. **potluck: the edges.** `potluck-e2b` env values through the door; remove host-side `runner=github`; a CLI
-    warning for credential-looking files in `cp`; a `host doctor` note on unencrypted swap.
+    warning for credential-looking files in `cp`; a `potluck doctor` check on unencrypted swap, and the authority refusing secrets to such a host.
 11. **zm: `task_start` takes `project`** (section 6).
 12. **Retire:** the host-side `runner=github` mode and client-side minting in clients that move to the door. Share
     the hand-out-once helper with the pairing relay.

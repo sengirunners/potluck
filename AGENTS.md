@@ -19,12 +19,12 @@ Go module `github.com/sengirunners/potluck`. Apache-2.0. `cmd/potluck` is the pr
 | `cmd/potluck-driver-tart`, `cmd/potluck-driver-local` (`internal/localdriver`) | drivers: VMs on this host; jobs on this machine |
 | `cmd/zm-run-tart`, `cmd/zm-run-local`, `cmd/zm-run-conformance`, `cmd/zm-e2b` | one-line mains: the same programs under their old names (zm's build lists and old updaters name these paths; keep them) |
 | `ghapp/` | GitHub App auth for runners; one-repository tokens minted and revoked per holder |
-| `issuers/` | the secrets door's minted kinds (`github-token`): ceiling, renewal, revocation, ledger |
+| `issuers/` | the secrets door's minted kinds (`github-token`, `potluck-token`): one lifecycle (`minted.go`), a backend per kind; ceiling, renewal, revocation, ledger |
 | `jobrule/` | the one copy of which GitHub jobs may hold a secret (events, ref, fork), shared by grants and issuers |
 | `site/` | static site (wrangler config) |
 | `kit/` | KIT: identity, projects, transports, the daemon shell (`kit/server`), teamlink |
 | `agentrunners/` | the agent runner job kind (`potluck agent-runner`): a vendor's self-hosted runner in a fresh box; adapters are data (`claude.go`); `docs/agent-runners.md` |
-| `runtarget/`, `runners/`, `usage/`, `grants/` (secret grants), `hostprobe/`, `computeapi/`, `computeclient/`, `boxcp/`, `boxpush/`, `wiring/`, `cmd/potluck-e2b` (`internal/e2bgateway`) | COMPUTE: boxes, sandboxes, runners, usage, wirings |
+| `runtarget/`, `runners/`, `usage/`, `grants/` (secret grants), `hostprobe/`, `hostswap/` (the host's swap state: reported in its advert, gates box secrets), `computeapi/`, `computeclient/`, `boxcp/`, `boxpush/`, `wiring/`, `cmd/potluck-e2b` (`internal/e2bgateway`) | COMPUTE: boxes, sandboxes, runners, usage, wirings |
 | `placement/` | the one rule for which box binding takes a new box (sandboxes and runner jobs): tier order, refusals with reasons, ranking |
 | `depscli/` | the client side of dependency layers: the `--deps` flags, the acquire's deps, the answer's line, the mismatch warning (`potluck sandbox create`, `potluck run`; zm imports it) |
 | `internal/forkguard`, `internal/workflowlint` | the fork-guarded `runs-on` rule and its edit (`potluck ci pr`, `docs/ci-pr.md`); the fork-safe workflow lint; `potluck ci doctor` reads guarded `runs-on` through forkguard |
