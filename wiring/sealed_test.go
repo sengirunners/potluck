@@ -34,6 +34,7 @@ import (
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/conformance/refdriver"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/authz"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/tailnet"
@@ -517,6 +518,13 @@ func TestSealingModes(t *testing.T) {
 	if _, err := a.owner.ProjectTeam(ctx, "orchid"); err != nil {
 		t.Fatal(err)
 	}
+	// The pool starts required; this test is about the move from preferred.
+	if v, err := computeclient.Sealing(ctx, inProject(a.owner, "orchid")); err != nil || v.Mode != computeapi.SealingRequired {
+		t.Fatalf("a fresh pool: %+v %v", v, err)
+	}
+	if _, err := computeclient.SetSealing(ctx, inProject(a.owner, "orchid"), computeapi.SetSealingRequest{Mode: computeapi.SealingPreferred}); err != nil {
+		t.Fatal(err)
+	}
 	fix, _ := filepath.EvalSymlinks(t.TempDir())
 	for _, x := range []struct {
 		d  *computeDaemon
@@ -651,7 +659,7 @@ func TestSealingModes(t *testing.T) {
 		changed = append(changed, string(e.Data))
 		return nil
 	})
-	if len(changed) != 1 || !strings.Contains(changed[0], `"from":"preferred"`) || !strings.Contains(changed[0], `"to":"required"`) || !strings.Contains(changed[0], `"by":`) {
+	if len(changed) != 2 || !strings.Contains(changed[1], `"from":"preferred"`) || !strings.Contains(changed[1], `"to":"required"`) || !strings.Contains(changed[1], `"by":`) {
 		t.Fatalf("the mode change's event: %v", changed)
 	}
 	if s, err := run(carl, "sandbox@box-b", onB); err != nil || wire.has(s) {
@@ -789,6 +797,9 @@ func TestReportedSealingIgnoresCancel(t *testing.T) {
 	if _, err := a.owner.ProjectTeam(ctx, "orchid"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := computeclient.SetSealing(ctx, inProject(a.owner, "orchid"), computeapi.SetSealingRequest{Mode: computeapi.SealingPreferred}); err != nil {
+		t.Fatal(err)
+	}
 	rs := module[*runtarget.Service](t, a)
 	gone, cancel := context.WithCancel(ctx)
 	cancel()
@@ -803,5 +814,74 @@ func TestReportedSealingIgnoresCancel(t *testing.T) {
 	}
 	if m := rs.ReportedSealing(gone); m != computeapi.SealingRequired {
 		t.Fatalf("after required, a cancelled request reported %q", m)
+	}
+}
+
+// A pool started by this build begins required. A pool from before has no
+// row and stays preferred; a mode its admin set stays; none of them is
+// touched when the pool is made team again (potluck create on an
+// existing pool).
+func TestNewPoolStartsRequired(t *testing.T) {
+	ctx := context.Background()
+	a := startCompute(t, tailnettest.New(), "mini", tailnettest.Identity{NodeID: "nMINI", NodeKey: "nodekey:mini", Login: "judy@example.com", Host: "mini"})
+	mode := func(pool string) string {
+		t.Helper()
+		v, err := computeclient.Sealing(ctx, inProject(a.owner, pool))
+		if err != nil {
+			t.Fatalf("sealing %s: %v", pool, err)
+		}
+		return v.Mode
+	}
+	fresh, err := a.owner.CreateProject(ctx, api.NewProjectRequest{Slug: "fresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.owner.ProjectTeam(ctx, "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if m := mode("fresh"); m != computeapi.SealingRequired {
+		t.Fatalf("a fresh pool reports %q", m)
+	}
+	if got := module[*runtarget.Service](t, a).ReportedSealing(ctx); got != computeapi.SealingRequired {
+		t.Fatalf("the machine reports %q for a fresh pool", got)
+	}
+
+	// A pool from before this build: team, with no sealing row.
+	db, err := a.dm.Deps.Store.Project(a.dm.Deps.System().Scope, authz.Write, fresh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM run_settings WHERE key='sealing'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.owner.ProjectTeam(ctx, "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if m := mode("fresh"); m != computeapi.SealingPreferred {
+		t.Fatalf("an existing pool with no row reports %q after team again", m)
+	}
+
+	// A mode an admin chose is kept the same way.
+	if _, err := computeclient.SetSealing(ctx, inProject(a.owner, "fresh"), computeapi.SetSealingRequest{Mode: computeapi.SealingRequired}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := computeclient.SetSealing(ctx, inProject(a.owner, "fresh"), computeapi.SetSealingRequest{Mode: computeapi.SealingPreferred}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.owner.ProjectTeam(ctx, "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if m := mode("fresh"); m != computeapi.SealingPreferred {
+		t.Fatalf("a chosen mode became %q after team again", m)
+	}
+	// And through solo and back to team, where the hook does run.
+	if _, err := a.owner.ProjectSolo(ctx, "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.owner.ProjectTeam(ctx, "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	if m := mode("fresh"); m != computeapi.SealingPreferred {
+		t.Fatalf("a chosen mode became %q after solo and team", m)
 	}
 }

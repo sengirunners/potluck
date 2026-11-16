@@ -18,9 +18,10 @@ func (a *app) sealingCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "sealing", Short: "The pool's sealing mode, and the machines that cannot seal secrets yet",
 		Long: `Every machine seals secrets and runner configs to the next machine's key when
 that machine can. The pool's mode says what happens with a machine too old to
-seal: "preferred" (the default) sends to it as before, in the clear over the
-tailnet, and warns; "required" refuses. Upgrade every machine, check that this
-command lists none that cannot seal, then: potluck sealing set required.`,
+seal: "preferred" sends to it as before, in the clear over the tailnet, and
+warns; "required" refuses. A pool started by this build begins "required"; a
+pool from before keeps "preferred" until you upgrade every machine, check that
+this command lists none that cannot seal, then: potluck sealing set required.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.inPool(cmd.Context())

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +142,9 @@ func TestHostBindingShare(t *testing.T) {
 	}
 	if json.Unmarshal(res, &ans) != nil || ans.Handle == "" {
 		t.Fatalf("answer: %s", res)
+	}
+	if l, err := computeclient.HostRunTargetsLive(ctx, owner); err != nil || len(l.Targets) != 1 || !slices.Equal(l.Targets[0].Live, []string{ans.Handle}) || len(l.Targets[0].Stopped) != 0 {
+		t.Errorf("live host list: %+v %v", l, err)
 	}
 	// The same binding shared with acme: acme's authority cannot reach orchid's handle.
 	ex, _ := json.Marshal(map[string]any{"argv": []string{"id"}, "timeout_s": 5})

@@ -12,7 +12,7 @@ food and cloud are inline SVG cut-outs that keep facing the reader; there are no
 from where each machine lands on screen (front to back, each at the cheapest spot: never over another label, the card
 or the arrows, and, where there is room, off every machine and with a leader line that runs over no other machine,
 label or leader), the three How it works figures (a blanket that unfolds with scroll, machines that drop into a
-row, a MacBook whose menu winds down; their classes start `bk-`, `sk-` and `mb-`), the cost slider, the copy button
+row and spring to life when pointed at, focused or tapped, over brackets that show their pools, a MacBook whose menu winds down; their classes start `bk-`, `sk-` and `mb-`), the cost slider, the copy button
 and the form. Without JavaScript the page still reads in full; the labels, turn arrows and copy button stay hidden,
 the figures show their finished state, and the form posts as a plain form. With `prefers-reduced-motion`, nothing
 moves on its own. The card's numbers are half of each machine's cores and memory,
@@ -20,7 +20,8 @@ because `potluck host` shares half unless told otherwise (`--share`).
 
 ## The founders form
 
-The "Talk to Jackson and Clay" form posts to `/api/contact`. Messages are kept in KV; nothing is emailed on.
+The "Talk to Jackson and Clay" form posts to `/api/contact`. Messages are kept in KV, and each kept message is
+emailed to the founders.
 
 - `POST /api/contact`: fields `name`, `email`, `topic` (one of `TOPICS` in `src/contact.js`; `npm test` checks the
   page offers exactly those), `team` (optional), `message`, and `leave_empty`, a field people never see (filled: a bot,
@@ -37,6 +38,25 @@ The "Talk to Jackson and Clay" form posts to `/api/contact`. Messages are kept i
 ```sh
 curl -s -H "authorization: Bearer $CONTACT_ADMIN_TOKEN" "https://potluck.sh/api/contact?limit=20"
 ```
+
+- Email (`src/notify.js`): after a message is stored, the Worker sends one plain-text email through the `NOTIFY`
+  binding (Cloudflare `send_email`) to ops@sengi.run, the binding's `destination_address`, from `NOTIFY_FROM`
+  (`vars` in `wrangler.jsonc`). Subject `potluck.sh: <name> (<topic>)`; the body has the name and email, topic,
+  team, time and country, and the message; Reply-To is the sender, so replying answers them (an address of an
+  unusual shape is left out of Reply-To but stays in the body). Visitor text is plain text with control
+  characters removed, never HTML. It is sent in `ctx.waitUntil` after the answer: a failed send is logged (read
+  with `npx wrangler tail`) and the visitor still gets ok; the message is in KV either way. The bot trap,
+  refused posts and rate-limited posts send nothing, so the only brake on how many arrive is the per-address limit
+  above. Under `wrangler dev` the binding is simulated and nothing leaves the machine; with the `send_email` entry
+  removed, nothing is sent and each message logs a warning.
+- Changing where it goes: set `destination_address` in `wrangler.jsonc` (the address must be a verified
+  destination in Cloudflare Email Routing for this account: `npx wrangler email routing addresses list`), and
+  `NOTIFY_FROM` to an address on a domain or subdomain with Email Routing (or Email Sending) turned on in this account, then
+  deploy. The sender is `form@notify.potluck.sh`: Email Routing is on for the subdomain `notify.potluck.sh`
+  only (its own MX and SPF records, added by Cloudflare), so potluck.sh's own mail records are not involved. Check
+  it with the Email Routing API (`GET /zones/<potluck.sh zone>/email/routing/dns?subdomain=notify.potluck.sh`);
+  `wrangler email routing settings` and `dns get` take only a domain. To stop the emails, remove the `send_email`
+  entry and deploy; messages are still kept.
 
 Removal: delete a message with `npx wrangler kv key delete --binding CONTACT --remote "<key>"` (list keys with
 `npx wrangler kv key list --binding CONTACT --remote --prefix msg:`).
@@ -114,4 +134,6 @@ curl -s -H "authorization: Bearer $WAITLIST_ADMIN_TOKEN" https://potluck.sh/api/
 curl -s -o /dev/null -w "contact read %{http_code}\n" -H "authorization: Bearer $CONTACT_ADMIN_TOKEN" https://potluck.sh/api/contact
 ```
 
-Expect 200 for the page, 410 for the post, the counts, and 200 for the contact read.
+Expect 200 for the page, 410 for the post, the counts, and 200 for the contact read. After a change to the form or the email, send one
+test message (with `origin: https://potluck.sh` and a content length), check ops@sengi.run got the notice, then
+delete the test message's key.

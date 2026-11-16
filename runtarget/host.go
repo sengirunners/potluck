@@ -211,26 +211,36 @@ func (s *Service) listHost(ctx context.Context, live bool) (any, error) {
 			v.Describe, v.Effective = d, stricter(t.RunTarget, d)
 		}
 		if live {
-			var l struct {
-				Handles []struct {
-					Handle string `json:"handle"`
-					State  string `json:"state"`
-				} `json:"handles"`
-			}
-			if err := s.callWithin(ctx, t.RunTarget, verbList, "", nil, &l, verbLimit); err != nil {
-				v.Error = errText(err) // unknown is not none: the caller refuses
-			} else {
-				v.Live = []string{}
-				for _, h := range l.Handles {
-					if handleOfBinding(h.Handle, t.RunTarget) && !terminal(h.State) {
-						v.Live = append(v.Live, h.Handle)
-					}
-				}
-			}
+			s.addLive(ctx, &v, t.RunTarget)
 		}
 		out.Targets = append(out.Targets, v)
 	}
 	return out, nil
+}
+
+// addLive sets v's Live (and Stopped among them) to b's handles its driver
+// lists as not ended, or v's Error when the driver does not answer: unknown
+// is not none, so a caller that needs the list refuses.
+func (s *Service) addLive(ctx context.Context, v *computeapi.RunTargetView, b computeapi.RunTarget) {
+	var l struct {
+		Handles []struct {
+			Handle string `json:"handle"`
+			State  string `json:"state"`
+		} `json:"handles"`
+	}
+	if err := s.callWithin(ctx, b, verbList, "", nil, &l, verbLimit); err != nil {
+		v.Error = errText(err)
+		return
+	}
+	v.Live = []string{}
+	for _, h := range l.Handles {
+		if handleOfBinding(h.Handle, b) && !terminal(h.State) {
+			v.Live = append(v.Live, h.Handle)
+			if h.State == computeapi.StateStopped {
+				v.Stopped = append(v.Stopped, h.Handle)
+			}
+		}
+	}
 }
 
 // HostAdverts answers the describe of each binding shared with the team

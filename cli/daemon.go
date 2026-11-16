@@ -264,12 +264,14 @@ func (a *app) statusCmd() *cobra.Command {
 // noAutostart are the commands (and everything under them) that never start
 // the daemon: asking whether it runs, and running or stopping it.
 var noAutostart = map[string]bool{
-	"potluck help":       true,
-	"potluck completion": true,
-	"potluck status":     true,
-	"potluck daemon":     true,
-	"potluck upgrade":    true,
-	"potluck mcp":        true,
+	"potluck help":        true,
+	"potluck completion":  true,
+	"potluck status":      true,
+	"potluck daemon":      true,
+	"potluck upgrade":     true,
+	"potluck mcp":         true,
+	"potluck host status": true, // the menu bar item asks every few seconds
+	"potluck host set":    true,
 }
 
 // autostartAllowed reports whether cmd may start the daemon.

@@ -163,9 +163,10 @@ potluck-driver-tart host set <open|drain|closed|auto> [--for 2h | --until 23:00]
   binding's policy alone would end or drain it.
 - A drain ends a runner until it prints that it took a job, so a job assigned in the second before that line is
   cut.
-- There is no status subcommand: `describe` carries `host` (`mode`, `state` `accepting`, `draining`, `closed` or
+- There is no status subcommand here: `describe` carries `host` (`mode`, `state` `accepting`, `draining`, `closed` or
   `holding`, `until`, and during a drain `drain_since`, `drain_deadline` and `drain_cut`, how many it cut), read
-  through the daemon.
+  through the daemon. `potluck host status` shows it with the cores lent and in use, and `potluck host set` is
+  this same command from the `potluck` program; the macOS menu bar item uses both ([docs/menubar.md](../../docs/menubar.md)).
 
 ## Linux boxes (`vm=oci`)
 

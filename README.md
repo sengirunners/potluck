@@ -123,7 +123,8 @@ All standard output is MCP protocol traffic.
 | OCI and Incus layers tested against stand-in CLIs; Tart through a fake layer | Tests on real VMs in CI (a manual run) |
 | The quick start on a fresh GitHub-hosted Linux VM with no zm, run by hand (the `clean-machine-proof` workflow): install, a pool over a Cloudflare quick tunnel, the VM shared through gVisor, a sandbox and `potluck run` | The quick start across two real machines in CI |
 | The VM driver passes the full suite over a fake layer (isolation is not exercised there) | |
-| Every check the reference driver passes is also shown to fail on a driver broken on purpose | An Actions job run live on a pool machine |
+| Every check the reference driver passes is also shown to fail on a driver broken on purpose | |
+| A real GitHub Actions job run through the broker, by hand: on a Mac (Tart, the same machine as the broker) and on a Linux box on another machine (OCI with gVisor) | Actions jobs on pool machines in our own CI, every day |
 | VMs end at their deadline even if the daemon is down | Commands sealed to the host's key |
 | Hand-back on a Mac when its owner types or moves the pointer | On Linux, hand-back when the owner returns (a time window only, today) |
 

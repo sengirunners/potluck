@@ -14,6 +14,10 @@
     { "binding": "WAITLIST", "id": "769e70d2a2f541068d81f0c3e3af33d4" },
     { "binding": "CONTACT", "id": "05663cbc62124bdb9df76f0bf93933e3" }
   ],
+  // NOTIFY: emails each message the founders form keeps to the one address below (src/notify.js); NOTIFY_FROM is
+  // the sender, on a domain Cloudflare sends mail for (README.md, "The founders form").
+  "send_email": [{ "name": "NOTIFY", "destination_address": "ops@sengi.run" }],
+  "vars": { "NOTIFY_FROM": "form@notify.potluck.sh" },
   "routes": [
     { "pattern": "potluck.sh", "custom_domain": true },
     { "pattern": "www.potluck.sh", "custom_domain": true }

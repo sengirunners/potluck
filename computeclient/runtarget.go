@@ -24,6 +24,14 @@ func RunTargets(ctx context.Context, c *client.Client, describe bool) (computeap
 	return l, c.Do(ctx, http.MethodGet, p, nil, &l)
 }
 
+// RunTargetsLive is GET /v0/run_targets?describe=1&live=1 (the machine's
+// owner only): RunTargets described, each of this machine's bindings with
+// its live handles (Live, and Stopped among them) as its driver lists them.
+func RunTargetsLive(ctx context.Context, c *client.Client) (computeapi.RunTargetList, error) {
+	var l computeapi.RunTargetList
+	return l, c.Do(ctx, http.MethodGet, "/v0/run_targets?describe=1&live=1", nil, &l)
+}
+
 // BindRunTarget is POST /v0/run_targets (the machine's owner only).
 func BindRunTarget(ctx context.Context, c *client.Client, req computeapi.BindRunTargetRequest) (computeapi.RunTargetView, error) {
 	var v computeapi.RunTargetView
@@ -35,6 +43,14 @@ func BindRunTarget(ctx context.Context, c *client.Client, req computeapi.BindRun
 func HostRunTargets(ctx context.Context, c *client.Client) (computeapi.RunTargetList, error) {
 	var l computeapi.RunTargetList
 	return l, c.Do(ctx, http.MethodGet, "/v0/run_targets?host=1", nil, &l)
+}
+
+// HostRunTargetsLive is GET /v0/run_targets?host=1&live=1: HostRunTargets
+// with each binding's live handles (Live, and Stopped among them) as its
+// driver lists them; a binding whose driver did not answer has Error set.
+func HostRunTargetsLive(ctx context.Context, c *client.Client) (computeapi.RunTargetList, error) {
+	var l computeapi.RunTargetList
+	return l, c.Do(ctx, http.MethodGet, "/v0/run_targets?host=1&live=1", nil, &l)
 }
 
 // UnbindHostRunTarget is DELETE /v0/run_targets/{target}?host=1.

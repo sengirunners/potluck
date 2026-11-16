@@ -7,14 +7,19 @@ package runtarget
 // sealing there (over the tunnel such a peer is refused in both modes, as
 // before):
 //
-//   - preferred (the default): send to it as before, in the clear over the
-//     tailnet, and take its clear secrets, as before; one Warn per peer per
-//     start names it and says to update it.
+//   - preferred (what a pool with no row has, as every pool from before this
+//     rule does): send to it as before, in the clear over the tailnet, and
+//     take its clear secrets, as before; one Warn per peer per start names
+//     it and says to update it.
 //   - required: refuse both ways.
 //
 // In both modes secrets in the clear from a peer that names a key are
 // refused, and a host refuses a clear op its authority marked as sealing:
 // stripping cannot turn a capable pair to the clear.
+//
+// A pool started by this build begins required (startSealing); a pool with no
+// row, which is every pool started before, stays preferred until its admin
+// sets it.
 //
 // The mode is a row of this brick's run_settings table in the pool's
 // project.db at its machine, read on every use (a change takes effect at
@@ -188,6 +193,28 @@ func (s *Service) warnUnsealed(project, machine, how string) {
 		s.d.Log.Warn("sealing: a machine that cannot seal "+how+" in the clear over the tailnet (pool sealing mode preferred): update it, then set sealing to required",
 			"machine", machine, "project", project)
 	}
+}
+
+// startSealing is a teamlink PoolStarting hook: the pool this build starts
+// begins required. It keeps a row already there (a retry, or a project that
+// went solo and team again), and never touches a pool that is already team.
+func (s *Service) startSealing(ctx context.Context, project string) error {
+	db, err := s.d.Store.Project(s.d.System().Scope, authz.Write, project)
+	if err != nil {
+		return err
+	}
+	if _, err = db.ExecContext(ctx, `INSERT INTO run_settings (key, value) VALUES ('sealing', ?) ON CONFLICT (key) DO NOTHING`, computeapi.SealingRequired); err != nil {
+		return err
+	}
+	return nil
+}
+
+// startedSealing is a teamlink PoolStarted hook: the project is team now, so
+// the machine's cached report (which skips solo projects) is read again.
+func (s *Service) startedSealing(context.Context, string) {
+	s.seal.mu.Lock()
+	s.seal.reported = ""
+	s.seal.mu.Unlock()
 }
 
 // sealingMode is project's mode at this machine. A row it cannot read

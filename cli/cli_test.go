@@ -26,7 +26,10 @@ import (
 	"github.com/sengirunners/potluck/kit/tailnet"
 	"github.com/sengirunners/potluck/kit/tailnet/tailnettest"
 	"github.com/sengirunners/potluck/kit/teamlink"
+	"github.com/sengirunners/potluck/menubar"
+	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget"
+	"github.com/sengirunners/potluck/vmhost"
 	"github.com/sengirunners/potluck/wiring"
 )
 
@@ -196,8 +199,11 @@ func TestQuickStartAcrossTwoMachines(t *testing.T) {
 	defer stop()
 
 	// A: a pool and an invite for a machine.
-	if out := a.ok(t, "create", "friends"); !strings.Contains(out, "pool friends is ready") {
+	if out := a.ok(t, "create", "friends"); !strings.Contains(out, "pool friends is ready") || !strings.Contains(out, "sealing: required") {
 		t.Fatalf("create:\n%s", out)
+	}
+	if out := a.ok(t, "sealing", "-P", "friends"); !strings.Contains(out, "pool friends: sealing required") {
+		t.Fatalf("a new pool's sealing:\n%s", out)
 	}
 	if out := a.ok(t, "invite", "ana"); !strings.Contains(out, "potluck join '") {
 		t.Fatalf("member invite:\n%s", out)
@@ -407,6 +413,38 @@ func TestNoDaemon(t *testing.T) {
 	var o, e bytes.Buffer
 	if code := Run(context.Background(), []string{"status"}, strings.NewReader(""), &o, &e); code != 3 || !strings.Contains(e.String(), "potluck daemon is not running") {
 		t.Fatalf("status: %d %q %q", code, o.String(), e.String())
+	}
+}
+
+// host status with no daemon answers its menu, saying so, and starts none.
+func TestHostStatusNoDaemon(t *testing.T) {
+	home, err := os.MkdirTemp("", "pl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	t.Setenv(EnvHome, home)
+	hostNow = func(owner, deadline int) (protocol.HostStatus, error) {
+		return protocol.HostStatus{Mode: protocol.HostDrain, State: protocol.HostDraining}, nil
+	}
+	t.Cleanup(func() { hostNow = vmhost.HostNow })
+	var o, e bytes.Buffer
+	if code := Run(context.Background(), []string{"--json", "host", "status"}, strings.NewReader(""), &o, &e); code != 0 {
+		t.Fatalf("host status: %d %q %q", code, o.String(), e.String())
+	}
+	var st menubar.Status
+	if err := json.Unmarshal(o.Bytes(), &st); err != nil || len(st.Menu.Items) != 3 || st.Cores < 1 || st.Mode == "" {
+		t.Fatalf("host status: %v %s", err, o.String())
+	}
+	if st.Mode != protocol.HostDrain || st.Menu.Title != "Potluck is not running" || !st.Menu.Items[1].Checked {
+		t.Errorf("host status: %+v", st)
+	}
+	root := (&app{stdout: io.Discard, stderr: io.Discard}).root()
+	for _, path := range [][]string{{"host", "status"}, {"host", "set"}} {
+		c, _, err := root.Find(path)
+		if err != nil || c.Name() != path[1] || autostartAllowed(c, func(string) string { return "" }) {
+			t.Errorf("potluck %s may start the daemon (%v)", strings.Join(path, " "), err)
+		}
 	}
 }
 

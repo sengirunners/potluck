@@ -4,10 +4,10 @@ import { handleContact } from "./contact.js";
 import { handleClosed, handleCount } from "./waitlist.js";
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/waitlist") return handleClosed();
-    if (url.pathname === "/api/contact") return handleContact(request, env);
+    if (url.pathname === "/api/contact") return handleContact(request, env, ctx);
     if (url.pathname === "/api/waitlist/count") return handleCount(request, env);
     return env.ASSETS.fetch(request);
   },

@@ -101,6 +101,11 @@ func (a *app) poolCreate(ctx context.Context, c *client.Client, slug, via string
 		return a.printJSON(p)
 	}
 	a.say("pool %s is ready; this machine runs it", slug)
+	if m := poolSealing(ctx, a, slug); strings.HasPrefix(m, computeapi.SealingRequired) {
+		a.say("sealing: %s (a new pool starts there: a machine too old to seal gets no secrets; potluck sealing lists them)", m)
+	} else if m != "" {
+		a.say("sealing: %s (potluck sealing lists the machines that cannot seal yet)", m)
+	}
 	a.say("next: potluck invite <name> for a friend who runs sandboxes, potluck invite <name> --host for one who shares a machine")
 	a.say("share this machine too: potluck host")
 	return nil
@@ -436,7 +441,7 @@ machine is in. On a Mac a sandbox ends when you touch the keyboard or pointer
 		},
 	}
 	s.add(cmd)
-	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd())
+	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostStatusCmd(), a.hostSetCmd())
 	return cmd
 }
 
@@ -691,8 +696,8 @@ func hostStop(ctx context.Context, c *client.Client, only string, force bool, wa
 			first = err
 		}
 	}
-	var l computeapi.RunTargetList
-	if err := c.Do(ctx, "GET", "/v0/run_targets?host=1&live=1", nil, &l); err != nil {
+	l, err := computeclient.HostRunTargetsLive(ctx, c)
+	if err != nil {
 		return nil, err
 	}
 	for _, t := range l.Targets {

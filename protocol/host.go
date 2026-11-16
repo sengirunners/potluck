@@ -19,10 +19,28 @@ type HostStatus struct {
 	DrainCut      *int   `json:"drain_cut,omitempty"`
 }
 
+// Host modes: the override in force (HostUnreadable: its file cannot be
+// read).
+const (
+	HostAuto       = "auto"
+	HostOpen       = "open"
+	HostDrain      = "drain"
+	HostClosed     = "closed"
+	HostUnreadable = "unreadable"
+)
+
+// Host states: what the mode means for new work now.
+const (
+	HostAccepting = "accepting"
+	HostHolding   = "holding"
+	HostDraining  = "draining"
+	HostShut      = "closed"
+)
+
 // Host modes and states: closed sets, as the driver writes them.
 var (
-	hostModes  = map[string]bool{"open": true, "drain": true, "closed": true, "auto": true, "unreadable": true}
-	hostStates = map[string]bool{"accepting": true, "holding": true, "draining": true, "closed": true}
+	hostModes  = map[string]bool{HostOpen: true, HostDrain: true, HostClosed: true, HostAuto: true, HostUnreadable: true}
+	hostStates = map[string]bool{HostAccepting: true, HostHolding: true, HostDraining: true, HostShut: true}
 )
 
 // Valid says whether h is a host block a reader may show: a mode and state

@@ -189,6 +189,25 @@ func TestRunTargets(t *testing.T) {
 	if err != nil || again.Handle != h.Handle {
 		t.Errorf("the same request_id: %+v %v", again, err)
 	}
+	// The owner lists each binding's live handles (the run may have ended
+	// already); a member may not.
+	if ll, err := computeclient.RunTargetsLive(ctx, owner); err != nil || len(ll.Targets) != 3 {
+		t.Errorf("live list: %+v %v", ll, err)
+	} else {
+		for _, v := range ll.Targets {
+			if v.Error != "" {
+				t.Errorf("live list of %s: %+v", v.Name, v)
+			}
+			for _, lh := range v.Live {
+				if !strings.HasPrefix(lh, "run:"+v.Name+"/") || (v.Name == "vm" && lh != h.Handle) {
+					t.Errorf("live list of %s holds %s", v.Name, lh)
+				}
+			}
+		}
+	}
+	if _, err := computeclient.RunTargetsLive(ctx, ana); code(err) != api.CodeForbidden {
+		t.Errorf("a member's live list: %v", err)
+	}
 	tok2, err := owner.MintToken(ctx, api.MintTokenRequest{As: "bo", Project: "acme", Role: "member"})
 	if err != nil {
 		t.Fatal(err)

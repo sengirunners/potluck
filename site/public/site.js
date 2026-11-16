@@ -517,10 +517,103 @@
   fig.classList.add('sk-armed');
   var io = new IntersectionObserver(function (es) {
     es.forEach(function (e) {
-      if (e.isIntersecting) { fig.classList.add('sk-in'); io.disconnect(); }
+      if (!e.isIntersecting) return;
+      fig.classList.add('sk-in'); io.disconnect();
+      // Once the last bracket has drawn, drop the entrance classes so the rest state is the plain one.
+      var last = fig.querySelector('.sk-pool:last-of-type');
+      if (last) last.addEventListener('animationend', function () { fig.classList.remove('sk-armed', 'sk-in'); }, { once: true });
     });
   }, { threshold: 0.4 });
   io.observe(fig);
+})();
+
+/* Skyline, alive: a machine springs to life while it (or its name) is pointed at, focused or tapped, and lights its
+   tick on each pool's bracket; a bracket springs its pool's machines in a wave and dims the rest. Clicking either
+   plays it again. The classes are the same under reduced motion; the stylesheet turns them into a still glow. */
+(function () {
+  var fig = document.querySelector('.sk-fig');
+  if (!fig) return;
+  var machines = fig.querySelectorAll('.sk-m');
+  // Without the script nothing here responds, so the machines become controls only now.
+  fig.classList.add('sk-live');
+  machines.forEach(function (m) { m.setAttribute('tabindex', '0'); m.setAttribute('role', 'button'); });
+  var shadows = fig.querySelectorAll('.sk-sh');
+  var names = [];
+  fig.querySelectorAll('.sk-names [data-m]').forEach(function (n) { names[+n.getAttribute('data-m')] = n; });
+  var pools = Array.prototype.map.call(fig.querySelectorAll('.sk-pool'), function (el) {
+    return { el: el, ticks: el.querySelectorAll('i'),
+      members: el.getAttribute('data-members').split(' ').map(Number) };
+  });
+
+  var hover = null, focus = null, tap = null, tapTimer = 0, shown = '', touched = false;
+  function key(t) { return t ? t.kind + t.i : ''; }
+  function focusVisible(el) { try { return el.matches(':focus-visible'); } catch (e) { return true; } }
+
+  function lit(els, on) { els.forEach(function (el) { if (el) el.classList.toggle('sk-on', on); }); }
+  function machineEls(i) { return [machines[i], shadows[i], names[i]]; }
+
+  function render(force) {
+    var t = tap || hover || focus, k = key(t);
+    if (k === shown && !force) return;
+    shown = k;
+    fig.classList.remove('sk-pick');
+    for (var i = 0; i < machines.length; i++) { lit(machineEls(i), false); machines[i].style.removeProperty('--w'); }
+    pools.forEach(function (p) {
+      p.el.classList.remove('sk-on', 'sk-lit');
+      lit(Array.prototype.slice.call(p.ticks), false);
+    });
+    if (force) void fig.getBoundingClientRect(); // let the animations start over
+    if (!t) return;
+    if (t.kind === 'm') {
+      lit(machineEls(t.i), true);
+      pools.forEach(function (p) {
+        var at = p.members.indexOf(t.i);
+        if (at < 0) return;
+        p.el.classList.add('sk-lit');
+        p.ticks[at].classList.add('sk-on');
+      });
+    } else {
+      var p = pools[t.i];
+      fig.classList.add('sk-pick');
+      p.el.classList.add('sk-on');
+      p.members.forEach(function (m, w) {
+        machines[m].style.setProperty('--w', w);
+        lit(machineEls(m), true);
+      });
+    }
+  }
+
+  function wire(el, t, focusable) {
+    el.addEventListener('pointerenter', function (e) { if (e.pointerType !== 'touch') { hover = t; render(); } });
+    el.addEventListener('pointerleave', function (e) {
+      if (e.pointerType !== 'touch' && key(hover) === key(t)) { hover = null; render(); }
+    });
+    el.addEventListener('pointercancel', function () {
+      // A finger that started a scroll: let the tap go.
+      if (key(tap) === key(t)) { tap = null; clearTimeout(tapTimer); render(); }
+      touched = false;
+    });
+    el.addEventListener('pointerdown', function (e) {
+      touched = e.pointerType === 'touch';
+      if (!touched) return;
+      tap = t; clearTimeout(tapTimer);
+      tapTimer = setTimeout(function () { tap = null; render(); }, t.kind === 'p' ? 3000 : 2000);
+      render(true);
+    });
+    if (!focusable) return;
+    // Only keyboard focus lights it; focus left behind by a click or tap would keep it lit after the pointer goes.
+    el.addEventListener('focus', function () { if (focusVisible(el)) { focus = t; render(); } });
+    el.addEventListener('blur', function () { if (key(focus) === key(t)) { focus = null; render(); } });
+    el.addEventListener('click', function () { if (!touched) render(true); touched = false; });
+    el.addEventListener('keydown', function (e) {
+      if (el.tagName !== 'BUTTON' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); render(true); }
+    });
+  }
+  for (var i = 0; i < machines.length; i++) {
+    wire(machines[i], { kind: 'm', i: i }, true);
+    if (names[i]) wire(names[i], { kind: 'm', i: i }, false);
+  }
+  pools.forEach(function (p, j) { wire(p.el, { kind: 'p', i: j }, true); });
 })();
 
 /* Step 3 figure: once it scrolls into view, the pointer moves to "Wind down", clicks it, and the jobs finish:

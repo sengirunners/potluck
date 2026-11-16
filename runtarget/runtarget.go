@@ -207,6 +207,10 @@ func (s *Service) list(r *http.Request) (any, error) {
 	}
 	out := computeapi.RunTargetList{Project: t.Project.Slug, Targets: []computeapi.RunTargetView{}}
 	ask := r.URL.Query().Get("describe") == "1"
+	live := r.URL.Query().Get("live") == "1"
+	if live && !owner(r.Context()) {
+		return nil, api.Errorf(api.CodeForbidden, "only the machine's owner lists its run targets' live handles, on the socket without a token")
+	}
 	var db *sql.DB // opened for the first budgeted binding
 	for _, b := range rt.ProjectTargets(s.d.Projects, t.Project.ID) {
 		v := computeapi.RunTargetView{RunTarget: shown(r.Context(), b), Effective: stricter(b, nil), Host: s.d.Config.Machine, HostClass: api.MachineTrusted}
@@ -221,6 +225,9 @@ func (s *Service) list(r *http.Request) (any, error) {
 				db, _ = s.d.Store.Project(s.d.System().Scope, authz.Write, t.Project.ID)
 			}
 			v.BudgetSpent = s.budgetSpent(r.Context(), db, b)
+		}
+		if live {
+			s.addLive(r.Context(), &v, b)
 		}
 		out.Targets = append(out.Targets, v)
 	}

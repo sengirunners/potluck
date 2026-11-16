@@ -650,6 +650,8 @@ func (s *Service) relayOn(link *teamlink.Service) {
 	link.RegisterRoutes("runtarget", RelayRoutes()...)
 	link.Hooks.ClassChanged = append(link.Hooks.ClassChanged, s.classChanged)
 	link.Hooks.DropForgotten = append(link.Hooks.DropForgotten, s.dropForgotten) // hostforget.go
+	link.Hooks.PoolStarting = append(link.Hooks.PoolStarting, s.startSealing)    // sealing.go
+	link.Hooks.PoolStarted = append(link.Hooks.PoolStarted, s.startedSealing)    // sealing.go
 }
 
 // classChanged is a teamlink Hooks.ClassChanged: back at a guest's default

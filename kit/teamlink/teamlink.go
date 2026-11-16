@@ -111,6 +111,15 @@ type Hooks struct {
 	// MoveLeases moves a project's leases when it turns team (toTeam) or
 	// solo and records the mode; nil records the mode only.
 	MoveLeases func(ctx context.Context, project string, toTeam bool) (int, error)
+	// PoolStarting each run before a solo project turns team (zm project
+	// team), so a layer can give the new pool its starting settings. It
+	// does not run for a project that is already team. It runs again on a
+	// retry after a failed move, so it must be safe to repeat; an error
+	// stops the move and the project stays solo.
+	PoolStarting []func(ctx context.Context, project string) error
+	// PoolStarted each run after a solo project turned team, once its
+	// PoolStarting hooks ran and the move held.
+	PoolStarted []func(ctx context.Context, project string)
 	// Machines lists project's machines (with numbers) at its authority;
 	// nil: the machines that joined it.
 	Machines func(ctx context.Context, project string) []string

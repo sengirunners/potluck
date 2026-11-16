@@ -241,8 +241,8 @@ The driver's side is in `docs/protocol.md`, "Secrets".
   machine seals them to its pool's machine, and the pool's machine seals an op holding them to the host that runs
   the box. The tunnel and the tailnet use the same code.
 - A machine too old to seal (it names no seal key) is treated by the pool's sealing mode ("Sealing modes" below):
-  over the tunnel it is refused in every mode, as before; over the tailnet `preferred` (the default) sends to it as
-  before, in the clear, and `required` refuses (`403` naming that machine as too old; the op never runs). Calls without
+  over the tunnel it is refused in every mode, as before; over the tailnet `preferred` (a pool started before new pools began at `required` has it, until its admin sets `required`) sends to it as
+  before, in the clear, and `required` (a new pool starts with it) refuses (`403` naming that machine as too old; the op never runs). Calls without
   secrets work in every mode.
 - The CLI's call to its own daemon (the socket) is not sealed: it never leaves the machine, and the daemon is the
   caller's own. Sealing starts at the first leg that does.
@@ -317,11 +317,11 @@ A pool's mode is kept at its machine (a row of `run_settings` in the pool's `pro
 change takes effect at once, with no restart. `potluck sealing` shows it and the machines its machine heard from since
 it started (each one's heartbeat names a seal key or not): that list is the pre-check. `potluck sealing set required`
 (an admin of the whole pool, never of one area; `PUT /v0/sealing`) is refused (`409`, naming them) while one cannot
-seal, unless `--force`. Every change is logged and published as the event `dev.zm.sealing.changed` (who, from, to).
+seal, unless `--force`. Every change by `potluck sealing set` is logged and published as the event `dev.zm.sealing.changed` (who, from, to); a new pool's starting mode is not a change and has no event.
 `potluck status` shows each pool's mode; the machine list is for the pool's project-wide operators (an area's members
 see the mode only).
 
-| | `preferred` (the default, for every pool) | `required` |
+| | `preferred` (a pool with no row, which is every pool started before the change below) | `required` (what a new pool starts with) |
 | --- | --- | --- |
 | Between machines that can seal | sealed | sealed |
 | Pool's machine to a host that cannot seal, tailnet | as before: in the clear; one Warn per host per start, naming it and "update it" | `403`, the op never runs (runner `jit_config` too) |
@@ -329,7 +329,18 @@ see the mode only).
 | A member's call to an older pool's machine, tailnet | sent as before, in the clear; one Warn on the member's machine (an older pool's machine has no mode to require more) | the same. But a pool's machine that ever named a key to this member is never sent secrets in the clear again (in either mode) until the member's owner forgets it |
 | Any leg over the tunnel to or from a machine that cannot seal | refused, as before | refused |
 
-Rollout: update every machine of the pool (hosts, members, its machine, in any order: `preferred` keeps the old ones
+A pool that this build starts (`potluck create`, or any turning of a solo project into a team one) starts `required`:
+the row is written before the project turns team, and `potluck create` prints the mode. A machine from before
+sealing gets no secrets in such a pool; `potluck sealing set preferred` lets it, while it is updated. A pool that was
+already running keeps what it had: no row stays `preferred`, and a mode its admin set stays. Running `potluck create`
+again on an existing pool changes nothing, and no migration touches an existing pool. (A running pool that goes solo
+and back to team with no row counts as started again and gets `required`; a row it has is kept.)
+
+A machine reports `required` to its members and hosts as soon as any pool it serves is `required`, so starting a new
+pool turns that report on for the pool's older siblings on the same machine too: if that machine is later put back on
+an older build, their hosts refuse its clear ops instead of warning.
+
+Rollout (a pool that is `preferred`): update every machine of the pool (hosts, members, its machine, in any order: `preferred` keeps the old ones
 working), run `potluck sealing` until it lists none that cannot seal, then `potluck sealing set required`. A machine
 that has not beaten since the pool's machine started is not listed: check that every host shows.
 

@@ -41,10 +41,10 @@ const drainDeadlineDefault = 1800
 
 // Override modes.
 const (
-	modeAuto   = "auto"
-	modeOpen   = "open"
-	modeDrain  = "drain"
-	modeClosed = "closed"
+	modeAuto   = protocol.HostAuto
+	modeOpen   = protocol.HostOpen
+	modeDrain  = protocol.HostDrain
+	modeClosed = protocol.HostClosed
 )
 
 // hostOverridePath is the host-wide override file. Tests point it elsewhere
@@ -215,7 +215,7 @@ func (c config) host() hostState {
 func (c config) hostAt(now time.Time, ov override, ovErr error, policy func() (bool, string, reading)) hostState {
 	if ovErr != nil {
 		h := c.hostAt(now, override{Mode: modeAuto}, nil, policy)
-		h.mode = "unreadable"
+		h.mode = protocol.HostUnreadable
 		bad := "the host override cannot be read, so no new work starts: " + ovErr.Error()
 		if h.verdict <= hostHolds {
 			h.verdict, h.why = hostHolds, bad
@@ -288,7 +288,7 @@ func (h hostState) refusal() string {
 
 // state is describe's word for the verdict.
 func (h hostState) state() string {
-	return [...]string{hostAdmits: "accepting", hostHolds: "holding", hostDrains: "draining", hostCloses: "closed"}[h.verdict]
+	return [...]string{hostAdmits: protocol.HostAccepting, hostHolds: protocol.HostHolding, hostDrains: protocol.HostDraining, hostCloses: protocol.HostShut}[h.verdict]
 }
 
 // hostStatus is h as describe's host block, without the drain's cut count.

@@ -1,23 +1,33 @@
-// The page's "Talk to the founders" form. Messages are kept in KV for the founders to read; nothing is sent on.
+// The page's "Talk to the founders" form. Messages are kept in KV for the founders to read, and each kept message
+// is emailed to them (src/notify.js) after it is stored.
 //
 //   POST /api/contact   form fields name, email, topic, team (optional), message, and leave_empty (a field people
 //                       never see: a filled one is a bot, answered as if it worked and not stored). Refused: a body
 //                       over 16 KB or of no stated length, and a post from another site (its Origin names another host). With
 //                       `accept: application/json` (the page's script) the answer is {"ok":true} or
 //                       {"ok":false,"error":<code>}; a plain form post (no script) is sent on to /thanks, or gets a
-//                       short page naming what to fix.
+//                       short page naming what to fix. Only a stored message is emailed on: the bot trap, refused
+//                       posts and rate-limited ones send nothing.
 //   GET  /api/contact   Authorization: Bearer $CONTACT_ADMIN_TOKEN; {"messages":[...],"next":<cursor or null>},
 //                       newest first, ?limit= of them (default and most 40: each is one KV read, and a Worker gets 50
 //                       subrequests on the free plan), from ?cursor= (the last answer's next).
 //
-// Binding: CONTACT (KV). Secret: CONTACT_ADMIN_TOKEN (the read route refuses everyone without it).
+// Bindings: CONTACT (KV), NOTIFY (send_email; src/notify.js). Var: NOTIFY_FROM. Secret: CONTACT_ADMIN_TOKEN (the
+// read route refuses everyone without it).
 // KV: `msg:<inverted time>:<random>` -> {name, email, topic, team, message, at, country, agent}; the inverted time
 // makes a plain list newest first. `rate:<ip>:<hour>` counts one address's posts in an hour (expires after two).
 
 import { authorized, json } from "./http.js";
+import { sendNotice } from "./notify.js";
 
-// What the topic select offers; anything else is refused.
-export const TOPICS = ["run", "broke", "build", "dish", "other"];
+// What the topic select offers, with the words it shows (the notice uses them); anything else is refused.
+export const TOPICS = {
+  run: "I want to run it",
+  broke: "Something broke",
+  build: "I want to help build it",
+  dish: "Try Potluck Dish early",
+  other: "Something else",
+};
 const LIMITS = { name: 100, email: 200, team: 120, message: 4000 };
 const PER_HOUR = 10;
 const MAX_BODY = 16 * 1024;
@@ -25,7 +35,8 @@ const PAGE = 40;
 // Syntax only: something@something.something with no spaces.
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export async function handleContact(request, env) {
+// ctx is the Worker's execution context: the notice is sent in ctx.waitUntil, after the answer.
+export async function handleContact(request, env, ctx) {
   if (request.method === "GET") return list(request, env);
   if (request.method !== "POST") return json({ ok: false, error: "method" }, 405, { allow: "GET, POST" });
   const wantsJSON = (request.headers.get("accept") ?? "").includes("application/json");
@@ -51,10 +62,11 @@ export async function handleContact(request, env) {
   const msg = { name: field("name"), email: field("email"), topic: field("topic"), team: field("team"), message: field("message") };
   if (!msg.name || !msg.message) return answer("missing");
   if (!EMAIL.test(msg.email)) return answer("email");
-  if (!TOPICS.includes(msg.topic)) return answer("topic");
+  if (!Object.hasOwn(TOPICS, msg.topic)) return answer("topic");
   for (const [k, max] of Object.entries(LIMITS)) if (msg[k].length > max) return answer("long");
   if (!env.CONTACT) return answer("unavailable");
 
+  let record;
   try {
     const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
     const now = new Date();
@@ -62,7 +74,7 @@ export async function handleContact(request, env) {
     const seen = Number(await env.CONTACT.get(rateKey)) || 0;
     if (seen >= PER_HOUR) return answer("busy");
     await env.CONTACT.put(rateKey, String(seen + 1), { expirationTtl: 7200 });
-    const record = {
+    record = {
       ...msg,
       at: now.toISOString(),
       country: request.cf?.country ?? null,
@@ -73,6 +85,7 @@ export async function handleContact(request, env) {
   } catch {
     return answer("unavailable");
   }
+  ctx.waitUntil(sendNotice(env, record, TOPICS));
   return answer(null);
 }
 

@@ -90,9 +90,22 @@ func (s *Service) handleTeam(r *http.Request) (any, error) {
 	if s.ByName(p.Slug) != nil {
 		return nil, api.Errorf(api.CodeConflict, "%s is also a team project this machine joined", p.Slug)
 	}
+	starting := !s.d.Projects.IsTeam(p.ID)
+	if starting {
+		for _, f := range s.Hooks.PoolStarting {
+			if err := f(r.Context(), p.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
 	n, err := s.moveLeases(r.Context(), p.ID, true)
 	if err != nil {
 		return nil, err
+	}
+	if starting {
+		for _, f := range s.Hooks.PoolStarted {
+			f(r.Context(), p.ID)
+		}
 	}
 	s.Publish(r.Context(), p)
 	return api.ProjectModeResponse{Project: api.ProjectRef{ID: p.ID, Slug: p.Slug}, Team: true, Moved: n}, nil

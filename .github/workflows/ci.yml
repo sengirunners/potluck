@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 3
     outputs:
       label: ${{ steps.pick.outputs.label }}
+      # potluck-pool's runs-on: the pool label in the repository variable POTLUCK_POOL_CI (for example pool:c1m2).
+      pool: ${{ vars.POTLUCK_POOL_CI }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,3 +68,40 @@ jobs:
           for v in $(env | grep -E '^ZM_' | cut -d= -f1); do unset "$v"; done
           env GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" GOPATH="$(go env GOPATH)" \
             HOME="$tmp/home" ZM_HOME="$tmp/zm" go test -timeout 30m ./...
+  # A few fast, hermetic checks on a Potluck pool runner (a box on a machine lent to the pool), so Potluck's own CI
+  # uses Potluck. A shadow: no required check names it and no job needs it, so a pool that is down, busy or broken
+  # by the change under test never blocks a merge; go above still runs the whole suite off the pool. It runs only
+  # when the repository variable POTLUCK_POOL_CI names the pool label (unset: skipped), for pushes to main and pull
+  # requests from this repository's own branches; a fork's pull request is skipped, and the runs-on guard sends it
+  # to ubuntu-latest anyway.
+  potluck-pool:
+    needs: route
+    if: ${{ needs.route.result == 'success' && needs.route.outputs.pool != '' && !(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository) }}
+    runs-on: ${{ github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || needs.route.outputs.pool || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    # One run per branch: a newer push cancels the older one still queued for, or running on, the small box.
+    concurrency:
+      group: potluck-pool-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: where this ran
+        run: echo "runner $RUNNER_NAME ($RUNNER_OS $RUNNER_ARCH) on $(uname -sr), $(nproc) cpu"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: site tests
+        working-directory: site
+        run: npm test
+      - name: go test (a few small packages)
+        run: |
+          umask 022
+          tmp=$(mktemp -d)
+          env GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" GOPATH="$(go env GOPATH)" \
+            HOME="$tmp/home" go test -timeout 5m ./placement/ ./jobrule/ ./internal/forkguard/ ./internal/workflowlint/

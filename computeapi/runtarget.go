@@ -147,6 +147,9 @@ type RunTargetDescribe struct {
 	Capabilities []string      `json:"capabilities"`
 	// Size is a box target's one size.
 	Size *RunTargetSize `json:"size,omitempty"`
+	// Slots are the binding's concurrent boxes for its OS as the driver
+	// counts them; nil from a driver that does not say.
+	Slots *RunTargetSlots `json:"slots,omitempty"`
 	// Runners is what the driver's newest GitHub runner refresh found, one
 	// entry per image of a binding whose boxes start a GitHub runner; empty
 	// before a box has started one, and from a driver that does not say.
@@ -163,6 +166,15 @@ type RunTargetSize struct {
 	CPU      int    `json:"cpu"`
 	MemoryMB int    `json:"memory_mb"`
 	DiskGB   int    `json:"disk_gb,omitempty"`
+}
+
+// RunTargetSlots is describe's slots: how many boxes of OS may run at
+// once (Total) and how many more may start now (Free). Bindings that share
+// a driver state directory share these slots.
+type RunTargetSlots struct {
+	OS    string `json:"os"`
+	Total int    `json:"total"`
+	Free  int    `json:"free"`
 }
 
 // RunTargetView is a binding as GET answers it: the binding, the class zm
@@ -190,9 +202,13 @@ type RunTargetView struct {
 	Shared []string `json:"share,omitempty"`
 	// SetupNotes are what the driver's setup said it did (bind with setup).
 	SetupNotes []string `json:"setup_notes,omitempty"`
-	// Live is a machine-level binding's handles its driver lists as not
-	// ended, for its owner (GET /v0/run_targets?host=1&live=1 only).
+	// Live is a binding's handles its driver lists as not ended, for the
+	// machine's owner (GET /v0/run_targets?live=1, with host=1 for the
+	// machine-level ones; a binding another machine serves has none).
 	Live []string `json:"live,omitempty"`
+	// Stopped are the handles in Live that are stopped (a kept disk, no
+	// VM running), so they hold no cores.
+	Stopped []string `json:"stopped,omitempty"`
 }
 
 // RunTargetClass is an isolation class.
@@ -638,7 +654,7 @@ type RunTargetLease struct {
 // treats a peer that names no seal key (a Potluck or zm from before sealing
 // on the tailnet).
 const (
-	// SealingPreferred (the default): seal to every peer that can; to one
+	// SealingPreferred (a pool with no row; a new pool starts required): seal to every peer that can; to one
 	// that cannot, over the tailnet, send as before (in the clear) and warn.
 	SealingPreferred = "preferred"
 	// SealingRequired: refuse secrets and jit_config to and from a peer that

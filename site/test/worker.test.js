@@ -191,7 +191,7 @@ test("the worker routes the two waitlist paths, and sends everything else to the
 
 test("the form's topics are the ones the server takes, and its fields have the server's names", () => {
   const form = HTML.slice(HTML.indexOf('<form class="talk"'), HTML.indexOf("</form>"));
-  const offered = [...form.matchAll(/<option value="([^"]+)"/g)].map((m) => m[1]);
+  const offered = Object.fromEntries([...form.matchAll(/<option value="([^"]+)">([^<]+)</g)].map((m) => [m[1], m[2]]));
   assert.match(form, /<option value="" disabled selected>/, "no topic is picked for the reader");
   assert.deepEqual(offered, TOPICS);
   const names = [...form.matchAll(/name="([^"]+)"/g)].map((m) => m[1]).sort();
