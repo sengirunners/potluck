@@ -70,7 +70,7 @@ behind, no url or secret leaked, verb timing, spend) always run. Groups run in t
 | `renew` | all | renew's lifetime cap and a later `expires_at`, or `not_implemented` when not listed | verb `renew` |
 | `expiry` | all | a short ttl ends the resource with no release and no call to the driver; status then says `expired` (run: exit 124); with `--strict`, for a box, `list` is the first call after the deadline and grace and must show it `expired` | `--ttl-short`, `--grace`; see skips |
 | `reclaim` | all | the owner's reclaim policy ends the resource with no call to the driver; status `reclaimed` | `--reclaim-config` |
-| `refuse` | all | missing `request_id`, `ttl_s` past the cap, shell-string script, unknown box image, bad exec arguments; for db a host not in `create_in` is refused before any connection | db: `--outside-config` with `{port}` |
+| `refuse` | all | missing `request_id`, negative `ttl_s` or past the cap, shell-string script, unknown box image, bad exec arguments; for db a host not in `create_in` is refused before any connection | db: `--outside-config` with `{port}` |
 | `net` | run, box | from inside: reaches what it should, resolves names, cannot reach forbidden addresses or send mail, peers cannot see each other, a box made with `net off` reaches nothing | `--net-*` flags |
 | `root` | box | with capability `root` or `docker`, sudo works and root lacks `NET_ADMIN`, `NET_RAW`, `MKNOD`; docker runs a container; without them sudo must not work | capabilities `root`, `docker` |
 

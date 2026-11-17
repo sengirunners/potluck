@@ -695,7 +695,9 @@ func (d *drv) acquire(req request) (any, error) {
 	}
 	var res map[string]any
 	var err error
-	if a.TTL > ttlMax && !d.is("ttl-no-cap") {
+	if a.TTL < 0 && !d.is("ttl-negative-ok") {
+		err = refuse("bad_request", "ttl_s cannot be negative")
+	} else if a.TTL > ttlMax && !d.is("ttl-no-cap") {
 		err = refuse("bad_request", "ttl_s past %d", ttlMax) // recorded failed, as any refusal after progressBegin
 	} else if err = d.slowAcquire(a.RequestID, a.JITConfig); err == nil {
 		err = locked(d.state, func() error {
