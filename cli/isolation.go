@@ -15,7 +15,6 @@ import (
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/kit/client"
-	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/runtarget"
 )
 
@@ -37,8 +36,8 @@ type bindingIsolation struct {
 	BlockTestError string                     `json:"block_test_error,omitempty"`
 	Stale          bool                       `json:"block_test_stale,omitempty"`
 	BlockTestOK    bool                       `json:"block_test_ok"`
-	// Testable: potluck isolation test can test it (a size this machine
-	// serves: one potluck host shares, or a pool's own size served here).
+	// Testable: isolation test can test it (a size this machine serves: one
+	// that host shares, or a pool's own size served here).
 	Testable bool `json:"block_test_runnable"`
 }
 
@@ -79,8 +78,8 @@ func isolationOf(v computeapi.RunTargetView, home string) bindingIsolation {
 }
 
 // blockTestLine is a box binding's block test in plain words.
-func blockTestLine(bi bindingIsolation) string {
-	again := "potluck isolation test " + bi.Binding
+func blockTestLine(bi bindingIsolation, p prefix) string {
+	again := p.cmd("isolation test " + bi.Binding)
 	switch r := bi.BlockTest; {
 	case bi.BlockTestError != "":
 		return "block test: its record cannot be read (" + bi.BlockTestError + "); run " + again
@@ -108,11 +107,14 @@ func blockTestLine(bi bindingIsolation) string {
 // daemon; err when the daemon does not answer. A pool whose list cannot be
 // read is named in partial, never left out silently.
 func (a *app) localIsolation(ctx context.Context) (out []bindingIsolation, partial string, err error) {
-	cfg, err := config.LoadClient()
+	cfg, err := a.loadClient()
 	if err != nil {
 		return nil, "", err
 	}
-	c := client.NewUnix(cfg.SocketPath())
+	c, err := a.readClient()
+	if err != nil {
+		return nil, "", err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	host, err := computeclient.HostRunTargets(ctx, c)
@@ -122,7 +124,7 @@ func (a *app) localIsolation(ctx context.Context) (out []bindingIsolation, parti
 	for _, v := range host.Targets {
 		out = append(out, isolationOf(v, cfg.Home))
 	}
-	pools, unread, err := servedHere(ctx, c, a.project)
+	pools, unread, err := servedHere(ctx, c, a.pool())
 	if err != nil {
 		return nil, "", err
 	}
@@ -185,7 +187,7 @@ func oneLineErr(err error) string { return strings.Join(strings.Fields(err.Error
 
 // printIsolation is doctor's and potluck isolation's per-binding lines,
 // and the list it could not read, if any.
-func printIsolation(w io.Writer, bs []bindingIsolation, partial string) {
+func printIsolation(w io.Writer, bs []bindingIsolation, partial string, p prefix) {
 	if partial != "" {
 		fmt.Fprintf(w, "isolation: %s, so it is not shown\n", partial)
 	}
@@ -200,7 +202,7 @@ func printIsolation(w io.Writer, bs []bindingIsolation, partial string) {
 		}
 		fmt.Fprintf(w, "  %s (%s): %s\n", bi.Binding, kind, bi.Says)
 		if bi.Kind == computeapi.RunTargetKindBox {
-			fmt.Fprintf(w, "    %s\n", blockTestLine(bi))
+			fmt.Fprintf(w, "    %s\n", blockTestLine(bi, p))
 		}
 	}
 }
@@ -211,24 +213,24 @@ func (a *app) isolationCmd() *cobra.Command {
 anyone's code: isolated (each piece of work in a throwaway machine walled
 off from this machine, its LAN and its tailnet, with no credentials), or
 not, in which case it takes only this machine's owner's own work. Each
-size also shows its latest block test (potluck isolation test).
+size also shows its latest block test (` + a.cmd("isolation test") + `).
 docs/isolation.md.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			bs, partial, err := a.localIsolation(cmd.Context())
 			if err != nil {
-				return fmt.Errorf("what this machine lends: %v (is potluck daemon running?)", err)
+				return fmt.Errorf("what this machine lends: %v (is %s running?)", err, a.cmd("daemon"))
 			}
-			if a.json {
+			if a.asJSON() {
 				if err := a.printJSON(bs); err != nil {
 					return err
 				}
 			} else if len(bs) == 0 && partial == "" {
-				fmt.Fprintln(a.stdout, "this machine lends nothing yet")
+				fmt.Fprintln(a.host.Stdout, "this machine lends nothing yet")
 			} else {
-				printIsolation(words{a.stdout}, bs, partial)
+				printIsolation(words{a.host.Stdout}, bs, partial, prefix(a.host.Prefix))
 			}
 			if partial != "" {
-				fmt.Fprintf(a.stderr, "potluck isolation: %s\n", partial)
+				fmt.Fprintf(a.host.Stderr, "%s: %s\n", a.cmd("isolation"), partial)
 				return exitSilently(1)
 			}
 			return nil
@@ -242,7 +244,7 @@ func (a *app) isolationTestCmd() *cobra.Command {
 	var timeout time.Duration
 	cmd := &cobra.Command{Use: "test <size> [--net-forbid host:port]...", Short: "Prove a size's sandboxes cannot reach this machine, its LAN or its tailnet, and record the result",
 		Long: `Runs conformance's network checks on a size this machine serves (one
-potluck host shares, or a pool's own size served here), with its own driver and
+` + a.cmd("host") + ` shares, or a pool's own size served here), with its own driver and
 config: a sandbox must not reach this machine on a port that is open (the
 test listens on one), the LAN's router or Tailscale's resolver (each on a
 port that opens from here), any --net-forbid target, or another sandbox at
@@ -252,17 +254,20 @@ docs/isolation.md.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			if err := a.notWhileAttached(a.cmd("isolation test")); err != nil {
+				return err
+			}
 			c, cfg, err := a.client()
 			if err != nil {
 				return err
 			}
-			b, err := localBoxBinding(ctx, c, args[0])
+			b, err := localBoxBinding(ctx, c, args[0], prefix(a.host.Prefix))
 			if err != nil {
 				return err
 			}
 			// The file the daemon would run, by its pin: the walling-off
 			// lives in the program, so the record names its sum.
-			pin, err := runtarget.PinnedDriver(cfg.Home, runtarget.DriverDirs(cfg.Home), b.Driver)
+			pin, err := runtarget.PinnedDriver(cfg.Home, a.driverDirs(cfg), b.Driver)
 			if err != nil {
 				return err
 			}
@@ -274,12 +279,12 @@ docs/isolation.md.`,
 			if err := hostprobe.RecordBlockTest(cfg.Home, r); err != nil {
 				return fmt.Errorf("record the result: %v", err)
 			}
-			if a.json {
+			if a.asJSON() {
 				if err := a.printJSON(r); err != nil {
 					return err
 				}
 			} else {
-				w := words{a.stdout}
+				w := words{a.host.Stdout}
 				for _, c := range r.Checks {
 					state := "PASS"
 					switch {
@@ -290,7 +295,7 @@ docs/isolation.md.`,
 					}
 					fmt.Fprintf(w, "%-4s  %s\n", state, strings.TrimSpace(c.Name+" "+c.Detail))
 				}
-				fmt.Fprintln(w, blockTestLine(bindingIsolation{Binding: b.Name, BlockTest: &r, BlockTestOK: r.Passed, Testable: true}))
+				fmt.Fprintln(w, blockTestLine(bindingIsolation{Binding: b.Name, BlockTest: &r, BlockTestOK: r.Passed, Testable: true}, prefix(a.host.Prefix)))
 			}
 			if !r.Passed {
 				return exitSilently(1)
@@ -307,7 +312,7 @@ docs/isolation.md.`,
 // pool's own size served here. The block test's record is kept by name, so
 // a name that names different sizes here (a shared size and a pool's, or
 // two pools') is refused: one record cannot speak for both.
-func localBoxBinding(ctx context.Context, c *client.Client, name string) (computeapi.RunTarget, error) {
+func localBoxBinding(ctx context.Context, c *client.Client, name string, p prefix) (computeapi.RunTarget, error) {
 	type found struct {
 		where string
 		t     computeapi.RunTarget
@@ -316,11 +321,11 @@ func localBoxBinding(ctx context.Context, c *client.Client, name string) (comput
 	var why []string
 	host, err := computeclient.HostRunTargets(ctx, c)
 	if err != nil {
-		why = append(why, "the sizes potluck host shares ("+oneLineErr(err)+")")
+		why = append(why, "the sizes "+p.cmd("host")+" shares ("+oneLineErr(err)+")")
 	}
 	for _, t := range targetsOf(host) {
 		if t.Name == name {
-			all = append(all, found{"shared by potluck host", t})
+			all = append(all, found{"shared by " + p.cmd("host"), t})
 		}
 	}
 	pools, unread, err := servedHere(ctx, c, "")
@@ -337,7 +342,7 @@ func localBoxBinding(ctx context.Context, c *client.Client, name string) (comput
 		if len(why) > 0 {
 			return computeapi.RunTarget{}, fmt.Errorf("this machine serves no size %s that could be read (%s could not be read)", name, strings.Join(why, "; and "))
 		}
-		return computeapi.RunTarget{}, fmt.Errorf("this machine serves no size %s (potluck isolation lists them)", name)
+		return computeapi.RunTarget{}, fmt.Errorf("this machine serves no size %s (%s lists them)", name, p.cmd("isolation"))
 	}
 	t := all[0].t
 	for _, f := range all {

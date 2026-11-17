@@ -240,3 +240,40 @@ func TestRegisteredMigrationsRunAfterTheModulesTheyUse(t *testing.T) {
 		}
 	}
 }
+
+// ComputeModules are exactly the route modules Compute adds to Kit.
+func TestComputeModules(t *testing.T) {
+	mods := func(w server.Wiring) map[string]bool {
+		t.Helper()
+		home, err := os.MkdirTemp("", "zm")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(home)
+		cfg, err := config.LoadFrom(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dm, err := server.New(context.Background(), cfg, nil, w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer dm.Close()
+		out := map[string]bool{}
+		for _, r := range dm.Router.Routes() {
+			out[r.Module] = true
+		}
+		return out
+	}
+	kit, compute := mods(wiring.Kit), mods(wiring.Compute)
+	var added []string
+	for m := range compute {
+		if m != "" && !kit[m] { // "": routes registered with no module name (Router.For)
+			added = append(added, m)
+		}
+	}
+	slices.Sort(added)
+	if !slices.Equal(added, wiring.ComputeModules) {
+		t.Fatalf("Compute adds the route modules %v to Kit; ComputeModules says %v", added, wiring.ComputeModules)
+	}
+}

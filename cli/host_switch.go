@@ -14,8 +14,6 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/hostprobe"
-	"github.com/sengirunners/potluck/kit/client"
-	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/menubar"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/vmhost"
@@ -32,13 +30,13 @@ func (a *app) hostStatusCmd() *cobra.Command {
 		Short: "How many of this machine's cores are lent and in use, and whether it takes new work (the menu bar item's facts)",
 		Long: `Status reads the sizes this machine shares (with pools it joined, and in
 pools it runs) from the daemon, each with the sandboxes running on it, and the
-host switch (potluck host set). Lent cores are, per driver state directory,
+host switch (` + a.cmd("host set") + `). Lent cores are, per driver state directory,
 its slots times its largest size's cores. With --json it prints the menu
 the macOS menu bar item draws (docs/menubar.md). It never starts the daemon.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			st := menubar.Build(hostFacts(cmd.Context()))
-			if a.json {
+			st := menubar.Build(a.hostFacts(cmd.Context()))
+			if a.asJSON() {
 				return a.printJSON(st)
 			}
 			m := st.Menu
@@ -67,11 +65,15 @@ closed (no new work; running work ends now) or auto (the sizes' own rules).
 --for and --until return it to auto then; --deadline is a drain's.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o, err := vmhost.SetHost(args[0], forD, until, deadline)
+			mode := args[0]
+			if mode == "close" { // the menu's and lend's word for it
+				mode = protocol.HostClosed
+			}
+			o, err := hostSet(mode, forD, until, deadline)
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(o)
 			}
 			line := o.Summary()
@@ -90,9 +92,10 @@ var hostNow = vmhost.HostNow
 
 // hostFacts gathers what potluck host status reports: the daemon's bindings
 // on this machine with their live boxes, the host switch, and the cores.
-func hostFacts(ctx context.Context) menubar.Facts {
-	f := menubar.Facts{Cores: hostprobe.SystemFacts{}.Cores(), Loc: time.Local}
-	targets, running, err := liveBindings(ctx)
+func (a *app) hostFacts(ctx context.Context) menubar.Facts {
+	f := menubar.Facts{Cores: hostprobe.SystemFacts{}.Cores(), Loc: time.Local,
+		Start: a.cmd("daemon --detach"), Share: a.cmd("host")}
+	targets, running, err := a.liveBindings(ctx)
 	switch {
 	case !running:
 		f.Daemon = err.Error()
@@ -125,6 +128,9 @@ func hostFacts(ctx context.Context) menubar.Facts {
 	if err != nil {
 		f.HostErr = err.Error()
 	}
+	if cfg, err := a.loadClient(); err == nil {
+		f.Background = hostBackground(cfg.Home)
+	}
 	return f
 }
 
@@ -132,14 +138,13 @@ func hostFacts(ctx context.Context) menubar.Facts {
 // in pools it runs), described, with their live handles, and whether the
 // daemon answered at all. It never starts the daemon; it goes on past a
 // pool it cannot list and returns the first error.
-func liveBindings(ctx context.Context) (out []computeapi.RunTargetView, running bool, first error) {
-	cfg, err := config.LoadClient()
+func (a *app) liveBindings(ctx context.Context) (out []computeapi.RunTargetView, running bool, first error) {
+	c, err := a.readClient()
 	if err != nil {
 		return nil, false, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	c := client.NewUnix(cfg.SocketPath())
 	if _, err := c.Health(ctx); err != nil {
 		return nil, false, err
 	}

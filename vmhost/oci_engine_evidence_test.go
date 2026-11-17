@@ -18,7 +18,7 @@ func fakeEngineEvidence(t *testing.T) (dockerEngineOwner, string, string) {
 	bin := filepath.Join(dir, "bin")
 	_ = os.Mkdir(bin, 0700)
 	for name, body := range map[string]string{
-		"sudo":       "#!/bin/sh\n[ \"$1\" = -n ] || exit 2\nshift\nexec \"$@\"\n",
+		"sudo":       fakeSudo,
 		"journalctl": "#!/bin/sh\nexec \"$ENGINE_TEST_EXE\" --fake-native-journal \"$@\"\n",
 		"systemctl":  "#!/bin/sh\ncat \"$ENGINE_SYSTEMD\"\n",
 	} {
@@ -27,6 +27,7 @@ func fakeEngineEvidence(t *testing.T) (dockerEngineOwner, string, string) {
 		}
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	t.Setenv("SUDO_LOG", filepath.Join(dir, "sudo.log"))
 	journal := filepath.Join(dir, "journal")
 	systemd := filepath.Join(dir, "systemd")
 	exe, err := os.Executable()
@@ -54,7 +55,7 @@ func journalEngineRecord(t *testing.T, owner dockerEngineOwner, at uint64, messa
 // This is the existing Docker29 successful-reload JSON/logfmt shape, including
 // hidden shim-v2 registration/options. Only selected runtime data is retained.
 func TestNativeProfileUsesCurrentSuccessfulDockerJournal(t *testing.T) {
-	for _, mode := range []string{"valid", "old-gap-recovered", "indexed-audit-noise", "pre-start", "journal-live-conflict", "pending", "missing-generation", "missing-runtime", "failed", "marshal-error", "journal-gap", "wrong-boot", "wrong-pid", "wrong-invocation", "restart", "out-of-order", "malformed"} {
+	for _, mode := range []string{"valid", "old-gap-recovered", "indexed-audit-noise", "pre-start", "journal-live-conflict", "pending", "missing-generation", "missing-runtime", "failed", "marshal-error", "journal-gap", "wrong-boot", "wrong-pid", "wrong-invocation", "restart", "out-of-order", "malformed", "cached-ticket-only"} {
 		t.Run(mode, func(t *testing.T) {
 			profile, p := testHostProfile(t)
 			_, dir := newFakeOCI(t, "none")
@@ -111,6 +112,9 @@ func TestNativeProfileUsesCurrentSuccessfulDockerJournal(t *testing.T) {
 				records = "not journal JSON\n"
 			case "restart":
 				_ = os.WriteFile(systemd, []byte("MainPID=1818\nInvocationID="+owner.invocation+"\n"), 0600)
+			case "cached-ticket-only": // sudo would run journalctl only from a ticket cached at this terminal, which the daemon lacks
+				t.Setenv("SUDO_POLICY", "password")
+				t.Setenv("SUDO_TICKET", "1")
 			}
 			if err := os.WriteFile(journal, []byte(records), 0600); err != nil {
 				t.Fatal(err)

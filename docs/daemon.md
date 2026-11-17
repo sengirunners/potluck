@@ -8,6 +8,61 @@ of the driver protocol (`docs/protocol.md`); a driver author needs only that. Sh
 The daemon side lives in `runtarget/` (run targets), `runners/` (the GitHub runner broker), `usage/`, `grants/`,
 `boxpush/`, `boxcp/` and `internal/e2bgateway/`. `$POTLUCK_HOME` is the daemon's home (zm's was `$ZM_HOME`).
 
+## One daemon per machine
+
+A daemon built on Potluck's kit is the machine's Potluck daemon, whichever program runs it: `potluck daemon`, or a
+program built on Potluck that adds its own modules to the same wiring. The `potluck` command and the menu bar item
+find it by one rule and never start a second daemon beside it.
+
+**The record.** From the moment its socket listens, a daemon keeps one record for the machine in
+`~/.local/state/potluck/daemons/<program>.json` (`$POTLUCK_DAEMONS_DIR` names another directory). The directory
+is 0700 and each file 0600, replaced whole; a reader ignores a file that is not this user's alone and refuses a
+directory that is not, since a record names a socket to dial and a program to run. It names the program, its binary, its home, its socket, its pid, its
+protocol and version, and the modules its routes come from:
+
+```json
+{
+  "program": "potluck",
+  "exe": "/Users/ana/.local/bin/potluck",
+  "home": "/Users/ana/.potluck",
+  "socket": "/Users/ana/.potluck/potluck.sock",
+  "pid": 4242,
+  "protocol": "potluck/1",
+  "version": "v0.4.0",
+  "modules": ["core", "grants", "owners", "runners", "runtarget", "tailnet", "teamlink", "tunnel", "usage"],
+  "started": "2026-11-17T09:00:00Z"
+}
+```
+
+The daemon removes its record when it stops. A record counts only while its process is this user's and alive and
+its socket is there and does not answer as another process (a daemon too slow to answer, or on another protocol major, counts as up); a crashed daemon's record is ignored, and the next daemon of that program replaces it. A
+second daemon of the same program on another home leaves a live record alone. The code is `kit/daemonrecord`;
+`kit/server` writes it.
+
+**Which daemon `potluck` uses**, decided once per command (`cli/attach.go`):
+
+1. `POTLUCK_BOX_CREDENTIAL` set: the authority that credential names, and no daemon on this machine.
+2. `POTLUCK_HOME` set: that home. When a daemon of another program that serves compute runs on it, potluck uses
+   that daemon; else (also when the records cannot be read) potluck's own.
+3. Potluck's own home (`~/.potluck`) exists: potluck's own daemon, started when a command needs it.
+4. Exactly one daemon of another program that serves compute runs (its record has every module of
+   `wiring.ComputeModules`): potluck uses it. Two or more: potluck refuses and names them; choose one with
+   `POTLUCK_HOME=<its home>`.
+5. Else potluck's own home, made on first use. Where a daemon built on Potluck has run before (the records
+   directory exists), the command that would make that home first waits up to 3 seconds for one restarting.
+
+Using another program's daemon, potluck sends every call over that daemon's socket and reads that home's
+`config.json` but writes nothing there. It never starts that program, and never starts `potluck daemon` on that
+home. `potluck status` says whose daemon it uses. These refuse, saying which program owns the daemon: `potluck
+daemon` (in the foreground or with `--detach`), `daemon stop`, `daemon preflight`, `driver pin`, `isolation test`
+and `host shelf`. `potluck upgrade` installs potluck's own programs and leaves the daemon, its home and its
+driver pins as they are; it does the same when potluck has no home yet, so installing potluck never makes
+`~/.potluck`.
+
+**A home has one program.** The first daemon on a home writes its program's name into `<home>/program`; a daemon
+of another program refuses that home before it opens anything there. With `POTLUCK_HOME` naming such a home while
+its daemon is not running, potluck starts no daemon there and refuses the commands above.
+
 ## project.toml and settings this build does not read
 
 `$POTLUCK_HOME/projects/<id>/project.toml` holds a project's own settings (`id`, `slug`, `name`, `paths`, `remotes`,
@@ -508,6 +563,9 @@ The ledger is the pool's event log (`GET /v0/events`):
 
 ### Kept disks
 
+From the command line: `potluck sandbox create --persist`, then `potluck sandbox stop <sandbox>` and
+`potluck sandbox start <sandbox> [--ttl 1h]`; `potluck sandbox rm` deletes the disk.
+
 - `persist` is for trusted machines only: a public machine's box is refused `403`, since its host can read a kept
   disk. Never with a `jit_config`.
 - `stop` is the holder's, or the machine owner's. `start` is the holder's alone: not even the machine owner starts
@@ -800,6 +858,9 @@ commands wrap the steps above and keep no state of their own.
 - `potluck host` is described in `docs/hosts.md`.
 
 ## Clients
+
+A program built on Potluck carries these commands in its own command tree, in its own words:
+[mounting.md](mounting.md).
 
 ### Sandbox commands
 
@@ -1466,8 +1527,11 @@ machine's socket (`POST /v0/runners/setup`, local):
 - `potluck runners link [<installation-id>] [--area]` prints the install URL, or for an existing installation GitHub's
   sign-in URL (an App made before `setup_url` needs it set on GitHub; the CLI says so). `potluck runners unlink <id>`.
   `potluck runners ls` shows the pool, `public_url`, the listener, the App, the settings (the label, the job limit),
-  sizes and links; `potluck runners repos` the connected repositories. Sizes are not set by
-  setup.
+  how the broker checks GitHub (webhooks or asking, and each installation's last complete round, errors and cuts),
+  sizes, the pool's machines, links and the connected repositories; away from the daemon's socket (a remote client,
+  a sandbox) or with a token, only the links and repositories, since the setup is the machine owner's. `potluck runners repos` lists the
+  connected repositories with what keeps one from being served (a public or internal one without `--public`). Sizes are not
+  set by setup.
 - Everything is checked before anything changes; a new pool drops every pending state. A `public_url` is https with
   a host and no path.
 - A taken or bad `listen` at daemon start leaves the broker running without its listener (logged), so `potluck
@@ -1585,8 +1649,12 @@ against), for a box to call its authority back: to comment on a work item, say, 
   "pool": {"kind": "potluck", "as": "ci",
            "ceiling": [{"project": "oncall", "role": "member"},
                        {"project": "oncall", "area": "ci", "role": "member",
-                        "workflows": [".github/workflows/nightly.yml"], "events": ["schedule"]}]}}}
+                        "repo": "acme/infra", "workflows": [".github/workflows/nightly.yml"], "events": ["schedule"]}]}}}
 ```
+
+The first rule serves boxes of project `oncall` (a person's, say). The second serves the `nightly.yml` job of
+`acme/infra`, a repository the runner broker serves: that job's box is in the pool project (`runners.pool.project`), not in `oncall`,
+and its token acts on `oncall` area `ci`, as `ci`, which must hold `member` there.
 
 - A rule is a project (slug or ULID; a slug is looked up at each issue, so a rule follows the slug), optionally one
   area of it (none: any area), and the most a token's role may be:
@@ -1594,14 +1662,28 @@ against), for a box to call its authority back: to comment on a work item, say, 
   `github-token`. With no rule it mints nothing.
 - A grant's ceiling is `{"role": "member"}`; a request's params `{"role": "member"}`. Both the grant and a config rule
   must allow the role.
-- The token is capped to exactly the box's project, the box's area (none: the whole project) and the asked role.
-  A person's token acts as that person; a GitHub job's acts as the issuer's `as` identity (no `as`: jobs get none).
-  That identity must already hold the role there (`potluck grant`): the token only narrows it, and an identity that
-  does not hold it is refused before anything is minted.
+- Which project a token acts in. Under a rule of the box's own project: the box's project, the box's area (none: the
+  whole project). A GitHub job the runner broker serves runs in a box of the pool project, in the area of its
+  installation's link, so a job's token for the project whose work it does comes from a job-only rule (one naming
+  `workflows` and the `repo` it serves, as `owner/name`) of that project: the token acts in the rule's project and the rule's area (none: the whole project),
+  never in the pool project. Such a rule serves only a job of its `repo` (a rule of another project without one
+  serves nothing: the pool's admin of any area may grant a job, so the rule names the repository the project's
+  owner means) that passes the job rules (as for `github-token`: its own repository, `refs/heads/<default branch>` with the broker's reviewed and pinned checks, an event and
+  workflow file the rule lists), and only in the broker's own box for that job: in the pool project, in the area
+  linked to the job's installation, recorded as guarded to the job's run (`runners_job_secrets`). It is asked at every
+  issue and renewal. A rule of another project without `workflows` serves nothing, so a person's box never gets
+  another project's token. The rule's project must exist and its area be an area of it. Rules that would put one
+  token in two projects or areas refuse it, so adding a job-only rule of another project beside a pool-project rule
+  without `workflows` (which also serves jobs) makes that job's token refuse until one of them is narrowed.
+- The token is capped to exactly that project and area and the asked role. A person's token acts as that person; a
+  GitHub job's acts as the issuer's `as` identity (no `as`: jobs get none). That identity must already hold the role
+  there, on the token's project and area (`potluck grant`): the token only narrows it, and an identity that does not
+  hold it is refused before anything is minted.
 - It lives at most an hour, never past the box's lease, and for a person who authenticated with a token never past
   that token (so one box's token cannot be traded for a longer-lived one); with less than a minute left it is not
   issued. It is renewed at two thirds of its life, like `github-token`; each renewal re-reads the lease and asks the
-  kind's whole check again (the identity still exists and holds the role, the caller's token still works): a renewal
+  kind's whole check again (the rule, the token's project included, and for a job under another project's rule the
+  broker's box; the identity still exists and holds the role; the caller's token still works): a renewal
   it refuses ends the token; one the registry cannot answer is tried again each minute, the old token staying. A mint
   whose registry stamp lands past the cap (the mint stalled) is revoked and refused.
 - A token minted for a caller who used another token (one box's, say) is not revoked when that token is: it lives
@@ -1632,7 +1714,8 @@ nothing long-lived. The file (`kit/tunnel` `BoxCredential`) is one JSON object:
 ```
 
 - `potluck` reads it when `POTLUCK_BOX_CREDENTIAL` names it, `$POTLUCK_SECRETS/<the grant's name>` in a box: every
-  command then talks to that authority, as the token's identity, capped to the box's project, area and role. It
+  command then talks to that authority, as the token's identity, capped to the token's project, area and role (the
+  box's, or a job-only rule's: above). It
   starts no daemon.
 - Each request is signed with the box's key for the pinned authority, as a member's daemon signs its own (the
   tunnel's signed exchange); only answers the authority's key signed are read. A box has no seal key, so a call
@@ -1676,12 +1759,15 @@ nothing long-lived. The file (`kit/tunnel` `BoxCredential`) is one JSON object:
 - Renewals, revocations and the issuer's refusals are published to the pool's event log (`secret.renewed`,
   `secret.revoked`, `secret.refused`) for readers who may operate in the box's area. Each names the issuer, the
   subject (`identity:<id>` or the job), the grant, the box, its host and the host's class, the repository and
-  permissions, the elevated ones, the reasons, the expiry and the token's `hashed_token`. Never a token.
+  permissions, the elevated ones, the reasons, the expiry and the token's `hashed_token`. The event's project is the
+  box's; a potluck-token's names where it acts (`token_project`, a ULID, and `token_area`), which for a job under
+  another project's rule is not the box's. Never a token.
 - `hashed_token` is the base64 of the token's SHA-256, the form GitHub's audit log searches by
   (`hashed_token:"..."`, URI-escaped in the REST API). Installation tokens are among the tokens the audit log
   records; Git events are found only in an exported audit log, not by search.
 - `issuers_ledger` in the registry is the issuer's own recovery record (issued, renewed, revoked, failed, expired,
-  expired_unrevoked, maybe_delivered, without values): what lets a start settle a crashed run. `maybe_delivered`
+  expired_unrevoked, maybe_delivered, without values): what lets a start settle a crashed run. Its `project` and
+  `area` are the box's; `token_project` and `token_area` where a potluck-token acts. `maybe_delivered`
   is a delivery that failed after it was sent (the driver timed out or its host went away), so the value may be in
   the box; the token is revoked after it, and the issue answers an error of its own (wrapping
   `rt.ErrMaybeDelivered`) so no caller delivers it again as if nothing arrived: the broker's job gets nothing, and

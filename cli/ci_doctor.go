@@ -36,7 +36,7 @@ func (a *app) ciDoctorCmd() *cobra.Command {
 	var want probeLabels
 	c := &cobra.Command{Use: "doctor [owner/repo]", Short: "Read-only checks explaining why jobs are not running", Long: ciDoctorHelp, Args: cobra.MaximumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if probe && len(args) == 0 {
-			return fmt.Errorf("--probe needs the repository to probe: potluck ci doctor owner/repo --probe")
+			return fmt.Errorf("--probe needs the repository to probe: %s", a.cmd("ci doctor owner/repo --probe"))
 		}
 		if !probe && slices.ContainsFunc([]string{"public", "labels", "size", "os"}, cmd.Flags().Changed) {
 			return fmt.Errorf("--public, --labels, --size and --os only go with --probe")
@@ -61,7 +61,7 @@ func (a *app) ciDoctorCmd() *cobra.Command {
 			}
 			out.Reports = []runners.DoctorReport{{Repo: repo, Checks: []runners.DoctorCheck{{
 				Number: 6, Status: "fail", Message: "This daemon has no CI doctor API; its fork-repository support cannot be checked.",
-				Fix: "update potluck and restart potluck daemon before diagnosing forked repositories",
+				Fix: "update " + a.name() + " and restart " + a.cmd("daemon") + " before diagnosing forked repositories",
 			}}}}
 		}
 		failed := false
@@ -84,7 +84,7 @@ func (a *app) ciDoctorCmd() *cobra.Command {
 			out.Reports[0].Checks = append(out.Reports[0].Checks, check)
 			failed = failed || check.Status == "fail"
 		}
-		if a.json {
+		if a.asJSON() {
 			if err := a.printJSON(out); err != nil {
 				return err
 			}
@@ -93,11 +93,11 @@ func (a *app) ciDoctorCmd() *cobra.Command {
 				a.say("warn: %s", warning)
 			}
 			for _, r := range out.Reports {
-				fmt.Fprintln(a.stdout, r.Repo)
+				fmt.Fprintln(a.host.Stdout, r.Repo)
 				for _, c := range r.Checks {
-					fmt.Fprintf(a.stdout, "%2d %-4s %s\n", c.Number, c.Status, c.Message)
+					fmt.Fprintf(a.host.Stdout, "%2d %-4s %s\n", c.Number, c.Status, c.Message)
 					if c.Fix != "" {
-						fmt.Fprintf(a.stdout, "   Next: %s\n", c.Fix)
+						fmt.Fprintf(a.host.Stdout, "   Next: %s\n", c.Fix)
 					}
 				}
 			}
@@ -107,7 +107,7 @@ func (a *app) ciDoctorCmd() *cobra.Command {
 					return err
 				}
 				a.say("The probe script (pushing a workflow file needs gh's workflow scope: gh auth refresh -s workflow):")
-				fmt.Fprint(a.stdout, string(b))
+				fmt.Fprint(a.host.Stdout, string(b))
 				a.say("next: sh %s", shellQuote(script))
 			}
 		}

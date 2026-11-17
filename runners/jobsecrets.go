@@ -736,6 +736,54 @@ func (s *Service) jobHolds(ctx context.Context, req issuers.Request) (bool, erro
 	return false, nil
 }
 
+// jobBox is issuers.JobBox: whether req's box is this broker's box for
+// the job req names. It is when the box is of the pool project, the newest
+// row of that box is held (issuing or issued) and guarded to the job's run
+// in the box's area, the row's job is of the job's repository and still
+// records that box, and that job's installation is linked to the pool
+// project in the box's area. A potluck-token rule naming another project
+// serves a job only then.
+func (s *Service) jobBox(ctx context.Context, req issuers.Request) (bool, error) {
+	if req.Subject.Job == nil || req.Box.Project == "" || req.Box.ID == "" {
+		return false, nil
+	}
+	pool, err := s.pool()
+	if err != nil || pool.ID != req.Box.Project {
+		return false, nil // no pool project, or the box is not of it
+	}
+	var owner, run int64
+	var area string
+	err = s.db().QueryRowContext(ctx, `SELECT job, run, area FROM runners_job_secrets WHERE project = ? AND handle = ? AND state IN `+secretsHeld+`
+		ORDER BY id DESC LIMIT 1`, req.Box.Project, req.Box.ID).Scan(&owner, &run, &area)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if run != req.Subject.Job.RunID || area != req.Box.Area {
+		return false, nil
+	}
+	j, err := s.job(ctx, owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if j.handle != req.Box.ID || !strings.EqualFold(j.repo, req.Subject.Job.Repo) {
+		return false, nil
+	}
+	l, err := s.link(ctx, j.installation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return l.project == pool.ID && l.Area == req.Box.Area, nil
+}
+
 // rowsOf is how many rows an Exec changed (0 on any error).
 func rowsOf(res sql.Result, err error) (int64, error) {
 	if err != nil {

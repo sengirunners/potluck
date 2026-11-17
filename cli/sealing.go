@@ -21,7 +21,7 @@ that machine can. The pool's mode says what happens with a machine too old to
 seal: "preferred" sends to it as before, in the clear over the tailnet, and
 warns; "required" refuses. A pool started by this build begins "required"; a
 pool from before keeps "preferred" until you upgrade every machine, check that
-this command lists none that cannot seal, then: potluck sealing set required.`,
+this command lists none that cannot seal, then: ` + a.cmd("sealing set required") + `.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.inPool(cmd.Context())
@@ -32,10 +32,10 @@ this command lists none that cannot seal, then: potluck sealing set required.`,
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(v)
 			}
-			a.say("%s", sealingText(v))
+			a.say("%s", sealingText(v, prefix(a.host.Prefix)))
 			return nil
 		}}
 	var force bool
@@ -50,10 +50,10 @@ this command lists none that cannot seal, then: potluck sealing set required.`,
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(v)
 			}
-			a.say("%s", sealingText(v))
+			a.say("%s", sealingText(v, prefix(a.host.Prefix)))
 			return nil
 		}}
 	set.Flags().BoolVar(&force, "force", false, "set required even while machines cannot seal (they then get no secrets or runner jobs)")
@@ -73,15 +73,15 @@ read, it starts a new, empty one (every pool machine is forgotten). Logged.`,
 			if err != nil {
 				return err
 			}
-			pool := a.project
+			pool := a.pool()
 			if pool == "" {
-				return fmt.Errorf("name the pool: potluck sealing forget -P <pool>")
+				return fmt.Errorf("name the pool: %s", a.cmd("sealing forget -P <pool>"))
 			}
 			v, err := computeclient.ForgetSealedHome(cmd.Context(), c, pool)
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(v)
 			}
 			if v.Forgot {
@@ -96,7 +96,7 @@ read, it starts a new, empty one (every pool machine is forgotten). Logged.`,
 }
 
 // sealingText is v for a person.
-func sealingText(v computeapi.Sealing) string {
+func sealingText(v computeapi.Sealing, p prefix) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "pool %s: sealing %s\n", v.Project, v.Mode)
 	for _, p := range v.Peers {
@@ -116,7 +116,7 @@ func sealingText(v computeapi.Sealing) string {
 	case len(v.CannotSeal) > 0:
 		fmt.Fprintf(&b, "%d machine(s) cannot seal: secrets reach them in the clear over the tailnet; update them before setting required", len(v.CannotSeal))
 	case v.Mode == computeapi.SealingPreferred:
-		fmt.Fprintf(&b, "every machine heard from since %s can seal: potluck sealing set required", v.Since.Format("2006-01-02 15:04Z"))
+		fmt.Fprintf(&b, "every machine heard from since %s can seal: %s", v.Since.Format("2006-01-02 15:04Z"), p.cmd("sealing set required"))
 	default:
 		b.WriteString("every machine heard from can seal")
 	}

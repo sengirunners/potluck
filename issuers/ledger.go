@@ -35,8 +35,8 @@ type Entry struct {
 	Kind        string
 	Subject     string // identity:<name> or job:<repo>:<workflow>@<ref>#<run>
 	Name        string
-	Project     string // the pool project's ULID
-	Area        string
+	Project     string // the box's project's ULID
+	Area        string // the box's area
 	Box         string
 	Host        string
 	HostClass   string
@@ -49,7 +49,13 @@ type Entry struct {
 	RuleReason  string // the ceiling rule's reason (a rule with elevated permissions has one)
 	Why         string // a refusal's, failure's or end's cause
 	Grant       string // the grant id the request named
-	Job         *Job   `json:"-"` // published, not stored
+	// TokenProject and TokenArea are where a potluck-token acts: the box's
+	// project and area, or for a GitHub job under a rule naming another
+	// project, that project (ULID) and the rule's area. Empty for a
+	// github-token and for a refusal.
+	TokenProject string
+	TokenArea    string
+	Job          *Job `json:"-"` // published, not stored
 }
 
 // Ledger is the issuer's recovery record (the audit surface is the pool's
@@ -103,6 +109,9 @@ CREATE TABLE issuers_assignments (
 	created INTEGER NOT NULL,
 	PRIMARY KEY (issuer, project, box, name)
 );`},
+	// Where a potluck-token acts, beside the box's project and area.
+	{Kind: store.KindRegistry, Name: "issuers/0002_ledger_token_project", Script: `ALTER TABLE issuers_ledger ADD COLUMN token_project TEXT NOT NULL DEFAULT '';
+ALTER TABLE issuers_ledger ADD COLUMN token_area TEXT NOT NULL DEFAULT '';`},
 }
 
 // SQLLedger is the ledger in the registry (kit/store: issuers_ledger).
@@ -123,16 +132,17 @@ func (l SQLLedger) Record(ctx context.Context, e Entry) error {
 		exp = e.ExpiresAt.Unix()
 	}
 	_, err := l.DB.ExecContext(ctx, `INSERT INTO issuers_ledger (at, event, issuer, kind, subject, name, project, area, box, host, host_class,
-		repo, permissions, expires, hashed_token, elevated, reason, rule_reason, why, grant_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		repo, permissions, expires, hashed_token, elevated, reason, rule_reason, why, grant_id, token_project, token_area)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.At.UnixMilli(), e.Event, clip(e.Issuer), e.Kind, clip(e.Subject), clip(e.Name), clip(e.Project), clip(e.Area), clip(e.Box), clip(e.Host),
 		clip(e.HostClass), clip(e.Repo), clip(e.Permissions), exp, e.HashedToken, clip(e.Elevated), clip(e.Reason), clip(e.RuleReason), clip(e.Why),
-		clip(e.Grant))
+		clip(e.Grant), clip(e.TokenProject), clip(e.TokenArea))
 	return err
 }
 
 func (l SQLLedger) Outstanding(ctx context.Context, issuer string) ([]Entry, error) {
 	rows, err := l.DB.QueryContext(ctx, `SELECT at, event, issuer, kind, subject, name, project, area, box, host, host_class, repo, permissions,
-		expires, hashed_token, elevated, reason, rule_reason, why, grant_id FROM issuers_ledger m
+		expires, hashed_token, elevated, reason, rule_reason, why, grant_id, token_project, token_area FROM issuers_ledger m
 		WHERE m.issuer = ? AND m.event IN ('issued', 'renewed') AND m.hashed_token != ''
 		AND NOT EXISTS (SELECT 1 FROM issuers_ledger e WHERE e.hashed_token = m.hashed_token
 			AND e.event IN ('revoked', 'expired', 'expired_unrevoked'))
@@ -146,7 +156,7 @@ func (l SQLLedger) Outstanding(ctx context.Context, issuer string) ([]Entry, err
 		var e Entry
 		var at, exp int64
 		if err := rows.Scan(&at, &e.Event, &e.Issuer, &e.Kind, &e.Subject, &e.Name, &e.Project, &e.Area, &e.Box, &e.Host, &e.HostClass, &e.Repo,
-			&e.Permissions, &exp, &e.HashedToken, &e.Elevated, &e.Reason, &e.RuleReason, &e.Why, &e.Grant); err != nil {
+			&e.Permissions, &exp, &e.HashedToken, &e.Elevated, &e.Reason, &e.RuleReason, &e.Why, &e.Grant, &e.TokenProject, &e.TokenArea); err != nil {
 			return nil, err
 		}
 		e.At = time.UnixMilli(at).UTC()

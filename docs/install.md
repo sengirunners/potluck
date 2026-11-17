@@ -46,6 +46,26 @@ Which keys are trusted, and how the signing key is replaced: [release-keys.md](r
 first, each replaced program is kept as `<name>.prev`, the drivers it replaced are re-pinned, and a running daemon is
 restarted on it (or, if the new one does not come up, the old programs and the old daemon come back).
 
+### Daily upgrades
+
+```sh
+potluck upgrade enable    # install the daily job
+potluck upgrade status    # on or off, where the job is, how the last run ended
+potluck upgrade disable   # remove it
+```
+
+`enable` writes a LaunchAgent (`~/Library/LaunchAgents/sh.potluck.update.plist`) on macOS or a systemd user
+timer (`~/.config/systemd/user/potluck-update.timer`) on Linux. It needs no root. About 03:00 (the minute is set
+by the machine's name, so machines spread over the hour) it runs `potluck upgrade --dir <where potluck is
+installed>`, which has the safeguards above: only a release signed by a trusted key, never an older one, and the
+old programs and daemon come back if the new daemon does not start. Its output goes to `$POTLUCK_HOME/update.log`.
+The directory potluck is installed in must be one you can write (the default `~/.local/bin` is). On Linux the
+timer runs only while you are logged in unless you run `sudo loginctl enable-linger $USER`. The job needs no
+token while the repository is public.
+
+If another unit or agent on the machine already runs `potluck upgrade`, `enable` says so and changes nothing;
+`disable` removes only the job `enable` wrote.
+
 ## From source
 
 ```sh

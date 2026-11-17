@@ -86,6 +86,7 @@ func TestForgetRefusals(t *testing.T) {
 		<-release
 		return nil, nil
 	}})
+	s.remotes[id] = &Remote{R: api.Remote{Project: api.ProjectRef{ID: id, Slug: "orchid"}, State: api.RemoteOK}}
 	s.TakeOps(ctx, id, []api.MachineOp{{ID: "op-run", Kind: "block"}})
 	if err := forget(api.ForgetKeepHostState); !api.IsCode(err, api.CodeConflict) || !strings.Contains(err.Error(), "still running") || !bound() {
 		close(release)
@@ -101,6 +102,7 @@ func TestForgetRefusals(t *testing.T) {
 	if _, err := st.Registry().ExecContext(ctx, `DELETE FROM team_ops_run`); err != nil {
 		t.Fatal(err)
 	}
+	delete(s.remotes, id) // the leave
 	// A row left running by a process that stopped mid-op does not refuse
 	// it, and goes with the forget.
 	if _, err := st.Registry().ExecContext(ctx, `INSERT INTO team_ops_run (id, project, kind, state, created) VALUES ('op-stale', ?, 'run_target', 'running', 0)`, id); err != nil {

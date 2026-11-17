@@ -100,6 +100,15 @@ type Live func(ctx context.Context, box Box) (bool, error)
 // never renewed or issued again.
 type JobHolds func(ctx context.Context, req Request) (bool, error)
 
+// JobBox answers whether req.Box is the runner broker's box for the GitHub
+// job req's subject names, as the broker records it now: a box of its pool
+// project, in the area of the link of the installation that serves the
+// job's repository, guarded to the job's run. A potluck-token rule naming
+// another project serves a job only on such a box, and it is asked at every
+// issue, renewal and re-issue of one. The daemon passes the broker's
+// (ProvideJobBox); without one no such rule serves anything.
+type JobBox func(ctx context.Context, req Request) (bool, error)
+
 // Check is the grant check (GrantCheck: the grants package), required. It
 // is asked at every issue, renewal and re-issue after a restart, and its
 // Decision names the grant the credential is issued under (Request.Grant is

@@ -263,6 +263,7 @@ func New(d *core.Deps) *Service {
 		wake:   [2]chan struct{}{make(chan struct{}, 1), make(chan struct{}, 1)},
 		taking: [2]map[string]bool{{}, {}}, jobsOn: map[int64]bool{}, lostAsk: map[int64]int{}, busy: map[string]bool{}}
 	issuers.ProvideJobHolds(d, s.jobHolds) // job grants: a job's credential is renewed only while it holds its box
+	issuers.ProvideJobBox(d, s.jobBox)     // a potluck-token rule of another project serves a job only in its box here
 	return s
 }
 

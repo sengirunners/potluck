@@ -9,11 +9,39 @@ import (
 	"testing"
 )
 
+// fakeSudo stands in for sudo -n [-k] <command>. SUDO_POLICY is the user's
+// sudoers: "nopasswd" (the default) runs anything; "helper" runs only the
+// helper with no arguments (the root step's rule) without a password;
+// "password" runs nothing without one. A command that needs a password runs
+// when SUDO_TICKET (a cached ticket, as after sudo -v) is set and -k is not
+// given, as real sudo does; else it refuses as sudo -n does. SUDO_REFUSE
+// refuses everything, SUDO_EXIT exits with that code, SUDO_WARN warns first.
+const fakeSudo = `#!/bin/sh
+[ "$1" = -n ] || exit 2
+shift
+k=
+if [ "$1" = -k ]; then k=1; shift; fi
+refuse() { echo 'sudo: a password is required' >&2; exit 1; }
+[ -z "${SUDO_REFUSE:-}" ] || refuse
+ticket=
+[ -n "$k" ] || [ -z "${SUDO_TICKET:-}" ] || ticket=1
+case "${SUDO_POLICY:-nopasswd}" in
+nopasswd) ;;
+helper) [ "$*" = "$FAKE_HELPER" ] || [ -n "$ticket" ] || refuse;;
+password) [ -n "$ticket" ] || refuse;;
+*) exit 2;;
+esac
+if [ -n "${SUDO_EXIT:-}" ]; then exit "$SUDO_EXIT"; fi
+if [ -n "${SUDO_WARN:-}" ]; then echo 'sudo: unable to resolve host x' >&2; fi
+echo "$*" >>"$SUDO_LOG"
+exec "$@"
+`
+
 // fakeDockerProc builds a private /proc where docker.service's main PID 1817
 // is a root dockerd holding a listener on the returned socket, then breaks it
-// as mode says. It puts fake sudo and systemctl first on PATH and points the
-// ownership read's /proc, PATH and helper at the fixture. sudo runs its
-// command unless SUDO_REFUSE is set; the helper file does not exist.
+// as mode says. It puts fake sudo (fakeSudo) and systemctl first on PATH and
+// points the ownership read's /proc, PATH and helper at the fixture. The
+// helper file does not exist.
 func fakeDockerProc(t *testing.T, mode string) (socket string) {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
@@ -63,7 +91,7 @@ func fakeDockerProc(t *testing.T, mode string) (socket string) {
 		mainPID = "0"
 	}
 	for name, body := range map[string]string{
-		"sudo":      "#!/bin/sh\n[ \"$1\" = -n ] || exit 2\nshift\nif [ -n \"${SUDO_REFUSE:-}\" ]; then echo 'sudo: a password is required' >&2; exit 1; fi\nif [ -n \"${SUDO_EXIT:-}\" ]; then exit \"$SUDO_EXIT\"; fi\nif [ -n \"${SUDO_WARN:-}\" ]; then echo 'sudo: unable to resolve host x' >&2; fi\necho \"$*\" >>\"$SUDO_LOG\"\nexec \"$@\"\n",
+		"sudo":      fakeSudo,
 		"systemctl": "#!/bin/sh\necho MainPID=" + mainPID + "\necho InvocationID=x\n",
 	} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o700); err != nil {
@@ -75,6 +103,7 @@ func fakeDockerProc(t *testing.T, mode string) (socket string) {
 	oldProc, oldPath, oldHelper, oldUID := dockerProcRoot, dockerOwnerPath, dockerOwnerHelper, dockerOwnerHelperUID
 	dockerProcRoot, dockerOwnerPath = proc, bin+":/usr/bin:/bin"
 	dockerOwnerHelper, dockerOwnerHelperUID = filepath.Join(dir, "libexec/potluck/docker-owner"), uint32(os.Getuid())
+	t.Setenv("FAKE_HELPER", dockerOwnerHelper)
 	t.Cleanup(func() {
 		dockerProcRoot, dockerOwnerPath, dockerOwnerHelper, dockerOwnerHelperUID = oldProc, oldPath, oldHelper, oldUID
 	})
@@ -167,6 +196,48 @@ func TestDockerOwnerNeedsRoot(t *testing.T) {
 			t.Setenv("SUDO_REFUSE", "1")
 			if _, err := readDockerOwner(); !errors.Is(err, ErrOCIOwnerNeedsRoot) {
 				t.Fatalf("sudo refused: want a root step, got %v", err)
+			}
+		})
+	}
+}
+
+// The read answers what the daemon's driver gets: it has no terminal and no
+// cached sudo ticket. A ticket left by a password typed at this terminal
+// minutes ago (sudo -v) does not make the read work, so doctor and share
+// still find the root step; once the root step's helper and rule are in, the
+// read works with or without a ticket. General passwordless sudo needs no
+// helper.
+func TestDockerOwnerReadIgnoresCachedTicket(t *testing.T) {
+	socket := fakeDockerProc(t, "owned")
+	body := dockerOwnerHelperBody(dockerProcRoot, dockerOwnerPath)
+	for _, c := range []struct {
+		name, policy           string
+		ticket, helper, worked bool
+	}{
+		{"password/ticket", "password", true, false, false},
+		{"password/no-ticket", "password", false, false, false},
+		{"helper-rule/ticket", "helper", true, true, true},
+		{"helper-rule/no-ticket", "helper", false, true, true},
+		{"helper-rule/helper-gone", "helper", true, false, false},
+		{"nopasswd/no-ticket", "nopasswd", false, false, true},
+		{"nopasswd/ticket", "nopasswd", true, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_ = os.Remove(dockerOwnerHelper)
+			if c.helper {
+				installFakeHelper(t, body, 0o755)
+			}
+			t.Setenv("SUDO_POLICY", c.policy)
+			t.Setenv("SUDO_TICKET", map[bool]string{true: "1"}[c.ticket])
+			out, err := readDockerOwner()
+			if !c.worked {
+				if !errors.Is(err, ErrOCIOwnerNeedsRoot) {
+					t.Fatalf("want a root step, got %q %v", out, err)
+				}
+				return
+			}
+			if err != nil || !dockerOwnerHolds(out, 1817, socket) {
+				t.Fatalf("%q %v", out, err)
 			}
 		})
 	}

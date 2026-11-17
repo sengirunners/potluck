@@ -7,6 +7,7 @@ Go module `github.com/sengirunners/potluck`. Apache-2.0. `cmd/potluck` is the pr
 | path | what |
 | --- | --- |
 | `cmd/potluck`, `cli/` | the program: `potluck daemon` (kit/server with `wiring.Compute`) and the commands; home `$POTLUCK_HOME`, default `~/.potluck` |
+| `cli/mount.go` | `cli.Commands(Host)`: Potluck's commands for a program that mounts them; every hint names a command through the host's prefix (`a.cmd`), never a literal `potluck <verb>` (`docs/mounting.md`) |
 | `DRIVERS.md` | where the daemon finds drivers, and their sha256 pins (`runtarget/pin.go`) |
 | `docs/protocol.md` | the driver protocol (potluck/1; the old names it still reads: "Names") |
 | `protocol/` | its wire types |
@@ -23,6 +24,7 @@ Go module `github.com/sengirunners/potluck`. Apache-2.0. `cmd/potluck` is the pr
 | `jobrule/` | the one copy of which GitHub jobs may hold a secret (events, ref, fork), shared by grants and issuers |
 | `site/` | static site (wrangler config) |
 | `kit/` | KIT: identity, projects, transports, the daemon shell (`kit/server`), teamlink |
+| `kit/daemonrecord/` | the machine's record of its running Potluck daemons (`<program>.json`), written by `kit/server`; how `potluck` and the menu bar item find a daemon of another program built on Potluck (`cli/attach.go`, `docs/daemon.md`) |
 | `agentrunners/` | the agent runner job kind (`potluck agent-runner`): a vendor's self-hosted runner in a fresh box; adapters are data (`claude.go`); `docs/agent-runners.md` |
 | `runtarget/`, `runners/`, `usage/`, `grants/` (secret grants), `hostprobe/`, `hostswap/` (the host's swap state: reported in its advert, gates box secrets), `computeapi/`, `computeclient/`, `boxcp/`, `boxpush/`, `wiring/`, `cmd/potluck-e2b` (`internal/e2bgateway`) | COMPUTE: boxes, sandboxes, runners, usage, wirings |
 | `placement/` | the one rule for which box binding takes a new box (sandboxes and runner jobs): tier order, refusals with reasons, ranking |

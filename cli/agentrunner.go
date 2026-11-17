@@ -70,8 +70,8 @@ included; see docs/agent-runners.md.
 Adapters:
 ` + adapterList() + `
 The sandbox's image must ship the adapter's command (claude: Claude Code).`,
-		Example: `  potluck agent-runner claude --secret-file ~/.config/claude/env-secret
-  potluck agent-runner claude --secret-file key --count 3 --timeout 4h --allow-tool 'Bash(go test:*)'`,
+		Example: "  " + a.cmd("agent-runner claude --secret-file ~/.config/claude/env-secret") + "\n" +
+			"  " + a.cmd("agent-runner claude --secret-file key --count 3 --timeout 4h --allow-tool 'Bash(go test:*)'"),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ad, ok := agentrunners.Lookup(args[0])
@@ -110,7 +110,7 @@ The sandbox's image must ship the adapter's command (claude: Claude Code).`,
 				return err
 			}
 			o.want.Net, o.want.Secrets = computeapi.NetOn, true
-			o.out, o.errw, o.drain = a.stdout, a.stderr, agentRunnerDrain
+			o.out, o.errw, o.p, o.drain = a.host.Stdout, a.host.Stderr, prefix(a.host.Prefix), agentRunnerDrain
 			return agentRunners(cmd.Context(), c, o)
 		}}
 	f := cmd.Flags()
@@ -122,7 +122,7 @@ The sandbox's image must ship the adapter's command (claude: Claude Code).`,
 	f.DurationVar(&o.opts.Idle, "idle", 0, "end a runner no session reached in this long (0: never)")
 	f.StringArrayVar(&o.opts.Allow, "allow-tool", nil, "a tool sessions may use without asking, as the vendor names it (repeatable)")
 	f.StringArrayVar(&o.opts.Deny, "deny-tool", nil, "a tool sessions may never use (repeatable)")
-	f.StringVar(&o.want.On, "on", "", "a shared machine size, as potluck status lists it (default: the smallest that fits)")
+	f.StringVar(&o.want.On, "on", "", "a shared machine size, as "+a.cmd("status")+" lists it (default: the smallest that fits)")
 	f.StringVar(&o.want.Size, "size", "", "a size the machine states")
 	f.StringVar(&o.want.OS, "os", "", "linux or macos")
 	f.StringVar(&o.image, "image", "", "one of the machine's images, by name")
@@ -205,9 +205,9 @@ func agentRunnerWorker(ctx context.Context, c *client.Client, o agentRunnerOptio
 		case ctx.Err() != nil:
 			return r, nil
 		case err != nil:
-			fmt.Fprintf(o.errw, "potluck: job %s: %s: %v\n", cmpStr(r.Handle, "(no sandbox)"), r.State, err)
+			fmt.Fprintf(o.errw, "%s: job %s: %s: %v\n", o.p.name(), cmpStr(r.Handle, "(no sandbox)"), r.State, err)
 		default:
-			fmt.Fprintf(o.errw, "potluck: job %s: %s, exit %d, after %s\n", sandboxID(r.Handle), r.State, r.code(), time.Since(start).Round(time.Second))
+			fmt.Fprintf(o.errw, "%s: job %s: %s, exit %d, after %s\n", o.p.name(), sandboxID(r.Handle), r.State, r.code(), time.Since(start).Round(time.Second))
 		}
 		if o.once {
 			return r, err
@@ -227,7 +227,7 @@ func agentRunnerWorker(ctx context.Context, c *client.Client, o agentRunnerOptio
 			wait = agentRunnerBackoff
 			continue
 		}
-		fmt.Fprintf(o.errw, "potluck: the job ended within %s; the next in %s\n", agentRunnerQuick, wait)
+		fmt.Fprintf(o.errw, "%s: the job ended within %s; the next in %s\n", o.p.name(), agentRunnerQuick, wait)
 		select {
 		case <-ctx.Done():
 			return r, nil
@@ -241,7 +241,7 @@ func agentRunnerWorker(ctx context.Context, c *client.Client, o agentRunnerOptio
 // key as its spawn's secret, followed until it exits, then the box ended.
 func agentRunnerJob(ctx context.Context, c *client.Client, o agentRunnerOptions) (jobResult, error) {
 	return boxJob(ctx, c, o.boxJobOptions, jobResult{State: "failed"}, func(ctx context.Context, bx acquiredBox) (string, error) {
-		fmt.Fprintf(o.errw, "potluck: %s: starting the %s runner\n", sandboxID(bx.handle), o.adapter.Name)
+		fmt.Fprintf(o.errw, "%s: %s: starting the %s runner\n", o.p.name(), sandboxID(bx.handle), o.adapter.Name)
 		opts := o.opts
 		opts.RetireAt = time.Now().Add(o.timeout - min(10*time.Minute, o.timeout/4))
 		return agentrunners.Start(ctx, daemonBox{c, bx.target, bx.id}, agentrunners.Job{Adapter: o.adapter, Options: opts,

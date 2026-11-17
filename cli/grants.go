@@ -26,8 +26,8 @@ func (a *app) secretsCmd() *cobra.Command {
 		Long: `A secret grant says who may put which kind of secret, up to what size, into
 which of the pool's sandboxes. No grant, no secret, except the built-in
 default: anyone who may use a sandbox may send their own values to it on
-potluck sandbox exec (--secret), as before grants existed. The pool's owner
-turns the default off (potluck secrets grant default off) once the grants
+` + a.cmd("sandbox exec") + ` (--secret), as before grants existed. The pool's owner
+turns the default off (` + a.cmd("secrets grant default off") + `) once the grants
 the pool needs are added. A public host is given no secrets, whatever a
 grant says.`,
 	}
@@ -49,7 +49,7 @@ func (a *app) grantAddCmd() *cobra.Command {
 agent in the pool; --role member covers everyone who may use the area's
 sandboxes. --area limits it to one pool area (default: every area, which
 only the pool's owner may grant). --target limits it to shared machine
-sizes, as potluck status lists them (--on's names). --scope is exec (one
+sizes, as ` + a.cmd("status") + ` lists them (--on's names). --scope is exec (one
 command, the default) or sandbox (the sandbox's whole life; nothing sends
 those yet).`,
 		Args: cobra.NoArgs,
@@ -76,7 +76,7 @@ those yet).`,
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(g)
 			}
 			a.say("%s", grantLine(g))
@@ -111,7 +111,7 @@ func (a *app) grantLsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(l)
 			}
 			for _, g := range l.Grants {
@@ -139,7 +139,7 @@ func (a *app) grantRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(g)
 			}
 			a.say("removed %s", grantLine(g))
@@ -166,7 +166,7 @@ func (a *app) grantDefaultCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(g)
 			}
 			a.say("%s", grantLine(g))

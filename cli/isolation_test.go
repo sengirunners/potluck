@@ -61,7 +61,7 @@ func TestIsolationLines(t *testing.T) {
 		isolationOf(computeapi.RunTargetView{RunTarget: computeapi.RunTarget{Name: "ci-db", Kind: "db"},
 			Effective: computeapi.RunTargetClass{Isolation: "none", Credentials: true}, Describe: &computeapi.RunTargetDescribe{}}, home),
 		isolationOf(box("pool-c2m4", eph, true), home),
-	}, "")
+	}, "", programName)
 	got := out.String()
 	for _, w := range []string{
 		"mac-c2m4 (sandbox size): isolated: each piece of work runs in a throwaway machine walled off from this machine, its LAN and its tailnet",

@@ -29,12 +29,12 @@ func (a *app) mcpCmd() *cobra.Command {
 				if c.Project != "" {
 					return c, nil
 				}
-				p, err := onlyPool(ctx, c)
+				p, err := a.onlyPool(ctx, c)
 				if err != nil {
 					return nil, err
 				}
 				return inPool(c, p), nil
-			}, a.stdin, a.stdout, a.prog.Tools...)
+			}, a.host.Stdin, a.host.Stdout, a.prog.Tools...)
 		}}
 	cmd.Flags().StringVar(&as, "as", strings.TrimSpace(os.Getenv("POTLUCK_AS")), "caller address (default: POTLUCK_AS, else your local identity)")
 	return cmd

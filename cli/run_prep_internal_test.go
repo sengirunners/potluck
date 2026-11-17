@@ -30,9 +30,16 @@ type prepDaemon struct {
 	// hook runs on the nth acquire before it answers (it may block on the
 	// request's context, as a daemon making a box does).
 	hook         map[int]func(r *http.Request)
-	releaseFails bool // a release is refused
-	onlySmall    bool // the daemon lists the small binding alone
+	releaseFails bool     // a release is refused
+	onlySmall    bool     // the daemon lists the small binding alone
+	verbs        []string // the verbs each binding's describe lists
 	acquires     int
+	asks         []computeapi.AcquireRunTargetRequest // each acquire's request
+	// renewFail answers the nth renew (1-based) with that error;
+	// releaseQuiet answers that many releases unavailable first.
+	renewFail    map[int]*api.Error
+	releaseQuiet int
+	renews       []int // each renew's ttl_s, answered or not
 }
 
 func (d *prepDaemon) log(s string) { d.mu.Lock(); d.asked = append(d.asked, s); d.mu.Unlock() }
@@ -43,7 +50,7 @@ func (d *prepDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(api.HeaderProtocol, api.Protocol)
 	view := func(name string, cpu, ttlMax int) computeapi.RunTargetView {
 		return computeapi.RunTargetView{RunTarget: computeapi.RunTarget{Name: name, Kind: "box", TTLMaxS: ttlMax}, HostClass: api.MachineTrusted,
-			Describe: &computeapi.RunTargetDescribe{Kind: "box", Available: true, Size: &computeapi.RunTargetSize{Name: name, OS: "linux", CPU: cpu, MemoryMB: 1024 * cpu}}}
+			Describe: &computeapi.RunTargetDescribe{Kind: "box", Available: true, Verbs: d.verbs, Size: &computeapi.RunTargetSize{Name: name, OS: "linux", CPU: cpu, MemoryMB: 1024 * cpu}}}
 	}
 	views := map[string]computeapi.RunTargetView{"small": view("small", 1, 600), "std": view("std", 2, 7200)}
 	if d.onlySmall {
@@ -66,6 +73,7 @@ func (d *prepDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.log("acquire " + name)
 		d.mu.Lock()
 		d.acquires++
+		d.asks = append(d.asks, req)
 		n := d.acquires
 		fail, hook := d.fail[n], d.hook[n]
 		d.mu.Unlock()
@@ -77,8 +85,30 @@ func (d *prepDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		api.WriteJSON(w, 200, computeapi.RunTargetHandle{Handle: "box:" + name + "/h1", RequestID: req.RequestID, State: "ready"})
+	case strings.HasSuffix(p, "/renew"):
+		var req computeapi.RenewRunTargetRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		d.mu.Lock()
+		d.renews = append(d.renews, req.TTLS)
+		fail := d.renewFail[len(d.renews)]
+		d.mu.Unlock()
+		if fail != nil {
+			api.WriteError(w, fail)
+			return
+		}
+		api.WriteJSON(w, 200, computeapi.RunTargetHandle{Handle: "box:x/h1", State: "ready"})
 	case strings.HasSuffix(p, "/release"):
 		d.log("release " + strings.Split(strings.TrimPrefix(p, "/"), "/")[0])
+		d.mu.Lock()
+		quiet := d.releaseQuiet > 0
+		if quiet {
+			d.releaseQuiet--
+		}
+		d.mu.Unlock()
+		if quiet {
+			api.WriteError(w, api.Errorf(api.CodeUnavailable, "host has not answered"))
+			return
+		}
 		if d.releaseFails {
 			api.WriteError(w, api.Errorf(api.CodeInternal, "potluck-driver-x release: crashed"))
 			return
@@ -245,5 +275,119 @@ func TestBoxJobSingleMisfitHasCode(t *testing.T) {
 	_, err := boxJob(context.Background(), client.WithHandler(d), o, jobResult{}, func(context.Context, acquiredBox) (string, error) { return "", nil })
 	if !api.IsCode(err, api.CodeBadRequest) || !computeclient.MadeNothing(err) || len(d.seen()) > 0 {
 		t.Errorf("one binding too short: %v (code %v), asked %q; want bad_request and nothing asked", err, api.IsCode(err, api.CodeBadRequest), d.seen())
+	}
+}
+
+// A run on a binding whose driver renews asks for a short lease it renews
+// itself (self_renew), not the whole --timeout: a client that dies leaves a
+// sandbox that ends soon. Kept, or on a driver that does not renew, it asks
+// for the whole lease.
+func TestBoxJobAsksAShortLease(t *testing.T) {
+	stop := errors.New("stop")
+	start := func(context.Context, acquiredBox) (string, error) { return "", stop }
+	for _, tc := range []struct {
+		name  string
+		verbs []string
+		keep  bool
+		ttlS  int
+		self  bool
+	}{
+		{"renews", []string{"renew"}, false, int(runLeaseTTL / time.Second), true},
+		{"kept", []string{"renew"}, true, 600, false}, // small's lifetime cap, under --timeout plus jobLeaseSlack
+		{"no renew", nil, false, 600, false},
+	} {
+		d := &prepDaemon{verbs: tc.verbs}
+		o := boxJobOptions{timeout: time.Minute, keep: tc.keep, out: io.Discard, errw: io.Discard}
+		if _, err := boxJob(context.Background(), client.WithHandler(d), o, jobResult{}, start); !errors.Is(err, stop) {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		d.mu.Lock()
+		asks := d.asks
+		d.mu.Unlock()
+		if len(asks) != 1 || asks[0].TTLS != tc.ttlS || asks[0].SelfRenew != tc.self {
+			t.Errorf("%s: asked %+v; want ttl_s %d, self_renew %t", tc.name, asks, tc.ttlS, tc.self)
+		}
+	}
+}
+
+// While the command runs, the short lease is renewed every runRenewEvery by
+// runLeaseTTL, and a renewal that fails (a driver's failure included) is
+// tried again at the next tick, not given up; at the end a release the
+// pool did not answer is asked again, saying so, until it is answered.
+func TestBoxJobRenewsAndAsksAgain(t *testing.T) {
+	oldTTL, oldEvery := runLeaseTTL, runRenewEvery
+	t.Cleanup(func() { runLeaseTTL, runRenewEvery = oldTTL, oldEvery })
+	runLeaseTTL, runRenewEvery = 3*time.Second, 20*time.Millisecond
+	d := &prepDaemon{verbs: []string{"renew"}, renewFail: map[int]*api.Error{1: api.Errorf(api.CodeInternal, "potluck-driver-x renew: crashed")}, releaseQuiet: 2}
+	var errw strings.Builder
+	o := boxJobOptions{timeout: time.Minute, out: io.Discard, errw: &errw}
+	stop := errors.New("stop")
+	r, err := boxJob(context.Background(), client.WithHandler(d), o, jobResult{}, func(context.Context, acquiredBox) (string, error) {
+		time.Sleep(300 * time.Millisecond) // the command's time: renewals go on meanwhile
+		return "", stop
+	})
+	if !errors.Is(err, stop) || !r.Released {
+		t.Fatalf("%+v %v\n%s", r, err, errw.String())
+	}
+	d.mu.Lock()
+	renews := slices.Clone(d.renews)
+	d.mu.Unlock()
+	if len(renews) < 3 || slices.ContainsFunc(renews, func(s int) bool { return s != 3 }) {
+		t.Errorf("renewals %v: want several of ttl_s 3, going on after the first failed", renews)
+	}
+	if got := d.seen(); !slices.Equal(got, []string{"acquire small", "release small", "release small", "release small"}) {
+		t.Errorf("asked %q: want the release asked until answered", got)
+	}
+	if !strings.Contains(errw.String(), "did not answer the end of small/h1") || strings.Count(errw.String(), "asking again") != 1 {
+		t.Errorf("stderr %q: want one line saying the end is asked again", errw.String())
+	}
+}
+
+// A Ctrl-C while the end of the sandbox is first asked cuts nothing short:
+// only once the pool did not answer does a Ctrl-C stop asking again (the
+// sandbox then ends at its lease).
+func TestBoxJobEndCtrlCOnlyStopsAskingAgain(t *testing.T) {
+	stop := errors.New("stop")
+	start := func(context.Context, acquiredBox) (string, error) { return "", stop }
+	pressed := func(ctx context.Context) (context.Context, context.CancelFunc) { // Ctrl-C, pressed already
+		ctx, cancel := context.WithCancel(ctx)
+		cancel()
+		return ctx, cancel
+	}
+	var errw strings.Builder
+	o := boxJobOptions{timeout: time.Minute, out: io.Discard, errw: &errw, again: pressed}
+	d := &prepDaemon{}
+	if r, err := boxJob(context.Background(), client.WithHandler(d), o, jobResult{}, start); !errors.Is(err, stop) || !r.Released {
+		t.Errorf("answered at once: %+v %v; want it ended", r, err)
+	}
+	d = &prepDaemon{releaseQuiet: 3}
+	r, err := boxJob(context.Background(), client.WithHandler(d), o, jobResult{}, start)
+	if !errors.Is(err, stop) || r.Released || !slices.Equal(d.seen(), []string{"acquire small", "release small"}) ||
+		!strings.Contains(errw.String(), "could not end small/h1 (it ends at its lease)") {
+		t.Errorf("not answered, then Ctrl-C: %+v %v, asked %q\n%s", r, err, d.seen(), errw.String())
+	}
+}
+
+// A renewal the pool refuses (the sandbox gone) stops the renewals, and the
+// run says the last one failed.
+func TestBoxJobStopsRenewingAtARefusal(t *testing.T) {
+	oldTTL, oldEvery := runLeaseTTL, runRenewEvery
+	t.Cleanup(func() { runLeaseTTL, runRenewEvery = oldTTL, oldEvery })
+	runLeaseTTL, runRenewEvery = 3*time.Second, 20*time.Millisecond
+	d := &prepDaemon{verbs: []string{"renew"}, renewFail: map[int]*api.Error{2: api.Errorf(api.CodeNotFound, "no handle box:small/h1")}}
+	var errw strings.Builder
+	o := boxJobOptions{timeout: time.Minute, out: io.Discard, errw: &errw}
+	stop := errors.New("stop")
+	if _, err := boxJob(context.Background(), client.WithHandler(d), o, jobResult{}, func(context.Context, acquiredBox) (string, error) {
+		time.Sleep(300 * time.Millisecond)
+		return "", stop
+	}); !errors.Is(err, stop) {
+		t.Fatal(err)
+	}
+	d.mu.Lock()
+	n := len(d.renews)
+	d.mu.Unlock()
+	if n != 2 || !strings.Contains(errw.String(), "the last renewal of small/h1's lease failed") {
+		t.Errorf("%d renewals, stderr %q: want 2 and the failure said", n, errw.String())
 	}
 }

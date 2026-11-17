@@ -49,6 +49,9 @@ type Daemon struct {
 	// started is closed once every module has started (Serve); nil = no
 	// Serve yet, so nothing waits (gate).
 	started atomic.Pointer[chan struct{}]
+	// program is config.Program when New ran: the program whose daemon
+	// this is (its home's owner, its machine record).
+	program string
 }
 
 // startGate bounds how long a socket call waits for the modules to start.
@@ -111,6 +114,10 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring) (*
 	if err := config.CheckNotRestoring(cfg.Home); err != nil {
 		return nil, err
 	}
+	program := config.Program
+	if err := config.ClaimHome(cfg.Home, program); err != nil {
+		return nil, err
+	}
 	st, err := store.OpenForWiring(ctx, cfg.Home)
 	if err != nil {
 		return nil, err
@@ -135,7 +142,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring) (*
 		return nil, err
 	}
 	d := &core.Deps{Config: cfg, Store: st, Projects: reg, Events: bus, Log: log, Started: time.Now().UTC()}
-	dm := &Daemon{Deps: d, stop: make(chan struct{}), closing: make(chan struct{})}
+	dm := &Daemon{Deps: d, stop: make(chan struct{}), closing: make(chan struct{}), program: program}
 	d.Closing = dm.closing
 	d.Zm = dm.zmState
 	if err := dm.wire(ctx, w); err != nil {
@@ -273,6 +280,12 @@ func (dm *Daemon) Serve(ctx context.Context) error {
 	srv := &http.Server{Handler: dm.gate(dm.Handler), ReadHeaderTimeout: 10 * time.Second, ConnContext: markUnix}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
+	// The machine record as soon as the socket answers (calls wait for the
+	// modules, gate): a client looking for the machine's daemon finds it
+	// rather than starting another.
+	if rec, ok := dm.writeRecord(ctx, sock); ok {
+		defer dm.removeRecord(rec)
+	}
 
 	mctx, cancel := context.WithCancel(ctx)
 	defer cancel()

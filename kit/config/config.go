@@ -78,6 +78,10 @@ type Config struct {
 	// (~/.claude.json, ~/.claude, ~/.codex) unless a session names its own.
 	// Load sets it (LoadFrom does not); "" reads none of it.
 	UserHome string `json:"-"`
+	// Socket, when set, is the socket a client dials (SocketPath) instead
+	// of the one the program's names give in Home: a daemon of another
+	// program, found by its machine record (kit/daemonrecord).
+	Socket string `json:"-"`
 }
 
 // Where the machine name came from (Config.MachineFrom).
@@ -463,6 +467,12 @@ func LoadClient() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	return LoadClientFrom(home)
+}
+
+// LoadClientFrom is LoadClient with an explicit home (read only: it
+// creates nothing there).
+func LoadClientFrom(home string) (*Config, error) {
 	host := HostName
 	if HostEnv != "" && os.Getenv(HostEnv) != "" {
 		// A remote client ($ZM_HOST) never names a session on this machine:
@@ -624,9 +634,14 @@ func (c *Config) AgentNiceness() int {
 	}
 }
 
-// SocketPath is the socket a client dials in Home: the first of the
-// program's socket names there, else its first (SocketIn).
-func (c *Config) SocketPath() string { return SocketIn(Wired(), c.Home, exists) }
+// SocketPath is the socket a client dials: Socket when set, else in Home
+// the first of the program's socket names there, else its first (SocketIn).
+func (c *Config) SocketPath() string {
+	if c.Socket != "" {
+		return c.Socket
+	}
+	return SocketIn(Wired(), c.Home, exists)
+}
 
 // ListenSocketPath is the socket the daemon listens on: the program's first
 // socket name in Home.

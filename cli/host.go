@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,9 +29,7 @@ import (
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/client"
-	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/project"
-	"github.com/sengirunners/potluck/runtarget"
 )
 
 // Test hooks: share's pulls and conformance, what this machine is, and the
@@ -71,15 +70,22 @@ func (f *hostFlags) limits() (hostprobe.Limits, error) {
 	return lim, nil
 }
 
-func (f *hostFlags) dir() string {
+// dir is the state directory host and doctor probe: --state-dir, else the
+// home's. Only the potluck program's own run falls back to ~/.potluck; a
+// mounted run with no home from its host is refused.
+func (f *hostFlags) dir(a *app) (string, error) {
 	if f.stateDir != "" {
-		return f.stateDir
+		return f.stateDir, nil
 	}
-	if cfg, err := config.LoadClient(); err == nil && cfg.Home != "" {
-		return cfg.Home
+	cfg, err := a.loadClient()
+	if err == nil && cfg.Home != "" {
+		return cfg.Home, nil
+	}
+	if !a.own {
+		return "", err
 	}
 	h, _ := os.UserHomeDir()
-	return filepath.Join(h, HomeDir)
+	return filepath.Join(h, HomeDir), nil
 }
 
 type doctorReport struct {
@@ -110,7 +116,11 @@ func (a *app) doctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			r := detectHost(cmd.Context(), f.dir())
+			dir, err := f.dir(a)
+			if err != nil {
+				return err
+			}
+			r := detectHost(cmd.Context(), dir)
 			out := doctorReport{Report: r, Share: lim.Fraction()}
 			var images []string // what host shares without --image: the best layer's default
 			if b, ok := r.Best(); ok {
@@ -130,14 +140,14 @@ func (a *app) doctorCmd() *cobra.Command {
 			out.Admission = a.bindingAdmission(cmd.Context())
 			var ierr error
 			if out.Isolation, out.IsolationPartial, ierr = a.localIsolation(cmd.Context()); ierr != nil {
-				out.IsolationPartial = "what this machine lends could not be read (" + oneLineErr(ierr) + "; is potluck daemon running?)"
+				out.IsolationPartial = "what this machine lends could not be read (" + oneLineErr(ierr) + "; is " + a.cmd("daemon") + " running?)"
 			}
-			if home, err := config.HomeDir(); err == nil {
-				if u := project.UnownedIn(home); len(u) > 0 {
+			if cfg, err := a.loadClient(); err == nil {
+				if u := project.UnownedIn(cfg.Home); len(u) > 0 {
 					out.Unowned = u
 				}
 			}
-			if a.json {
+			if a.asJSON() {
 				if err := a.printJSON(out); err != nil {
 					return err
 				}
@@ -146,7 +156,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				}
 				return nil
 			}
-			w := words{a.stdout}
+			w := words{a.host.Stdout}
 			fmt.Fprintf(w, "%s/%s, %d cores, %d MB RAM, %.0f GB free in %s, kvm: %t\n", r.OS, r.Arch, r.Cores, r.RAMMB, r.FreeDiskGB, r.StateDir, r.KVM)
 			for _, l := range r.Layers {
 				state := "not ready"
@@ -198,7 +208,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				fmt.Fprintf(w, "! %s\n", r.SwapNote)
 			}
 			printDoctorAdmission(w, out.Admission)
-			printIsolation(w, out.Isolation, out.IsolationPartial)
+			printIsolation(w, out.Isolation, out.IsolationPartial, prefix(a.host.Prefix))
 			for _, slug := range slices.Sorted(maps.Keys(out.Unowned)) {
 				fmt.Fprintf(w, "project %s: project.toml has settings nothing in this build reads (kept, not checked; a misspelt name looks the same): %s\n",
 					slug, strings.Join(out.Unowned[slug], ", "))
@@ -212,7 +222,7 @@ func (a *app) doctorCmd() *cobra.Command {
 			if !hostswap.Safe(r.Swap) {
 				return exitWith{1, errors.New(swapProblem(r))}
 			}
-			fmt.Fprintf(w, "next: potluck host   (layer %s; the default image unless --image name@sha256:<digest>)\n", out.Best)
+			fmt.Fprintf(w, "next: %s   (layer %s; the default image unless --image name@sha256:<digest>)\n", a.cmd("host"), out.Best)
 			return nil
 		}}
 	f.add(cmd)
@@ -266,23 +276,23 @@ func onATerminal() bool {
 // terminal can answer sudo, then reads the machine again. Else, or when
 // sudo does not finish, it says why and host goes on without it. Only a
 // cancelled command is an error.
-func (rs rootStep) first(ctx context.Context, o *hostprobe.ShareOptions, noSudo bool, again func() hostprobe.Report, w io.Writer) error {
+func (rs rootStep) first(ctx context.Context, o *hostprobe.ShareOptions, noSudo bool, again func() hostprobe.Report, w io.Writer, p prefix) error {
 	steps := o.RootSteps()
 	if len(steps) == 0 {
 		return nil
 	}
-	need := "potluck needs admin rights once to " + rootWhy(o.Report, steps)
+	need := p.name() + " needs admin rights once to " + rootWhy(o.Report, steps)
 	switch {
 	case o.DryRun:
 		fmt.Fprintf(w, "%s; a dry run does not ask: the root line below does it\n", need)
 	case noSudo:
 		fmt.Fprintf(w, "%s; --no-sudo: run the root line below yourself, then this again\n", need)
 	case !rs.tty():
-		fmt.Fprintf(w, "%s; not at a terminal, so potluck did not ask: run the root line below yourself, then this again\n", need)
+		fmt.Fprintf(w, "%s; not at a terminal, so %s did not ask: run the root line below yourself, then this again\n", need, p.name())
 	case !rs.sudo():
 		fmt.Fprintf(w, "%s; sudo is not installed: run the root line below as root, then this again\n", need)
 	default:
-		fmt.Fprintf(w, "%s; sudo may ask for your password (potluck doctor prints the exact command).\n", need)
+		fmt.Fprintf(w, "%s; sudo may ask for your password (%s prints the exact command).\n", need, p.cmd("doctor"))
 		err := rs.run(ctx, hostprobe.RootScript(steps))
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -290,7 +300,7 @@ func (rs rootStep) first(ctx context.Context, o *hostprobe.ShareOptions, noSudo 
 		o.Report = again()
 		switch {
 		case err != nil:
-			fmt.Fprintf(w, "the admin step did not finish (%v): potluck goes on without it; the root line below does it\n", err)
+			fmt.Fprintf(w, "the admin step did not finish (%v): %s goes on without it; the root line below does it\n", err, p.name())
 		case len(o.RootSteps()) > 0:
 			fmt.Fprintln(w, "the admin step ran, but this machine is not ready yet (if it added you to a group, such as kvm, that counts only from your next login): what is left is below")
 		}
@@ -331,9 +341,14 @@ type shareFlags struct {
 	pullTimeout time.Duration
 	shelfGB     int
 	volumeMaxGB int
+	// when is --when (any or away), detach --detach, and skipAfter the
+	// host program's flag that skips its AfterLend.
+	when      string
+	detach    bool
+	skipAfter bool
 }
 
-func (s *shareFlags) add(cmd *cobra.Command) {
+func (s *shareFlags) add(cmd *cobra.Command, a *app) {
 	s.f.add(cmd)
 	fl, o := cmd.Flags(), &s.o
 	fl.StringArrayVar(&o.Images, "image", nil, "an image pinned by digest, name@sha256:<64 hex> (repeat; default: Potluck's pinned image for the layer, macOS on tart)")
@@ -353,14 +368,19 @@ func (s *shareFlags) add(cmd *cobra.Command) {
 	fl.StringArrayVar(&o.NetMail, "net-mail", nil, "an outside mail server (host, checked on 25, 465 and 587, or host:port) no sandbox may open, passed to conformance (repeat)")
 	fl.IntVar(&o.NetMbit, "net-mbit", 0, "oci: cap what all sandboxes on Potluck's network download together, in Mbit/s, for a machine whose uplink you guard; a root step (default: what an earlier host run set; 0 removes the cap)")
 	fl.IntVar(&s.shelfGB, "shelf-gb", 0, "oci: turn the package shelf on: make the potluck-cache volume (if missing) and cap what it holds at this many GiB, on every size, so sandboxes find public npm packages on a read-only shelf (docs/shelf.md); 0 fills nothing (default: what an earlier host run set)")
-	fl.StringVar(&o.ShelfFill, "shelf-fill", "", "oci: what fills the shelf: seed (only potluck host shelf fill; the default), \"boxes\" (also the public packages that lockfiles in sandboxes name, so a sandbox can tell someone on this host recently used a given public package) or off; needs --shelf-gb above 0 (default: what an earlier host run set)")
+	fl.StringVar(&o.ShelfFill, "shelf-fill", "", "oci: what fills the shelf: seed (only "+a.cmd("host shelf fill")+"; the default), \"boxes\" (also the public packages that lockfiles in sandboxes name, so a sandbox can tell someone on this host recently used a given public package) or off; needs --shelf-gb above 0 (default: what an earlier host run set)")
 	fl.IntVar(&s.volumeMaxGB, "volume-max-gb", 0, "oci: the most each renter's named volumes may hold on each size, in GiB, on every size this run shares (default 20; 0 turns volumes off; default: what an earlier host run set)")
 	fl.BoolVar(&s.dryRun, "dry-run", false, "print the plan; pull, test and share nothing")
 	fl.BoolVar(&s.o.ShowCommands, "show-commands", false, "with --dry-run, also print each conformance command line (a dry run prints the pulls and the plan only)")
 	fl.DurationVar(&s.pullTimeout, "pull-timeout", 0, "give up on an image pull after this long (default: image pin budget, else 60m; a stopped pull resumes)")
-	fl.BoolVar(&s.noSudo, "no-sudo", false, "never run the root step potluck doctor prints with sudo: print it, and share without it")
+	fl.BoolVar(&s.noSudo, "no-sudo", false, "never run the root step "+a.cmd("doctor")+" prints with sudo: print it, and share without it")
 	fl.BoolVar(&o.Full, "full", false, "run the whole conformance suite on every size (minutes per size); default: the security checks once, a boot check per size")
-	fl.IntVar(&o.ReclaimIdleS, "reclaim-idle-s", 0, fmt.Sprintf("macOS: a sandbox ends when you touch the keyboard or pointer and starts only after this many idle seconds; 0 shares all the time (default %d on macOS, 0 elsewhere)", hostprobe.DefaultReclaimIdleS))
+	fl.IntVar(&o.ReclaimIdleS, "reclaim-idle-s", 0, fmt.Sprintf("macOS: a sandbox ends when you touch the keyboard or pointer and starts only after this many idle seconds; 0 shares all the time (default: what an earlier host run chose, else %d on macOS, 0 elsewhere)", hostprobe.DefaultReclaimIdleS))
+	fl.StringVar(&s.when, "when", "", fmt.Sprintf("when sandboxes may run: any (any time; --reclaim-idle-s 0) or away (macOS: only while you are away from the keyboard and pointer; --reclaim-idle-s %d) (default: what an earlier host run chose, else away on macOS, any elsewhere)", hostprobe.DefaultReclaimIdleS))
+	fl.BoolVar(&s.detach, "detach", false, "after the checks and the admin step, go on in the background, its words in the home's host.log ("+a.cmd("host status")+" says how it goes)")
+	if al := a.host.AfterLend; al != nil && al.Skip != "" {
+		fl.BoolVar(&s.skipAfter, al.Skip, false, al.SkipUsage)
+	}
 	fl.StringVar(&o.AdmissionURL, "admission-url", "", "a machine that runs other work too: every sandbox first takes a lease from this admission controller (cmd/potluck-driver-tart/README.md; default: what an earlier host run set; none removes it)")
 	fl.StringVar(&o.AdmissionTokenFile, "admission-token-file", "", "a 0600 file whose token goes with every admission call (default: an earlier host run's)")
 	fl.IntVar(&o.AdmissionTTLS, "admission-ttl-s", 0, "how long a lease lasts unrenewed, 120..3600 s (default: an earlier host run's, else the driver's 120)")
@@ -375,7 +395,11 @@ func (a *app) rootStep(ctx context.Context, s *shareFlags) func(*hostprobe.Share
 		if err := hostprobe.Precheck(ctx, shareRunner, *o); err != nil {
 			return err
 		}
-		return hostRoot.first(ctx, o, s.noSudo, func() hostprobe.Report { return detectHost(ctx, s.f.dir()) }, a.stderr)
+		dir, err := s.f.dir(a)
+		if err != nil {
+			return err
+		}
+		return hostRoot.first(ctx, o, s.noSudo, func() hostprobe.Report { return detectHost(ctx, dir) }, a.host.Stderr, prefix(a.host.Prefix))
 	}
 }
 
@@ -389,11 +413,11 @@ func (a *app) shareOptions(cmd *cobra.Command, s *shareFlags) (hostprobe.ShareOp
 	o.Limits, o.Sizes, o.DryRun, o.Driver = lim, s.sizes, s.dryRun, shareDriver
 	o.PullTimeout = s.pullTimeout
 	o.StateDir = s.f.stateDir
-	if cfg, err := config.LoadClient(); err == nil { // conformance tests the file the daemon will pin
-		o.DriverDirs = runtarget.DriverDirs(cfg.Home)
+	if cfg, err := a.loadClient(); err == nil { // conformance tests the file the daemon will pin
+		o.DriverDirs = a.driverDirs(cfg)
 	}
-	if !cmd.Flags().Changed("reclaim-idle-s") {
-		o.ReclaimIdleS = defaultReclaimIdleS()
+	if err := s.reclaim(cmd, &o); err != nil {
+		return o, err
 	}
 	o.DockerSet = cmd.Flags().Changed("docker")
 	o.RootSet = cmd.Flags().Changed("root")
@@ -405,7 +429,7 @@ func (a *app) shareOptions(cmd *cobra.Command, s *shareFlags) (hostprobe.ShareOp
 		o.VolumeMaxGB = &s.volumeMaxGB
 	}
 	if o.NamePrefix == "" { // the machine name, read without touching the daemon
-		cfg, err := config.LoadClient()
+		cfg, err := a.loadClient()
 		if err != nil {
 			return o, err
 		}
@@ -417,16 +441,46 @@ func (a *app) shareOptions(cmd *cobra.Command, s *shareFlags) (hostprobe.ShareOp
 		} else if o.With == "" && len(o.Images) == 0 {
 			// An implicit image plan could silently replace a named image.
 			o.EarlierUnread = err.Error()
-		} else if !a.json {
-			fmt.Fprintln(a.stderr, "note: earlier bindings could not be read; the explicit image plan does not show earlier admission keys (host keeps them)")
+		} else if !a.asJSON() {
+			fmt.Fprintln(a.host.Stderr, "note: earlier bindings could not be read; the explicit image plan does not show earlier admission keys (host keeps them)")
 		}
 	}
-	o.Report = detectHost(cmd.Context(), s.f.dir())
+	dir, err := s.f.dir(a)
+	if err != nil {
+		return o, err
+	}
+	o.Report = detectHost(cmd.Context(), dir)
 	o.HostAddrs = hostprobe.HostAddrs()
-	if !a.json {
-		o.Progress = func(line string) { fmt.Fprintln(words{a.stderr}, line) }
+	if !a.asJSON() {
+		o.Progress = func(line string) { fmt.Fprintln(words{a.host.Stderr}, line) }
 	}
 	return o, nil
+}
+
+// reclaim sets o's reclaim policy from --when or --reclaim-idle-s, marking
+// it chosen for this run; with neither, an earlier host run's stands, else
+// the default (hostprobe keeps the earlier one).
+func (s *shareFlags) reclaim(cmd *cobra.Command, o *hostprobe.ShareOptions) error {
+	fl := cmd.Flags()
+	switch {
+	case fl.Changed("when") && fl.Changed("reclaim-idle-s"):
+		return exitWith{2, errors.New("--when or --reclaim-idle-s, not both: --when away is --reclaim-idle-s " + strconv.Itoa(hostprobe.DefaultReclaimIdleS) + ", --when any is --reclaim-idle-s 0")}
+	case fl.Changed("when"):
+		switch s.when {
+		case "any":
+			o.ReclaimIdleS = 0
+		case "away":
+			o.ReclaimIdleS = hostprobe.DefaultReclaimIdleS
+		default:
+			return exitWith{2, fmt.Errorf("--when %q: want any or away", s.when)}
+		}
+		o.ReclaimSet = true
+	case fl.Changed("reclaim-idle-s"):
+		o.ReclaimSet = true
+	default:
+		o.ReclaimIdleS = defaultReclaimIdleS()
+	}
+	return nil
 }
 
 // defaultReclaimIdleS: a Mac is shared only while its owner is away from it.
@@ -439,12 +493,12 @@ func defaultReclaimIdleS() int {
 
 // reportShare prints a share's result and fails when a size stayed unshared.
 func (a *app) reportShare(res hostprobe.ShareResult, w io.Writer) error {
-	if a.json {
+	if a.asJSON() {
 		if err := a.printJSON(res); err != nil {
 			return err
 		}
 	} else {
-		printShare(words{w}, res)
+		printShare(words{w}, res, prefix(a.host.Prefix))
 	}
 	if res.Failed() {
 		return errors.New("some sizes were not shared")
@@ -452,7 +506,7 @@ func (a *app) reportShare(res hostprobe.ShareResult, w io.Writer) error {
 	return nil
 }
 
-func printShare(w io.Writer, res hostprobe.ShareResult) {
+func printShare(w io.Writer, res hostprobe.ShareResult, p prefix) {
 	verb := "ran"
 	if res.DryRun {
 		verb = "would run"
@@ -462,7 +516,7 @@ func printShare(w io.Writer, res hostprobe.ShareResult) {
 	case res.NamedImage != "":
 		fmt.Fprintf(w, "image %s (selected with --with %s)\n", strings.Join(res.Images, ", "), res.NamedImage)
 	case res.DefaultImage && len(res.Images) > 1:
-		fmt.Fprintf(w, "images %s (the default, then its templates for potluck sandbox create --template; --image to choose another)\n", strings.Join(res.Images, ", "))
+		fmt.Fprintf(w, "images %s (the default, then its templates for %s; --image to choose another)\n", strings.Join(res.Images, ", "), p.cmd("sandbox create --template"))
 	case res.DefaultImage:
 		fmt.Fprintf(w, "image %s (the default; --image to choose another)\n", strings.Join(res.Images, ", "))
 	}
@@ -470,7 +524,9 @@ func printShare(w io.Writer, res hostprobe.ShareResult) {
 		fmt.Fprintln(w, "quick check: the security checks once, a boot check per size (--full for the whole suite)")
 	}
 	if res.ReclaimIdleS > 0 {
-		fmt.Fprintf(w, "sandboxes end when you touch the keyboard or pointer, and start after %ds idle (--reclaim-idle-s 0: always shared)\n", res.ReclaimIdleS)
+		fmt.Fprintf(w, "sandboxes end when you touch the keyboard or pointer, and start after %ds idle (--when any: always shared)%s\n", res.ReclaimIdleS, keptFrom(res.ReclaimFrom))
+	} else if res.ReclaimFrom != "" {
+		fmt.Fprintf(w, "sandboxes may run any time%s\n", keptFrom(res.ReclaimFrom))
 	}
 	if ad := res.Admission; ad != nil {
 		fmt.Fprintf(w, "admission: every sandbox, conformance's too, first takes a lease from %s%s", ad["admission_url"], admissionDetail(ad))
@@ -506,6 +562,15 @@ func printShare(w io.Writer, res hostprobe.ShareResult) {
 			fmt.Fprintf(w, "  %s\n", s.Error)
 		}
 	}
+}
+
+// keptFrom says which earlier shared size a choice was kept from ("" for
+// none).
+func keptFrom(name string) string {
+	if name == "" {
+		return ""
+	}
+	return "; kept from " + name + " (--when changes it)"
 }
 
 // printStorage says the shelf and volume keys every size is bound with.
@@ -554,13 +619,12 @@ func (a *app) bindingViewsIn(ctx context.Context, start, host, describe bool) (c
 			return computeapi.RunTargetList{}, err
 		}
 	} else {
-		cfg, err := config.LoadClient()
-		if err != nil {
+		var err error
+		if c, err = a.readClient(); err != nil {
 			return computeapi.RunTargetList{}, err
 		}
-		c = client.NewUnix(cfg.SocketPath())
-		if a.project != "" {
-			c.Project, c.ProjectFrom = a.project, "flag"
+		if a.pool() != "" {
+			c = inPool(c, a.pool())
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

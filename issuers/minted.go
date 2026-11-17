@@ -42,10 +42,13 @@ type Options struct {
 
 	// Tokens, BoxExpires and Home are a potluck issuer's (required there):
 	// the pool's token mint, each box's lease end, and the authority a box
-	// reaches (its tunnel URL and key fingerprint).
+	// reaches (its tunnel URL and key fingerprint). JobBox is its too, and
+	// optional: without it a rule naming another project than the box's
+	// serves nothing.
 	Tokens     TokenMint
 	BoxExpires BoxExpires
 	Home       Home
+	JobBox     JobBox
 
 	// Secrets, HTTP and Sleep are a github-app issuer's: its App key
 	// reference (default secrets.Default()), its HTTP client, and the wait
@@ -114,6 +117,8 @@ type plan struct {
 	elevated   []string          // the elevated permissions granted at write, sorted
 	ruleReason string            // the config rule's reason
 	as         string            // potluck-token: the identity the token acts as
+	project    string            // potluck-token: the project (ULID) the token acts in
+	area       string            // potluck-token: the area it acts in ("": the whole project)
 }
 
 // publicError is a mint failure whose detail stays in the ledger: the
@@ -300,7 +305,8 @@ func (g *Minted) record(ctx context.Context, e Entry, event, why string) error {
 
 func (g *Minted) publish(ctx context.Context, typ string, e Entry) error {
 	d := SecretEvent{By: e.Subject, Job: e.Job, Kind: e.Kind, Issuer: e.Issuer, Names: []string{e.Name}, Box: e.Box, Host: e.Host,
-		HostClass: e.HostClass, Grant: e.Grant, Reason: e.Reason, HashedToken: e.HashedToken, Why: e.Why}
+		HostClass: e.HostClass, Grant: e.Grant, Reason: e.Reason, HashedToken: e.HashedToken, Why: e.Why,
+		TokenProject: e.TokenProject, TokenArea: e.TokenArea}
 	d.Count = len(d.Names)
 	d.Params, _ = json.Marshal(map[string]any{"repo": e.Repo, "permissions": e.Permissions})
 	if !e.ExpiresAt.IsZero() {
@@ -429,6 +435,7 @@ func (g *Minted) issue(ctx context.Context, req Request, again bool) (Issued, er
 	e.Permissions = permString(p.perms)
 	e.Elevated = strings.Join(p.elevated, ",")
 	e.RuleReason = p.ruleReason
+	e.TokenProject, e.TokenArea = p.project, p.area
 	k := heldKey(req.Box, req.Name)
 	var me *held
 	for {
@@ -849,6 +856,7 @@ func (g *Minted) renew(ctx context.Context, h *held) {
 	h.req.Grant, h.e.Grant = dec.Grant, dec.Grant // a renewal is under the grant that covers it now
 	e, req := h.e, h.req
 	g.mu.Unlock()
+	e.TokenProject, e.TokenArea = p.project, p.area // the check just now decided where it acts
 	tok, err := g.mint(ctx, e, &req, p)
 	if err != nil {
 		fail(err.Error())

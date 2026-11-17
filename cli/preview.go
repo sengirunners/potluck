@@ -43,7 +43,13 @@ func (a *app) sandboxPreviewCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return computeclient.RevokeRunTargetPreview(cmd.Context(), c, target, id, args[1])
+		if err := computeclient.RevokeRunTargetPreview(cmd.Context(), c, target, id, args[1]); err != nil {
+			return err
+		}
+		return a.printJSON(struct {
+			Preview string `json:"preview"`
+			Revoked bool   `json:"revoked"`
+		}{args[1], true})
 	}}
 	configure := &cobra.Command{Use: "configure <existing-domain>", Short: "Use an existing wildcard HTTPS ingress domain on this daemon; empty domain disables publishing", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		c, _, err := a.client()

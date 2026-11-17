@@ -90,3 +90,9 @@ func ownersModule(d *core.Deps) *owners.Service {
 	}
 	return owners.New(d, drv, dev)
 }
+
+// ComputeModules are the modules Compute adds to Kit, by the name their
+// routes carry (core.Route.Module): a daemon whose routes come from all of
+// them serves what potluck's commands call (daemonrecord.Record.Serves),
+// whichever program runs it.
+var ComputeModules = []string{"grants", "runners", "runtarget", "usage"}

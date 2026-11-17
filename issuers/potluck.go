@@ -97,8 +97,11 @@ func potluckSpec(name string, is config.SecretsIssuer) (Spec, error) {
 }
 
 func checkPotluckRule(r config.SecretsCeiling) (Rule, error) {
-	if r.Repo != "" || len(r.Permissions) > 0 || len(r.Elevated) > 0 || r.Reason != "" {
-		return Rule{}, fmt.Errorf("repo, permissions, elevated and reason are a %q issuer's", KindGitHubApp)
+	if len(r.Permissions) > 0 || len(r.Elevated) > 0 || r.Reason != "" {
+		return Rule{}, fmt.Errorf("permissions, elevated and reason are a %q issuer's", KindGitHubApp)
+	}
+	if r.Repo != "" && (len(r.Workflows) == 0 || !jobrule.ValidRepo(r.Repo)) {
+		return Rule{}, fmt.Errorf("repo %q: owner/name, on a rule that names workflows (it limits the rule to jobs of that repository)", r.Repo)
 	}
 	if r.Project == "" || !(api.ValidSlug(strings.ToLower(r.Project)) || ids.Valid(strings.ToUpper(r.Project))) {
 		return Rule{}, fmt.Errorf("project %q: a project's slug or ULID", r.Project)
@@ -120,15 +123,18 @@ func checkPotluckRule(r config.SecretsCeiling) (Rule, error) {
 	if err != nil {
 		return Rule{}, err
 	}
-	return Rule{Project: r.Project, Area: r.Area, Role: strings.ToLower(r.Role), Workflows: wfs, Events: events}, nil
+	return Rule{Project: r.Project, Area: r.Area, Role: strings.ToLower(r.Role), Repo: r.Repo, Workflows: wfs, Events: events}, nil
 }
 
 // potluckBackend is the potluck-token kind: per box, a token of this pool's
 // own (the tokens every caller authenticates with), capped to one role on
-// the box's project and area, living at most an hour and never past the
-// box's lease. A person's token acts as that person; a GitHub job's acts as
-// the issuer's identity (Spec.As). The identity must already hold that role
-// there: the token only ever narrows what it holds.
+// one project and area, living at most an hour and never past the box's
+// lease. That project and area are the box's, except for a GitHub job
+// under a job-only rule naming another project (rule): the runner broker
+// runs every job in a box of its pool project, while the work the job does
+// is another project's. A person's token acts as that person; a GitHub
+// job's acts as the issuer's identity (Spec.As). The identity must already
+// hold that role there: the token only ever narrows what it holds.
 //
 // The token is bound to a key made for this one mint (a per-box key): the
 // tunnel takes it only on requests that key signed. What lands in the box
@@ -141,6 +147,7 @@ type potluckBackend struct {
 	tokens  TokenMint
 	expires BoxExpires
 	home    Home
+	jobBox  JobBox // nil: no rule naming another project serves anything
 	now     func() time.Time
 }
 
@@ -165,30 +172,105 @@ func newPotluckBackend(s Spec, o Options) (*potluckBackend, error) {
 	if o.Tokens == nil || o.BoxExpires == nil || o.Home == nil {
 		return nil, fmt.Errorf("secrets.issuers.%s: a %s issuer needs the token mint, the boxes' leases and the authority's tunnel", s.Name, KindPotluck)
 	}
-	return &potluckBackend{spec: s, tokens: o.Tokens, expires: o.BoxExpires, home: o.Home, now: o.Now}, nil
+	return &potluckBackend{spec: s, tokens: o.Tokens, expires: o.BoxExpires, home: o.Home, jobBox: o.JobBox, now: o.Now}, nil
 }
 
 func (b *potluckBackend) kind() string { return KindPotluckToken }
 
-// rule finds a config rule covering role on box for sub.
-func (b *potluckBackend) rule(box Box, sub Subject, role authz.Relation) (Rule, bool) {
+// scope is where a token acts: a project (its ULID) and an area of it (""
+// the whole project). what names it in a refusal.
+type scope struct{ project, area, what string }
+
+// rule answers where req's token acts, from the config rules that cover
+// role for req:
+//
+//   - A rule of the box's own project: the box's project and area (a rule
+//     naming an area covers only a box of that area).
+//   - A job-only rule (one naming workflows) of another project: that
+//     project and the rule's area (none: the whole project), for a GitHub
+//     job only, and only on the runner broker's box for that job (JobBox).
+//     The rule's area must be an area of its project.
+//   - No other rule: a person's box never gets another project's token.
+//
+// Rules that would put one token in two places refuse it. why is a
+// refusal; err is JobBox not answering. The job itself was checked
+// (jobrule.Check) before.
+func (b *potluckBackend) rule(ctx context.Context, req Request, role authz.Relation) (scope, string, error) {
+	box, job := req.Box, req.Subject.Job
+	why := "outside the issuer's ceiling (project, area, role, event or workflow)"
+	var found *scope
+	var brokers *bool // JobBox's answer, asked once
 	for _, r := range b.spec.Ceiling {
 		p, ok := b.tokens.Lookup(r.Project)
-		if !ok || p.ID != box.Project || (r.Area != "" && r.Area != box.Area) {
+		if !ok {
 			continue
 		}
 		if top, _ := potluckRole(r.Role); !roleWithin(role, top) {
 			continue
 		}
-		if sub.Job != nil && !jobrule.Serves(r.Events, r.Workflows, *sub.Job) {
+		if job != nil && !jobrule.Serves(r.Events, r.Workflows, *job) {
 			continue
 		}
-		if sub.Job == nil && len(r.Workflows) > 0 { // a workflow rule serves only jobs
+		if job == nil && len(r.Workflows) > 0 { // a workflow rule serves only jobs
 			continue
 		}
-		return r, true
+		if r.Repo != "" && (job == nil || !strings.EqualFold(r.Repo, job.Repo)) {
+			continue
+		}
+		var s scope
+		switch {
+		case p.ID == box.Project:
+			if r.Area != "" && r.Area != box.Area {
+				continue
+			}
+			s = scope{project: box.Project, area: box.Area, what: "the box's project and area"}
+		case len(r.Workflows) == 0 || job == nil:
+			continue // only a job-only rule reaches past the box's project, and only for a job
+		case r.Repo == "":
+			why = "a rule for project " + p.Slug + " serves jobs of one repository: name it with repo"
+			continue
+		default:
+			if r.Area != "" && !b.tokens.HasArea(p.ID, r.Area) {
+				why = "area " + r.Area + " is not an area of project " + p.Slug
+				continue
+			}
+			if brokers == nil {
+				ok, err := b.brokersBox(ctx, req)
+				if err != nil {
+					return scope{}, "", err
+				}
+				brokers = &ok
+			}
+			if !*brokers {
+				why = "a rule for project " + p.Slug + " serves a job only in the runner broker's box for it (its pool project, an area linked to the job's installation)"
+				continue
+			}
+			s = scope{project: p.ID, area: r.Area, what: "project " + p.Slug}
+			if r.Area != "" {
+				s.what += " area " + r.Area
+			}
+		}
+		if found != nil && (found.project != s.project || found.area != s.area) {
+			return scope{}, "the issuer's ceiling rules would put this token in more than one project or area", nil
+		}
+		found = &s
 	}
-	return Rule{}, false
+	if found == nil {
+		return scope{}, why, nil
+	}
+	return *found, "", nil
+}
+
+// brokersBox is JobBox's answer for req (false with none).
+func (b *potluckBackend) brokersBox(ctx context.Context, req Request) (bool, error) {
+	if b.jobBox == nil {
+		return false, nil
+	}
+	ok, err := b.jobBox(ctx, req)
+	if err != nil {
+		return false, fmt.Errorf("asking the runner broker whether the box is the job's: %w", err)
+	}
+	return ok, nil
 }
 
 func (b *potluckBackend) check(ctx context.Context, req Request) (plan, string, error) {
@@ -210,8 +292,9 @@ func (b *potluckBackend) check(ctx context.Context, req Request) (plan, string, 
 			return plan{}, why, nil
 		}
 	}
-	if _, ok := b.rule(req.Box, req.Subject, role); !ok {
-		return plan{}, "outside the issuer's ceiling (project, area, role, event or workflow)", nil
+	at, why, err := b.rule(ctx, req, role)
+	if err != nil || why != "" {
+		return plan{}, why, err
 	}
 	as := req.Subject.IdentityID
 	if req.Subject.Job != nil {
@@ -239,15 +322,15 @@ func (b *potluckBackend) check(ctx context.Context, req Request) (plan, string, 
 	if err != nil {
 		return plan{}, "", fmt.Errorf("reading the identity's grants: %w", err)
 	}
-	held := authz.FromTuples(tuples, &authz.Cap{Project: req.Box.Project, Area: req.Box.Area, Role: role}).
-		Relation(authz.Object{Project: req.Box.Project, Area: req.Box.Area})
+	held := authz.FromTuples(tuples, &authz.Cap{Project: at.project, Area: at.area, Role: role}).
+		Relation(authz.Object{Project: at.project, Area: at.area})
 	if held != role {
-		return plan{}, "identity " + who.Name + " does not hold " + string(role) + " on the box's project and area", nil
+		return plan{}, "identity " + who.Name + " does not hold " + string(role) + " on " + at.what, nil
 	}
-	return plan{perms: map[string]string{"role": string(role)}, as: who.Name}, "", nil
+	return plan{perms: map[string]string{"role": string(role)}, as: who.Name, project: at.project, area: at.area}, "", nil
 }
 
-// mint mints a token as p.as, capped to the box's project, area and role,
+// mint mints a token as p.as, capped to p's project, area and role,
 // living until the earliest of an hour from now, the box's lease end and the
 // expiry of the token the caller authenticated with.
 func (b *potluckBackend) mint(ctx context.Context, req *Request, p plan) (Credential, error) {
@@ -289,7 +372,7 @@ func (b *potluckBackend) mint(ctx context.Context, req *Request, p plan) (Creden
 	limit := exp
 	ttl := int64(exp.Sub(now)/time.Second) - 1
 	exp = now.Add(time.Duration(ttl) * time.Second)
-	out, err := b.tokens.Mint(ctx, b.tokens.Local(""), api.MintTokenRequest{As: p.as, Project: req.Box.Project, Area: req.Box.Area,
+	out, err := b.tokens.Mint(ctx, b.tokens.Local(""), api.MintTokenRequest{As: p.as, Project: p.project, Area: p.area,
 		Role: p.perms["role"], TTLSeconds: ttl, NoGrant: true, Note: "potluck-token " + req.Name + " for box " + req.Box.ID,
 		BoxKey: tunnel.BoxKeyID(key)})
 	if err != nil {

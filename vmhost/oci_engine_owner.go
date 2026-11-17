@@ -18,16 +18,16 @@ import (
 // The Docker ownership read: whether the local docker.service's main process
 // is a root dockerd in this shell's mount and cgroup namespaces, and which
 // listening Unix sockets it holds. Only root can read another process's exe,
-// namespaces and descriptors, so the driver runs it with sudo -n on every
-// Docker connection.
+// namespaces and descriptors, so the driver runs it with sudo -n -k (no
+// prompt, no cached ticket) on every Docker connection.
 //
 // A host whose user has no passwordless sudo installs it once (OCIOwnerRootSteps)
 // as a root-owned helper at a fixed path and a sudoers rule allowing exactly
 // that path with no arguments. The helper takes nothing from its caller: it
 // reads docker.service's main PID itself and uses /proc and a fixed PATH, so
 // the rule gives the user one read-only answer and nothing more. Without the
-// helper the driver runs the same script inline (sudo -n sh -c), which works
-// where the user already has passwordless sudo.
+// helper the driver runs the same script inline (sudo -n -k sh -c), which
+// works where the user already has passwordless sudo.
 
 // DockerOwnerHelper is where the root step installs the ownership read.
 const DockerOwnerHelper = "/usr/local/libexec/potluck/docker-owner"
@@ -173,11 +173,16 @@ func rootOnly(path string, st fs.FileInfo) error {
 // installed). It returns the read's output; an error wrapping
 // ErrOCIOwnerNeedsRoot when sudo refused it; the reason Docker is not owned;
 // or why the read failed otherwise (a timeout is not a missing root step).
+//
+// It runs sudo -n -k: cached credentials ignored, as the daemon's driver has
+// no terminal and no ticket. Without -k, a password typed at this terminal
+// minutes ago would make the read work for doctor and host share, which then
+// skip the root step the daemon needs.
 func readDockerOwner() (string, error) {
-	args := []string{"-n", dockerOwnerHelper}
+	args := []string{"-n", "-k", dockerOwnerHelper}
 	helperErr := trustedDockerOwnerHelper()
 	if helperErr != nil {
-		args = []string{"-n", "sh", "-c", dockerOwnerScript(dockerProcRoot, dockerOwnerPath), "sh"}
+		args = []string{"-n", "-k", "sh", "-c", dockerOwnerScript(dockerProcRoot, dockerOwnerPath), "sh"}
 	}
 	// sudo's own words are read below: in C, whatever the host's locale.
 	b, err := boundedHostCommandEnv(2*time.Second, append(os.Environ(), "LC_ALL=C"), "sudo", args...)

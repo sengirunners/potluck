@@ -20,7 +20,6 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/hostprobe"
-	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/runtarget"
 )
 
@@ -49,9 +48,12 @@ GOINSECURE match here (go env, else this shell's environment) are left out.
 
 It runs for each vm=oci size this machine shares with shelf_max_gb above 0
 (one per state directory), and does nothing when shelf_fill is off.`,
-		Example: "  potluck host shelf fill --npm-lock package-lock.json --go-sum go.sum",
+		Example: "  " + a.cmd("host shelf fill --npm-lock package-lock.json --go-sum go.sum"),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.notWhileAttached(a.cmd("host shelf")); err != nil {
+				return err
+			}
 			if len(locks)+len(sums) == 0 {
 				return errors.New("name at least one package-lock.json (--npm-lock) or go.sum (--go-sum)")
 			}
@@ -83,7 +85,7 @@ It runs for each vm=oci size this machine shares with shelf_max_gb above 0
 			if len(targets) == 0 {
 				return errors.New("no size this machine shares has a shelf: it needs vm=oci and shelf_max_gb above 0")
 			}
-			cfg, err := config.LoadClient()
+			cfg, err := a.loadClient()
 			if err != nil {
 				return err
 			}
@@ -99,14 +101,17 @@ through its driver: the shelf's path, bytes and files (never a package name),
 the fill mode, the limits and how much of sandboxes' wants is queued. It also says
 where sizes of one engine carry different limits: they share one volume and
 the smallest wins. It makes no volume and fetches nothing.`,
-		Example: "  potluck host shelf status",
+		Example: "  " + a.cmd("host shelf status"),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.notWhileAttached(a.cmd("host shelf")); err != nil {
+				return err
+			}
 			ts, err := a.localBindings(cmd.Context())
 			if err != nil {
 				return err
 			}
-			cfg, err := config.LoadClient()
+			cfg, err := a.loadClient()
 			if err != nil {
 				return err
 			}
@@ -136,7 +141,7 @@ func (a *app) localBindings(ctx context.Context) ([]computeapi.RunTarget, error)
 func (a *app) shelfStatus(ctx context.Context, home string, ts []computeapi.RunTarget) error {
 	targets := ociBindings(ts)
 	if len(targets) == 0 {
-		return errors.New("no size this machine shares is vm=oci: only oci sandboxes have a shelf (potluck host --shelf-gb N)")
+		return errors.New("no size this machine shares is vm=oci: only oci sandboxes have a shelf (" + a.cmd("host --shelf-gb N") + ")")
 	}
 	for _, d := range hostprobe.StorageDisagreements(ts) {
 		a.say("warning: %s", d)
@@ -201,7 +206,7 @@ func runEach(ctx context.Context, home string, targets []computeapi.RunTarget, a
 	var errs []error
 	for _, t := range targets {
 		a.say("%s:", t.Name)
-		if err := hostShelfRun(ctx, home, t, args, a.stdout, a.stderr); err != nil {
+		if err := hostShelfRun(ctx, home, t, args, a.host.Stdout, a.host.Stderr); err != nil {
 			errs = append(errs, err)
 		}
 	}

@@ -200,22 +200,36 @@ type opReg struct {
 	want wantState
 	wg   sync.WaitGroup // ops running here
 	// running counts, per project, the ops this process is running (until
-	// each one's report is recorded). A team_ops_run row in state running
-	// is not proof: one left by a process that stopped mid-op is never run
-	// again and never ends.
+	// each one's report is recorded), and live holds their ids. A
+	// team_ops_run row in state running is not proof: one left by a process
+	// that stopped mid-op is never run again and never ends by itself
+	// (TookOps ends it once it is older than its kind's ReportWithin).
 	running map[string]int
+	live    map[string]int // by op id: a resent op counts again
 }
 
-// opRunning adds d to project's count of ops running in this process.
-func (s *Service) opRunning(project string, d int) {
+// opRunning adds d (1 or -1) to project's count of ops running in this
+// process, and likewise op id's (a resent op already running counts
+// twice until both end).
+func (s *Service) opRunning(project, id string, d int) {
 	s.ops.mu.Lock()
 	defer s.ops.mu.Unlock()
 	if s.ops.running == nil {
-		s.ops.running = map[string]int{}
+		s.ops.running, s.ops.live = map[string]int{}, map[string]int{}
 	}
 	if s.ops.running[project] += d; s.ops.running[project] <= 0 {
 		delete(s.ops.running, project)
 	}
+	if s.ops.live[id] += d; s.ops.live[id] <= 0 {
+		delete(s.ops.live, id)
+	}
+}
+
+// opLive: this process is running op id.
+func (s *Service) opLive(id string) bool {
+	s.ops.mu.RLock()
+	defer s.ops.mu.RUnlock()
+	return s.ops.live[id] > 0
 }
 
 // runningOps is how many ops this process is running for project.
@@ -710,20 +724,31 @@ func (s *Service) TakeOps(ctx context.Context, project string, ops []api.Machine
 		if op.ID == "" {
 			continue
 		}
-		// Counted before its row exists, so a forget's check never misses
-		// an op whose row is already in. TakeOps does not hold keyMu: an
-		// answer still in flight when a forget runs can add a row after
-		// the check (zm-eakh.12.5.10.28).
-		s.opRunning(project, 1)
+		// Counted first, then the remote checked: a leave retires the
+		// remote (Remove) before it deletes the join's row, and a forget
+		// looks at the count only after that row is gone. So an op whose
+		// check passed was counted before the forget looked, and the
+		// forget refuses; one whose check fails records nothing, and an
+		// answer that outlived a leave and a forget puts no row back
+		// (zm-eakh.12.5.10.28). The insert waits for neither lock.
+		s.opRunning(project, op.ID, 1)
+		s.mu.RLock()
+		x := s.remotes[project]
+		s.mu.RUnlock()
+		if x == nil || Ended(x.Snapshot()) != nil {
+			s.opRunning(project, op.ID, -1)
+			s.d.Log.Debug("teamlink: an answer's op for a project this machine left; not recorded", "op", op.ID)
+			continue
+		}
 		res, err := db.ExecContext(ctx, `INSERT INTO team_ops_run (id, project, kind, state, created) VALUES (?, ?, ?, 'running', ?) ON CONFLICT (id) DO NOTHING`,
 			op.ID, project, op.Kind, store.Millis(time.Now()))
 		if err != nil {
 			s.d.Log.Warn("teamlink: record a machine op before running it (not run; the next beat tries again)", "op", op.ID, "err", err)
-			s.opRunning(project, -1)
+			s.opRunning(project, op.ID, -1)
 			continue
 		}
 		if n, _ := res.RowsAffected(); n != 1 {
-			s.opRunning(project, -1)
+			s.opRunning(project, op.ID, -1)
 			continue // run (or running) already
 		}
 		s.ops.wg.Add(1)
@@ -735,7 +760,7 @@ func (s *Service) TakeOps(ctx context.Context, project string, ops []api.Machine
 			final := h.Settled == nil || h.Settled(rep)
 			js, _ := json.Marshal(rep)
 			res, err := db.ExecContext(rctx, `UPDATE team_ops_run SET state = 'done', report = ?, final = ? WHERE id = ?`, string(js), final, op.ID)
-			s.opRunning(project, -1)
+			s.opRunning(project, op.ID, -1)
 			if err != nil {
 				s.d.Log.Warn("teamlink: record a machine op's report", "op", op.ID, "err", err)
 			} else if n, _ := res.RowsAffected(); n != 1 {
@@ -829,7 +854,11 @@ func (s *Service) OpReports(ctx context.Context, project string) (reps []api.Mac
 // TookOps are the ids of project's ops this machine recorded (TakeOps)
 // and has not had a final report taken for, newest first, at most
 // maxBeatOps: a beat's Took, so the authority sends none of them again.
+// A run record left running by a process that stopped mid-op, and older
+// than its kind's ReportWithin (by when the authority has ended the op),
+// is ended first (endStuckRuns): it would ride every beat otherwise.
 func (s *Service) TookOps(ctx context.Context, project string) []string {
+	s.endStuckRuns(ctx, project)
 	rows, err := s.d.Store.Registry().QueryContext(ctx, `SELECT id FROM team_ops_run WHERE project = ? AND acked = 0 ORDER BY created DESC, id DESC LIMIT ?`, project, maxBeatOps)
 	if err != nil {
 		return nil
@@ -843,6 +872,50 @@ func (s *Service) TookOps(ctx context.Context, project string) []string {
 		}
 	}
 	return ids
+}
+
+// endStuckRuns ends project's run records that are still running, are not
+// run by this process (it stopped mid-op: the op never runs again and never
+// reports) and are older than their kind's ReportWithin, by when the
+// authority has ended the op itself. Each is marked done and acked with no
+// report: nothing is sent, it leaves every beat's Took, and the record
+// stays (acked) until OpsKeep, so an answer that carries the op again does
+// not run it a second time. Nothing here touches an op this process runs.
+func (s *Service) endStuckRuns(ctx context.Context, project string) {
+	db := s.d.Store.Registry()
+	now := time.Now()
+	hs := s.handlers()
+	rows, err := db.QueryContext(ctx, `SELECT id, kind, created FROM team_ops_run WHERE project = ? AND state = 'running' AND acked = 0`, project)
+	if err != nil {
+		return
+	}
+	type run struct {
+		id, kind string
+		created  int64
+	}
+	var stuck []run
+	for rows.Next() {
+		var v run
+		if rows.Scan(&v.id, &v.kind, &v.created) != nil {
+			continue
+		}
+		limit := OpHandler{}.reportWithin() // an unregistered kind: the default
+		if h, ok := hs[v.kind]; ok {
+			limit = h.reportWithin()
+		}
+		if store.Millis(now.Add(-limit)) > v.created {
+			stuck = append(stuck, v)
+		}
+	}
+	rows.Close()
+	for _, v := range stuck {
+		if s.opLive(v.id) {
+			continue
+		}
+		// The state check keeps a record its op just reported; created, one
+		// a forget and a new join of the same op id put in its place.
+		_, _ = db.ExecContext(ctx, `UPDATE team_ops_run SET state = 'done', report = '', final = 1, acked = 1 WHERE id = ? AND state = 'running' AND created = ?`, v.id, v.created)
+	}
 }
 
 // AckOps: an answer took these final reports (one holding a secret is

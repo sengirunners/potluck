@@ -13,6 +13,7 @@ import (
 	"io"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,12 +31,16 @@ import (
 
 // JobFile is the script run runs when no command is given, at the shipped
 // commit: it lives with the code, so a commit always means one job.
-const JobFile = ".potluck/job"
+// OldJobFile is its old name, run when a commit has no JobFile.
+const (
+	JobFile    = ".potluck/job"
+	OldJobFile = ".zm/job"
+)
 
-// Timing: the lease covers the push and the command with room to spare; a
-// command the driver did not end by its timeout is killed jobKillGrace
-// later; output calls failing in a row for jobLostAfter mean the sandbox is
-// gone.
+// Timing: the lease planned covers the push and the command with room to
+// spare (run_lease.go asks it short and renews it); a command the driver
+// did not end by its timeout is killed jobKillGrace later; output calls
+// failing in a row for jobLostAfter mean the sandbox is gone.
 var (
 	jobLeaseSlack = 10 * time.Minute
 	jobKillGrace  = 90 * time.Second
@@ -65,8 +70,12 @@ type boxJobOptions struct {
 	// deps are the dependency layers the box is acquired with (depscli).
 	deps      []computeapi.BoxDeps
 	depsWaitS *int
-	out       io.Writer // the command's stdout
-	errw      io.Writer // its stderr and potluck's own lines
+	// under is the project's directory in the checkout ("" its top) when a
+	// layer is mounted there by default: run's command runs there, beside it.
+	under string
+	out   io.Writer // the command's stdout
+	errw  io.Writer // its stderr and the program's own lines
+	p     prefix    // how the program names Potluck's commands (Host.Prefix)
 	// again, when set, is how boxJob learns of another Ctrl-C while it ends a
 	// sandbox that may have been made: ctx comes back cancelled by it (nil:
 	// the process's signals, caughtSignals).
@@ -86,16 +95,18 @@ func (o boxJobOptions) untilAgain(ctx context.Context) (context.Context, context
 // its sandbox went; never a pass), interrupted (Ctrl-C), failed (potluck
 // could not start it; Error says why).
 type jobResult struct {
-	Handle   string  `json:"handle,omitempty"`
-	Target   string  `json:"target,omitempty"`
-	Commit   string  `json:"commit,omitempty"`
-	PID      string  `json:"pid,omitempty"`
-	State    string  `json:"state"`
-	Exit     *int    `json:"exit,omitempty"`
-	Error    string  `json:"error,omitempty"`
-	Kept     bool    `json:"kept"`
-	Released bool    `json:"released"`
-	Seconds  float64 `json:"seconds"`
+	Handle string `json:"handle,omitempty"`
+	Target string `json:"target,omitempty"`
+	Commit string `json:"commit,omitempty"`
+	PID    string `json:"pid,omitempty"`
+	State  string `json:"state"`
+	Exit   *int   `json:"exit,omitempty"`
+	Error  string `json:"error,omitempty"`
+	// Deps are the acquire's answer for each layer asked for (--deps).
+	Deps     []computeapi.BoxDepsAnswer `json:"deps,omitempty"`
+	Kept     bool                       `json:"kept"`
+	Released bool                       `json:"released"`
+	Seconds  float64                    `json:"seconds"`
 }
 
 // code is the command's exit code for r.
@@ -115,22 +126,30 @@ func (a *app) runCmd() *cobra.Command {
 	var o jobOptions
 	cmd := &cobra.Command{Use: "run [--on <machine-size> | --size S --os O] [--ref HEAD] [--dirty] [--timeout 30m] [--keep] [-- <argv...>]",
 		Short: "Run a command (default: the commit's .potluck/job) at this checkout's commit in a fresh sandbox; exits with its code",
-		Long: `Places a sandbox as potluck sandbox create does, sends the commit (default
+		Long: `Places a sandbox as ` + a.cmd("sandbox create") + ` does, sends the commit (default
 HEAD; with --dirty your uncommitted changes too) as a git bundle, starts the
 command in the checkout, streams its output as it comes and exits with its
 exit code. The sandbox ends at the end, also on Ctrl-C, an error or the
 timeout (exit 124), unless --keep. A command that ends with no exit code
-(its sandbox went) fails. No command: the commit's .potluck/job.`,
-		Example: `  potluck run -- make test
-  potluck run --os macos --timeout 45m --dirty
-  potluck run --json -- go test ./... 2>log`,
+(its sandbox went) fails. No command: the commit's .potluck/job.
+
+--deps npm[:path] runs it beside a dependency layer of yours (node_modules
+built once from this directory's package-lock.json and package.json files,
+then reused; ` + a.cmd("sandbox create --help") + ` says more), mounted copy-on-write at
+the checkout plus this directory's place in its repository, where the push
+puts the code; the command (the commit's .potluck/job too) runs there. On a
+machine of another member's, name a --template, not an --image.`,
+		Example: "  " + a.cmd("run -- make test") + "\n" +
+			"  " + a.cmd("run --deps npm --template agent -- npm test") + "\n" +
+			"  " + a.cmd("run --os macos --timeout 45m --dirty") + "\n" +
+			"  " + a.cmd("run --json -- go test ./... 2>log"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := a.inPool(cmd.Context())
 			if err != nil {
 				return err
 			}
 			o.argv = args
-			o.out, o.errw = a.stdout, a.stderr
+			o.out, o.errw, o.p = a.host.Stdout, a.host.Stderr, prefix(a.host.Prefix)
 			if o.want.Net, err = netFlag(o.net); err != nil {
 				return err
 			}
@@ -140,14 +159,15 @@ timeout (exit 124), unless --keep. A command that ends with no exit code
 			}
 			o.deps, o.depsWaitS = dreq.Deps, dreq.DepsWaitS
 			o.want.Volumes = len(o.deps) > 0
+			o.under = depscli.Under(cmd.Context(), o.repo, o.push.dir, o.deps)
 			if len(o.deps) > 0 {
-				depscli.WarnMismatch(cmd.Context(), a.stderr, "potluck", o.repo, o.ref, o.push.dirty, o.push.untracked, o.deps)
+				depscli.WarnMismatch(cmd.Context(), a.host.Stderr, a.name(), o.repo, o.ref, o.push.dirty, o.push.untracked, o.deps)
 			}
-			if a.json {
-				o.out = a.stderr // stdout carries only the result
+			if a.asJSON() {
+				o.out = a.host.Stderr // stdout carries only the result
 			}
 			r, err := jobRun(cmd.Context(), c, o)
-			if a.json {
+			if a.asJSON() {
 				if err != nil && r.Error == "" {
 					r.Error = err.Error()
 				}
@@ -168,13 +188,14 @@ timeout (exit 124), unless --keep. A command that ends with no exit code
 			return nil
 		}}
 	f := cmd.Flags()
-	f.StringVar(&o.want.On, "on", "", "a shared machine size, as potluck status lists it (default: the smallest that fits)")
+	f.StringVar(&o.want.On, "on", "", "a shared machine size, as "+a.cmd("status")+" lists it (default: the smallest that fits)")
 	f.StringVar(&o.want.Size, "size", "", "a size the machine states")
 	f.StringVar(&o.want.OS, "os", "", "linux or macos")
 	f.StringVar(&o.image, "image", "", "one of the machine's images, by name")
+	f.StringVar(&o.want.Template, "template", "", "an image template: "+strings.Join(computeapi.BoxTemplates(), ", ")+" (default: the machine's first image)")
 	f.StringVar(&o.ref, "ref", "", "the commit to run, in this checkout (default HEAD)")
 	f.DurationVar(&o.timeout, "timeout", 30*time.Minute, "kill the command after this long (exit 124)")
-	f.BoolVar(&o.keep, "keep", false, "leave the sandbox up afterwards, for potluck sandbox exec (it ends at its lease)")
+	f.BoolVar(&o.keep, "keep", false, "leave the sandbox up afterwards, for "+a.cmd("sandbox exec")+" (it ends at its lease)")
 	f.StringVar(&o.net, "net", "on", netUsage)
 	o.push.add(f)
 	o.df.Add(f)
@@ -194,7 +215,7 @@ func jobRun(ctx context.Context, c *client.Client, o jobOptions) (r jobResult, e
 		o.push.maxMiB = boxpush.DefaultMax >> 20
 	}
 	o.push.repo = o.repo
-	b, err := o.push.bundle(ctx, o.ref, o.errw)
+	b, err := o.push.bundle(ctx, o.ref, o.errw, o.p.name())
 	if err != nil {
 		return r.stopped(ctx, err)
 	}
@@ -202,18 +223,23 @@ func jobRun(ctx context.Context, c *client.Client, o jobOptions) (r jobResult, e
 	r.Commit = b.Head
 	argv := o.argv
 	if len(argv) == 0 {
-		if argv, err = jobFileArgv(ctx, b); err != nil {
+		if argv, err = jobFileArgv(ctx, b, o.under, o.p); err != nil {
 			return r.stopped(ctx, err)
 		}
 	}
 	return boxJob(ctx, c, o.boxJobOptions, r, func(ctx context.Context, bx acquiredBox) (string, error) {
-		fmt.Fprintf(o.errw, "potluck: %s at %s\n", sandboxID(bx.handle), shortSHA(b.Head))
+		fmt.Fprintf(o.errw, "%s: %s at %s\n", o.p.name(), sandboxID(bx.handle), shortSHA(b.Head))
 		pushed, err := boxpush.Push(ctx, boxpush.Exec(c, bx.target, bx.id), b, boxpush.PushOptions{Dest: o.push.dir})
 		if err != nil {
 			return "", err
 		}
-		// The checkout's path as the sandbox's shell has it ($HOME/<dir>).
-		sp, err := computeclient.SpawnRunTarget(ctx, c, bx.target, bx.id, computeapi.SpawnRunTargetRequest{Argv: append([]string{"sh", "-c", jobCd, "potluck-run", pushed.Dir}, argv...),
+		// The checkout's path as the sandbox's shell has it ($HOME/<dir>),
+		// and the project's directory in it when a layer is mounted there.
+		cwd := pushed.Dir
+		if o.under != "" {
+			cwd = strings.TrimSuffix(cwd, "/") + "/" + o.under
+		}
+		sp, err := computeclient.SpawnRunTarget(ctx, c, bx.target, bx.id, computeapi.SpawnRunTargetRequest{Argv: append([]string{"sh", "-c", jobCd, "potluck-run", cwd}, argv...),
 			TimeoutS: int((o.timeout + time.Second - 1) / time.Second), RequestID: bx.key})
 		if err != nil {
 			return "", err
@@ -233,12 +259,21 @@ type boxStart func(ctx context.Context, bx acquiredBox) (pid string, err error)
 // output until it ends, and releases the box (unless o.keep), Ctrl-C
 // included. r carries what the caller filled; it comes back filled as far
 // as it got.
-func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, r jobResult, start boxStart) (jobResult, error) {
+func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, in jobResult, start boxStart) (r jobResult, err error) {
+	r = in // named: the deferred end of the sandbox below sets Kept and Released on what is returned
 	key := "job-" + strings.ToLower(ids.New())
-	areq := computeapi.AcquireRunTargetRequest{RequestID: key, Image: o.image, Net: o.want.Net, Deps: o.deps, DepsWaitS: o.depsWaitS}
+	areq := computeapi.AcquireRunTargetRequest{RequestID: key, Image: o.image, Template: o.want.Template, Net: o.want.Net,
+		Deps: o.deps, DepsWaitS: o.depsWaitS}
 	var prepErr error // a refusal before the acquire: nothing was asked of that binding
+	// planned is the lease the job is planned for (the end of the sandbox's
+	// life); it is asked for a short lease of runLeaseTTL that this client
+	// renews up to planned (run_lease.go), when the binding's driver renews
+	// and the sandbox is not kept. leased says so; lifeCap is the binding's
+	// lifetime cap (0: none known), which counts from the acquire.
+	var planned, lifeCap time.Duration
+	var leased bool
 	prep := func(ctx context.Context, target string, ar *computeapi.AcquireRunTargetRequest) error {
-		prepErr = nil
+		prepErr, leased, lifeCap = nil, false, 0
 		ttl := o.timeout + jobLeaseSlack
 		v, err := computeclient.DescribeRunTarget(ctx, c, target)
 		if ctx.Err() != nil { // Ctrl-C before the acquire: nothing was asked
@@ -250,18 +285,33 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, r jobResult,
 			if v.Describe != nil {
 				lim = placement.LifeCap(lim, v.Describe.TTLMaxS)
 			}
-			if capd := time.Duration(lim) * time.Second; lim > 0 && ttl > capd {
+			lifeCap = time.Duration(lim) * time.Second
+			if capd := lifeCap; lim > 0 && ttl > capd {
 				if o.timeout+2*time.Minute > capd {
 					// Nothing asked of it: the next binding may fit.
 					return &computeclient.Misfit{Err: api.Errorf(api.CodeBadRequest, "--timeout %v does not fit %s's lifetime cap of %v (with two minutes to start it)", o.timeout, target, capd)}
 				}
 				ttl = capd
 			}
+			leased = !o.keep && ttl > runLeaseTTL && v.Describe != nil && slices.Contains(v.Describe.Verbs, "renew") // the protocol's verb
+		}
+		if err := depscli.ImageOK(ctx, c, target, ar.Image, ar.Deps); err != nil {
+			prepErr = err
+			return err
+		}
+		planned = ttl
+		if leased {
+			ttl = runLeaseTTL
 		}
 		ar.TTLS = int(ttl / time.Second)
-		areq.TTLS = ar.TTLS // as this binding was asked: the interrupt below asks it again, the same
+		// This client renews the short lease itself: said so, the daemon's
+		// sweep (which renews a handle whose holder session lives) does not
+		// keep the sandbox up after this process dies.
+		ar.SelfRenew = leased
+		areq.TTLS, areq.SelfRenew = ar.TTLS, ar.SelfRenew // as this binding was asked: the interrupt below asks it again, the same
 		return nil
 	}
+	acquiring := time.Now()
 	target, h, err := computeclient.AcquireBox(ctx, c, o.want, areq, prep)
 	r.Target = target
 	if err != nil && (target == "" || err == prepErr || computeclient.MadeNothing(err)) { // nothing was made: nothing to end
@@ -279,7 +329,7 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, r jobResult,
 		if interrupted {
 			what = "interrupted while the sandbox was being made"
 		}
-		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute+depscli.Within(o.deps, o.depsWaitS))
 		defer cancel()
 		actx, stopWaiting := o.untilAgain(actx)
 		defer stopWaiting()
@@ -287,7 +337,7 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, r jobResult,
 		if interrupted {
 			stopHint = "Ctrl-C again to stop waiting"
 		}
-		fmt.Fprintf(o.errw, "potluck: ending the sandbox that may have been made (request id %s; %s: it then ends at its lease)\n", key, stopHint)
+		fmt.Fprintf(o.errw, "%s: ending the sandbox that may have been made (request id %s; %s: it then ends at its lease)\n", o.p.name(), key, stopHint)
 		if h, err = computeclient.AcquireRunTarget(actx, c, target, areq); err != nil {
 			if computeclient.MadeNothing(err) {
 				// The daemon forgot the request: nothing was made, nothing to end.
@@ -297,7 +347,7 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, r jobResult,
 		}
 		r.Handle = h.Handle
 		_, id, _ := computeclient.SplitBoxHandle(h.Handle)
-		if _, err := computeclient.ReleaseRunTarget(actx, c, target, id); err != nil {
+		if err := releaseBox(actx, c, target, id, nil); err != nil {
 			return r, fmt.Errorf("%s; could not end %s (it ends at its lease): %w", what, sandboxID(h.Handle), err)
 		}
 		r.Released = true
@@ -309,21 +359,34 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, r jobResult,
 	if err != nil {
 		return r, err
 	}
-	r.Handle = h.Handle
-	depscli.Print(o.errw, "potluck", o.deps, h.Deps)
+	r.Handle, r.Deps = h.Handle, h.Deps
+	depscli.Print(o.errw, o.p.name(), o.deps, h.Deps)
 	sid := sandboxID(h.Handle)
 	_, id, _ := computeclient.SplitBoxHandle(h.Handle)
+	stopRenew := func() error { return nil }
+	if leased {
+		end := time.Now().Add(planned) // the sandbox's life counts from when it was made
+		if capEnd := acquiring.Add(lifeCap); lifeCap > 0 && capEnd.Before(end) {
+			end = capEnd // the cap counts from the acquire, whenever the sandbox came up
+		}
+		stopRenew = keepLease(ctx, c, target, id, end)
+	}
 	defer func() {
+		if rerr := stopRenew(); rerr != nil {
+			fmt.Fprintf(o.errw, "%s: the last renewal of %s's lease failed (a lease runs %v from the last that got through): %v\n", o.p.name(), sid, runLeaseTTL, rerr)
+		}
 		if o.keep {
 			r.Kept = true
-			fmt.Fprintf(o.errw, "potluck: kept %s (potluck sandbox exec %s -- ...; potluck sandbox rm %s ends it)\n", sid, sid, sid)
+			fmt.Fprintf(o.errw, "%s: kept %s (%s -- ...; %s ends it)\n", o.p.name(), sid, o.p.cmd("sandbox exec "+sid), o.p.cmd("sandbox rm "+sid))
 			return
 		}
-		// Ended whatever happened, Ctrl-C included: on a context of its own.
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
-		defer cancel()
-		if _, rerr := computeclient.ReleaseRunTarget(rctx, c, target, id); rerr != nil {
-			fmt.Fprintf(o.errw, "potluck: could not end %s (it ends at its lease): %v\n", sid, rerr)
+		// Ended whatever happened, Ctrl-C included: on a context of its own;
+		// once the pool did not answer, a Ctrl-C stops asking again.
+		if rerr := releaseBox(context.WithoutCancel(ctx), c, target, id, func(ctx context.Context) (context.Context, context.CancelFunc) {
+			fmt.Fprintf(o.errw, "%s: the pool did not answer the end of %s; asking again for up to %v (Ctrl-C to stop: it then ends at its lease)\n", o.p.name(), sid, runReleaseFor)
+			return o.untilAgain(ctx)
+		}); rerr != nil {
+			fmt.Fprintf(o.errw, "%s: could not end %s (it ends at its lease): %v\n", o.p.name(), sid, rerr)
 			return
 		}
 		r.Released = true
@@ -402,7 +465,7 @@ func follow(ctx context.Context, c *client.Client, target, id string, o boxJobOp
 			what string
 		}{{p.DroppedStdout, "stdout"}, {p.DroppedStderr, "stderr"}} {
 			if d.n > 0 {
-				fmt.Fprintf(o.errw, "potluck: %d bytes of %s are no longer kept\n", d.n, d.what)
+				fmt.Fprintf(o.errw, "%s: %d bytes of %s are no longer kept\n", o.p.name(), d.n, d.what)
 			}
 		}
 		_, _ = io.WriteString(o.out, p.Stdout)
@@ -427,7 +490,7 @@ func follow(ctx context.Context, c *client.Client, target, id string, o boxJobOp
 // passes, or another Ctrl-C comes, on a context of its own: the caller's is
 // cancelled. A transient failure to read its output is tried again.
 func drained(c *client.Client, target, id string, o boxJobOptions, req computeapi.OutputRunTargetRequest, deadline time.Time) bool {
-	fmt.Fprintf(o.errw, "potluck: sent TERM; waiting up to %s for it to end (Ctrl-C again to stop it now)\n", time.Until(deadline).Round(time.Second))
+	fmt.Fprintf(o.errw, "%s: sent TERM; waiting up to %s for it to end (Ctrl-C again to stop it now)\n", o.p.name(), time.Until(deadline).Round(time.Second))
 	again, stop := o.untilAgain(context.Background())
 	defer stop()
 	for time.Now().Before(deadline) && again.Err() == nil {
@@ -455,16 +518,25 @@ func drained(c *client.Client, target, id string, o boxJobOptions, req computeap
 	return false
 }
 
-// jobFileArgv is the argv of the commit's JobFile: run directly when
-// committed executable (its shebang decides), else with sh.
-func jobFileArgv(ctx context.Context, b *boxpush.Bundle) ([]string, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", b.Repo, "ls-tree", b.Head, "--", JobFile).Output()
-	mode, _, _ := strings.Cut(string(out), " ")
-	switch {
-	case err != nil || mode == "":
-		return nil, fmt.Errorf("no command given and no %s at %s: pass one after -- (potluck run -- make test) or commit a %s script", JobFile, shortSHA(b.Head), JobFile)
-	case mode == "100755":
-		return []string{"./" + JobFile}, nil
+// jobFileArgv is the argv of the commit's JobFile (else its OldJobFile):
+// run directly when committed executable (its shebang decides), else with
+// sh; from under (the command's directory below the checkout's top), by a
+// path up to the top.
+func jobFileArgv(ctx context.Context, b *boxpush.Bundle, under string, p prefix) ([]string, error) {
+	for _, file := range []string{JobFile, OldJobFile} {
+		out, err := exec.CommandContext(ctx, "git", "-C", b.Repo, "ls-tree", b.Head, "--", file).Output()
+		mode, _, _ := strings.Cut(string(out), " ")
+		if err != nil || mode == "" {
+			continue
+		}
+		path := "./" + file
+		if under != "" {
+			path = strings.Repeat("../", strings.Count(under, "/")+1) + file
+		}
+		if mode == "100755" {
+			return []string{path}, nil
+		}
+		return []string{"sh", path}, nil
 	}
-	return []string{"sh", JobFile}, nil
+	return nil, fmt.Errorf("no command given and no %s at %s: pass one after -- (%s) or commit a %s script", JobFile, shortSHA(b.Head), p.cmd("run -- make test"), JobFile)
 }

@@ -1,0 +1,34 @@
+== sandbox spawn --json
+.pid string
+== sandbox output --json
+.exit number
+.running bool
+.stderr string
+.stderr_next number
+.stdout string
+.stdout_next number
+== sandbox kill --json
+.sent bool
+== sandbox renew --json
+.acquired string
+.actor string
+.created string
+.expires_at string
+.handle string
+.image_digest string
+.kind string
+.request_id string
+.size string
+.spend.amount number
+.spend.unit string
+.state string
+.target string
+.ttl_s number
+== sandbox cp --json
+.bytes number
+.chunks number
+.files number
+.from string
+.kind string
+.sent number
+.to string

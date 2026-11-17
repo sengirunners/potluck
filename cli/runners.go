@@ -3,10 +3,10 @@ package cli
 // potluck runners setup|set|link|unlink|allow|disallow|repos|ls|jobs (copied from zm's cmd/zm
 // runners.go and runners_jobs.go): a pool's owner turns GitHub Actions on
 // for the pool. The daemon writes config.json's runners block and opens its
-// listener. zm's setup also routed the broker's paths through a tunnel
-// `zm tunnel setup` made; potluck has no tunnel setup command, so GitHub
-// reaches the broker at --url (or runners.public_url) through a proxy its
-// owner runs.
+// listener. potluck has no tunnel setup command, so GitHub reaches the
+// broker at --url (or runners.public_url) through a proxy its owner runs; a
+// host program that fronts the broker itself routes it after setup
+// (Host.RunnersRoute).
 
 import (
 	"context"
@@ -19,6 +19,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sengirunners/potluck/computeclient"
+	"github.com/sengirunners/potluck/ghapp"
 	"github.com/sengirunners/potluck/jobrule"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/runners"
@@ -52,7 +54,7 @@ one account), the install page opens on that account with those repositories
 already chosen. Re-running it is safe.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cl, _, err := a.client()
+			cl, cfg, err := a.client()
 			if err != nil {
 				return err
 			}
@@ -61,24 +63,49 @@ already chosen. Re-running it is safe.`,
 			if err := cl.Do(cmd.Context(), "POST", "/v0/runners/setup", req, &st); err != nil {
 				return err
 			}
-			if a.json {
-				return a.printJSON(map[string]any{"setup": st})
+			var route string
+			var rerr error
+			if a.host.RunnersRoute != nil {
+				route, rerr = a.host.RunnersRoute(cmd.Context(), cfg.Home, st)
 			}
-			a.say("potluck: runner broker on for pool %s: GitHub reaches it at %s (listener %s, live); forward that URL to the listener", st.Pool, st.PublicURL, st.Listening)
+			if rerr != nil {
+				rerr = fmt.Errorf("routing GitHub's calls to the broker (the setup is saved and the listener is open; run setup again once that is fixed): %w", rerr)
+			}
+			if a.asJSON() {
+				if rerr != nil {
+					return rerr
+				}
+				out := map[string]any{"setup": st}
+				if a.host.RunnersRoute != nil {
+					out["route"] = route
+				}
+				return a.printJSON(out)
+			}
+			if a.host.RunnersRoute != nil {
+				a.say("%s: runner broker on for pool %s: GitHub reaches it at %s (listener %s, live)", a.name(), st.Pool, st.PublicURL, st.Listening)
+			} else {
+				a.say("%s: runner broker on for pool %s: GitHub reaches it at %s (listener %s, live); forward that URL to the listener", a.name(), st.Pool, st.PublicURL, st.Listening)
+			}
+			switch {
+			case rerr != nil:
+				return rerr
+			case route != "":
+				a.say("%s: %s", a.name(), route)
+			}
 			switch st.Next {
 			case "create_app":
 				if req.Org == "" {
-					a.say("potluck: no --org: the App goes on your own GitHub account and installs only there (an org's jobs need --org <org>)")
+					a.say("%s: no --org: the App goes on your own GitHub account and installs only there (an org's jobs need --org <org>)", a.name())
 				}
 				a.say("Open this URL to create the GitHub App (until %s); GitHub then offers the install, which brings you back to link it:\n    %s", st.ExpiresAt, st.URL)
 			case "install":
 				a.say("The App %s exists. Open this URL to install it and link it (until %s):\n    %s", st.App.Slug, st.ExpiresAt, st.URL)
-				a.say("(If GitHub does not bring you back after installing, set the App's Setup URL on GitHub to %s, or run potluck runners link <installation-id>.)", st.SetupURL)
+				a.say("(If GitHub does not bring you back after installing, set the App's Setup URL on GitHub to %s, or run %s.)", st.SetupURL, a.cmd("runners link <installation-id>"))
 			}
 			return nil
 		},
 	}
-	c.Flags().StringVar(&req.PublicURL, "url", "", "the https URL GitHub calls (default: runners.public_url)")
+	c.Flags().StringVar(&req.PublicURL, "url", "", "the https URL GitHub calls (default: runners.public_url, else tunnel.url)")
 	c.Flags().StringVar(&req.Org, "org", "", "create the App under this GitHub org (default: your user account)")
 	c.Flags().StringVar(&req.Name, "name", "", "the App's name on GitHub")
 	c.Flags().StringVar(&req.Area, "area", "", "the pool area the first linked org's jobs run in (default: the whole pool)")
@@ -93,8 +120,8 @@ func (a *app) runnersSetCmd() *cobra.Command {
 		Long: `Changes one setting of the runner broker on this machine (the pool's owner).
 It is written to config.json and applies to the next job: no restart, no
 hand edit. A job that runs already keeps the time limit it started with.
-potluck runners ls shows the values. Which repositories are served is
-potluck runners allow.
+` + a.cmd("runners ls") + ` shows the values. Which repositories are served is
+` + a.cmd("runners allow") + `.
 
   label <name>|default        the label jobs ask for (runs-on: <name>);
                               default is the pool's own name. Jobs still
@@ -113,10 +140,10 @@ potluck runners allow.
 			if err := cl.Do(cmd.Context(), "POST", "/v0/runners/settings", runners.SetRequest{Key: args[0], Value: args[1]}, &st); err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(map[string]any{"setup": st})
 			}
-			a.say("potluck: %s set, from the next job on", args[0])
+			a.say("%s: %s set, from the next job on", a.name(), args[0])
 			a.printSettings(&st)
 			return nil
 		},
@@ -125,9 +152,9 @@ potluck runners allow.
 
 // printSettings prints what potluck runners set changes, as it is now.
 func (a *app) printSettings(st *runners.Setup) {
-	fmt.Fprintf(a.stdout, "job limit   %d s (job_ttl_s: fallback runtime; a resolved workflow timeout-minutes takes precedence; host needs 300s extra for startup)\n", st.JobTTLS)
+	fmt.Fprintf(a.host.Stdout, "job limit   %d s (job_ttl_s: fallback runtime; a resolved workflow timeout-minutes takes precedence; host needs 300s extra for startup)\n", st.JobTTLS)
 	for _, n := range st.Notices {
-		fmt.Fprintf(a.stdout, "notice      %s\n", n)
+		fmt.Fprintf(a.host.Stdout, "notice      %s\n", n)
 	}
 }
 
@@ -163,12 +190,12 @@ installation's account, on their yes.`,
 			if err := cl.Do(cmd.Context(), "POST", "/v0/runners/links", body, &out); err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(out)
 			}
 			if out.Install != "" {
 				a.say("Open this URL to install the App and link it (until %s):\n    %s", out.Expires, out.Install)
-				a.say("(If GitHub does not bring you back after installing, the App lacks its Setup URL: potluck runners link <installation-id>.)")
+				a.say("(If GitHub does not bring you back after installing, the App lacks its Setup URL: %s.)", a.cmd("runners link <installation-id>"))
 			} else {
 				a.say("Open this URL as an admin of the installation's account to link it (until %s):\n    %s", out.Expires, out.Authorize)
 			}
@@ -182,8 +209,11 @@ installation's account, on their yes.`,
 func (a *app) runnersUnlinkCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unlink <installation-id>",
-		Short: "Stop serving an installation's jobs (revokes its token)",
-		Args:  cobra.ExactArgs(1),
+		Short: "Stop serving an installation's jobs (revokes its token, disconnects its repositories)",
+		Long: `Stops serving an installation's jobs and revokes its token. Every repository
+connected through that installation is disconnected too (` + a.cmd("runners repos") + `):
+linking it again does not bring them back, each needs ` + a.cmd("runners allow") + `.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cl, _, err := a.client()
 			if err != nil {
@@ -196,7 +226,7 @@ func (a *app) runnersUnlinkCmd() *cobra.Command {
 			if err := cl.Do(cmd.Context(), "DELETE", "/v0/runners/links/"+strconv.FormatInt(id, 10), nil, nil); err != nil {
 				return err
 			}
-			a.say("potluck: installation %s unlinked", args[0])
+			a.say("%s: installation %s unlinked", a.name(), args[0])
 			return nil
 		},
 	}
@@ -209,8 +239,7 @@ func (a *app) runnersAllowCmd() *cobra.Command {
 		Short: "Serve a repository's jobs: one of a linked installation's (a public one needs --public)",
 		Long: `Connects a repository to the pool (its owner, on this machine): its jobs that
 ask for the pool are served from the next one on. The App must be installed
-on the repository's account, given the repository, and linked (potluck
-runners link). A repository not connected is never served.
+on the repository's account, given the repository, and linked (` + strings.Replace(a.cmd("runners link"), " runners", "\nrunners", 1) + `). A repository not connected is never served.
 
 A public repository needs --public, your yes for it, given while it is
 public (it is refused for a private one). It serves the
@@ -226,7 +255,14 @@ made public while its job waited is not served without the yes, and a
 repository that took a connected one's name (that one renamed or deleted)
 is not connected.
 
-Running it again changes the yes; potluck runners disallow undoes it.`,
+Running it again changes the yes; ` + a.cmd("runners disallow") + ` undoes it.
+
+After an upgrade from a version that served every repository of a linked
+installation: only repositories with a job the broker took (not one it
+ignored) in the last 30 days, through an installation still linked, were
+connected for you (by "upgrade"), and a public or internal one is not served
+until you give --public. Run ` + a.cmd("runners repos") + `, then ` + a.cmd("runners allow") + ` each
+repository missing from it (--public for a public or internal one).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cl, _, err := a.client()
@@ -238,16 +274,16 @@ Running it again changes the yes; potluck runners disallow undoes it.`,
 			if err := cl.Do(cmd.Context(), "POST", "/v0/runners/repos", req, &rp); err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(map[string]any{"repo": rp})
 			}
 			how := "served"
 			if rp.Public {
 				how = "served while public: its own branches only, never a fork's pull request"
 			}
-			a.say("potluck: %s connected (%s), from its next job on", rp.Repo, how)
+			a.say("%s: %s connected (%s), from its next job on", a.name(), rp.Repo, how)
 			if rp.Warning != "" {
-				a.say("potluck: warning: %s", rp.Warning)
+				a.say("%s: warning: %s", a.name(), rp.Warning)
 			}
 			return nil
 		},
@@ -284,7 +320,7 @@ func (a *app) runnersDisallowCmd() *cobra.Command {
 			if err := cl.Do(cmd.Context(), "DELETE", path, nil, nil); err != nil {
 				return err
 			}
-			a.say("potluck: %s disconnected: its next jobs are not served", args[0])
+			a.say("%s: %s disconnected: its next jobs are not served", a.name(), args[0])
 			return nil
 		},
 	}
@@ -294,44 +330,108 @@ func (a *app) runnersReposCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "repos",
 		Short: "The repositories whose jobs are served, and any warning about their settings",
-		Args:  cobra.NoArgs,
+		Long: `Lists the connected repositories. After an upgrade, a repository is missing from
+the list (and its jobs are not served) unless the broker took a job of it
+(not one it ignored) in the last 30 days through an installation still
+linked: connect each one missing with ` + a.cmd("runners allow <owner/repo>") + `
+(--public for a public or internal one). A public or internal one connected
+by "upgrade" is listed but not served until ` + a.cmd("runners allow <owner/repo> --public") + `;
+until the broker has read its visibility (minutes after the daemon starts,
+if GitHub answers) its row says it may be public.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cl, _, err := a.client()
 			if err != nil {
 				return err
 			}
-			var out struct {
-				Repos []runners.Repo `json:"repos"`
-			}
-			if err := cl.Do(cmd.Context(), "GET", "/v0/runners/repos", nil, &out); err != nil {
+			repos, err := runnersRepos(cmd.Context(), cl)
+			if err != nil {
 				return err
 			}
-			if a.json {
-				return a.printJSON(out)
+			if a.asJSON() {
+				return a.printJSON(map[string]any{"repos": repos})
 			}
-			if len(out.Repos) == 0 {
-				a.say("no repositories connected: potluck runners allow <owner/repo>")
-				return nil
-			}
-			tw := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "REPO\tVISIBILITY\tPUBLIC YES\tBY\tCHECKED\tWARNING")
-			for _, r := range out.Repos {
-				yes := "no"
-				if r.Public {
-					yes = "yes"
-				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Repo, dash(r.Visibility), yes, r.By, dash(r.Checked), dash(r.Warning))
-			}
-			return tw.Flush()
+			a.printRepos(repos)
+			return nil
 		},
 	}
+}
+
+// runnersRepos is GET /v0/runners/repos: the connected repositories the
+// caller may read (never nil).
+func runnersRepos(ctx context.Context, cl *client.Client) ([]runners.Repo, error) {
+	var out struct {
+		Repos []runners.Repo `json:"repos"`
+	}
+	if err := cl.Do(ctx, "GET", "/v0/runners/repos", nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Repos == nil {
+		out.Repos = []runners.Repo{}
+	}
+	return out.Repos, nil
+}
+
+// printRepos is the connected repositories (runners repos, and the end of
+// runners ls), each with what keeps it from being served (repoWarning).
+func (a *app) printRepos(repos []runners.Repo) {
+	w := a.host.Stdout
+	if len(repos) == 0 {
+		fmt.Fprintf(w, "repos       none connected: no job is served (%s)\n", a.cmd("runners allow <owner/repo>"))
+		return
+	}
+	fmt.Fprintln(w, "repos")
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "  REPO\tVISIBILITY\tPUBLIC YES\tBY\tCHECKED\tWARNING")
+	for _, r := range repos {
+		yes := "no"
+		if r.Public {
+			yes = "yes"
+		}
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\n", r.Repo, dash(r.Visibility), yes, r.By, dash(r.Checked), dash(a.repoWarning(r)))
+	}
+	_ = tw.Flush()
+	for _, r := range repos {
+		if r.By == "upgrade" {
+			fmt.Fprintf(w, "  \"upgrade\" connected only repositories with a job taken (not ignored) in the last 30 days through a still-linked installation; any other repository you serve: %s (--public for a public or internal one)\n", a.cmd("runners allow <owner/repo>"))
+			break
+		}
+	}
+}
+
+// repoWarning is what the list says about a connected repository: the
+// broker's own warning about its settings and, for a repository others can
+// see (public, internal: ghapp.Public, the broker's rule) without its
+// owner's yes (one the upgrade connected), that it is not served. One the
+// upgrade connected whose visibility the broker has not read yet may be
+// public, so it says what a public one still needs.
+func (a *app) repoWarning(r runners.Repo) string {
+	var not string
+	switch {
+	case r.Public:
+	case r.Visibility != "" && ghapp.Public(true, r.Visibility):
+		not = "not served until " + a.cmd("runners allow "+r.Repo+" --public")
+	case r.Visibility == "" && r.By == "upgrade":
+		not = "visibility not read yet: if public or internal, not served until " + a.cmd("runners allow "+r.Repo+" --public")
+	}
+	switch {
+	case not == "":
+		return r.Warning
+	case r.Warning == "":
+		return not
+	}
+	return not + "; " + r.Warning
 }
 
 func (a *app) runnersLsCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ls",
-		Short: "The runner broker: its App, listener, pool, settings, sizes and linked installations",
-		Args:  cobra.NoArgs,
+		Short: "The runner broker: its App, listener, pool, settings, checks, sizes, machines, linked installations and repositories",
+		Long: `Ls shows the broker of the machine you ask. On its own socket that is the
+whole setup; from another machine (a remote client, or inside a sandbox) the
+setup is the owner's alone, so ls shows only the links and repositories you
+may read.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cl, _, err := a.client()
 			if err != nil {
@@ -341,23 +441,59 @@ func (a *app) runnersLsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
-				return a.printJSON(map[string]any{"setup": st, "links": links})
+			var machines *runners.PoolStatus
+			var machinesErr string
+			if st != nil && st.Pool != "" {
+				if ps, err := poolStatus(cmd.Context(), cl, *st); err != nil {
+					machinesErr = err.Error()
+				} else {
+					machines = &ps
+				}
 			}
-			a.printRunners(st, links)
+			// The repositories are one read among several: a daemon older
+			// than per-repository serving answers 404 for it, and the rest
+			// of ls is still true.
+			repos, reposErr := []runners.Repo{}, error(nil)
+			if st == nil || st.Pool != "" {
+				repos, reposErr = runnersRepos(cmd.Context(), cl)
+			}
+			if a.asJSON() {
+				out := map[string]any{"setup": st, "links": links, "machines": machines, "machines_error": machinesErr, "repos": repos}
+				if reposErr != nil {
+					out["repos_error"] = reposErr.Error()
+				}
+				return a.printJSON(out)
+			}
+			if !a.printRunners(st, links) {
+				return nil // the broker is off
+			}
+			if machinesErr != "" {
+				fmt.Fprintf(a.host.Stderr, "could not read the pool's machines: %s\n", machinesErr)
+			}
+			a.printMachines(st, machines)
+			if reposErr != nil {
+				fmt.Fprintf(a.host.Stdout, "repos       could not read: %s\n", reposErr)
+			} else {
+				a.printRepos(repos)
+			}
 			return nil
 		},
 	}
 }
 
-// runnersList is the setup and the links the caller may read.
+// runnersList is the setup (nil away from the daemon's own socket, or with
+// a token, which narrows even there: it is the machine owner's alone) and
+// the links the caller may read.
 func runnersList(ctx context.Context, cl *client.Client) (*runners.Setup, []runners.Link, error) {
-	st := &runners.Setup{}
-	if err := cl.Do(ctx, "GET", "/v0/runners/setup", nil, st); err != nil {
-		return nil, nil, err
-	}
-	if st.Pool == "" {
-		return st, nil, nil
+	var st *runners.Setup
+	if cl.Socket != "" && cl.Token == "" {
+		st = &runners.Setup{}
+		if err := cl.Do(ctx, "GET", "/v0/runners/setup", nil, st); err != nil {
+			return nil, nil, err
+		}
+		if st.Pool == "" {
+			return st, nil, nil
+		}
 	}
 	var out struct {
 		Links []runners.Link `json:"links"`
@@ -368,47 +504,91 @@ func runnersList(ctx context.Context, cl *client.Client) (*runners.Setup, []runn
 	return st, out.Links, nil
 }
 
-func (a *app) printRunners(st *runners.Setup, links []runners.Link) {
-	w := a.stdout
-	if st.Pool == "" {
-		fmt.Fprintln(w, "the runner broker is off on this machine (potluck runners setup <pool>)")
+// poolStatus reads the pool's run targets as the pool project sees them
+// (trust is relative to it) and folds them into what they can serve.
+func poolStatus(ctx context.Context, cl *client.Client, st runners.Setup) (runners.PoolStatus, error) {
+	targets, err := computeclient.RunTargets(ctx, inPool(cl, st.Pool), true)
+	if err != nil {
+		return runners.PoolStatus{}, err
+	}
+	return runners.Status(targets.Targets, st), nil
+}
+
+// printMachines says which machines serve the pool, which wait (the
+// driver's reason, such as the owner using the Mac), which did not answer
+// and which cannot serve. A machine that is lent but asleep or offline is
+// not listed, so an empty list is not proof that none is lent.
+func (a *app) printMachines(st *runners.Setup, m *runners.PoolStatus) {
+	if m == nil {
 		return
 	}
-	fmt.Fprintf(w, "pool        %s (jobs ask runs-on: [self-hosted, %s])\n", st.Pool, st.Label)
-	fmt.Fprintf(w, "public url  %s\n", st.PublicURL)
-	if st.Listening == "" {
-		fmt.Fprintf(w, "listener    not serving (potluck runners setup %s)\n", st.Pool)
-	} else {
-		fmt.Fprintf(w, "listener    %s\n", st.Listening)
+	switch {
+	case m.NotReady != "":
+		a.say("machines    not judged: %s", m.NotReady)
+	case m.RunsOn != "":
+		a.say("machines    %s", m.RunsOn)
+	case len(m.Refused)+len(m.Unknown) == 0:
+		a.say("machines    none listed (%s on a machine to lend it; a lent machine that is asleep or offline is not listed)", a.cmd("host "+st.Pool))
+	default:
+		a.say("machines    none can serve now")
 	}
-	if st.App == nil {
-		fmt.Fprintf(w, "app         none yet (potluck runners setup %s prints the URL to create it)\n", st.Pool)
-	} else {
-		fmt.Fprintf(w, "app         %s (id %d)\n", st.App.Slug, st.App.ID)
+	for _, s := range m.Waiting {
+		a.say("  waiting   %s", s)
 	}
-	a.printSettings(st)
-	sizes := make([]string, 0, len(st.Sizes))
-	for k := range st.Sizes {
-		sizes = append(sizes, k)
+	for _, s := range m.Unknown {
+		a.say("  unknown   %s", s)
 	}
-	sort.Strings(sizes)
-	for i, k := range sizes {
-		head := "sizes      "
-		if i > 0 {
-			head = "           "
+	for _, s := range m.Refused {
+		a.say("  refused   %s", s)
+	}
+}
+
+// printRunners prints the setup (when read) and the links; false when the
+// broker is off, which is all there is to say.
+func (a *app) printRunners(st *runners.Setup, links []runners.Link) bool {
+	w := a.host.Stdout
+	if st != nil {
+		if st.Pool == "" {
+			fmt.Fprintf(w, "the runner broker is off on this machine (%s)\n", a.cmd("runners setup <pool>"))
+			return false
 		}
-		def := ""
-		if k == st.DefaultSize {
-			def = " (default)"
+		fmt.Fprintf(w, "pool        %s (jobs ask runs-on: [self-hosted, %s])\n", st.Pool, st.Label)
+		fmt.Fprintf(w, "public url  %s\n", st.PublicURL)
+		if st.Listening == "" {
+			fmt.Fprintf(w, "listener    not serving (%s)\n", a.cmd("runners setup "+st.Pool))
+		} else {
+			fmt.Fprintf(w, "listener    %s\n", st.Listening)
 		}
-		fmt.Fprintf(w, "%s %s -> %s%s\n", head, k, st.Sizes[k], def)
-	}
-	if len(sizes) == 0 {
-		fmt.Fprintln(w, "sizes       none")
+		if st.App == nil {
+			fmt.Fprintf(w, "app         none yet (%s prints the URL to create it)\n", a.cmd("runners setup "+st.Pool))
+		} else {
+			fmt.Fprintf(w, "app         %s (id %d)\n", st.App.Slug, st.App.ID)
+		}
+		a.printSettings(st)
+		a.printCheck(st.Check)
+		sizes := make([]string, 0, len(st.Sizes))
+		for k := range st.Sizes {
+			sizes = append(sizes, k)
+		}
+		sort.Strings(sizes)
+		for i, k := range sizes {
+			head := "sizes      "
+			if i > 0 {
+				head = "           "
+			}
+			def := ""
+			if k == st.DefaultSize {
+				def = " (default)"
+			}
+			fmt.Fprintf(w, "%s %s -> %s%s\n", head, k, st.Sizes[k], def)
+		}
+		if len(sizes) == 0 {
+			fmt.Fprintln(w, "sizes       none")
+		}
 	}
 	if len(links) == 0 {
-		fmt.Fprintln(w, "links       none (potluck runners link)")
-		return
+		fmt.Fprintf(w, "links       none (%s)\n", a.cmd("runners link"))
+		return true
 	}
 	fmt.Fprintln(w, "links")
 	for _, l := range links {
@@ -417,6 +597,35 @@ func (a *app) printRunners(st *runners.Setup, links []runners.Link) {
 			area = "(whole pool)"
 		}
 		fmt.Fprintf(w, "  %-10d %s (%s)  area %s  by %s  %s\n", l.Installation, l.Account, strings.ToLower(l.AccountType), area, l.LinkedBy, l.Created)
+	}
+	return true
+}
+
+// printCheck prints how the broker learns of waiting jobs and, per linked
+// installation, when it last heard every list it asks GitHub for and what
+// failed or was cut short since (runners/check.go). Nothing before the App
+// exists.
+func (a *app) printCheck(c *runners.Checking) {
+	if c == nil {
+		return
+	}
+	w := a.host.Stdout
+	if c.Mode == "webhook" {
+		fmt.Fprintf(w, "check       GitHub's webhooks serve; a catch-up check every %d s\n", c.EveryS)
+	} else {
+		fmt.Fprintf(w, "check       asking GitHub every %d s (no public url: no webhook arrives)\n", c.EveryS)
+	}
+	if c.Error != "" {
+		fmt.Fprintf(w, "            could not check at %s: %s\n", dash(c.ErrorAt), c.Error)
+	}
+	for _, i := range c.Installations {
+		fmt.Fprintf(w, "            installation %d: %d repositories, last complete round %s\n", i.Installation, i.Repos, dash(i.LastOK))
+		if i.Error != "" {
+			fmt.Fprintf(w, "              errors since (%s): %s\n", dash(i.ErrorAt), i.Error)
+		}
+		if i.Cut != "" {
+			fmt.Fprintf(w, "              cut short (%s): %s\n", dash(i.CutAt), i.Cut)
+		}
 	}
 }
 
@@ -452,14 +661,14 @@ func (a *app) runnersJobsCmd() *cobra.Command {
 			if err := c.Do(cmd.Context(), "GET", "/v0/runners/jobs?limit="+strconv.Itoa(limit), nil, &out); err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(out)
 			}
 			if len(out.Jobs) == 0 {
 				a.say("no jobs yet: a workflow asks for the pool with runs-on: <pool name> (or <pool name>:<size>)")
 				return nil
 			}
-			tw := tabwriter.NewWriter(a.stdout, 0, 4, 2, ' ', 0)
+			tw := tabwriter.NewWriter(a.host.Stdout, 0, 4, 2, ' ', 0)
 			fmt.Fprintln(tw, "JOB\tREPO\tSTATE\tWHERE\tLIMIT\tSOURCE\tUPDATED\tWHY")
 			for _, j := range out.Jobs {
 				fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%ds\t%s\t%s\t%s\n", j.ID, j.Repo, j.State, dash(j.Target), j.LimitS, j.LimitSource, j.Updated, dash(strings.Join(strings.Fields(j.Why), " ")))

@@ -183,6 +183,11 @@ type SecretEvent struct {
 	ExpiresAt   string   `json:"expires_at,omitempty"`
 	HashedToken string   `json:"hashed_token,omitempty"`
 	Elevated    []string `json:"elevated,omitempty"`
+	// TokenProject and TokenArea are where a minted potluck-token acts: the
+	// box's project (the event's own) and area, or for a GitHub job under a
+	// rule naming another project, that project's ULID and the rule's area.
+	TokenProject string `json:"token_project,omitempty"`
+	TokenArea    string `json:"token_area,omitempty"`
 	// Why is a refusal's cause, in words that name no secret.
 	Why string `json:"why,omitempty"`
 	// Failed: the call that carried the secrets returned an error (they may

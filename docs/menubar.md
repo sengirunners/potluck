@@ -22,6 +22,11 @@ Lending 6 of 12 cores
 Keep lending is checked in `auto` and in `open`. The modes are the host switch's
 ([cmd/potluck-driver-tart/README.md](../cmd/potluck-driver-tart/README.md#the-host-switch-open-drain-closed-auto)).
 
+A closed switch is a paused Mac (`potluck host pause`, or Stop now): the menu says "Paused: lending nothing" and
+Keep lending reads "Resume lending" (it runs the same `host set auto`, as `potluck host resume` does). While a
+`potluck host --detach` run goes on, the note says so with its last line; `host status --json` carries it as
+`background` (`running`, or `ended` with the last run's last line).
+
 ## Where it gets its facts
 
 Every 15 seconds, and when the menu opens (at most every 5), it runs `potluck --json host status`; when that fails it
@@ -61,8 +66,12 @@ it in Finder and choose Open once. The installer says "not Developer ID signed" 
 To start it at login, add it in System Settings > General > Login Items. Quit it from its menu. To update the app,
 run the installer with `--menubar` again; `potluck upgrade` does not touch it yet.
 
-It looks for `potluck` in `$POTLUCK_BIN`, then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and
-`~/go/bin`.
+It runs `$POTLUCK_BIN`; else `potluck` from `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` or
+`~/go/bin`; else the program of the machine's Potluck daemon, from its record
+([daemon.md](daemon.md#one-daemon-per-machine)). That program must have potluck's `host status` and `host set`
+commands; when it has not, the menu shows the error it prints. The app uses a record only when exactly one, of a
+program other than potluck, names a running process of yours, in a directory and file that are yours alone. Unlike
+the `potluck` command, it does not ask that daemon's socket whether it answers: a live process is enough.
 
 Setting the switch writes `/Users/Shared/Potluck/host-override.json` as you, so run the app as the user who owns
 the host (the one who ran `potluck host`).

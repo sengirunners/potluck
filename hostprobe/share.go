@@ -101,7 +101,10 @@ type ShareOptions struct {
 	// ReclaimIdleS > 0 binds each size with reclaim_idle_s: a box ends as
 	// reclaimed (never billed) when the owner touches the keyboard or pointer,
 	// and none starts until the Mac has been idle this long. macOS only.
+	// Unless ReclaimSet (the owner chose it for this run), a re-run keeps
+	// what an earlier share of these bindings bound (reclaim.go).
 	ReclaimIdleS int
+	ReclaimSet   bool
 	// ConformanceTimeout bounds one size's suite run (default 15 minutes).
 	ConformanceTimeout time.Duration
 	// PullTimeout bounds one image pull (default: the pin's pull_minutes,
@@ -198,6 +201,9 @@ type ShareResult struct {
 	Full         bool `json:"full"`
 	// ReclaimIdleS is the reclaim policy bound (0: lent all the time).
 	ReclaimIdleS int `json:"reclaim_idle_s,omitempty"`
+	// ReclaimFrom names the earlier binding ReclaimIdleS was kept from ("":
+	// this run's choice).
+	ReclaimFrom string `json:"reclaim_idle_s_kept_from,omitempty"`
 	// Images are the pins pulled, checked and bound: the owner's --image, else
 	// the layer's default from images.pin (DefaultImage true).
 	Images       []string `json:"images"`
@@ -391,6 +397,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			return res, fmt.Errorf("mail server %q: want a host, or host:port", m)
 		}
 	}
+	o.ReclaimIdleS, res.ReclaimFrom = o.reclaim()
 	if o.ReclaimIdleS < 0 {
 		return res, errors.New("reclaim idle time: want 0 (off) or more seconds")
 	}
@@ -465,8 +472,14 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	}
 	if o.With == "" && len(o.Images) == 0 {
 		if o.EarlierUnread != "" {
-			return res, fmt.Errorf("cannot safely choose the default image: earlier bindings could not be read: %s; start the daemon and retry, or select --with or --image explicitly", o.EarlierUnread)
+			return res, fmt.Errorf("cannot safely choose the default image: earlier bindings could not be read: %s; start the daemon and retry, or pass --image explicitly", o.EarlierUnread)
 		}
+		// An image this version cannot name (the owner's own, or one from a
+		// repository Potluck no longer publishes) is replaced by the default,
+		// and the result says so with the flags that keep it: re-lending is
+		// one command with no flags.
+		replaced := map[string][]string{} // the flags that keep an image: the bindings that lent it
+		var keeps []string
 		for _, old := range o.Earlier {
 			if !strings.HasPrefix(old.Name, o.NamePrefix+"-") || cmp.Or(old.Config["vm"], "tart") != layer.Name || len(old.Images) == 0 {
 				continue
@@ -476,8 +489,17 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 				return res, fmt.Errorf("%s previously lent --with %s: repeat --with %s to keep it, or pass --image explicitly to replace it", old.Name, name, name)
 			}
 			if !known {
-				return res, fmt.Errorf("%s previously lent an unknown image: select --with or --image explicitly to replace it", old.Name)
+				k := keepFlags(old)
+				if replaced[k] == nil {
+					keeps = append(keeps, k)
+				}
+				replaced[k] = append(replaced[k], old.Name)
 			}
+		}
+		for _, k := range keeps {
+			note := fmt.Sprintf("%s lent an image this version does not know: lending the default replaces it (to keep that image instead, run this again with %s)", strings.Join(replaced[k], ", "), k)
+			res.Notes = append(res.Notes, note)
+			say(note)
 		}
 	}
 	if layer.Name == "tart" { // before any pull: a disk too small for the images refuses here

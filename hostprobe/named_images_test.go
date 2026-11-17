@@ -151,9 +151,64 @@ func (r deadlineRunner) Run(ctx context.Context, name string, args ...string) (R
 	return r.Runner.Run(ctx, name, args...)
 }
 
+// A machine that lent an image this version cannot name (its own, or one
+// from a repository Potluck no longer publishes) re-runs host with no flags
+// and lends the default: the result says it replaced that image and names
+// the exact flags that keep it instead, on a Mac and on Linux alike.
+func TestRelendReplacesUnknownImage(t *testing.T) {
+	other := "ghcr.io/example/other@sha256:" + strings.Repeat("1", 64)
+	tools := "ghcr.io/example/tools@sha256:" + strings.Repeat("2", 64)
+	for _, c := range []struct {
+		name, prefix, layer string
+		report              Report
+		earlier             []computeapi.RunTarget
+		keep                string
+	}{
+		{"mac", "mac", "tart", macReport(), []computeapi.RunTarget{
+			{Name: "mac-c2m4", Images: []string{other}, Config: map[string]string{"vm": "tart"}},
+		}, "--image " + other},
+		{"linux, two sizes", "host-a", "oci", bigReport(), []computeapi.RunTarget{
+			{Name: "host-a-c1m2", Images: []string{other, tools}, Config: map[string]string{"vm": "oci", "runner_dir": "/home/runner"}},
+			{Name: "host-a-c2m4", Images: []string{other, tools}, Config: map[string]string{"vm": "oci", "runner_dir": "/home/runner"}},
+		}, "--image " + other + " --image " + tools + " --runner-dir /home/runner"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			def, err := DefaultImage(c.layer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := checkOn(context.Background(), &fakeRunner{}, ShareOptions{Report: c.report, Earlier: c.earlier, NamePrefix: c.prefix, DryRun: true})
+			if err != nil {
+				t.Fatalf("re-lend with no flags refused: %v", err)
+			}
+			if len(res.Images) == 0 || res.Images[0] != def.Image || !res.DefaultImage {
+				t.Fatalf("lends %v (default %v), want the default %s", res.Images, res.DefaultImage, def.Image)
+			}
+			var notes []string
+			for _, n := range res.Notes {
+				if strings.Contains(n, "does not know") {
+					notes = append(notes, n)
+				}
+			}
+			if len(notes) != 1 {
+				t.Fatalf("want one note saying the image was replaced, got %q", res.Notes)
+			}
+			for _, old := range c.earlier {
+				if !strings.Contains(notes[0], old.Name) {
+					t.Errorf("the note does not name %s: %s", old.Name, notes[0])
+				}
+			}
+			if !strings.Contains(notes[0], "replaces") || !strings.Contains(notes[0], "run this again with "+c.keep+")") {
+				t.Errorf("the note does not say it replaced the image and how to keep it (%s): %s", c.keep, notes[0])
+			}
+		})
+	}
+}
+
 // A machine lent on an earlier version of a published pin re-runs host with
-// no flags and upgrades; an earlier Xcode digest still asks for --with xcode,
-// and an image from no published repository is still refused.
+// no flags and upgrades; an earlier Xcode digest still asks for --with xcode;
+// an image from no published repository is replaced by the default
+// (TestRelendReplacesUnknownImage).
 func TestRerunAfterPinMoved(t *testing.T) {
 	stale := func(layer, name string) string {
 		for _, p := range DefaultPins() {
@@ -170,7 +225,7 @@ func TestRerunAfterPinMoved(t *testing.T) {
 	}{
 		{stale("tart", ""), ""},
 		{stale("tart", "xcode"), "repeat --with xcode"},
-		{"ghcr.io/example/other@sha256:" + strings.Repeat("1", 64), "unknown image"},
+		{"ghcr.io/example/other@sha256:" + strings.Repeat("1", 64), ""},
 	}
 	for _, c := range cases {
 		earlier := []computeapi.RunTarget{{Name: "mac-c2m4", Images: []string{c.image}, Config: map[string]string{"vm": "tart"}}}

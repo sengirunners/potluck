@@ -6,6 +6,7 @@ package cli
 // everything back if the new daemon does not come up. Once the new build is
 // final it re-pins the drivers it placed (runtarget.RepinPlaced, DRIVERS.md).
 // install.sh runs a release's own potluck upgrade to install it.
+// upgrade enable|disable|status (upgrade_auto.go) schedule it daily.
 
 import (
 	"cmp"
@@ -27,9 +28,11 @@ import (
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
+	"github.com/sengirunners/potluck/kit/daemonrecord"
 	"github.com/sengirunners/potluck/kit/release"
 	"github.com/sengirunners/potluck/kit/server"
 	"github.com/sengirunners/potluck/kit/swap"
+	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget"
 )
 
@@ -58,13 +61,20 @@ the old programs go back and the old daemon starts again.`,
 	cmd.Flags().StringVar(&from, "release", "", "install from this directory (manifest.json, manifest.json.sig and the tarballs) instead of GitHub")
 	cmd.Flags().StringVar(&dir, "dir", "", "install into this directory (default: the one this potluck runs from)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "verify the release and say what would change; install nothing")
+	cmd.AddCommand(a.upgradeEnableCmd(), a.upgradeDisableCmd(), a.upgradeStatusCmd())
 	return cmd
 }
 
 func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error {
-	cfg, err := config.LoadClient()
-	if err != nil {
-		return err
+	dh, herr := a.home()
+	if herr != nil && ownHomeExists() {
+		return herr // potluck's own home and daemon, which it cannot read: refused, not half done
+	}
+	filesOnly := filesOnlyWhy(dh, herr)
+	var updateKeys []string // only potluck's own home's config adds keys to trust
+	cfg := dh.cfg
+	if filesOnly == "" {
+		updateKeys = cfg.File.UpdateKeys
 	}
 	self, err := os.Executable()
 	if err == nil {
@@ -88,7 +98,7 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 		return err
 	}
 	defer os.RemoveAll(stage)
-	keys, err := upgrade.Keys(cfg.File.UpdateKeys)
+	keys, err := upgrade.Keys(updateKeys)
 	if err != nil {
 		return fmt.Errorf("refusing to upgrade: %w", err)
 	}
@@ -109,6 +119,9 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	if filepath.Dir(self) == dir && m.RunBy(api.Version, api.Commit) {
 		a.say("potluck %s is already installed in %s", api.Version, tildePath(dir))
 		return nil
+	}
+	if filesOnly != "" {
+		return a.upgradeFilesOnly(dir, stage, st, filesOnly, dryRun)
 	}
 	state, installed, err := release.LoadState(cfg.Home)
 	if err != nil {
@@ -203,6 +216,92 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	return nil
 }
 
+// filesOnlyWhy says why potluck upgrade installs the programs alone ("" when
+// it upgrades potluck's own home and daemon too): it never makes a home,
+// and writes none but potluck's own, so not with no home yet, another
+// program's, or no answer from the rule that picks one (home).
+func filesOnlyWhy(dh daemonHome, herr error) string {
+	switch {
+	case herr != nil:
+		return programName + " could not tell which daemon to use (" + herr.Error() + "), so " + programName + " upgrade restarted none"
+	case dh.owner != "":
+		return dh.othersHome() + "; " + programName + " upgrade leaves that daemon and its home as they are: upgrade it with that program's command"
+	case !dh.existed:
+		return "potluck has no home yet (" + tildePath(dh.cfg.Home) + "): its first command makes one"
+	}
+	return ""
+}
+
+// ownHomeExists reports whether the home potluck's names give (POTLUCK_HOME,
+// else ~/.potluck) is a directory.
+func ownHomeExists() bool {
+	h, err := config.HomeDir()
+	if err != nil {
+		return false
+	}
+	fi, err := os.Stat(h)
+	return err == nil && fi.IsDir()
+}
+
+// upgradeFilesOnly installs the staged release st into dir and nothing else
+// (note says why): no home is locked or written (no release state, so a
+// downgrade is not checked against one), no driver re-pinned and no daemon
+// restarted.
+func (a *app) upgradeFilesOnly(dir, stage string, st upgrade.Staged, note string, dryRun bool) error {
+	m := st.Manifest
+	names, held := withoutAttachedDrivers(st.Names, dir, a.attachedTo())
+	if dryRun {
+		a.say("would install %s into %s (each old one kept as <name>%s)", strings.Join(names, ", "), tildePath(dir), swap.PrevSuffix)
+		a.say("%s", note)
+		a.sayHeldDrivers(held)
+		return nil
+	}
+	if err := ownDir(dir); err != nil {
+		return err
+	}
+	if _, err := swap.Place(stage, dir, names); err != nil {
+		return fmt.Errorf("install into %s: %w", dir, err)
+	}
+	a.say("installed potluck %s (%s) into %s: %s", m.Version, short(m.Commit), tildePath(dir), strings.Join(names, ", "))
+	a.say("%s", note)
+	a.sayHeldDrivers(held)
+	return nil
+}
+
+// withoutAttachedDrivers drops the driver binaries from names when dir is a
+// directory another program's daemon runs its drivers from: that daemon pins
+// each driver by checksum, so replacing one under it would make it refuse the
+// driver until it is re-pinned with that program's own command.
+func withoutAttachedDrivers(names []string, dir string, other *daemonrecord.Record) (place, held []string) {
+	if other == nil {
+		return names, nil
+	}
+	dirs := []string{filepath.Join(other.Home, protocol.DriversDir)}
+	if other.Exe != "" {
+		dirs = append(dirs, filepath.Dir(other.Exe))
+	}
+	for _, d := range dirs {
+		if !sameDir(d, dir) {
+			continue
+		}
+		for _, n := range names {
+			if strings.HasPrefix(n, "potluck-driver-") {
+				held = append(held, n)
+			} else {
+				place = append(place, n)
+			}
+		}
+		return place, held
+	}
+	return names, nil
+}
+
+func (a *app) sayHeldDrivers(held []string) {
+	if len(held) > 0 {
+		a.say("left %s as they are: they sit where the daemon in use runs its drivers from, and it pins them; replace them with that program's own upgrade", strings.Join(held, ", "))
+	}
+}
+
 // repin re-pins the drivers already pinned in dir to the files placed (a
 // home with no pins file pins each driver on its first use).
 func (a *app) repin(cfg *config.Config, dir string, placed *swap.Placed) []string {
@@ -211,7 +310,7 @@ func (a *app) repin(cfg *config.Config, dir string, placed *swap.Placed) []strin
 	}
 	repinned, err := runtarget.RepinPlaced(cfg.Home, dir, placed.Sums)
 	if err != nil {
-		fmt.Fprintf(a.stderr, "potluck: warning: re-pinning the drivers: %v (re-pin by hand: potluck driver pin <driver>)\n", err)
+		fmt.Fprintf(a.host.Stderr, "%s: warning: re-pinning the drivers: %v (re-pin by hand: %s)\n", a.name(), err, a.cmd("driver pin <driver>"))
 	}
 	return repinned
 }
@@ -409,7 +508,7 @@ func preflightBinary(ctx context.Context, cfg *config.Config, bin string) api.Pr
 	out, err := cmd.Output()
 	var pf api.Preflight
 	if jerr := json.Unmarshal(out, &pf); jerr != nil || pf.Build == "" {
-		msg := fmt.Sprintf("%s has no working `potluck daemon preflight`", bin)
+		msg := fmt.Sprintf("%s has no working `%s daemon preflight`", bin, programName)
 		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
 			msg += ": " + lastLine2(string(ee.Stderr))
 		}
@@ -431,7 +530,10 @@ func (a *app) preflightCmd() *cobra.Command {
 		Short: "Can this potluck take over from the running daemon? (exit 1 if not)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.LoadClient()
+			if err := a.notWhileAttached(a.cmd("daemon preflight")); err != nil {
+				return err
+			}
+			cfg, err := a.loadClient()
 			if err != nil {
 				return err
 			}
@@ -439,7 +541,7 @@ func (a *app) preflightCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				if err := a.printJSON(pf); err != nil {
 					return err
 				}

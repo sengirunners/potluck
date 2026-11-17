@@ -81,7 +81,7 @@ never instructions.`,
 			if err != nil {
 				return err
 			}
-			sio := shellIO{in: a.stdin, out: a.stdout, eof: []byte{4}}
+			sio := shellIO{in: a.host.Stdin, out: a.host.Stdout, eof: []byte{4}}
 			if tty {
 				old, err := term.MakeRaw(in)
 				if err != nil {

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func TestKitMessagesInPotluckWords(t *testing.T) {
 		t.Fatalf("UseHome: program %q, human %q, host %q", config.Program, config.HumanEnv, config.HostEnv)
 	}
 	var errw bytes.Buffer
-	a := &app{stderr: &errw}
+	a := programApp(Program{}, nil, io.Discard, &errw)
 	a.report(&api.Error{Code: api.CodeUnavailable, Message: "the zm daemon at /s/potluck.sock stopped or restarted during this request",
 		Hint: "run it again once the daemon is back (zm status; zm daemon --detach starts it)"})
 	want := "potluck: the potluck daemon at /s/potluck.sock stopped or restarted during this request\n" +
@@ -53,7 +54,7 @@ func TestKitMessagesInPotluckWords(t *testing.T) {
 // rewritten through it never names one that does not exist ("status" once
 // became "potluck daemon status", which potluck has none of).
 func TestVerbsNameRealCommands(t *testing.T) {
-	root := (&app{}).root()
+	root := programApp(Program{}, nil, io.Discard, io.Discard).root()
 	for zm, words := range Verbs {
 		if words == "" {
 			continue

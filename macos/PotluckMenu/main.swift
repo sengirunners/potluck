@@ -26,20 +26,64 @@ struct Status: Decodable {
     let menu: Menu
 }
 
-/// The potluck program: $POTLUCK_BIN, else the first of the usual places.
+/// The program to run: $POTLUCK_BIN, else potluck in the first of the
+/// usual places, else the program of the machine's Potluck daemon (its
+/// record, recordedProgram), which must have potluck's `host status` and
+/// `host set` commands; when it has not, running it fails and the menu says so.
 func potluckPath() -> String? {
     let env = ProcessInfo.processInfo.environment
     if let p = env["POTLUCK_BIN"], !p.isEmpty { return p }
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let places = [home + "/.local/bin/potluck", "/opt/homebrew/bin/potluck", "/usr/local/bin/potluck", home + "/go/bin/potluck"]
-    return places.first { FileManager.default.isExecutableFile(atPath: $0) }
+    if let p = places.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) { return p }
+    return recordedProgram()
+}
+
+/// A daemon's machine record (kit/daemonrecord), the fields read here.
+struct DaemonRecord: Decodable {
+    let program: String
+    let exe: String
+    let pid: Int32
+}
+
+/// isPrivate: path is this user's alone (owned by this user, no group or
+/// other permission bits, not a symlink), as kit/daemonrecord requires.
+func isPrivate(_ path: String) -> Bool {
+    var st = stat()
+    guard lstat(path, &st) == 0 else { return false }
+    let kind = st.st_mode & S_IFMT
+    return (kind == S_IFDIR || kind == S_IFREG) && st.st_uid == getuid() && st.st_mode & 0o077 == 0
+}
+
+/// The program of the one daemon of another program than potluck whose
+/// record is in the machine's records ($POTLUCK_DAEMONS_DIR, else
+/// ~/.local/state/potluck/daemons) and whose process is this user's and
+/// alive. Unlike the potluck command, this does not ask the daemon's
+/// socket. None, or more than one: nil.
+func recordedProgram() -> String? {
+    let env = ProcessInfo.processInfo.environment
+    let fm = FileManager.default
+    var dir = fm.homeDirectoryForCurrentUser.path + "/.local/state/potluck/daemons"
+    if let d = env["POTLUCK_DAEMONS_DIR"], !d.isEmpty { dir = d }
+    guard isPrivate(dir), let names = try? fm.contentsOfDirectory(atPath: dir) else { return nil }
+    var found: [String] = []
+    for name in names where name.hasSuffix(".json") && !name.hasPrefix(".") {
+        let path = dir + "/" + name
+        guard isPrivate(path), let data = fm.contents(atPath: path),
+              let r = try? JSONDecoder().decode(DaemonRecord.self, from: data),
+              name == r.program + ".json", r.program != "potluck", r.pid > 0, kill(r.pid, 0) == 0,
+              fm.isExecutableFile(atPath: r.exe)
+        else { continue }
+        found.append(r.exe)
+    }
+    return found.count == 1 ? found[0] : nil
 }
 
 /// Runs potluck with args; its exit code, stdout and stderr. Both pipes are
 /// read at once (a full stderr cannot block it), and it is ended after 25 s.
 func runPotluck(_ args: [String]) -> (Int32, Data, String) {
     guard let path = potluckPath() else {
-        return (127, Data(), "potluck not found: install it (~/.local/bin) or set POTLUCK_BIN")
+        return (127, Data(), "potluck not found, and no running Potluck daemon names its program: install potluck (~/.local/bin) or set POTLUCK_BIN")
     }
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)

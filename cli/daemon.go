@@ -30,9 +30,12 @@ func (a *app) daemonCmd() *cobra.Command {
 	var detach, verbose, tailnet bool
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Run this machine's potluck daemon (in the foreground; --detach to start it in the background)",
+		Short: "Run this machine's " + a.name() + " daemon (in the foreground; --detach to start it in the background)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := a.refuseBesideOther(); err != nil {
+				return err
+			}
 			cfg, err := config.Load()
 			if err != nil {
 				return err
@@ -46,9 +49,9 @@ func (a *app) daemonCmd() *cobra.Command {
 				case err != nil:
 					return err
 				case already:
-					a.say("potluck daemon already running: %s", cfg.SocketPath())
+					a.say("%s already running: %s", a.cmd("daemon"), cfg.SocketPath())
 				default:
-					a.say("potluck daemon started: %s", cfg.SocketPath())
+					a.say("%s started: %s", a.cmd("daemon"), cfg.SocketPath())
 				}
 				return nil
 			}
@@ -56,7 +59,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			if verbose {
 				lvl = slog.LevelDebug
 			}
-			log := slog.New(slog.NewTextHandler(words{a.stderr}, &slog.HandlerOptions{Level: lvl}))
+			log := slog.New(slog.NewTextHandler(words{a.host.Stderr}, &slog.HandlerOptions{Level: lvl}))
 			return serve(cmd.Context(), cfg, log, a.prog.wiring())
 		},
 	}
@@ -68,7 +71,10 @@ func (a *app) daemonCmd() *cobra.Command {
 		Short: "Stop this machine's daemon and wait until it has stopped",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.LoadClient()
+			if err := a.notWhileAttached(a.cmd("daemon stop")); err != nil {
+				return err
+			}
+			cfg, err := a.loadClient()
 			if err != nil {
 				return err
 			}
@@ -119,10 +125,10 @@ func (a *app) stopDaemon(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	if !stopped {
-		a.say("no potluck daemon is running at %s", cfg.SocketPath())
+		a.say("no %s is running at %s", a.cmd("daemon"), cfg.SocketPath())
 		return nil
 	}
-	a.say("potluck daemon stopped")
+	a.say("%s stopped", a.cmd("daemon"))
 	return nil
 }
 
@@ -212,21 +218,34 @@ func (a *app) statusCmd() *cobra.Command {
 				}
 			}
 			problems := h.SelfCheck != nil && !h.SelfCheck.OK
-			if a.json {
+			type daemonView struct {
+				Program string `json:"program"`
+				Exe     string `json:"exe"`
+			}
+			var other *daemonView // another program's daemon, which this run uses
+			if o := a.attachedTo(); o != nil {
+				other = &daemonView{Program: o.Program, Exe: o.Exe}
+			}
+			if a.asJSON() {
 				if err := a.printJSON(struct {
-					Health api.Health `json:"health"`
-					Home   string     `json:"home"`
-					Pools  []poolView `json:"pools"`
-				}{h, cfg.Home, pools}); err != nil {
+					Health api.Health  `json:"health"`
+					Home   string      `json:"home"`
+					Daemon *daemonView `json:"daemon_of,omitempty"`
+					Pools  []poolView  `json:"pools"`
+				}{h, cfg.Home, other, pools}); err != nil {
 					return err
 				}
 			} else {
-				s := fmt.Sprintf("potluck %s (%s, %s), home %s", h.Version, h.Commit, h.Protocol, tildePath(cfg.Home))
+				s := fmt.Sprintf("%s %s (%s, %s), home %s", a.name(), h.Version, h.Commit, h.Protocol, tildePath(cfg.Home))
+				if other != nil {
+					s = fmt.Sprintf("using %s's daemon (%s, %s), home %s: this machine's Potluck daemon",
+						other.Program, h.Version, h.Protocol, tildePath(cfg.Home))
+				}
 				if h.Machine != "" {
 					s += fmt.Sprintf("\nmachine %s, pid %d, up %s", h.Machine, h.PID, time.Since(h.Started).Round(time.Second))
 				}
-				if h.Version != api.Version || h.Commit != api.Commit {
-					s += fmt.Sprintf("\nnote: this command is %s (%s); restart the daemon to match (potluck daemon stop, then potluck daemon --detach)", api.Version, api.Commit)
+				if other == nil && (h.Version != api.Version || h.Commit != api.Commit) {
+					s += fmt.Sprintf("\nnote: this command is %s (%s); restart the daemon to match (%s, then %s)", api.Version, api.Commit, a.cmd("daemon stop"), a.cmd("daemon --detach"))
 				}
 				if sc := h.SelfCheck; problems {
 					s += fmt.Sprintf("\nPROBLEM: this daemon cannot serve %d thing(s):", len(sc.Problems))
@@ -235,7 +254,7 @@ func (a *app) statusCmd() *cobra.Command {
 					}
 				}
 				if len(pools) == 0 {
-					s += "\nno pool yet: potluck create <pool>, or potluck join '<invite code>'"
+					s += "\nno pool yet: " + a.cmd("create <pool>") + ", or " + a.cmd("join '<invite code>'")
 				}
 				for _, p := range pools {
 					s += fmt.Sprintf("\npool %s (%s): ", p.Pool, p.Role)
@@ -243,7 +262,7 @@ func (a *app) statusCmd() *cobra.Command {
 					case p.Error != "":
 						s += "machines not listed: " + p.Error
 					case len(p.Machines) == 0:
-						s += "no machine shared yet (potluck host)"
+						s += "no machine shared yet (" + a.cmd("host") + ")"
 					default:
 						s += "sandboxes on " + strings.Join(p.Machines, ", ")
 					}
@@ -262,16 +281,17 @@ func (a *app) statusCmd() *cobra.Command {
 }
 
 // noAutostart are the commands (and everything under them) that never start
-// the daemon: asking whether it runs, and running or stopping it.
+// the daemon: asking whether it runs, and running or stopping it. Keyed by
+// the command's words under the root (commandWords).
 var noAutostart = map[string]bool{
-	"potluck help":        true,
-	"potluck completion":  true,
-	"potluck status":      true,
-	"potluck daemon":      true,
-	"potluck upgrade":     true,
-	"potluck mcp":         true,
-	"potluck host status": true, // the menu bar item asks every few seconds
-	"potluck host set":    true,
+	"help":        true,
+	"completion":  true,
+	"status":      true,
+	"daemon":      true,
+	"upgrade":     true,
+	"mcp":         true,
+	"host status": true, // the menu bar item asks every few seconds
+	"host set":    true,
 }
 
 // autostartAllowed reports whether cmd may start the daemon.
@@ -285,11 +305,21 @@ func autostartAllowed(cmd *cobra.Command, getenv func(string) string) bool {
 		return false
 	}
 	for c := cmd; c != nil; c = c.Parent() {
-		if noAutostart[c.CommandPath()] {
+		if noAutostart[commandWords(c)] {
 			return false
 		}
 	}
 	return true
+}
+
+// commandWords are cmd's words under its root: "host status" for the
+// potluck program's `potluck host status` ("" for the root).
+func commandWords(cmd *cobra.Command) string {
+	var words []string
+	for c := cmd; c.HasParent(); c = c.Parent() {
+		words = append([]string{c.Name()}, words...)
+	}
+	return strings.Join(words, " ")
 }
 
 // fileAutostartLock serialises autostarting commands ($POTLUCK_HOME).
@@ -299,6 +329,9 @@ const fileAutostartLock = "autostart.lock"
 // already did, and says so on stderr. A lock file serialises concurrent
 // starters, so two commands run at once start one daemon.
 func (a *app) autostart(ctx context.Context, cfg *config.Config) error {
+	if o := a.otherStarting(ctx); o != nil {
+		return fmt.Errorf("%s's daemon (home %s) has just started, and potluck's commands use it: run this again", o.Program, tildePath(o.Home))
+	}
 	if err := cfg.EnsureHome(); err != nil {
 		return err
 	}
@@ -315,7 +348,7 @@ func (a *app) autostart(ctx context.Context, cfg *config.Config) error {
 	if err != nil || already {
 		return err
 	}
-	fmt.Fprintf(a.stderr, "potluck: started the daemon (%s)\n", tildePath(cfg.Home))
+	fmt.Fprintf(a.host.Stderr, "%s: started the daemon (%s)\n", a.name(), tildePath(cfg.Home))
 	return nil
 }
 

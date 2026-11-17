@@ -29,6 +29,7 @@ import (
 	"github.com/sengirunners/potluck/grants"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/authz"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/teamlink"
 	"github.com/sengirunners/potluck/placement"
@@ -328,7 +329,14 @@ func (s *Service) describeOf(ctx context.Context, b computeapi.RunTarget) (*comp
 	if b.Kind == computeapi.RunTargetKindBox {
 		required = append(required, verbExec)
 		if d.Size == nil || d.Size.Name == "" {
-			return nil, api.Errorf(api.CodeBadRequest, "potluck-driver-%s describes a box without its size", b.Driver)
+			// potluck-driver-tart leaves the size out when it cannot read its
+			// image (gone after a disk swap, or Docker unreadable): its why
+			// says which, and host share repairs and rebinds the size.
+			why := ""
+			if d.Why != "" {
+				why = " (it says: " + d.Why + ")"
+			}
+			return nil, api.Errorf(api.CodeBadRequest, "potluck-driver-%s describes a box without its size%s: run %s on the machine that lends it, which checks the machine again, pulls its image if that is missing and rebinds the size", b.Driver, why, config.Cmd("host share"))
 		}
 	}
 	for _, v := range required {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -27,10 +28,10 @@ import (
 	"github.com/sengirunners/potluck/kit/tailnet"
 	"github.com/sengirunners/potluck/kit/tailnet/tailnettest"
 	"github.com/sengirunners/potluck/kit/teamlink"
+	"github.com/sengirunners/potluck/kit/updatejob"
 	"github.com/sengirunners/potluck/menubar"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget"
-	"github.com/sengirunners/potluck/vmhost"
 	"github.com/sengirunners/potluck/wiring"
 )
 
@@ -41,8 +42,16 @@ func TestMain(m *testing.M) {
 	// A host's adverts carry its swap state: not this machine's, whatever runs the tests.
 	hostswap.Local = func(context.Context) hostswap.Reading { return hostswap.Reading{State: hostswap.Encrypted} }
 	UseHome()
+	// No test writes or loads a real update job: the ones that need a
+	// schedule replace this (upgrade_auto_test.go).
+	newUpdateSchedule = func() (*updatejob.Schedule, error) {
+		return nil, errors.New("a test must give the update job its own schedule")
+	}
 	// A command must never start a daemon here: it would run this test binary.
 	os.Setenv(EnvNoAutostart, "1")
+	// Nor read or write this machine's host switch: one in memory stands in.
+	sw := &memSwitch{}
+	hostNow, hostSet = sw.now, sw.set
 	os.Exit(m.Run())
 }
 
@@ -218,6 +227,16 @@ func TestQuickStartAcrossTwoMachines(t *testing.T) {
 	}
 	if _, e, code := a.run(t, "invite", "sam", "--trust", "public"); code == 0 || !strings.Contains(e, "--trust goes with --host") {
 		t.Fatalf("--trust without --host: %d %s", code, e)
+	}
+	// --image (a host invite's alone, pinned) goes into the command printed for the friend.
+	if out := a.ok(t, "invite", "dee", "--host", "--image", refPin); !strings.Contains(out, "' --image "+refPin+"\n") || !strings.Contains(out, "then potluck host --image "+refPin+")") {
+		t.Fatalf("invite --host --image:\n%s", out)
+	}
+	if _, e, code := a.run(t, "invite", "dee", "--image", refPin); code == 0 || !strings.Contains(e, "--image goes with --host") {
+		t.Fatalf("invite --image without --host: exit %d %s", code, e)
+	}
+	if _, e, code := a.run(t, "invite", "dee", "--host", "--image", "ref-image:latest"); code == 0 || !strings.Contains(e, "is not pinned") {
+		t.Fatalf("invite --image unpinned: exit %d %s", code, e)
 	}
 
 	// B: join, then share this machine.
@@ -427,10 +446,11 @@ func TestHostStatusNoDaemon(t *testing.T) {
 	}
 	defer os.RemoveAll(home)
 	t.Setenv(EnvHome, home)
+	old := hostNow
 	hostNow = func(owner, deadline int) (protocol.HostStatus, error) {
 		return protocol.HostStatus{Mode: protocol.HostDrain, State: protocol.HostDraining}, nil
 	}
-	t.Cleanup(func() { hostNow = vmhost.HostNow })
+	t.Cleanup(func() { hostNow = old })
 	var o, e bytes.Buffer
 	if code := Run(context.Background(), []string{"--json", "host", "status"}, strings.NewReader(""), &o, &e); code != 0 {
 		t.Fatalf("host status: %d %q %q", code, o.String(), e.String())
@@ -442,7 +462,7 @@ func TestHostStatusNoDaemon(t *testing.T) {
 	if st.Mode != protocol.HostDrain || st.Menu.Title != "Potluck is not running" || !st.Menu.Items[1].Checked {
 		t.Errorf("host status: %+v", st)
 	}
-	root := (&app{stdout: io.Discard, stderr: io.Discard}).root()
+	root := programApp(Program{}, nil, io.Discard, io.Discard).root()
 	for _, path := range [][]string{{"host", "status"}, {"host", "set"}} {
 		c, _, err := root.Find(path)
 		if err != nil || c.Name() != path[1] || autostartAllowed(c, func(string) string { return "" }) {
@@ -476,7 +496,7 @@ func TestHelpWords(t *testing.T) {
 			walk(sub)
 		}
 	}
-	walk((&app{}).root())
+	walk(programApp(Program{}, nil, io.Discard, io.Discard).root())
 }
 
 // host --dry-run prints the plan without a daemon: it never starts one, and
@@ -594,19 +614,19 @@ func TestTailnetNameBesideZm(t *testing.T) {
 func TestPrintShareDryRunHidesConformanceLines(t *testing.T) {
 	res := hostprobe.ShareResult{Layer: "tart", DryRun: true, Sizes: []hostprobe.SizeResult{{Binding: "h-c1m2", Conformance: []string{"potluck-conformance", "tart"}}}}
 	var b strings.Builder
-	printShare(&b, res)
+	printShare(&b, res, programName)
 	if strings.Contains(b.String(), "potluck-conformance") || !strings.Contains(b.String(), "would share h-c1m2") {
 		t.Errorf("default dry run:\n%s", b.String())
 	}
 	res.ShowCommands = true
 	b.Reset()
-	printShare(&b, res)
+	printShare(&b, res, programName)
 	if !strings.Contains(b.String(), "would run: potluck-conformance tart") {
 		t.Errorf("--show-commands:\n%s", b.String())
 	}
 	res.DryRun, res.ShowCommands = false, false
 	b.Reset()
-	printShare(&b, res)
+	printShare(&b, res, programName)
 	if !strings.Contains(b.String(), "ran: potluck-conformance tart") {
 		t.Errorf("real run:\n%s", b.String())
 	}

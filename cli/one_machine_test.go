@@ -20,6 +20,27 @@ import (
 // configured (no Tailscale), the machine that runs the pool shares itself
 // and runs a sandbox on itself (the one-machine trial the README leads with).
 func TestOneMachineTrialWithoutTailscale(t *testing.T) {
+	m := onePoolMachine(t, refPin)
+	out := m.ok(t, "sandbox", "create", "--ttl", "5m")
+	id, _, _ := strings.Cut(strings.TrimSpace(out), " ")
+	if !strings.Contains(out, " ready ") {
+		t.Fatalf("sandbox create:\n%s", out)
+	}
+	if o := m.ok(t, "sandbox", "exec", id, "--", "echo", "hi"); o != "hi\n" {
+		t.Fatalf("exec: %q", o)
+	}
+	m.ok(t, "sandbox", "rm", id)
+	// None of it brought the tailnet node up: no Tailscale was needed.
+	if st, err := client.WithHandler(m.dm.SocketHandler()).Tailnet(context.Background()); err == nil && st.Running {
+		t.Error("the one-machine trial started the tailnet node")
+	}
+}
+
+// onePoolMachine is a machine that made pool "trial" with --via tunnel and
+// shares itself with the reference driver, lending images (the first its
+// default): sandboxes on one machine, as the one-machine trial makes them.
+func onePoolMachine(t *testing.T, images ...string) *machine {
+	t.Helper()
 	oldBeat, oldRunner, oldDetect, oldDriver := teamlink.BeatEvery, shareRunner, detectHost, shareDriver
 	t.Cleanup(func() {
 		teamlink.BeatEvery, shareRunner, detectHost, shareDriver = oldBeat, oldRunner, oldDetect, oldDriver
@@ -50,26 +71,17 @@ func TestOneMachineTrialWithoutTailscale(t *testing.T) {
 	if err := os.Symlink(drv, installed); err != nil {
 		t.Fatal(err)
 	}
-	stop := beat(module[*teamlink.Service](t, m))
-	defer stop()
+	t.Cleanup(beat(module[*teamlink.Service](t, m)))
 
 	if out := m.ok(t, "create", "--via", "tunnel", "trial"); !strings.Contains(out, "pool trial is ready") {
 		t.Fatalf("create:\n%s", out)
 	}
-	if out := m.ok(t, "host", "--image", refPin, "--sizes", "c1m2", "--name-prefix", "solo", "--reclaim-idle-s", "0", "--no-sudo"); !strings.Contains(out, "shared solo-c1m2") {
+	args := []string{"host", "--sizes", "c1m2", "--name-prefix", "solo", "--reclaim-idle-s", "0", "--no-sudo"}
+	for _, im := range images {
+		args = append(args, "--image", im)
+	}
+	if out := m.ok(t, args...); !strings.Contains(out, "shared solo-c1m2") {
 		t.Fatalf("host:\n%s", out)
 	}
-	out := m.ok(t, "sandbox", "create", "--ttl", "5m")
-	id, _, _ := strings.Cut(strings.TrimSpace(out), " ")
-	if !strings.Contains(out, " ready ") {
-		t.Fatalf("sandbox create:\n%s", out)
-	}
-	if o := m.ok(t, "sandbox", "exec", id, "--", "echo", "hi"); o != "hi\n" {
-		t.Fatalf("exec: %q", o)
-	}
-	m.ok(t, "sandbox", "rm", id)
-	// None of it brought the tailnet node up: no Tailscale was needed.
-	if st, err := client.WithHandler(m.dm.SocketHandler()).Tailnet(context.Background()); err == nil && st.Running {
-		t.Error("the one-machine trial started the tailnet node")
-	}
+	return m
 }

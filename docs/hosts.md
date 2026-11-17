@@ -96,6 +96,18 @@ no known runner, or the owner's own `--oci-network`).
 - Ctrl-C at sudo's prompt reaches sudo from the terminal (Potluck does not kill it, so sudo restores the terminal's
   echo) and stops Potluck, as anywhere.
 
+### Reading Docker's socket owner
+
+On every Docker connection the driver checks, as root, that the socket belongs to docker.service's own root dockerd
+in this machine's namespaces (`vmhost/oci_engine_owner.go`). It runs that read with `sudo -n -k`: no prompt, and a
+sudo ticket cached at this terminal ignored, because the daemon's driver has no terminal and no ticket. Doctor and
+host ask the same read, so a password typed for sudo a minute ago does not make them call oci ready.
+
+- With passwordless sudo for everything, the read runs inline and needs no root step.
+- Otherwise the root step installs the read as a root-owned helper, `/usr/local/libexec/potluck/docker-owner`, and a
+  sudoers drop-in `/etc/sudoers.d/potluck-docker-owner-<uid>` allowing that user exactly that path with no arguments.
+  The step removes the rule again unless `sudo -n -k` now runs the helper as that user.
+
 ### Installing gVisor
 
 On Linux with a container CLI but no isolating runtime, the root line installs gVisor from its own release channel.
@@ -129,11 +141,25 @@ On Linux with a container CLI but no isolating runtime, the root line installs g
 potluck host ['<invite code>' | <pool>] [--image name@sha256:<64 hex>]... [--layer] [--sizes] [--name-prefix]
   [--oci-runtime] [--oci-cli] [--oci-network] [--net-allow] [--net-forbid] [--net-mail] [--net-mbit] [--runner-dir]
   [--docker] [--root] [--shelf-gb] [--shelf-fill] [--volume-max-gb]
-  [--admission-url] [--admission-token-file] [--admission-ttl-s] [--full] [--reclaim-idle-s] [--share]
-  [--max-cores] [--max-ram-mb] [--state-dir] [--no-sudo] [--dry-run]
+  [--admission-url] [--admission-token-file] [--admission-ttl-s] [--full] [--reclaim-idle-s | --when any|away]
+  [--share] [--max-cores] [--max-ram-mb] [--state-dir] [--no-sudo] [--dry-run] [--detach]
 ```
 
-`potluck host` shares with a pool. `potluck host stop [--force]` removes every size it shared.
+`potluck host` shares with a pool. `potluck host stop [--force]` removes every size it shared; when it removed
+some and left nothing shared, a paused host switch goes back to auto, so the next share lends at once.
+
+One host run at a time per home (`host.lock`): a second is refused, naming the first. `--detach` runs the checks,
+the admin step and a dry run of the plan here, then the same command (its flags as given, without `--detach` and
+`--json`, with `--no-sudo`) again in the background, hands it the lock held, and returns; its words go to the
+home's `host.log`, and `potluck host status` (and the menu bar item) says that it goes on, with its last line.
+
+`potluck host pause [--for 2h | --until 23:00]` closes the host switch (no new work; what is shared stays shared)
+and is refused while work runs on a shared size, which it would end, or when whether it runs cannot be read
+(`--json`: `{"state":"refused","refused":{"reason":"job_running"|"job_unknown",...}}`, exit 0). `potluck host resume` hands a closed or draining switch back to auto. Both
+are words for the one switch file `potluck host set` writes and every driver reads.
+
+A program that mounts these commands ([mounting.md](mounting.md)) may give host a step of its own once a run lent
+the machine (`Host.AfterLend`), with a flag that skips it.
 
 `--state-dir DIR` sends the same absolute driver state path to conformance and every shared binding.
 Without it, the driver keeps its own default state directory (see [the protocol](protocol.md));
@@ -260,10 +286,16 @@ quick, 44 s full, before box secrets; `box-secrets` adds about 0.5 s to the quic
 The binding carries the pins as its `images` only, never also as a config key `images`. The daemon sends them to
 the driver as config `images`; a machine-level binding with both could not be read back from `run_targets.toml`.
 
+When the driver cannot read a binding's image (it is gone, after a disk swap, or Docker cannot be read), it describes
+the box without its size, and the daemon does not advertise or place that size. The binding's error (in doctor, and
+in the bindings list) gives the driver's reason and says to run `potluck host` on that machine: it checks the machine
+again, pulls its image if that is missing and rebinds the size in place.
+
 ### Hand-back on a Mac
 
-On macOS the binding also carries `reclaim_idle_s` (`--reclaim-idle-s`, default 300; 0 lends all the time; refused
-elsewhere). A box ends as `reclaimed` (never billed) within about a second of the owner's keyboard or pointer input,
+On macOS the binding also carries `reclaim_idle_s` (`--reclaim-idle-s`, or `--when away`, default 300; 0 or
+`--when any` lends all the time; refused elsewhere). Without either flag a run again keeps what the earlier binding
+of the same name carried (`reclaim_idle_s_kept_from` in `--json`). A box ends as `reclaimed` (never billed) within about a second of the owner's keyboard or pointer input,
 and none starts until the Mac has been idle that long. Conformance runs without it, since the owner is at the
 keyboard.
 
@@ -330,6 +362,9 @@ an Xcode job.
 
 Running host again without `--with` refuses to replace an earlier named image;
 repeat `--with xcode` to keep it, or use an explicit `--image` to replace it.
+An earlier image this version cannot name (the owner's own `--image`, or one from a repository Potluck no longer
+publishes) does not stop a re-run with no flags: host lends the default in its place and says so, naming the bindings
+and the exact flags that keep the old image instead (`--image ...`, and `--runner-dir` when the binding had one).
 If earlier bindings cannot be read, including a dry run while the daemon is down,
 select an image explicitly or start the daemon before retrying.
 Pins also carry `min_free_gb` and `pull_minutes`: the base Mac budgets 60 GB

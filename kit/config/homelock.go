@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,4 +41,43 @@ func LockHome(home string) (release func(), err error) {
 		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		f.Close()
 	}, nil
+}
+
+// FileProgram names the program whose daemon owns the home: the first
+// daemon to start on a home writes its program (Program) there, and a
+// daemon of any other program refuses the home (ClaimHome).
+const FileProgram = "program"
+
+// ClaimHome is a daemon's check, before it opens anything in home, that
+// home is program's: a home with no FileProgram yet becomes program's; one
+// that names another program is refused, so a daemon never opens another
+// program's registry.db.
+func ClaimHome(home, program string) error {
+	path := filepath.Join(home, FileProgram)
+	b, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return os.WriteFile(path, []byte(program+"\n"), 0o600)
+	case err != nil:
+		return err
+	}
+	owner := strings.TrimSpace(string(b))
+	switch owner {
+	case program:
+		return nil
+	case "": // a write cut short
+		return os.WriteFile(path, []byte(program+"\n"), 0o600)
+	}
+	return fmt.Errorf("%s is the home of %s's daemon, not %s's: a daemon never opens another program's home "+
+		"(if this home is yours under a new program name, write %q into %s)", home, owner, program, program, path)
+}
+
+// HomeOwner is the program FileProgram names in home ("" when none has
+// claimed it yet, or it cannot be read).
+func HomeOwner(home string) string {
+	b, err := os.ReadFile(filepath.Join(home, FileProgram))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }

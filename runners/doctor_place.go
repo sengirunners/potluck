@@ -92,13 +92,7 @@ func (p *doctorPool) fit(w want, ttl int) (names []string, why string, permanent
 	}
 	free := make([]computeapi.RunTargetView, len(p.views))
 	for i, v := range p.views {
-		if v.Describe != nil {
-			d := *v.Describe
-			d.Available = true
-			v.Describe = &d
-		}
-		v.BudgetSpent = nil // a spent budget clears with its period, as busy clears
-		free[i] = v
+		free[i] = whenFree(v)
 	}
 	if n, _ := bindingFits(free, p.sizes, w, nil, nil, ttl); len(n) > 0 {
 		return nil, why, false

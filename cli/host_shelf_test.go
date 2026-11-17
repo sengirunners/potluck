@@ -69,7 +69,7 @@ func TestShelfStatus(t *testing.T) {
 	}
 	ts := []computeapi.RunTarget{box("a", "oci", "5", "/s1"), box("b", "oci", "9", "/s1"), box("c", "oci", "0", "/s2"), box("d", "tart", "", "/s3")}
 	var out, errs bytes.Buffer
-	a := &app{stdout: &out, stderr: &errs}
+	a := programApp(Program{}, nil, &out, &errs)
 	if err := a.shelfStatus(context.Background(), t.TempDir(), ts); err != nil {
 		t.Fatal(err)
 	}

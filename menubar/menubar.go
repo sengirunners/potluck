@@ -34,6 +34,20 @@ type Facts struct {
 	HostErr string
 	// Loc is where times are shown (time.Local in the command).
 	Loc *time.Location
+	// Start and Share are the commands that start this machine's daemon and
+	// share this machine, as the program that answers spells them
+	// ("potluck daemon --detach", "potluck host"; cli renders them).
+	Start, Share string
+	// Background is a host run going on in the background, or the last
+	// one's end (nil: none).
+	Background *Background
+}
+
+// Background is a host run in the background (host --detach): running
+// now, or ended, with the last line it wrote.
+type Background struct {
+	State string `json:"state"` // running or ended
+	Last  string `json:"last,omitempty"`
 }
 
 // Lending is how much of this machine is lent and in use.
@@ -125,6 +139,8 @@ type Status struct {
 	Cores   int     `json:"cores"`
 	Lending Lending `json:"lending"`
 	Menu    Menu    `json:"menu"`
+	// Background is Facts.Background.
+	Background *Background `json:"background,omitempty"`
 }
 
 // Build turns the facts into the status and its menu.
@@ -134,7 +150,7 @@ func Build(f Facts) Status {
 		loc = time.UTC
 	}
 	l := Lend(f.Targets)
-	st := Status{Cores: f.Cores, Lending: l, Mode: protocol.HostUnreadable, State: protocol.HostHolding}
+	st := Status{Cores: f.Cores, Lending: l, Mode: protocol.HostUnreadable, State: protocol.HostHolding, Background: f.Background}
 	if f.Host != nil {
 		st.Mode, st.State, st.Until = f.Host.Mode, f.Host.State, f.Host.Until
 	}
@@ -146,14 +162,14 @@ func Build(f Facts) Status {
 		m.Note = cmp.Or(f.HostErr, "no new jobs start until it can")
 	case f.Daemon != "":
 		m.Title = "Potluck is not running"
-		m.Note = "start it: potluck daemon --detach"
+		m.Note = "start it: " + f.Start
 	case l.Sizes == 0 && f.ListErr != "":
 		m.Title = "Cannot read what this Mac lends"
 	case l.Sizes == 0:
 		m.Title = "Not lending"
-		m.Note = "share this Mac: potluck host"
-	case st.Mode == protocol.HostClosed:
-		m.Title = "Stopped: lending nothing"
+		m.Note = "share this Mac: " + f.Share
+	case st.Mode == protocol.HostClosed: // host pause, or Stop now
+		m.Title = "Paused: lending nothing"
 	case st.State == protocol.HostDraining:
 		m.Title = fmt.Sprintf("Winding down %d of %d cores", lent, f.Cores)
 		if t, err := time.Parse(time.RFC3339, f.Host.DrainDeadline); err == nil && !now().Before(t) {
@@ -175,6 +191,9 @@ func Build(f Facts) Status {
 			m.Note = join(m.Note, "not everything shared could be read: "+f.ListErr)
 		}
 	}
+	if b := f.Background; b != nil && b.State == "running" {
+		m.Note = join(m.Note, "sharing goes on in the background: "+b.Last)
+	}
 	if u := clock(st.Until, loc); u != "" && st.Mode != protocol.HostAuto {
 		m.Note = join(m.Note, "until "+u+", then back to your rules")
 	}
@@ -184,6 +203,9 @@ func Build(f Facts) Status {
 		item("keep", "Keep lending", "", keep, protocol.HostAuto),
 		item("wind", "Wind down", "finish jobs, take no new ones", st.Mode == protocol.HostDrain, protocol.HostDrain),
 		item("stop", "Stop now", "end jobs now", st.Mode == protocol.HostClosed, protocol.HostClosed),
+	}
+	if st.Mode == protocol.HostClosed { // paused: the way back
+		m.Items[0].Label = "Resume lending"
 	}
 	if stop := &m.Items[2]; stop.Args != nil && l.Jobs > 0 {
 		stop.Confirm = fmt.Sprintf("End %s now? Their work is lost.", plural(l.Jobs, "running job"))

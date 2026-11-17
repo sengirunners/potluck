@@ -64,7 +64,7 @@ func (a *app) ciPRCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rerun := "potluck ci pr " + repo
+			rerun := a.cmd("ci pr " + repo)
 			cmd.Flags().Visit(func(f *pflag.Flag) {
 				if f.Name != "dry-run" && f.Name != "workflow" && cmd.InheritedFlags().Lookup(f.Name) == nil { // not --json and the like
 					rerun += " --" + f.Name + " " + shellQuote(f.Value.String())
@@ -74,7 +74,7 @@ func (a *app) ciPRCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(res)
 			}
 			return nil
@@ -112,7 +112,7 @@ func (a *app) ciPRLabels(ctx context.Context, labels, size, osName string) ([]st
 		return nil, err
 	}
 	if st.Label == "" {
-		return nil, errors.New("this machine lends to no pool yet: potluck runners setup <pool> first, or pass --labels")
+		return nil, errors.New("this machine lends to no pool yet: " + a.cmd("runners setup <pool>") + " first, or pass --labels")
 	}
 	pool := strings.ToLower(st.Label)
 	if size != "" {
@@ -146,7 +146,7 @@ type ghContent struct {
 func (a *app) ciPR(ctx context.Context, repo, job, workflow string, own []string, dryRun bool, rerun string) (ciPRResult, error) {
 	res := ciPRResult{Repo: repo, Labels: own}
 	say := a.say
-	if a.json {
+	if a.asJSON() {
 		say = func(string, ...any) {}
 	}
 	var info struct {
@@ -180,7 +180,7 @@ func (a *app) ciPR(ctx context.Context, repo, job, workflow string, own []string
 				continue
 			}
 			if !jobrule.ValidWorkflow(f.Path) {
-				res.note(say, "note: skipped %q: potluck ci pr edits only files named with letters, digits, '.', '_' and '-'", f.Path)
+				res.note(say, "note: skipped %q: %s edits only files named with letters, digits, '.', '_' and '-'", f.Path, a.cmd("ci pr"))
 				continue
 			}
 			files = append(files, f.Path)
@@ -283,8 +283,8 @@ func (a *app) ciPR(ctx context.Context, repo, job, workflow string, own []string
 	g, _ := forkguard.Parse(h.c.After)
 	say("Job %s in %s: own branches will ask for %s (this machine's pool); pull requests from forks stay on GitHub's %s.", job, h.file.Path, strings.Join(own, ", "), g.Fork)
 	res.Diff = unifiedDiff(h.file.Path, h.src, h.c.Text)
-	if !a.json {
-		fmt.Fprint(a.stdout, res.Diff)
+	if !a.asJSON() {
+		fmt.Fprint(a.host.Stdout, res.Diff)
 	}
 	if dryRun {
 		res.State = ciPRDryRun
@@ -315,7 +315,7 @@ func (a *app) ciPR(ctx context.Context, repo, job, workflow string, own []string
 	if base.Object.SHA == "" {
 		return res, fmt.Errorf("GitHub did not say %s's head commit", info.DefaultBranch)
 	}
-	script, err := writePRScript(repo, info.DefaultBranch, base.Object.SHA, branch, job, g.Fork, own, h.file, h.c.Text)
+	script, err := writePRScript(repo, info.DefaultBranch, base.Object.SHA, branch, job, g.Fork, own, h.file, h.c.Text, a.cmd("ci pr"))
 	if err != nil {
 		return res, err
 	}
@@ -325,8 +325,8 @@ func (a *app) ciPR(ctx context.Context, repo, job, workflow string, own []string
 	}
 	res.State, res.Script, res.Next = ciPRScript, script, "sh "+shellQuote(script)
 	say("The GitHub App this machine uses can read workflows but not change them or open pull requests, so the pull request is opened with your own gh sign-in. This script does it (pushing a workflow file needs gh's workflow scope: gh auth refresh -s workflow):")
-	if !a.json {
-		fmt.Fprint(a.stdout, string(b))
+	if !a.asJSON() {
+		fmt.Fprint(a.host.Stdout, string(b))
 	}
 	say("next: %s", res.Next)
 	return res, nil
@@ -369,12 +369,13 @@ func ciPRBranch(ctx context.Context, repo, job string) (branch, open string, err
 }
 
 // writePRScript writes, in a new temporary directory, the request bodies and a script that creates branch at base,
-// commits text as file's new content there, and opens the pull request. It returns the script's path.
-func writePRScript(repo, defaultBranch, base, branch, job, fork string, own []string, file ghContent, text []byte) (string, error) {
+// commits text as file's new content there, and opens the pull request. It returns the script's path. by is
+// the command that prepared it, as the person typed it (the commit and pull request name it).
+func writePRScript(repo, defaultBranch, base, branch, job, fork string, own []string, file ghContent, text []byte, by string) (string, error) {
 	title := "Run job " + job + " on the lent Mac for own branches"
 	refBody, _ := json.Marshal(map[string]string{"ref": "refs/heads/" + branch, "sha": base})
 	putBody, _ := json.Marshal(map[string]string{
-		"message": title + "\n\nPull requests from forks stay on GitHub's " + fork + ". Prepared by potluck ci pr.",
+		"message": title + "\n\nPull requests from forks stay on GitHub's " + fork + ". Prepared by " + by + ".",
 		"content": base64.StdEncoding.EncodeToString(text),
 		"sha":     file.SHA,
 		"branch":  branch,
@@ -383,12 +384,12 @@ func writePRScript(repo, defaultBranch, base, branch, job, fork string, own []st
 		"- Pushes, dispatches and pull requests from this repository's own branches ask for `%s`: the Mac lent to this repository's Potluck pool.\n"+
 		"- Pull requests from forks keep running on GitHub's `%s`, as before.\n\n"+
 		"A fork's pull request runs the workflow from its own merge commit, so it can change `runs-on` itself. The Potluck broker refuses jobs from forks, so those never reach the lent Mac; if this repository is private and its owner turned on `allow_fork_prs`, that refusal is off and they can.\n\n"+
-		"Undo: change `runs-on` back to `%s`.\n\nPrepared by `potluck ci pr`.\n",
-		job, file.Path, strings.Join(own, ", "), fork, fork)
+		"Undo: change `runs-on` back to `%s`.\n\nPrepared by `%s`.\n",
+		job, file.Path, strings.Join(own, ", "), fork, fork, by)
 	files := map[string][]byte{"ref.json": refBody, "put.json": putBody, "body.md": []byte(body), "workflow.yml": text}
 	return writeGHScript("potluck-ci-pr-", "open-pr.sh", files, func(q func(string) string) string {
 		return fmt.Sprintf(`#!/bin/sh
-# Opens the pull request potluck ci pr prepared (written %[2]s). The new workflow file is
+# Opens the pull request %[13]s prepared (written %[2]s). The new workflow file is
 # %[3]s. Needs gh signed in with the workflow scope.
 set -e
 dir=%[12]s
@@ -398,7 +399,7 @@ gh api --method PUT %[6]s --input %[7]s >/dev/null
 gh pr create -R %[1]s --base %[8]s --head %[9]s --title %[10]s --body-file %[11]s
 `, shellQuote(repo), time.Now().UTC().Format(time.RFC3339), q("workflow.yml"), shellQuote("repos/"+repo+"/git/refs"), q("ref.json"),
 			shellQuote("repos/"+repo+"/contents/"+escapePath(file.Path)), q("put.json"),
-			shellQuote(defaultBranch), shellQuote(branch), shellQuote(title), q("body.md"), q(""))
+			shellQuote(defaultBranch), shellQuote(branch), shellQuote(title), q("body.md"), q(""), by)
 	})
 }
 

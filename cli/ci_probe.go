@@ -51,9 +51,9 @@ func (a *app) ciProbe(ctx context.Context, repo string, want probeLabels, public
 	check := func(status, message, fix string) runners.DoctorCheck {
 		return runners.DoctorCheck{Number: probeCheck, Status: status, Message: message, Fix: fix}
 	}
-	rerun := "potluck ci doctor " + shellQuote(repo) + " --probe" + want.flags(true)
+	rerun := a.cmd("ci doctor") + " " + shellQuote(repo) + " --probe" + want.flags(true)
 	// The placeholder is quoted: pasted bare, its < and > would be shell redirects.
-	relabel := "potluck ci doctor " + shellQuote(repo) + " --probe" + want.flags(false) + " --labels " + shellQuote("<labels>")
+	relabel := a.cmd("ci doctor") + " " + shellQuote(repo) + " --probe" + want.flags(false) + " --labels " + shellQuote("<labels>")
 	if public {
 		rerun += " --public"
 		relabel += " --public"
@@ -112,7 +112,7 @@ func (a *app) ciProbe(ctx context.Context, repo string, want probeLabels, public
 	if p := workflowlint.Lint(string(text)); len(p) > 0 {
 		return check("fail", "The fork-safe lint refuses the generated probe workflow: "+strings.Join(p, "; "), "report this: the generator and the lint disagree"), ""
 	}
-	script, err := writeProbeScript(repo, branch, labels, text)
+	script, err := writeProbeScript(repo, branch, labels, text, prefix(a.host.Prefix))
 	if err != nil {
 		return check("warn", "unavailable: the probe script could not be written: "+err.Error(), rerun), ""
 	}
@@ -124,7 +124,7 @@ func (a *app) ciProbe(ctx context.Context, repo string, want probeLabels, public
 // pushes them as branch (one commit with no parent, holding only the workflow, so the push starts no other
 // workflow), waits for the run, prints what the job reported and deletes the branch, also when it fails or is
 // stopped. It returns the script's path.
-func writeProbeScript(repo, branch string, labels []string, workflow []byte) (string, error) {
+func writeProbeScript(repo, branch string, labels []string, workflow []byte, p prefix) (string, error) {
 	tree, err := json.Marshal(map[string]any{"tree": []map[string]string{{
 		"path": runners.ProbeWorkflowPath, "mode": "100644", "type": "blob", "content": string(workflow),
 	}}})
@@ -134,7 +134,7 @@ func writeProbeScript(repo, branch string, labels []string, workflow []byte) (st
 	marker := strings.TrimSpace(runners.ProbeMarker)
 	return writeGHScript("potluck-ci-probe-", "probe.sh", map[string][]byte{"tree.json": tree, "potluck-probe.yml": workflow}, func(q func(string) string) string {
 		return fmt.Sprintf(`#!/bin/sh
-# The probe potluck ci doctor --probe prepared (written %[1]s) for %[2]s: it pushes branch
+# The probe %[11]s --probe prepared (written %[1]s) for %[2]s: it pushes branch
 # %[3]s holding only the workflow %[4]s, waits for its job on %[5]s,
 # prints what the machine reported, and deletes the branch, also when it fails or is stopped.
 # Needs gh signed in with the workflow scope (gh auth refresh -s workflow).
@@ -191,7 +191,7 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 tree=$(gh api --method POST "repos/$repo/git/trees" --input %[7]s --jq .sha)
 # The body is JSON on stdin, so an empty parents list needs no recent gh (-f 'parents[]' does).
-commit=$(printf '{"message":"potluck ci doctor --probe","tree":"%%s","parents":[]}' "$tree" | gh api --method POST "repos/$repo/git/commits" --input - --jq .sha)
+commit=$(printf '{"message":"%[11]s --probe","tree":"%%s","parents":[]}' "$tree" | gh api --method POST "repos/$repo/git/commits" --input - --jq .sha)
 # Set first: a stop while the branch is being made still deletes it (a branch that was never made is no error).
 pushed=1
 if ! why=$(gh api --method POST "repos/$repo/git/refs" -f ref="refs/heads/$branch" -f sha="$commit" 2>&1 >/dev/null); then
@@ -209,7 +209,7 @@ if ! why=$(gh api --method POST "repos/$repo/git/refs" -f ref="refs/heads/$branc
   # Only now: a stop during the reads still has cleanup look for the run.
   refused=$gone
   echo "fail: GitHub did not accept the probe's branch: $why" >&2
-  echo "A token without gh's workflow scope is refused like this (gh auth refresh -s workflow); so is a ruleset that blocks the branch name or a GitHub outage. This script removes its files when it ends: run potluck ci doctor %[10]s --probe again for a new one." >&2
+  echo "A token without gh's workflow scope is refused like this (gh auth refresh -s workflow); so is a ruleset that blocks the branch name or a GitHub outage. This script removes its files when it ends: run %[11]s %[10]s --probe again for a new one." >&2
   exit 1
 fi
 echo "Pushed branch $branch; waiting for its job."
@@ -228,7 +228,7 @@ while :; do
     if [ -z "$run" ]; then
       echo "fail: GitHub started no run for the probe in $wait_s seconds; check that Actions is on for $repo." >&2
     else
-      echo "fail: the probe job waited $wait_s seconds and no machine finished it ($state); run potluck ci doctor $repo and potluck runners jobs." >&2
+      echo "fail: the probe job waited $wait_s seconds and no machine finished it ($state); run %[11]s $repo and %[12]s." >&2
     fi
     exit 1
   fi
@@ -254,6 +254,6 @@ if [ "$conclusion" != success ]; then
 fi
 echo "pass: a machine of this pool took the probe job and finished it."
 `, time.Now().UTC().Format(time.RFC3339), shellQuote(repo), shellQuote(branch), q("potluck-probe.yml"), strings.Join(labels, ", "),
-			probeWaitSeconds, q("tree.json"), marker, q(""), shellQuote(repo))
+			probeWaitSeconds, q("tree.json"), marker, q(""), shellQuote(repo), p.cmd("ci doctor"), p.cmd("runners jobs"))
 	})
 }

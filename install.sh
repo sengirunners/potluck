@@ -303,6 +303,7 @@ next_steps() {
 	say "  see what this machine can share:  potluck doctor"
 	say "  start a pool:  potluck create <pool>      (then: potluck invite <name>)"
 	say "  join a pool:   potluck join '<invite code>'"
+	say "  keep potluck current, once a day:  potluck upgrade enable"
 }
 
 main() {

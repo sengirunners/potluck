@@ -83,6 +83,21 @@ func KeepEarlierImage(t computeapi.RunTarget) (with string, images []string, run
 	return "", nil, "", true
 }
 
+// keepFlags are the share flags that lend again the images of t, a binding
+// whose image the pin table does not know, as KeepEarlierImage repeats them:
+// its images and its runner_dir.
+func keepFlags(t computeapi.RunTarget) string {
+	_, images, runnerDir, _ := KeepEarlierImage(t)
+	var f []string
+	for _, im := range images {
+		f = append(f, "--image "+im)
+	}
+	if runnerDir != "" {
+		f = append(f, "--runner-dir "+runnerDir)
+	}
+	return strings.Join(f, " ")
+}
+
 func imageRoot(images []string) bool {
 	if len(images) == 0 {
 		return false

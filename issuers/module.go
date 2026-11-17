@@ -108,6 +108,7 @@ func NewModule(d *core.Deps) *Module {
 			Live:            m.live,
 			Check:           GrantCheck(d, m.classOf, mints[kind]),
 			JobHolds:        m.jobHolds,
+			JobBox:          m.jobBox,
 			Events:          eventsOf{d},
 			Tokens:          registryTokens{d},
 			BoxExpires:      m.boxExpires,
@@ -184,6 +185,22 @@ func ProvideJobHolds(d *core.Deps, f JobHolds) { d.Provide(jobHoldsService, f) }
 // registered no job holds anything.
 func (m *Module) jobHolds(ctx context.Context, req Request) (bool, error) {
 	f, _ := m.d.Service(jobHoldsService).(JobHolds)
+	if f == nil {
+		return false, nil
+	}
+	return f(ctx, req)
+}
+
+const jobBoxService = "issuers.jobbox"
+
+// ProvideJobBox registers the runner broker's answer to whether a box is
+// its box for a GitHub job (Options.JobBox), before the daemon serves.
+func ProvideJobBox(d *core.Deps, f JobBox) { d.Provide(jobBoxService, f) }
+
+// jobBox is the broker's JobBox, read at each call; with none registered
+// no box is a job's broker box.
+func (m *Module) jobBox(ctx context.Context, req Request) (bool, error) {
+	f, _ := m.d.Service(jobBoxService).(JobBox)
 	if f == nil {
 		return false, nil
 	}

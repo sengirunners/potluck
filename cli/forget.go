@@ -85,10 +85,10 @@ func (a *app) confirmForget(k api.ProjectKey, state string) error {
 	if state == api.ForgetDropHostState {
 		what = "drops this machine's shares, the pool's sandboxes here and the pool's key tag (volumes made under it stay, out of reach)"
 	}
-	fmt.Fprintf(a.stderr, "pool %s is tied to the key of %s (%s over %s, since %s).\n"+
+	fmt.Fprintf(a.host.Stderr, "pool %s is tied to the key of %s (%s over %s, since %s).\n"+
 		"Forgetting it lets the next join of this id tie it to any key, and %s.\n"+
 		"Type yes to forget it: ", k.Project, k.Authority, k.Fingerprint, k.Via, k.Bound.Format("2006-01-02 15:04"), what)
-	line, err := bufio.NewReader(a.stdin).ReadString('\n')
+	line, err := bufio.NewReader(a.host.Stdin).ReadString('\n')
 	if strings.TrimSpace(line) == "yes" {
 		return nil
 	}

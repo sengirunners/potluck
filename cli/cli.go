@@ -1,12 +1,13 @@
 // Package cli is the potluck command: the daemon (potluck daemon) and the
-// commands people run against it. The commands were copied from zm's cmd/zm
-// (pool, host, sandbox, job, target, runners and the team commands) and use
-// Potluck's words; zm keeps its own copies for now.
+// commands people run against it. Another program built on Potluck mounts
+// the same commands in its own tree (Commands, mount.go): every hint they
+// print names a command through the host's prefix (app.cmd).
 //
-// Each Run builds a fresh command tree around an app, which holds the
-// global flags and where output goes, so tests can run many commands in one
-// process (cli_test.go). A program built on this command (Program,
-// RunProgram) brings its own daemon wiring, commands and MCP tools.
+// Each run builds a fresh command tree around an app, which holds the host
+// (its prefix, global flags, client and streams), so tests can run many
+// commands in one process (cli_test.go). A program built on the potluck
+// command itself (Program, RunProgram) brings its own daemon wiring,
+// commands and MCP tools.
 package cli
 
 import (
@@ -29,6 +30,10 @@ import (
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/tunnel"
 )
+
+// programName is the potluck program's name: its root command and
+// config.Program.
+const programName = "potluck"
 
 // Potluck's home: POTLUCK_HOME, else ~/.potluck, with its socket
 // potluck.sock. Never zm's: a zm home holds migrations this build does not
@@ -69,7 +74,7 @@ func UseHome() {
 	config.Use(config.Names{HomeEnvs: []string{EnvHome}, HomeDirs: []string{HomeDir}, Sockets: []string{SocketName}})
 	config.MachineEnv, config.MachineSuffix = EnvMachine, MachineSuffix
 	config.HumanEnv, config.HostEnv = EnvHuman, ""
-	config.Program, config.Verbs = "potluck", Verbs
+	config.Program, config.Verbs = programName, Verbs
 }
 
 // Verbs maps zm's command words, as kit's messages name them, to potluck's
@@ -118,9 +123,11 @@ func (t words) Write(p []byte) (int, error) {
 
 // nameTaken is the hint for a tailnet node whose name another node holds
 // (kit/tailnet's invite and join refusals name zm's remedies).
-const nameTaken = "another node on your tailnet already has this machine's name. Give potluck its own: " +
-	"set POTLUCK_MACHINE=<name> (or \"machine\" in $POTLUCK_HOME/config.json), restart the daemon " +
-	"(potluck daemon stop, then potluck daemon --detach) and run this again"
+func (a *app) nameTaken() string {
+	return "another node on your tailnet already has this machine's name. Give " + a.name() + " its own: " +
+		"set POTLUCK_MACHINE=<name> (or \"machine\" in $POTLUCK_HOME/config.json), restart the daemon " +
+		"(" + a.cmd("daemon stop") + ", then " + a.cmd("daemon --detach") + ") and run this again"
+}
 
 // Main runs the potluck command with the process's arguments and returns
 // its exit code.
@@ -142,17 +149,22 @@ func caughtSignals() []os.Signal {
 	return sigs
 }
 
-// app is one run of the command: its global flags and its streams.
+// app is one run of Potluck's commands for a host (mount.go): how they
+// are typed there, its global flags, its client and its streams.
 type app struct {
-	prog    Program // what this binary adds to Potluck (program.go)
-	json    bool
-	project string
-	stdin   io.Reader
-	stdout  io.Writer
-	stderr  io.Writer
+	host Host
+	prog Program // what this binary adds to Potluck (program.go); the potluck program's alone
+	// own: this is the potluck program's own run (RunProgram), whose daemon
+	// and home follow attach.go's rule; a mounted run uses the host's
+	// client and home.
+	own bool
 	// running is the command being executed (set before its RunE), so
-	// client can tell whether it may start the daemon.
+	// the potluck program's client can tell whether it may start the daemon.
 	running *cobra.Command
+	// The daemon this run uses (home, attach.go), decided once.
+	homeDone bool
+	homeV    daemonHome
+	homeErr  error
 }
 
 // Run runs one potluck command line and returns its exit code: 0, 1 for
@@ -162,15 +174,19 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	return RunProgram(ctx, Program{}, args, stdin, stdout, stderr)
 }
 
+// root is the potluck program's command tree: its own commands
+// (ProgramCommands) and the mountable ones, with --json and --pool.
 func (a *app) root() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "potluck",
+		Use:   programName,
 		Short: "Pool your machines with friends and run sandboxes on them",
 		Long: `Potluck pools machines: one person creates a pool and invites friends; a
-friend joins it, and may share a machine with it (potluck host). Anyone in
+friend joins it, and may share a machine with it (` + a.cmd("host") + `). Anyone in
 the pool can then create sandboxes on the shared machines and run commands
-in them. A local daemon (potluck daemon) does the work; every command talks
-to it over a socket in $POTLUCK_HOME (default ~/.potluck).`,
+in them. A local daemon (` + a.cmd("daemon") + `) does the work; every command talks
+to it over a socket in $POTLUCK_HOME (default ~/.potluck). On a machine
+whose daemon is another program's built on Potluck, and with no
+~/.potluck, the commands use that daemon instead (docs/daemon.md).`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       api.Version + " (" + api.Commit + ")",
@@ -178,57 +194,60 @@ to it over a socket in $POTLUCK_HOME (default ~/.potluck).`,
 			a.running = cmd
 		},
 	}
-	root.PersistentFlags().BoolVar(&a.json, "json", false, "print JSON")
-	root.PersistentFlags().StringVarP(&a.project, "pool", "P", "", "the pool (default: the only pool this machine is in)")
-	root.AddCommand(a.daemonCmd(), a.statusCmd(),
-		a.createCmd(), a.inviteCmd(), a.joinCmd(), a.leaveCmd(), a.forgetCmd(), a.remotesCmd(),
-		a.doctorCmd(), a.isolationCmd(), a.hostCmd(), a.ciCmd(),
-		a.sandboxCmd(), a.mcpCmd(), a.usageCmd(), a.sealingCmd(), a.runCmd(), a.agentRunnerCmd(), a.runnersCmd(), a.secretsCmd(), a.driverCmd(), a.upgradeCmd())
+	var asJSON bool
+	var pool string
+	root.PersistentFlags().BoolVar(&asJSON, "json", false, "print JSON")
+	root.PersistentFlags().StringVarP(&pool, "pool", "P", "", "the pool (default: the only pool this machine is in)")
+	a.host.JSON = func() bool { return asJSON }
+	a.host.Pool = func() string { return pool }
+	root.AddCommand(a.programCommands()...)
+	root.AddCommand(a.mountable()...)
 	a.addCommands(root)
 	return root
 }
 
 // report prints err (as JSON with --json) and returns the exit code.
 func (a *app) report(err error) int {
-	var quiet exitSilently
-	if errors.As(err, &quiet) {
-		return int(quiet)
-	}
-	var ew exitWith
-	if errors.As(err, &ew) {
-		if ew.err != nil {
-			a.report(ew.err)
+	if code, show, ok := ExitCode(err); ok {
+		if show != nil {
+			a.report(show)
 		}
-		return ew.code
+		return code
 	}
 	var e *api.Error
 	if client.NotRunning(err) { // kit's words name zm's commands
-		e = &api.Error{Code: api.CodeUnavailable, Message: "the potluck daemon is not running",
-			Hint: "start it with: potluck daemon --detach (most commands start it on their own)"}
+		e = &api.Error{Code: api.CodeUnavailable, Message: "the " + a.name() + " daemon is not running",
+			Hint: "start it with: " + a.cmd("daemon --detach") + " (most commands start it on their own)"}
+		if a.own { // a mounted run's daemon is the host's: attach.go is not consulted
+			if o := a.attachedTo(); o != nil {
+				e = &api.Error{Code: api.CodeUnavailable, Message: fmt.Sprintf("%s's daemon (home %s), which potluck's commands use, stopped answering", o.Program, tildePath(o.Home)),
+					Hint: "start it again with that program's command"}
+			}
+		}
 	}
 	if e != nil || errors.As(err, &e) {
 		if e.Code == api.CodeConflict && strings.Contains(e.Message, "is taken on this tailnet") {
-			e.Hint = nameTaken
+			e.Hint = a.nameTaken()
 		}
 		x := *e // kit's words in potluck's, as text and as JSON
 		x.Message, x.Hint = config.Text(e.Message), config.Text(e.Hint)
 		e = &x
-		if a.json {
+		if a.asJSON() {
 			b, _ := json.Marshal(api.ErrorResponse{Error: e})
-			_ = json.NewEncoder(a.stderr).Encode(json.RawMessage(textclean.JSON(b)))
+			_ = json.NewEncoder(a.host.Stderr).Encode(json.RawMessage(textclean.JSON(b)))
 		} else {
-			msg := "potluck: " + e.Message
+			msg := a.name() + ": " + e.Message
 			if e.Hint != "" {
 				msg += "\n  " + e.Hint
 			}
-			fmt.Fprintln(a.stderr, textclean.Clean(msg))
+			fmt.Fprintln(a.host.Stderr, textclean.Clean(msg))
 		}
 		if client.NotRunning(err) {
 			return 3
 		}
 		return 1
 	}
-	fmt.Fprintln(a.stderr, "potluck:", textclean.Clean(config.Text(err.Error())))
+	fmt.Fprintln(a.host.Stderr, a.name()+":", textclean.Clean(config.Text(err.Error())))
 	if strings.Contains(err.Error(), "unknown command") || strings.Contains(err.Error(), "flag") ||
 		strings.Contains(err.Error(), "arg(s)") {
 		return 2
@@ -256,17 +275,33 @@ func (e exitWith) Error() string {
 	return fmt.Sprintf("exit %d", e.code)
 }
 
-// client returns a client for this machine's daemon on its socket, with
-// --pool applied. It starts the daemon when none answers, unless the
-// running command never does (autostartAllowed). It reads none of zm's
-// client variables (ZM_HOST, ZM_TOKEN, ZM_AS, ZM_PROJECT, ZM_SESSION).
-// With POTLUCK_BOX_CREDENTIAL set it is instead a client for the authority
-// that credential names, and starts nothing.
+// client returns the host's client for this machine's daemon (Host.Client)
+// and its client config, with the host's pool flag applied to a copy.
 func (a *app) client() (*client.Client, *config.Config, error) {
-	cfg, err := config.LoadClient()
+	c, cfg, err := a.host.Client()
 	if err != nil {
 		return nil, nil, err
 	}
+	if p := a.pool(); p != "" {
+		c = inPool(c, p)
+	}
+	return c, cfg, nil
+}
+
+// ownClient is the potluck program's Host.Client: a client for this
+// machine's daemon on its socket: potluck's own, or the daemon of another
+// program this run uses (home, attach.go). It starts potluck's own daemon
+// when none answers, unless the running command never does
+// (autostartAllowed); never another program's. It reads none of zm's
+// client variables (ZM_HOST, ZM_TOKEN, ZM_AS, ZM_PROJECT, ZM_SESSION).
+// With POTLUCK_BOX_CREDENTIAL set it is instead a client for the authority
+// that credential names, and starts nothing.
+func (a *app) ownClient() (*client.Client, *config.Config, error) {
+	h, err := a.home()
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg := h.cfg
 	var c *client.Client
 	if path := os.Getenv(EnvBoxCredential); path != "" {
 		cred, err := tunnel.ReadBoxCredential(path)
@@ -279,14 +314,33 @@ func (a *app) client() (*client.Client, *config.Config, error) {
 	} else {
 		c = client.NewUnix(cfg.SocketPath())
 		c.Cwd, _ = os.Getwd()
-		if autostartAllowed(a.running, os.Getenv) {
+		// Another program's daemon, or one on its home, is never started from here.
+		if h.owner == "" && autostartAllowed(a.running, os.Getenv) {
 			c.Autostart = func(ctx context.Context) error { return a.autostart(ctx, cfg) }
 		}
 	}
-	if a.project != "" {
-		c.Project, c.ProjectFrom = a.project, "flag"
-	}
 	return c, cfg, nil
+}
+
+// readClient is a client for this machine's daemon that never starts it
+// (host status, asked every few seconds; doctor and isolation, which only
+// read): the potluck program's own socket, or a copy of the host's client
+// with its autostart off. No pool applied.
+func (a *app) readClient() (*client.Client, error) {
+	if !a.own {
+		c, _, err := a.host.Client()
+		if err != nil {
+			return nil, err
+		}
+		x := *c
+		x.Autostart = nil
+		return &x, nil
+	}
+	cfg, err := a.loadClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.NewUnix(cfg.SocketPath()), nil
 }
 
 // inPool is a client for this machine's daemon with the pool as its
@@ -300,7 +354,7 @@ func (a *app) inPool(ctx context.Context) (*client.Client, error) {
 	if c.Project != "" {
 		return c, nil
 	}
-	p, err := onlyPool(ctx, c)
+	p, err := a.onlyPool(ctx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -308,7 +362,7 @@ func (a *app) inPool(ctx context.Context) (*client.Client, error) {
 }
 
 // onlyPool is the one pool this machine runs or joined.
-func onlyPool(ctx context.Context, c *client.Client) (string, error) {
+func (a *app) onlyPool(ctx context.Context, c *client.Client) (string, error) {
 	l, err := c.ProjectList(ctx)
 	if err != nil {
 		return "", err
@@ -323,7 +377,7 @@ func onlyPool(ctx context.Context, c *client.Client) (string, error) {
 	case 1:
 		return slugs[0], nil
 	case 0:
-		return "", errors.New("this machine is in no pool yet: potluck create <pool>, or potluck join '<invite code>'")
+		return "", errors.New("this machine is in no pool yet: " + a.cmd("create <pool>") + ", or " + a.cmd("join '<invite code>'"))
 	}
 	return "", fmt.Errorf("this machine is in more than one pool (%s): name one with --pool", strings.Join(slugs, ", "))
 }
@@ -341,14 +395,14 @@ func (a *app) printJSON(v any) error {
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(a.stdout)
+	enc := json.NewEncoder(a.host.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(json.RawMessage(textclean.JSON(b)))
 }
 
 // say prints one line (or more) for people on stdout.
 func (a *app) say(format string, args ...any) {
-	fmt.Fprintln(a.stdout, strings.TrimRight(textclean.Clean(config.Text(fmt.Sprintf(format, args...))), "\n"))
+	fmt.Fprintln(a.host.Stdout, strings.TrimRight(textclean.Clean(config.Text(fmt.Sprintf(format, args...))), "\n"))
 }
 
 // call is a common RunE body: build a client, run fn, print its result.
@@ -362,7 +416,7 @@ func call[T any](a *app, cmd *cobra.Command, fn func(context.Context, *client.Cl
 	if err != nil {
 		return err
 	}
-	if a.json || human == nil {
+	if a.asJSON() || human == nil {
 		return a.printJSON(v)
 	}
 	if s := human(v); s != "" {

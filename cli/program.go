@@ -50,7 +50,7 @@ func (e Env) Client() (*client.Client, error) {
 func (e Env) InPool(ctx context.Context) (*client.Client, error) { return e.a.inPool(ctx) }
 
 // JSON reports whether --json was given.
-func (e Env) JSON() bool { return e.a.json }
+func (e Env) JSON() bool { return e.a.asJSON() }
 
 // PrintJSON writes v, indented and with control characters cleaned, to
 // stdout.
@@ -60,9 +60,9 @@ func (e Env) PrintJSON(v any) error { return e.a.printJSON(v) }
 func (e Env) Say(format string, args ...any) { e.a.say(format, args...) }
 
 // Stdin, Stdout and Stderr are the run's streams.
-func (e Env) Stdin() io.Reader  { return e.a.stdin }
-func (e Env) Stdout() io.Writer { return e.a.stdout }
-func (e Env) Stderr() io.Writer { return e.a.stderr }
+func (e Env) Stdin() io.Reader  { return e.a.host.Stdin }
+func (e Env) Stdout() io.Writer { return e.a.host.Stdout }
+func (e Env) Stderr() io.Writer { return e.a.host.Stderr }
 
 // MainProgram is Main for p.
 func MainProgram(p Program) int {
@@ -75,7 +75,7 @@ func MainProgram(p Program) int {
 
 // RunProgram is Run for p.
 func RunProgram(ctx context.Context, p Program, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	a := &app{prog: p, stdin: stdin, stdout: stdout, stderr: stderr}
+	a := programApp(p, stdin, stdout, stderr)
 	root := a.root()
 	root.SetArgs(args)
 	root.SetIn(stdin)
@@ -85,6 +85,15 @@ func RunProgram(ctx context.Context, p Program, args []string, stdin io.Reader, 
 		return a.report(err)
 	}
 	return 0
+}
+
+// programApp is the potluck program's own run of p: the host whose prefix
+// is "potluck", whose client is ownClient and whose flags root defines.
+func programApp(p Program, stdin io.Reader, stdout, stderr io.Writer) *app {
+	a := newApp(Host{Prefix: programName, Stdin: stdin, Stdout: stdout, Stderr: stderr})
+	a.prog, a.own = p, true
+	a.host.Client = a.ownClient
+	return a
 }
 
 // wiring is the daemon's wiring: the program's, else Potluck's.

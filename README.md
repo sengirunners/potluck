@@ -53,6 +53,8 @@ its owner returns. Pools will let people you invite lend machines too.
 - A **sandbox** is a fresh VM or container on a host (`potluck sandbox create`). You run commands in it and then remove it.
 - A **layer** is what makes the sandbox: Tart VMs on a Mac, Docker with Kata or gVisor on Linux. Potluck drives it through a
   small program called a driver, which you do not have to run yourself.
+- One **daemon** per machine does the work. When a program built on Potluck already runs one, `potluck` uses it
+  rather than starting its own ([docs/daemon.md](docs/daemon.md#one-daemon-per-machine)).
 
 ## Quick start
 
@@ -72,7 +74,7 @@ Other ways to install, and what the script checks:
 | A release you downloaded | `sh install.sh --from <dir>` ([docs/install.md](docs/install.md)) |
 | To check the signature before anything runs | an OpenSSL 3 first on `PATH` ([docs/install.md](docs/install.md#what-is-checked)) |
 | The Mac menu bar item (not Developer ID signed yet) | `sh install.sh --menubar` on a Mac ([docs/menubar.md](docs/menubar.md)) |
-| Later releases | `potluck upgrade` |
+| Later releases | `potluck upgrade`, or once a day: `potluck upgrade enable` |
 | To build from source | `go build -o ~/bin/ ./cmd/potluck ./cmd/potluck-driver-tart ./cmd/potluck-conformance` |
 
 ### Try it on one machine
@@ -187,16 +189,21 @@ Afterwards:
 potluck isolation test <size> # prove its boxes cannot reach this machine, its LAN or tailnet (docs/isolation.md)
 potluck host set drain        # wind down: nothing new starts, running work finishes (cut after 30 minutes by default)
 potluck host set closed       # stop now (set auto to go back to your own rules)
+potluck host pause            # stop lending for now, keeping what is shared (refused while work runs)
+potluck host resume           # lend again after a pause, a wind-down or a stop now
 potluck host stop             # stop sharing: remove every size potluck host shared from this machine
 ```
 
 `--share` (default 0.5) sets the fraction of cores and RAM shared; on a Mac a sandbox ends when you touch the
-keyboard or pointer (`--reclaim-idle-s`, default 300; 0 shares all the time). Run again with no code, `potluck host` shares with the only pool this
-machine is in. `potluck host --help` lists the rest.
+keyboard or pointer (`--when away`, the default there; `--when any` shares all the time), and a run again keeps
+the earlier choice. Run again with no code, `potluck host` shares with the only pool this machine is in.
+`--detach` does the checks and the admin step, then goes on in the background (`potluck host status` says how it
+goes). `potluck host --help` lists the rest.
 
 ### More
 
-`potluck --help` lists the rest: `leave`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal`, `usage`,
+`potluck --help` lists the rest: `leave`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal|stop|start`
+(`sandbox create --persist` keeps a sandbox's disk while it is stopped), `usage`,
 `run`, `agent-runner` (a coding agent vendor's self-hosted runners in fresh sandboxes:
 [docs/agent-runners.md](docs/agent-runners.md)) and `runners`.
 
@@ -228,7 +235,7 @@ All standard output is MCP protocol traffic.
 
 | Works today | Not yet |
 | --- | --- |
-| `go build`, `go vet`, `go test` in CI on Linux; signed releases and `install.sh` | Automatic upgrades (`potluck upgrade` is run by hand) |
+| `go build`, `go vet`, `go test` in CI on Linux; signed releases and `install.sh`; a daily upgrade job (`potluck upgrade enable`) | |
 | OCI and Incus layers tested against stand-in CLIs; Tart through a fake layer | Tests on real VMs in CI (a manual run) |
 | The quick start on a fresh GitHub-hosted Linux VM with no earlier Potluck or zm on it, run by hand (the `clean-machine-proof` workflow): install, a pool over a Cloudflare quick tunnel, the VM shared through gVisor, a sandbox and `potluck run` | The quick start across two real machines in CI |
 | The VM driver passes the full suite over a fake layer (isolation is not exercised there) | |

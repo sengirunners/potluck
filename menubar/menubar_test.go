@@ -78,8 +78,13 @@ func TestBuild(t *testing.T) {
 			"Lending 6 of 12 cores", "6 cores in use by 2 jobs", "until 14:00, then back to your rules", "keep", "●●●●●●······"},
 		{"winding down", Facts{Cores: 12, Targets: lending, Host: &protocol.HostStatus{Mode: "drain", State: "draining", DrainSince: "2026-11-14T19:00:00Z", DrainDeadline: "2026-11-15T19:30:00Z"}},
 			"Winding down 6 of 12 cores", "6 cores in use by 2 jobs", "jobs still running end at Nov 15 11:30", "wind", "●●●●●●······"},
-		{"stopped", Facts{Cores: 12, Targets: []computeapi.RunTargetView{box("c3", "", "linux", 3, 2, nil, nil)}, Host: host("closed", "closed")},
-			"Stopped: lending nothing", "nothing running", "", "stop", "○○○○○○······"},
+		{"paused", Facts{Cores: 12, Targets: []computeapi.RunTargetView{box("c3", "", "linux", 3, 2, nil, nil)}, Host: host("closed", "closed")},
+			"Paused: lending nothing", "nothing running", "", "stop", "○○○○○○······"},
+		{"paused for a while, sharing in the background", Facts{Cores: 12, Targets: []computeapi.RunTargetView{box("c3", "", "linux", 3, 2, nil, nil)},
+			Host: &protocol.HostStatus{Mode: "closed", State: "closed", Until: "2026-11-14T22:00:00Z"}, Background: &Background{State: "running", Last: "pulling img: 40%"}},
+			"Paused: lending nothing", "nothing running", "sharing goes on in the background: pulling img: 40%; until 14:00, then back to your rules", "stop", "○○○○○○······"},
+		{"a background run that ended says nothing in the menu", Facts{Cores: 12, Targets: lending, Host: host("auto", "accepting"), Background: &Background{State: "ended", Last: "done"}},
+			"Lending 6 of 12 cores", "6 cores in use by 2 jobs", "", "keep", "●●●●●●······"},
 		{"the owner's rules say no", Facts{Cores: 12, Targets: lending, Host: host("auto", "closed")},
 			"Paused by your lending rules", "6 cores in use by 2 jobs", "", "keep", "●●●●●●······"},
 		{"one job", Facts{Cores: 4, Targets: []computeapi.RunTargetView{box("c1", "", "linux", 1, 2, []string{"a"}, nil)}, Host: host("auto", "accepting")},
@@ -102,6 +107,7 @@ func TestBuild(t *testing.T) {
 			"Held: the host switch cannot be read", "nothing running", "permission denied", "", "····"},
 	} {
 		c.f.Loc = loc
+		c.f.Start, c.f.Share = "potluck daemon --detach", "potluck host"
 		s := Build(c.f)
 		m := s.Menu
 		if m.Title != c.title || m.Detail != c.detail || m.Note != c.note || m.Cores != c.cores || checked(s) != c.checked {
@@ -142,13 +148,29 @@ func TestStopNowAsksFirstWhileJobsRun(t *testing.T) {
 }
 
 func TestBuildLabels(t *testing.T) {
-	s := Build(Facts{Cores: 2, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}})
-	var got [][2]string
-	for _, it := range s.Menu.Items {
-		got = append(got, [2]string{it.Label, it.Sub})
+	for mode, keep := range map[string]string{"auto": "Keep lending", "drain": "Keep lending", "closed": "Resume lending"} {
+		s := Build(Facts{Cores: 2, Host: &protocol.HostStatus{Mode: mode, State: "accepting"}})
+		var got [][2]string
+		for _, it := range s.Menu.Items {
+			got = append(got, [2]string{it.Label, it.Sub})
+		}
+		want := [][2]string{{keep, ""}, {"Wind down", "finish jobs, take no new ones"}, {"Stop now", "end jobs now"}}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: items: %v", mode, got)
+		}
 	}
-	want := [][2]string{{"Keep lending", ""}, {"Wind down", "finish jobs, take no new ones"}, {"Stop now", "end jobs now"}}
-	if !slices.Equal(got, want) {
-		t.Errorf("items: %v", got)
+}
+
+// A paused machine (host pause: the switch closed) says so, its way back
+// is Resume lending (the switch back to auto), and the status carries a
+// background host run.
+func TestBuildPaused(t *testing.T) {
+	bg := &Background{State: "running", Last: "conformance on solo-c1m2"}
+	s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{box("c1", "", "linux", 1, 2, nil, nil)}, Host: &protocol.HostStatus{Mode: "closed", State: "closed"}, Background: bg})
+	if s.Mode != "closed" || s.Menu.Title != "Paused: lending nothing" || s.Background != bg {
+		t.Fatalf("paused: %+v", s)
+	}
+	if it := s.Menu.Items[0]; it.Label != "Resume lending" || it.Checked || !slices.Equal(it.Args, []string{"host", "set", "auto"}) {
+		t.Errorf("resume item: %+v", it)
 	}
 }

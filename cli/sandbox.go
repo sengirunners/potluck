@@ -55,7 +55,9 @@ pool, kept up for its lease, which only you run commands in. It ends at rm,
 at its deadline, or when its machine's owner takes the machine back. Each
 command names it by the id sandbox create printed (sandbox ls lists them).`}
 	sb.AddCommand(a.sandboxCreateCmd(), a.sandboxLsCmd(), a.sandboxExecCmd(), a.sandboxLogsCmd(), a.sandboxShellCmd(),
-		a.sandboxCpCmd(), a.sandboxPushCmd(), a.sandboxExtendCmd(), a.sandboxRmCmd(), a.sandboxSignalCmd(), a.sandboxPreviewCmd())
+		a.sandboxCpCmd(), a.sandboxPushCmd(), a.sandboxExtendCmd(), a.sandboxRmCmd(), a.sandboxSignalCmd(), a.sandboxPreviewCmd(),
+		a.sandboxStopCmd(), a.sandboxStartCmd())
+	sb.AddCommand(a.sandboxOldSpellings()...)
 	return sb
 }
 
@@ -67,7 +69,7 @@ func (a *app) sandboxCreateCmd() *cobra.Command {
 	var netOpt string
 	var vols []string
 	var df depscli.Flags
-	cmd := &cobra.Command{Use: "create [--size c2m4] [--os linux] [--on <machine-size>] [--ttl 1h] [--ref HEAD [--dirty]] [--template agent|browser] [--net off] [--volume name:path[:rw|ro|cow]]... [--deps npm[:path]]...",
+	cmd := &cobra.Command{Use: "create [--size c2m4] [--os linux] [--on <machine-size>] [--ttl 1h] [--ref HEAD [--dirty]] [--template agent|browser] [--net off] [--persist] [--volume name:path[:rw|ro|cow]]... [--deps npm[:path]]...",
 		Short: "Start a sandbox on the smallest shared machine size that fits (or --on); prints its id",
 		Long: `With --ref (or --dirty) the sandbox gets that commit of this checkout, sent
 as a git bundle, checked out in ~/checkout (--dir); no credential enters it.
@@ -81,6 +83,12 @@ machine's filtered network (never the machine, its LAN, cloud metadata or
 outbound mail); --net off makes it with no network at all. A public
 machine's sandbox has none.
 
+--persist keeps the sandbox's disk when it stops (` + a.cmd("sandbox stop") + `, or
+its lease running out): ` + a.cmd("sandbox start") + ` boots the same disk on the
+same machine, for you only, until the machine's keep runs out (30 days by
+default; ` + a.cmd("sandbox ls") + ` shows when). ` + a.cmd("sandbox rm") + ` deletes it.
+Trusted machines whose driver keeps disks only.
+
 --volume name:path[:mode] mounts a named volume of yours at path (relative
 to the sandbox's HOME) that outlives the sandbox: the next one that names it
 on the same machine sees what this one left. rw (the default) is one
@@ -93,7 +101,7 @@ package.json files (and each workspace's package.json) of this directory,
 and its .npmrc's resolution keys (legacy-peer-deps and the like; an .npmrc
 with any other key, such as a registry or a token, is refused),
 installed by the machine in a sandbox of yours with the network and no
-secrets, and reused by your later sandboxes on that machine. potluck prints
+secrets, and reused by your later sandboxes on that machine. ` + a.name() + ` prints
 whether it was a hit (already built) or built. The sandbox sees it
 copy-on-write: what it writes never reaches the layer or another sandbox.
 Trusted machines only. --deps-wait S waits at most S seconds while another
@@ -128,7 +136,7 @@ install scripts. The files come from this directory, not from --ref.`,
 			switch {
 			case err != nil:
 				return err
-			case a.json && res != nil:
+			case a.asJSON() && res != nil:
 				return a.printJSON(struct {
 					computeapi.RunTargetHandle
 					Push boxpush.Result `json:"push"`
@@ -139,8 +147,8 @@ install scripts. The files come from this directory, not from --ref.`,
 			return a.printHandle(h, false)
 		}}
 	f := cmd.Flags()
-	f.StringVar(&want.On, "on", "", "a shared machine size, as potluck status lists it (default: the smallest that fits)")
-	f.StringVar(&want.Size, "size", "", "a size one of the pool's machines shares, as potluck status lists them (c<vCPU>m<GiB>, e.g. c2m4)")
+	f.StringVar(&want.On, "on", "", "a shared machine size, as "+a.cmd("status")+" lists it (default: the smallest that fits)")
+	f.StringVar(&want.Size, "size", "", "a size one of the pool's machines shares, as "+a.cmd("status")+" lists them (c<vCPU>m<GiB>, e.g. c2m4)")
 	f.StringVar(&want.OS, "os", "", "linux or macos")
 	f.DurationVar(&ttl, "ttl", 0, "lease length (default: the machine's)")
 	f.StringVar(&req.Ref, "ref", "", "a commit of this checkout to send in (HEAD)")
@@ -148,6 +156,7 @@ install scripts. The files come from this directory, not from --ref.`,
 	f.StringVar(&want.Template, "template", "", "an image template: "+strings.Join(computeapi.BoxTemplates(), ", ")+" (default: the machine's first image)")
 	f.StringVar(&req.RequestID, "request-id", "", "idempotency key: the same key answers the same sandbox")
 	f.StringVar(&netOpt, "net", "on", netUsage)
+	f.BoolVar(&req.Persist, "persist", false, "keep the sandbox's disk when it stops, for "+a.cmd("sandbox start")+" (a trusted machine whose driver keeps disks)")
 	f.StringArrayVar(&vols, "volume", nil, "name:path[:rw|ro|cow]: a named volume of yours that outlives the sandbox, mounted at path (repeatable)")
 	push.add(f)
 	df.Add(f)
@@ -203,12 +212,15 @@ func (a *app) sandboxCreate(ctx context.Context, c *client.Client, want computec
 	}()
 	ref := req.Ref // the push below clears the ref of a binding that does not check it out
 	if len(req.Deps) > 0 && (ref != "" || push.dirty) {
-		depscli.WarnMismatch(ctx, a.stderr, "potluck", push.repo, ref, push.dirty, push.untracked, req.Deps)
+		depscli.WarnMismatch(ctx, a.host.Stderr, a.name(), push.repo, ref, push.dirty, push.untracked, req.Deps)
 	}
 	pushing := false  // the binding asked checks out no refs: this checkout's commit is pushed in
 	var prepErr error // a refusal before the acquire: nothing was asked of that binding
 	prep := func(ctx context.Context, target string, r *computeapi.AcquireRunTargetRequest) error {
 		pushing, prepErr = false, nil
+		if prepErr = depscli.ImageOK(ctx, c, target, r.Image, r.Deps); prepErr != nil {
+			return prepErr
+		}
 		if ref == "" && !push.dirty {
 			return nil
 		}
@@ -221,7 +233,7 @@ func (a *app) sandboxCreate(ctx context.Context, c *client.Client, want computec
 				return prepErr
 			}
 		case !self && b == nil: // made before the sandbox, so a refusal costs nothing
-			b, prepErr = push.bundle(ctx, ref, a.stderr)
+			b, prepErr = push.bundle(ctx, ref, a.host.Stderr, a.name())
 		}
 		if prepErr == nil && !self {
 			r.Ref, pushing = "", true
@@ -237,18 +249,18 @@ func (a *app) sandboxCreate(ctx context.Context, c *client.Client, want computec
 	case err != nil:
 		return h, nil, retryWithKey(err, req.RequestID)
 	}
-	depscli.Print(a.stderr, "potluck", req.Deps, h.Deps)
+	depscli.Print(a.host.Stderr, a.name(), req.Deps, h.Deps)
 	if !pushing {
 		return h, nil, nil
 	}
-	if !a.json {
+	if !a.asJSON() {
 		_ = a.printHandle(h, false)
 	}
 	_, id, _ := computeclient.SplitBoxHandle(h.Handle)
-	res, err := push.push(ctx, c, target, id, b, a.stderr)
+	res, err := push.push(ctx, c, target, id, b, a.host.Stderr, a.name())
 	if err != nil {
 		s := sandboxID(h.Handle)
-		return h, nil, fmt.Errorf("%w (the sandbox is kept: potluck sandbox push %s to resume, potluck sandbox rm %s to end it)", err, s, s)
+		return h, nil, fmt.Errorf("%w (the sandbox is kept: %s to resume, %s to end it)", err, a.cmd("sandbox push "+s), a.cmd("sandbox rm "+s))
 	}
 	return h, &res, nil
 }
@@ -272,7 +284,8 @@ func (p *pushFlags) add(f *pflag.FlagSet) {
 
 // bundle makes the bundle of ref (default HEAD), listing on w every
 // untracked file it carries.
-func (p *pushFlags) bundle(ctx context.Context, ref string, w io.Writer) (*boxpush.Bundle, error) {
+// It reports progress on w, its lines starting with the program's name.
+func (p *pushFlags) bundle(ctx context.Context, ref string, w io.Writer, name string) (*boxpush.Bundle, error) {
 	switch {
 	case p.maxMiB <= 0:
 		return nil, fmt.Errorf("--max-mib must be positive")
@@ -284,17 +297,18 @@ func (p *pushFlags) bundle(ctx context.Context, ref string, w io.Writer) (*boxpu
 		return nil, err
 	}
 	for _, f := range b.Untracked {
-		fmt.Fprintf(w, "potluck: sending untracked %s\n", f)
+		fmt.Fprintf(w, "%s: sending untracked %s\n", name, f)
 	}
 	return b, nil
 }
 
-// push sends b into the sandbox, with progress on w for a big one.
-func (p *pushFlags) push(ctx context.Context, c *client.Client, target, id string, b *boxpush.Bundle, w io.Writer) (boxpush.Result, error) {
+// push sends b into the sandbox, with progress on w for a big one (its
+// lines start with the program's name).
+func (p *pushFlags) push(ctx context.Context, c *client.Client, target, id string, b *boxpush.Bundle, w io.Writer, name string) (boxpush.Result, error) {
 	o := boxpush.PushOptions{Dest: p.dir}
 	if b.Size > 4*boxpush.ChunkSize {
 		o.Progress = func(done, total int) {
-			fmt.Fprintf(w, "\rpotluck: sending %s: %d/%d chunks", shortSHA(b.Head), done, total)
+			fmt.Fprintf(w, "\r%s: sending %s: %d/%d chunks", name, shortSHA(b.Head), done, total)
 		}
 	}
 	res, err := boxpush.Push(ctx, boxpush.Exec(c, target, id), b, o)
@@ -302,7 +316,7 @@ func (p *pushFlags) push(ctx context.Context, c *client.Client, target, id strin
 		fmt.Fprintln(w)
 	}
 	if err == nil {
-		fmt.Fprintf(w, "potluck: checked out %s at %s in the sandbox (%.1f MiB sent; exec --cwd %s)\n", shortSHA(res.Commit), res.Dest, float64(b.Size)/(1<<20), res.Dest)
+		fmt.Fprintf(w, "%s: checked out %s at %s in the sandbox (%.1f MiB sent; exec --cwd %s)\n", name, shortSHA(res.Commit), res.Dest, float64(b.Size)/(1<<20), res.Dest)
 	}
 	return res, err
 }
@@ -322,16 +336,16 @@ the sandbox. A push cut off resumes when run again.`,
 			if err != nil {
 				return err
 			}
-			b, err := push.bundle(cmd.Context(), append(args[1:], "")[0], a.stderr)
+			b, err := push.bundle(cmd.Context(), append(args[1:], "")[0], a.host.Stderr, a.name())
 			if err != nil {
 				return err
 			}
 			defer b.Close()
-			res, err := push.push(cmd.Context(), c, t, id, b, a.stderr)
+			res, err := push.push(cmd.Context(), c, t, id, b, a.host.Stderr, a.name())
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(res)
 			}
 			return nil
@@ -354,12 +368,12 @@ func (a *app) sandboxLsCmd() *cobra.Command {
 				return err
 			}
 			for _, s := range skipped {
-				fmt.Fprintln(a.stderr, "potluck: skipped", config.Text(s))
+				fmt.Fprintln(a.host.Stderr, a.name()+": skipped", config.Text(s))
 			}
 			if len(hs) == 0 && len(skipped) > 0 {
 				return exitWith{code: 1, err: fmt.Errorf("no shared machine answered")}
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(computeapi.RunTargetHandles{Handles: hs})
 			}
 			for _, h := range hs {
@@ -376,7 +390,7 @@ func (a *app) sandboxLsCmd() *cobra.Command {
 // printHandle prints a sandbox on one line: when it ended (else when it
 // expires) and, with who, who made it.
 func (a *app) printHandle(h computeapi.RunTargetHandle, who bool) error {
-	if a.json {
+	if a.asJSON() {
 		return a.printJSON(h)
 	}
 	exit := ""
@@ -399,6 +413,12 @@ func (a *app) printHandle(h computeapi.RunTargetHandle, who bool) error {
 	if h.Ended != "" {
 		when = " ended=" + h.Ended
 	}
+	switch {
+	case h.State == computeapi.StateStopped: // a stopped sandbox's expires is its kept disk's
+		net += " persist (disk kept until expires; " + a.cmd("sandbox start "+sandboxID(h.Handle)) + ")"
+	case h.Persist && h.Ended == "":
+		net += " persist"
+	}
 	a.say("%s %s%s%s%s%s%s", sandboxID(h.Handle), h.State, by, exit, commit, when, net)
 	if h.URL != "" {
 		a.say("%s", h.URL)
@@ -419,7 +439,7 @@ func (a *app) usageCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(l)
 			}
 			for _, u := range l.Boxes {
@@ -479,7 +499,7 @@ sandbox, and what it runs is counted as it runs.`,
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(l)
 			}
 			if len(l.Limits) == 0 {
@@ -522,14 +542,14 @@ func (a *app) sandboxExecCmd() *cobra.Command {
 		Long: `Runs argv in the sandbox and waits for it (--timeout, default 30 s, at most
 600 s), printing its stdout and stderr and exiting with its exit code. With
 --detach it starts the command in the background and prints its pid at
-once; potluck sandbox logs reads its output.
+once; ` + a.cmd("sandbox logs") + ` reads its output.
 
 A call is sealed between machines only when it carries --secret values;
 without them argv and --stdin travel readable, and the output always does:
 the pool's machine reads them and, over a tunnel, so does the tunnel's
 provider (Cloudflare). A command that prints a secret sends it back readable.`,
-		Example: `  potluck sandbox exec mini-c2m4@mini/01J... -- uname -a
-  potluck sandbox exec mini-c2m4@mini/01J... --detach -- make test`,
+		Example: "  " + a.cmd("sandbox exec mini-c2m4@mini/01J... -- uname -a") + "\n" +
+			"  " + a.cmd("sandbox exec mini-c2m4@mini/01J... --detach -- make test"),
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, t, id, err := a.sandboxClient(cmd.Context(), args[0])
@@ -543,7 +563,7 @@ provider (Cloudflare). A command that prints a secret sends it back readable.`,
 			}
 			in := ""
 			if stdin {
-				b, err := io.ReadAll(io.LimitReader(a.stdin, 1<<20+1))
+				b, err := io.ReadAll(io.LimitReader(a.host.Stdin, 1<<20+1))
 				if err != nil {
 					return err
 				}
@@ -558,7 +578,7 @@ provider (Cloudflare). A command that prints a secret sends it back readable.`,
 				if err != nil {
 					return retryWithKey(err, requestID)
 				}
-				if a.json {
+				if a.asJSON() {
 					return a.printJSON(r)
 				}
 				a.say("%s", r.PID)
@@ -569,13 +589,13 @@ provider (Cloudflare). A command that prints a secret sends it back readable.`,
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(r)
 			}
-			fmt.Fprint(a.stdout, r.Stdout)
-			fmt.Fprint(a.stderr, r.Stderr)
+			fmt.Fprint(a.host.Stdout, r.Stdout)
+			fmt.Fprint(a.host.Stderr, r.Stderr)
 			if r.Truncated {
-				fmt.Fprintln(a.stderr, "potluck: output truncated at 1 MiB")
+				fmt.Fprintln(a.host.Stderr, a.name()+": output truncated at 1 MiB")
 			}
 			if r.Exit != 0 {
 				return exitSilently(r.Exit)
@@ -583,7 +603,7 @@ provider (Cloudflare). A command that prints a secret sends it back readable.`,
 			return nil
 		}}
 	f := cmd.Flags()
-	f.BoolVarP(&detach, "detach", "d", false, "start it in the background and print its pid (potluck sandbox logs reads its output)")
+	f.BoolVarP(&detach, "detach", "d", false, "start it in the background and print its pid ("+a.cmd("sandbox logs")+" reads its output)")
 	f.IntVar(&req.TimeoutS, "timeout", 0, "seconds, then it is killed (exit 124); default 30 and at most 600, or with --detach until the sandbox ends")
 	f.StringVar(&req.Cwd, "cwd", "", "a path in the sandbox (default: the checkout, else HOME)")
 	f.BoolVar(&stdin, "stdin", false, "send this command's stdin (at most 1 MiB)")
@@ -611,7 +631,7 @@ func (a *app) sandboxLogsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if a.json && !follow {
+				if a.asJSON() && !follow {
 					return a.printJSON(o)
 				}
 				for _, d := range []struct {
@@ -619,11 +639,11 @@ func (a *app) sandboxLogsCmd() *cobra.Command {
 					what string
 				}{{o.DroppedStdout, "stdout"}, {o.DroppedStderr, "stderr"}} {
 					if d.n > 0 {
-						fmt.Fprintf(a.stderr, "potluck: %d bytes of %s are no longer kept\n", d.n, d.what)
+						fmt.Fprintf(a.host.Stderr, "%s: %d bytes of %s are no longer kept\n", a.name(), d.n, d.what)
 					}
 				}
-				fmt.Fprint(a.stdout, o.Stdout)
-				fmt.Fprint(a.stderr, o.Stderr)
+				fmt.Fprint(a.host.Stdout, o.Stdout)
+				fmt.Fprint(a.host.Stderr, o.Stderr)
 				req.StdoutFrom, req.StderrFrom = o.StdoutNext, o.StderrNext
 				if done, err := a.logsEnd(o, follow); done {
 					return err
@@ -651,7 +671,7 @@ func (a *app) logsEnd(o computeapi.RunTargetOutput, follow bool) (bool, error) {
 	case !o.Running:
 		return true, nil
 	case !follow:
-		fmt.Fprintf(a.stderr, "potluck: running; go on with --stdout-from %d --stderr-from %d\n", o.StdoutNext, o.StderrNext)
+		fmt.Fprintf(a.host.Stderr, "%s: running; go on with --stdout-from %d --stderr-from %d\n", a.name(), o.StdoutNext, o.StderrNext)
 		return true, nil
 	}
 	return false, nil
@@ -671,7 +691,7 @@ func (a *app) sandboxSignalCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(r)
 			}
 			if !r.Sent {
@@ -712,7 +732,7 @@ func (a *app) sandboxRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(r)
 			}
 			if r.Released {
@@ -726,21 +746,23 @@ func (a *app) sandboxRmCmd() *cobra.Command {
 
 // warnCredentialLike says which copied paths look like credentials files:
 // a copy lands on the box's disk, not in its secrets.
-func warnCredentialLike(w io.Writer, paths []string) {
+func warnCredentialLike(w io.Writer, paths []string, name string) {
 	for i, p := range paths {
 		if i == 10 {
-			fmt.Fprintf(w, "potluck: warning: and %d more that look like credentials files\n", len(paths)-i)
+			fmt.Fprintf(w, "%s: warning: and %d more that look like credentials files\n", name, len(paths)-i)
 			break
 		}
-		fmt.Fprintf(w, "potluck: warning: %s looks like a credentials file\n", config.Text(p))
+		fmt.Fprintf(w, "%s: warning: %s looks like a credentials file\n", name, config.Text(p))
 	}
 	if len(paths) > 0 {
-		fmt.Fprintln(w, "potluck: a copy is written to the box's disk and is not a secret channel; send secrets with exec --secret NAME=@file (a file in the box's memory, gone when the command ends)")
+		fmt.Fprintln(w, name+": a copy is written to the box's disk and is not a secret channel; send secrets with exec --secret NAME=@file (a file in the box's memory, gone when the command ends)")
 	}
 }
 
 // cpUsage is sandbox cp's argument error.
-const cpUsage = "sandbox cp takes the sandbox first, then two paths: the sandbox's starts with : (potluck sandbox cp <sandbox> ./data :work/, or <sandbox> :work/out.json .)"
+func (a *app) cpUsage() string {
+	return "sandbox cp takes the sandbox first, then two paths: the sandbox's starts with : (" + a.cmd("sandbox cp <sandbox> ./data :work/") + ", or <sandbox> :work/out.json .)"
+}
 
 func (a *app) sandboxCpCmd() *cobra.Command {
 	var maxMiB int
@@ -758,11 +780,12 @@ outside the destination, symlinks, hard links and devices are left out and
 listed, a directory is never merged into one already here (refused) and
 appears whole or not at all; a file replaces one here. Each copy is checked
 against its SHA-256. A copy cut off on the way up resumes when run again.`,
-		Example: `  potluck sandbox cp mini-c2m4@mini/01J... ./data :work/
-  potluck sandbox cp mini-c2m4@mini/01J... :work/out.json .`,
+		Example: "  " + a.cmd("sandbox cp mini-c2m4@mini/01J... ./data :work/") + "\n" +
+			"  " + a.cmd("sandbox cp mini-c2m4@mini/01J... :work/out.json ."),
 		Args: func(_ *cobra.Command, args []string) error {
-			if len(args) != 3 {
-				return exitWith{2, errors.New(cpUsage)}
+			two := len(args) == 2 && (strings.HasPrefix(args[0], "box:") || strings.HasPrefix(args[1], "box:")) // the old form (oldCpArgs)
+			if len(args) != 3 && !two {
+				return exitWith{2, errors.New(a.cpUsage())}
 			}
 			return nil
 		},
@@ -770,10 +793,16 @@ against its SHA-256. A copy cut off on the way up resumes when run again.`,
 			if maxMiB <= 0 || int64(maxMiB)<<20 > boxcp.HardMax {
 				return fmt.Errorf("--max-mib is from 1 to %d", boxcp.HardMax>>20)
 			}
+			if len(args) == 2 {
+				var err error
+				if args, err = oldCpArgs(args); err != nil {
+					return err
+				}
+			}
 			p0, in0 := strings.CutPrefix(args[1], ":")
 			p1, in1 := strings.CutPrefix(args[2], ":")
 			if in0 == in1 || strings.IndexAny(args[0], ":./~") == 0 { // a path where the sandbox goes
-				return api.Errorf(api.CodeBadRequest, "%s", cpUsage)
+				return api.Errorf(api.CodeBadRequest, "%s", a.cpUsage())
 			}
 			for _, p := range []string{p0, p1} {
 				if _, _, _, err := boxcp.Split(handleOf(args[0]) + ":" + p); err != nil {
@@ -787,7 +816,7 @@ against its SHA-256. A copy cut off on the way up resumes when run again.`,
 			o := boxcp.Options{Max: int64(maxMiB) << 20}
 			o.Progress = func(done, total int) {
 				if total > 4 {
-					fmt.Fprintf(a.stderr, "\rpotluck: %d/%d chunks", done, total)
+					fmt.Fprintf(a.host.Stderr, "\r%s: %d/%d chunks", a.name(), done, total)
 				}
 			}
 			x := boxpush.Exec(c, t, id)
@@ -798,19 +827,19 @@ against its SHA-256. A copy cut off on the way up resumes when run again.`,
 				res, err = boxcp.Download(cmd.Context(), x, p0, args[2], o)
 			}
 			if res.Chunks > 4 {
-				fmt.Fprintln(a.stderr)
+				fmt.Fprintln(a.host.Stderr)
 			}
 			for _, l := range res.Left {
-				fmt.Fprintln(a.stderr, "potluck: left out", config.Text(l))
+				fmt.Fprintln(a.host.Stderr, a.name()+": left out", config.Text(l))
 			}
-			warnCredentialLike(a.stderr, res.CredentialLike)
+			warnCredentialLike(a.host.Stderr, res.CredentialLike, a.name())
 			if err != nil {
 				return err
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(res)
 			}
-			fmt.Fprintf(a.stderr, "potluck: copied %s (%d files, %.1f MiB) to %s\n", res.Kind, res.Files, float64(res.Bytes)/(1<<20), res.To)
+			fmt.Fprintf(a.host.Stderr, "%s: copied %s (%d files, %.1f MiB) to %s\n", a.name(), res.Kind, res.Files, float64(res.Bytes)/(1<<20), res.To)
 			return nil
 		}}
 	cmd.Flags().IntVar(&maxMiB, "max-mib", boxcp.DefaultMax>>20, fmt.Sprintf("refuse a copy over this many MiB (a directory as a tar; at most %d)", boxcp.HardMax>>20))

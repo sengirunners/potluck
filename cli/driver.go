@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/runtarget"
 )
 
@@ -20,28 +19,31 @@ func (a *app) driverCmd() *cobra.Command {
 		Use:   "pin <driver>...",
 		Short: "Trust the driver file there now (after you upgraded it on purpose): record its path and sha256",
 		Long: `Drivers run as you and see secrets, so the daemon runs one only from the
-directory of the potluck program or $POTLUCK_HOME/drivers, and only while
+directory of the ` + a.name() + ` program or $POTLUCK_HOME/drivers, and only while
 its sha256 is the one pinned. A driver is pinned the first time it runs;
 after you upgrade or replace one on purpose, pin it again with this.`,
-		Example: "  potluck driver pin tart",
+		Example: "  " + a.cmd("driver pin tart"),
 		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.LoadClient()
+			if err := a.notWhileAttached(a.cmd("driver pin")); err != nil {
+				return err
+			}
+			cfg, err := a.loadClient()
 			if err != nil {
 				return err
 			}
 			var out []runtarget.DriverPin
 			for _, d := range args {
-				p, err := runtarget.PinDriver(cfg.Home, runtarget.DriverDirs(cfg.Home), d)
+				p, err := runtarget.PinDriver(cfg.Home, a.driverDirs(cfg), d)
 				if err != nil {
 					return err
 				}
 				out = append(out, p)
-				if !a.json {
-					fmt.Fprintf(a.stdout, "pinned %s: %s sha256 %s\n", d, p.Path, p.SHA256)
+				if !a.asJSON() {
+					fmt.Fprintf(a.host.Stdout, "pinned %s: %s sha256 %s\n", d, p.Path, p.SHA256)
 				}
 			}
-			if a.json {
+			if a.asJSON() {
 				return a.printJSON(out)
 			}
 			return nil
