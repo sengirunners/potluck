@@ -4,25 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- seo:start (written by build/build.mjs from build/pages.mjs: title, description, canonical, Open Graph, JSON-LD; edit those, not this) -->
-<title>Potluck: run coding agents and builds on the computers you already own</title>
-<meta name="description" content="Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.">
+<title>Potluck: self-hosted GitHub Actions runners and AI agent sandboxes on your team's idle machines</title>
+<meta name="description" content="Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.">
 <link rel="canonical" href="https://potluck.sh/">
 <meta property="og:site_name" content="Potluck">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Potluck: run coding agents and builds on the computers you already own">
-<meta property="og:description" content="Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.">
+<meta property="og:title" content="Potluck: self-hosted GitHub Actions runners and AI agent sandboxes on your team's idle machines">
+<meta property="og:description" content="Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.">
 <meta property="og:url" content="https://potluck.sh/">
-<meta property="og:image" content="https://potluck.sh/og.png">
+<meta property="og:image" content="https://potluck.sh/og/home.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Potluck: run coding agents and builds on the computers you already own">
+<meta property="og:image:alt" content="Put your team's idle machines to work.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Potluck: run coding agents and builds on the computers you already own">
-<meta name="twitter:description" content="Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.">
-<meta name="twitter:image" content="https://potluck.sh/og.png">
+<meta name="twitter:title" content="Potluck: self-hosted GitHub Actions runners and AI agent sandboxes on your team's idle machines">
+<meta name="twitter:description" content="Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.">
+<meta name="twitter:image" content="https://potluck.sh/og/home.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 <meta name="google-site-verification" content="VtxYvTdYwVWYZa_DXm-MVSC0k4lRAy65l4ujzYZXrcI">
 <link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":["SoftwareApplication","SoftwareSourceCode"],"@id":"https://potluck.sh/#software","name":"Potluck","url":"https://potluck.sh/","description":"Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://www.apache.org/licenses/LICENSE-2.0","codeRepository":"https://github.com/sengirunners/potluck","programmingLanguage":"Go","downloadUrl":"https://github.com/sengirunners/potluck/releases","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@id":"https://sengi.run/#organization"}},{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},{"@type":"WebSite","@id":"https://potluck.sh/#website","url":"https://potluck.sh/","name":"Potluck","publisher":{"@id":"https://sengi.run/#organization"}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":["SoftwareApplication","SoftwareSourceCode"],"@id":"https://potluck.sh/#software","name":"Potluck","url":"https://potluck.sh/","description":"Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://www.apache.org/licenses/LICENSE-2.0","codeRepository":"https://github.com/sengirunners/potluck","programmingLanguage":"Go","downloadUrl":"https://github.com/sengirunners/potluck/releases","image":"https://potluck.sh/og/home.png","sameAs":["https://github.com/sengirunners/potluck"],"author":{"@id":"https://sengi.run/#organization"},"publisher":{"@id":"https://sengi.run/#organization"}},{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},{"@type":"WebSite","@id":"https://potluck.sh/#website","url":"https://potluck.sh/","name":"Potluck","publisher":{"@id":"https://sengi.run/#organization"}}]}</script>
 <!-- seo:end -->
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
@@ -63,8 +66,8 @@
 <main>
 <section class="hero wrap" aria-labelledby="headline">
   <div class="say">
-    <h1 id="headline">Run your coding agents and builds on the computers you <em>already own</em>.</h1>
-    <p class="lede">Builds and agents make your laptop crawl. Potluck pools your team's spare machines and runs <strong>coding agents</strong> and <strong>builds</strong> on them, each in a fresh VM or sandbox. When someone needs their machine back, it's theirs.</p>
+    <h1 id="headline">Put your team's idle machines <em>to work</em>.</h1>
+    <p class="lede">Self-hosted <strong>GitHub Actions runners</strong> and sandboxes for <strong>coding agents</strong>, each job in a fresh VM or sandbox, on the Macs and Linux boxes you already own. When someone needs their machine back, it's theirs. Free and open source.</p>
     <a class="jump" href="#install">Install</a>
   </div>
 
@@ -353,7 +356,7 @@
       </a>
       <a class="btn line" href="#how">How it works</a>
     </div>
-    <p class="fine">Free and open source (Apache-2.0). Releases are signed: the installer checks the signature when it can (it needs OpenSSL 3) and says so when it can't. To lend a machine you need an Apple-silicon Mac with Tart and Softnet, or a Linux box with Docker and Kata or gVisor; <code>potluck doctor</code> says what's missing. It's early: see <a href="https://github.com/sengirunners/potluck#what-you-need">what you need</a> and <a href="https://github.com/sengirunners/potluck#what-works-today">what works today</a>.</p>
+    <p class="fine">Free and open source (Apache-2.0) · macOS and Linux</p>
   </div>
 </section>
 
@@ -955,16 +958,17 @@
         <div class="del">- runs-on: macos-15</div>
         <div class="add">+ runs-on: your Mac (GitHub's for forks)</div>
       </div>
-      <p class="exact">Simplified. <a href="https://github.com/sengirunners/potluck/blob/main/docs/ci-pr.md#L15-L18">The exact line it writes</a>.</p>
+      <p class="exact">Simplified. <a href="https://github.com/sengirunners/potluck/blob/main/docs/ci-pr.md#what-it-writes">The exact line it writes</a>.</p>
     </article>
   </div>
+  <p class="guides">Guides: <a href="/github-actions-runner">a self-hosted GitHub Actions runner with a fresh VM for every job</a> · <a href="/tart">Tart, its licence, and what Potluck adds</a></p>
 </section>
 
 <section class="band" aria-labelledby="save-h">
   <div class="in wrap">
     <div>
       <h2 id="save-h">What a Mac you already own could save</h2>
-      <label for="minutes">macOS build minutes a month, for a private repository, after your plan's included minutes: <output id="minutes-out" for="minutes">5,000</output></label>
+      <label for="minutes">macOS GitHub Actions minutes a month, for a private repository, after your plan's included minutes: <output id="minutes-out" for="minutes">5,000</output></label>
       <input id="minutes" type="range" min="500" max="30000" step="500" value="5000">
       <p class="src">At GitHub's listed rate for its standard macOS runner, $0.062 a minute as of November 2026 (<a href="https://docs.github.com/en/billing/reference/actions-runner-pricing">GitHub's price list</a>). Public repositories run on GitHub's runners for free. Potluck is free, and GitHub doesn't charge per minute on your own runners; you pay for the electricity.</p>
     </div>
@@ -984,7 +988,7 @@
       <li><h3>Work stays in a box</h3><p>Every job runs in a throwaway VM or sandbox, not directly on your machine, and is deleted after.</p></li>
       <li><h3>Keys go only where you send them</h3><p>A job gets a secret only when you grant it, only on a friend's machine, and as a file: never on the command line or in its environment.</p></li>
       <li><h3>Friends and strangers</h3><p>Mark each machine as a friend's or a stranger's. A friend's machine takes your jobs and the keys you grant. A stranger's runs only the sandboxes you send it, and never gets a key.</p></li>
-      <li><h3>Share the Mac you already own</h3><p>Stop paying by the minute for Mac builds. Lend your Mac's spare time to your team and friends and save them thousands. Apple's licence forbids selling Mac time, not lending a macOS VM to your team.<a class="fn" href="#mac-note" aria-describedby="mac-note">*</a></p></li>
+      <li><h3>Share the Mac you already own</h3><p>Stop paying by the minute for macOS GitHub Actions jobs. Lend your Mac's spare time to your team and friends. Apple's licence forbids selling Mac time, not lending a macOS VM to your team.<a class="fn" href="#mac-note" aria-describedby="mac-note">*</a></p></li>
     </ol>
     <p class="note" id="mac-note">* That's our reading of Apple's macOS licence; read it yourself before you lend. Linux VMs on a Mac aren't affected.</p>
   </div>

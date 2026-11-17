@@ -1,12 +1,13 @@
 // The facts every generated file shares, and the one list of hand-written pages. A page's `lastmod` is the day its
 // content last changed in a way a search engine should recrawl; it is committed here, never read from git or the clock.
 // Blog posts are not listed here: each carries its own `date` and `updated` (content/blog/<slug>.md).
+import { INSTALLER_URL } from "../src/install.js";
 
 export const ORIGIN = "https://potluck.sh";
 export const REPO = "https://github.com/sengirunners/potluck";
 export const SENGI = "https://sengi.run";
-export const INSTALL = "curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh";
-export const OG_IMAGE = `${ORIGIN}/og.png`;
+
+export const INSTALL = `curl -fsSL ${INSTALLER_URL} | sh`;
 
 // IndexNow's key. It is public on purpose: the protocol has the site serve it at /<key>.txt to prove it owns the host.
 export const INDEXNOW_KEY = "7b1a88c94e3d01e8f2150746ddb8a872";
@@ -15,20 +16,25 @@ export const INDEXNOW_KEY = "7b1a88c94e3d01e8f2150746ddb8a872";
 // verified it with the Site Verification API's META method). Public on purpose; removing it un-verifies the site.
 export const GOOGLE_SITE_VERIFICATION = "VtxYvTdYwVWYZa_DXm-MVSC0k4lRAy65l4ujzYZXrcI";
 
+// `headline` is the page's h1 (public/index.html), which its share image carries; `title` is the <title>.
 export const HOME = {
   path: "/",
-  lastmod: "2026-11-16",
-  title: "Potluck: run coding agents and builds on the computers you already own",
+  lastmod: "2026-11-17",
+  title: "Potluck: self-hosted GitHub Actions runners and AI agent sandboxes on your team's idle machines",
+  headline: "Put your team's idle machines to work.",
   description:
-    "Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.",
+    "Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.",
   markdown: "content/home.md",
 };
 
 export const BLOG = {
   path: "/blog",
   title: "Potluck blog",
-  description: "Guides and notes on running coding agents and builds on the machines you already own, from the people who make Potluck.",
+  description: "Guides and notes on running GitHub Actions jobs and coding agents on your team's idle machines, from the people who make Potluck.",
 };
 
-/** Pages with a hand-written source, in sitemap order. */
+/** Pages with a hand-written source, in sitemap order. The pages in content/pages/ follow them. */
 export const PAGES = [HOME];
+
+/** Page slugs content/pages/ may not take: hand-written files, generated ones, and the Worker's routes. */
+export const RESERVED_SLUGS = ["index", "thanks", "blog", "feed", "sitemap", "robots", "llms", "llms-full", "og", "fonts", "api", "home"];

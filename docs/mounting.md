@@ -68,7 +68,7 @@ state). A host can add the same command at two places, built twice with two pref
 
 Every top-level command of `potluck` except `ProgramCommands`: `create`, `invite`, `join`, `leave`, `forget`,
 `remotes`, `doctor`, `isolation`, `host` (with `status`, `set`, `pause`, `resume`, `stop`, `shelf`), `ci`, `sandbox`, `usage`,
-`sealing`, `run`, `agent-runner`, `runners`, `secrets` and `driver`.
+`sealing`, `run`, `agent-task`, `agent-runner`, `runners`, `secrets` and `driver`.
 
 `daemon`, `status`, `upgrade` and `mcp` are not mounted: they run, report on and replace one program's daemon and
 binary, or serve that program's MCP tools, and a host has its own. A hint that names one uses the program's name

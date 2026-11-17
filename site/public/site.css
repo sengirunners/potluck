@@ -76,6 +76,7 @@ svg.defs{position:absolute;width:0;height:0;overflow:hidden}
 .ctas{display:flex;flex-wrap:wrap;gap:12px;margin-top:18px}
 .jump{display:none;font-size:17px;font-weight:600}
 .fine{font-size:16px;color:var(--soft);margin-top:16px;max-width:34em}
+.guides{font-size:17px;color:var(--soft);margin-top:22px}
 
 /* The picnic: a round lawn in CSS 3D. Machines are lit boxes that turn with the lawn; people, food and the cloud are
    flat cut-outs that keep facing you. Sizes are in cqw (the scene's width) so it scales as one picture.

@@ -1,5 +1,5 @@
 <h1 align="center">
-  <a href="https://potluck.sh"><img src="docs/img/readme-hero.webp" width="100%" alt="Potluck: run your coding agents and builds on the computers you already own. Six lent machines sit on a picnic blanket: a gaming PC, a cloud VM, a mini PC, a Mac mini, a MacBook Pro and a rented server."></a>
+  <a href="https://potluck.sh"><img src="docs/img/readme-hero.webp" width="100%" alt="Potluck: put your team's idle machines to work. Six lent machines sit on a picnic blanket: a gaming PC, a cloud VM, a mini PC, a Mac mini, a MacBook Pro and a rented server."></a>
 </h1>
 
 <p align="center">
@@ -117,8 +117,8 @@ $ potluck sandbox rm mini-potluck-c2m4/a1b2c3
 removed mini-potluck-c2m4/a1b2c3
 ```
 
-This path is tested in CI with a stand-in for the VM layer (`cli/one_machine_test.go`). It has not yet been run
-end to end on a real Mac with Tart.
+This path has been run end to end by hand many times on an Apple-silicon Mac with Tart. It is also tested in CI
+with a stand-in for the VM layer (`cli/one_machine_test.go`) and has run by hand on a Linux VM with gVisor.
 
 ### With friends
 
@@ -204,7 +204,8 @@ goes). `potluck host --help` lists the rest.
 
 `potluck --help` lists the rest: `leave`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal|stop|start`
 (`sandbox create --persist` keeps a sandbox's disk while it is stopped), `usage`,
-`run`, `agent-runner` (a coding agent vendor's self-hosted runners in fresh sandboxes:
+`run`, `agent-task` (a coding agent run once in a fresh sandbox, its commits back as a local ref:
+[docs/agent-tasks.md](docs/agent-tasks.md)), `agent-runner` (a coding agent vendor's self-hosted runners in fresh sandboxes:
 [docs/agent-runners.md](docs/agent-runners.md)) and `runners`.
 
 - **Move a CI job onto a lent Mac:** `potluck ci pr <owner/repo>` changes one job's `runs-on` and prepares the pull
@@ -213,7 +214,8 @@ goes). `potluck host --help` lists the rest.
 
 This flow is tested in CI with the reference driver standing in for the VM layer (`cli/cli_test.go`), and run by hand
 on a fresh GitHub-hosted Linux VM with gVisor (`scripts/clean-machine-proof.sh`, the `clean-machine-proof`
-workflow); not yet on Tart or across two machines.
+workflow). Its one-machine part has been run by hand many times on an Apple-silicon Mac with Tart; it has not
+yet been run across two machines.
 
 ## MCP for agents
 
@@ -238,6 +240,7 @@ All standard output is MCP protocol traffic.
 | `go build`, `go vet`, `go test` in CI on Linux; signed releases and `install.sh`; a daily upgrade job (`potluck upgrade enable`) | |
 | OCI and Incus layers tested against stand-in CLIs; Tart through a fake layer | Tests on real VMs in CI (a manual run) |
 | The quick start on a fresh GitHub-hosted Linux VM with no earlier Potluck or zm on it, run by hand (the `clean-machine-proof` workflow): install, a pool over a Cloudflare quick tunnel, the VM shared through gVisor, a sandbox and `potluck run` | The quick start across two real machines in CI |
+| The one-machine quick start on an Apple-silicon Mac with Tart, run end to end by hand many times | |
 | The VM driver passes the full suite over a fake layer (isolation is not exercised there) | |
 | Every check the reference driver passes is also shown to fail on a driver broken on purpose | |
 | A real GitHub Actions job run through the broker, by hand: on a Mac (Tart, the same machine as the broker) and on a Linux box on another machine (OCI with gVisor) | Actions jobs on pool machines in our own CI, every day |
@@ -252,7 +255,8 @@ When an owner takes a machine back, running VMs are ended and new work is refuse
 - The machine that runs a pool can read commands, output and secrets passing through it, until commands are
   sealed to the host's key. Join only a pool whose owner you would trust with them.
 - A coding agent vendor's key handed to `potluck agent-runner` can be read by the machine that runs the box and by
-  the agent's session in it ([docs/agent-runners.md](docs/agent-runners.md)).
+  the agent's session in it ([docs/agent-runners.md](docs/agent-runners.md)); so can a credential handed to
+  `potluck agent-task` ([docs/agent-tasks.md](docs/agent-tasks.md)).
 - Conformance proves a driver behaves. It does not prove its author can be trusted. A run can also pass with
   checks skipped (the network checks need flags), so read the SKIP lines.
 - On the OCI layer, the default is no network at all. A box with a network relies on a firewall the host's owner

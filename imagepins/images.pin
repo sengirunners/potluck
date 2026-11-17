@@ -28,7 +28,7 @@
 #   runner is in /home/runner (the base's; the Dockerfile's build fails without /home/runner/run.sh).
 # oci linux, template agent: zm's coding-agent image, cmd/potluck-driver-tart/images/agent/Dockerfile, built by the same
 #   workflow FROM the potluck-box-linux image it pushes (so the runner and box tools stay), adding git, gh, Node 22
-#   with npm and corepack, Python 3 with pip and venv, ripgrep, jq, build-essential and the Claude Code and Codex
+#   with npm and corepack, Go, Python 3 with pip and venv, ripgrep, jq, build-essential and the Claude Code and Codex
 #   CLIs, each pinned. "-" until the workflow first publishes ghcr.io/sengirunners/potluck-box-agent.
 tart darwin ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on min_free_gb=60 pull_minutes=60
 oci linux ghcr.io/sengirunners/potluck-box-linux@sha256:f2176f837d68a9711f503729a109a57b2bb2abcbe7c1ab8a391418d51f8f983c runner_dir=/home/runner

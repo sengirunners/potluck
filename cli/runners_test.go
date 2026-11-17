@@ -429,3 +429,24 @@ func TestRunnersListWithATokenOnTheSocket(t *testing.T) {
 		}
 	}
 }
+
+// runners capacity publishes stdin as the host's report; the broker then
+// serves it without a token.
+func TestRunnersCapacityPublishes(t *testing.T) {
+	m := startMachine(t, tailnettest.New(), "mini", "judy@example.com")
+	if _, err := client.NewUnix(m.dm.Deps.Config.SocketPath()).CreateProject(context.Background(), api.NewProjectRequest{Slug: "pool"}); err != nil {
+		t.Fatal(err)
+	}
+	m.ok(t, "runners", "setup", "pool", "--url", "https://pool.example")
+	if _, e, code := m.runIn(t, "not json", "runners", "capacity", "mini"); code == 0 || !strings.Contains(e, "not JSON") {
+		t.Fatalf("a report that is not JSON: exit %d, %s", code, e)
+	}
+	o, e, code := m.runIn(t, `{"schema": "example-capacity-v1", "ready": true}`, "runners", "capacity", "mini", "--ttl-s", "30")
+	if code != 0 || !strings.Contains(o+e, "published until") {
+		t.Fatalf("publish: exit %d\n%s%s", code, o, e)
+	}
+	var got map[string]any
+	if err := client.WithHandler(m.dm.Handler).Do(context.Background(), "GET", "/v0/runners/capacity/mini", nil, &got); err != nil || got["schema"] != "example-capacity-v1" {
+		t.Fatalf("served: %v %v", got, err)
+	}
+}

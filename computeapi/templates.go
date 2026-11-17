@@ -9,7 +9,7 @@ import "sort"
 // and its test keeps the two agreeing.
 var boxTemplates = map[string]string{
 	"browser": "ghcr.io/sengirunners/potluck-box-browser", // sandboxed Chromium, Playwright and PNG screenshots
-	"agent":   "ghcr.io/sengirunners/potluck-box-agent",   // git, gh, Node, Python, the Claude Code and Codex CLIs
+	"agent":   "ghcr.io/sengirunners/potluck-box-agent",   // git, gh, Node, Go, Python, the Claude Code and Codex CLIs
 }
 
 // BoxTemplateImage is the image name template t boots.

@@ -15,7 +15,7 @@ data_sources:
 drafted: 2026-11-16
 model: claude-sonnet-5-5
 date: 2026-11-16
-updated: 2026-11-16
+updated: 2026-11-17
 summary: "A plain self-hosted runner runs every job on your Mac itself. Potluck gives each GitHub Actions job its own fresh VM on your Mac and deletes it when the job ends."
 ---
 
@@ -37,7 +37,7 @@ A plain runner is therefore a poor fit for a Mac you also sit at.
 
 A fresh VM changes where the job runs. Instead of running on your Mac, the job runs inside a virtual machine that Potluck starts for that one job and deletes afterward. Nothing the job writes survives, and the next job starts from the same clean image.
 
-Potluck's isolation claim (docs/isolation.md in the repository) is that a job's VM cannot reach the lending Mac on any port (on Tart, apart from Softnet's DNS forwarder on the host), cannot reach its local network or its Tailscale network, cannot reach another VM running at the same time, cannot send mail, and holds none of your credentials. The test that checks this, `potluck isolation test`, has not yet been recorded on a real Mac; the repository lists that run as owed.
+Potluck's isolation claim (docs/isolation.md in the repository) is that a job's VM cannot reach the lending Mac on any port (on Tart, apart from Softnet's DNS forwarder on the host), cannot reach its local network or its Tailscale network, cannot reach another VM running at the same time, cannot send mail, and holds none of your credentials. `potluck isolation test` checks the host, local network, Tailscale network and second-VM claims by sample on your own machine; `potluck host` checks mail.
 
 | | Plain self-hosted runner | Potluck, a fresh VM per job |
 | --- | --- | --- |
@@ -59,7 +59,7 @@ Only code from people who can push to the repository is served. For a public rep
 
 ## How do you set it up, step by step?
 
-You need an Apple-silicon Mac with Tart and Softnet installed. The first `potluck host` on a Mac pulls a macOS image of about 27 GB and wants about 60 GB free. Linux boxes with Docker and Kata or gVisor work too, for Linux jobs.
+You need an Apple-silicon Mac with [Tart](/tart) and Softnet installed. The first `potluck host` on a Mac pulls a macOS image of about 27 GB and wants about 60 GB free. Linux boxes with Docker and Kata or gVisor work too, for Linux jobs.
 
 ### Step 1: Install Potluck
 
@@ -138,9 +138,7 @@ To add more machines later, the pool needs a way for them to reach this one. A p
 
 Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs on a Mac you own or control for uses such as development and testing, and its licence does not allow time-sharing or service-bureau use. The Potluck README's rule is that lending a macOS guest to your team or invited friends is fine and selling Mac time to the public is not. Potluck caps macOS guests at two per Mac. Read the license yourself; this is not legal advice.
 
-## What works today and what does not?
-
-Potluck is early, and its README lists what has been tested. A GitHub Actions job has been run through the broker by hand on a Mac with Tart, and on a Linux box on another machine. Potluck's own CI does not yet run Actions jobs on pool machines every day. The `runs-on` form that `potluck ci pr` writes uses GitHub's `fromJSON` function, and Potluck's docs say that form has not yet been run live. Interfaces will change.
+How the runner picks and refuses jobs is on the [self-hosted GitHub Actions runner](/github-actions-runner) page.
 
 ## FAQ
 

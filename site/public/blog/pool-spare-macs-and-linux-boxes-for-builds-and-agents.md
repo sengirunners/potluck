@@ -1,6 +1,6 @@
 # How to pool your team's spare Macs and Linux boxes for builds and coding agents
 
-Published 2026-11-16. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
+Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
 
 A pool is a group of machines that a team or friends lend to each other for builds and coding agents. With Potluck, one machine runs the pool, other people join with one-time invite codes, and each job runs in a fresh VM or sandbox on whichever machine is free. A machine's owner chooses how much to share and can wind it down or stop it with one command.
 
@@ -27,7 +27,7 @@ The pool's owner decides, because every person and machine joins with a one-time
 
 A host's trust is the owner's choice at invite time, and the machine cannot change it. The difference matters:
 
-- A **trusted** machine, a friend's, has sandboxes placed on it without being asked. It may run GitHub Actions jobs and receive the secrets a member sends to a sandbox.
+- A **trusted** machine, a friend's, has sandboxes placed on it without being asked. It may run [GitHub Actions jobs](/github-actions-runner) and receive the secrets a member sends to a sandbox.
 - A **public** machine, a stranger's, runs only sandboxes a member names with `--on`. It never runs GitHub Actions jobs and never receives a secret.
 
 Two limits are worth knowing before you invite anyone. The machine that runs a sandbox can read everything in it, including code, commands, output and secrets. The machine that runs the pool can read the commands, output and secrets passing through it, until commands are sealed to the host's key, and over `--via tunnel` so can the tunnel's provider. Join only a pool whose owner you would trust with that.
@@ -42,7 +42,7 @@ A lender can check this on their own machine:
 potluck isolation test <machine>-c2m4
 ```
 
-Sizes are matched by exact name, and `potluck host` names each one `<machine>-<size>` (`potluck isolation` lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. The repository lists the first recorded run on a real Mac as owed, and on Linux a sandbox that has a network relies on a firewall the machine's owner sets up.
+Sizes are matched by exact name, and `potluck host` names each one `<machine>-<size>` (`potluck isolation` lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. On Linux, a sandbox that has a network relies on a firewall the machine's owner sets up.
 
 ## How do you start a pool, step by step?
 
@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.s
 potluck doctor
 ```
 
-A Mac needs to be Apple silicon with Tart and Softnet. A Linux box needs Docker with Kata or gVisor. `potluck doctor` says what is missing.
+A Mac needs to be Apple silicon with [Tart](/tart) and Softnet. A Linux box needs Docker with Kata or gVisor. `potluck doctor` says what is missing.
 
 ### Step 2: Create the pool and share this machine
 
@@ -104,11 +104,11 @@ potluck host set auto
 
 `auto` returns to the machine's own rules. `--for 2h` and `--until 23:00` return the machine to `auto` at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar`, which installs the app but does not start it, then open it with `open ~/Applications/"Potluck Menu.app"`. It is not yet signed with an Apple Developer ID.
 
-To stop sharing for good, `potluck host stop` removes every size the machine shared, and `potluck leave` leaves the pool. On Linux, hand-back when the owner returns is a time window only today.
+To stop sharing for good, `potluck host stop` removes every size the machine shared, and `potluck leave` leaves the pool.
 
-## What should you know before relying on it?
+## Can you lend a Mac?
 
-Potluck is early, and its README says interfaces will change. The one-machine path is tested in CI with a stand-in VM layer, and the whole quick start has run by hand on a Linux VM. It has not yet been run on two real machines in CI. Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.
+Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.
 
 ## FAQ
 

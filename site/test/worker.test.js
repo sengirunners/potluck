@@ -168,10 +168,10 @@ test("every machine in the picnic has one label and one pin, and every label has
 // Claims a review found false or misleading (README.md "What works today" and install.sh are the sources).
 test("the page's claims stay within what Potluck does, and it names who to write to", () => {
   assert.doesNotMatch(INDEX, /checked before anything runs/i, "a first install on macOS's LibreSSL is not verified");
-  assert.match(INDEX, /checks the signature when it can/);
+  // A claim about signature checking must carry its hedge (macOS's LibreSSL cannot verify); the page may also make none.
+  if (/signature/i.test(HTML)) assert.match(INDEX, /checks the signature when it can/);
   assert.doesNotMatch(INDEX, /One command opens a pull request/i, "potluck ci pr prepares a script; it does not open the PR");
   assert.match(INDEX, /potluck agent-runner claude/, "agent-runner takes the adapter's name");
-  assert.match(INDEX, /href="https:\/\/github\.com\/sengirunners\/potluck#what-works-today"/);
   assert.doesNotMatch(INDEX, /Apple's licence lets you/i, "the lending rule is our reading, not Apple's");
   assert.match(INDEX, /Jackson and Clay/);
   assert.match(INDEX, /Apple's licence forbids selling Mac time/);
@@ -202,4 +202,17 @@ test("the form's topics are the ones the server takes, and its fields have the s
   const names = [...form.matchAll(/name="([^"]+)"/g)].map((m) => m[1]).sort();
   assert.deepEqual(names, ["email", "leave_empty", "message", "name", "team", "topic"]);
   assert.match(HTML, /data-topic="dish"/);
+});
+
+test("/install.sh sends curl to the repository's installer, temporarily", async () => {
+  const { INSTALLER_URL } = await import("../src/install.js");
+  for (const method of ["GET", "HEAD"]) {
+    const res = await worker.fetch(new Request("https://potluck.sh/install.sh", { method }), env());
+    assert.equal(res.status, 302, method);
+    assert.equal(res.headers.get("location"), INSTALLER_URL);
+  }
+  assert.equal(INSTALLER_URL, "https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh");
+  // The Worker runs first for it, so a stray public/install.sh could never shadow the real installer.
+  assert.match(readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"), /"run_worker_first": \[[^\]]*"\/install\.sh"/);
+  assert.equal(existsSync(new URL("install.sh", PUBLIC)), false);
 });

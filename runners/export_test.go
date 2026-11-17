@@ -341,3 +341,6 @@ func (s *Service) Stored(ctx context.Context) (n int) {
 	_ = s.db().QueryRowContext(ctx, `SELECT count(*) FROM runners_inbox`).Scan(&n)
 	return n
 }
+
+// MayPublishCapacity is mayPublishCapacity (capacity.go).
+var MayPublishCapacity = mayPublishCapacity

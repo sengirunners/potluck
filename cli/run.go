@@ -76,6 +76,11 @@ type boxJobOptions struct {
 	out   io.Writer // the command's stdout
 	errw  io.Writer // its stderr and the program's own lines
 	p     prefix    // how the program names Potluck's commands (Host.Prefix)
+	// collect, when set, runs once the command ended with an exit code (any,
+	// 124 included; err is what following it answered), before the box is
+	// released: the result and error it answers are boxJob's, and keep
+	// true keeps the box as --keep does.
+	collect func(ctx context.Context, bx acquiredBox, r jobResult, err error) (_ jobResult, keep bool, _ error)
 	// again, when set, is how boxJob learns of another Ctrl-C while it ends a
 	// sandbox that may have been made: ctx comes back cancelled by it (nil:
 	// the process's signals, caughtSignals).
@@ -208,14 +213,7 @@ func jobRun(ctx context.Context, c *client.Client, o jobOptions) (r jobResult, e
 	start := time.Now()
 	defer func() { r.Seconds = time.Since(start).Round(time.Millisecond).Seconds() }()
 	r.State = "failed"
-	if o.timeout < time.Second {
-		return r, fmt.Errorf("--timeout must be at least 1s")
-	}
-	if o.push.maxMiB <= 0 {
-		o.push.maxMiB = boxpush.DefaultMax >> 20
-	}
-	o.push.repo = o.repo
-	b, err := o.push.bundle(ctx, o.ref, o.errw, o.p.name())
+	b, err := o.bundle(ctx)
 	if err != nil {
 		return r.stopped(ctx, err)
 	}
@@ -228,8 +226,7 @@ func jobRun(ctx context.Context, c *client.Client, o jobOptions) (r jobResult, e
 		}
 	}
 	return boxJob(ctx, c, o.boxJobOptions, r, func(ctx context.Context, bx acquiredBox) (string, error) {
-		fmt.Fprintf(o.errw, "%s: %s at %s\n", o.p.name(), sandboxID(bx.handle), shortSHA(b.Head))
-		pushed, err := boxpush.Push(ctx, boxpush.Exec(c, bx.target, bx.id), b, boxpush.PushOptions{Dest: o.push.dir})
+		pushed, err := o.pushInto(ctx, c, bx, b)
 		if err != nil {
 			return "", err
 		}
@@ -246,6 +243,26 @@ func jobRun(ctx context.Context, c *client.Client, o jobOptions) (r jobResult, e
 		}
 		return sp.PID, nil
 	})
+}
+
+// bundle checks the timeout and makes the bundle of o's commit, before any
+// box is asked for.
+func (o *jobOptions) bundle(ctx context.Context) (*boxpush.Bundle, error) {
+	if o.timeout < time.Second {
+		return nil, fmt.Errorf("--timeout must be at least 1s")
+	}
+	if o.push.maxMiB <= 0 {
+		o.push.maxMiB = boxpush.DefaultMax >> 20
+	}
+	o.push.repo = o.repo
+	return o.push.bundle(ctx, o.ref, o.errw, o.p.name())
+}
+
+// pushInto names the box b goes to and pushes it there, answering where it
+// was checked out.
+func (o jobOptions) pushInto(ctx context.Context, c *client.Client, bx acquiredBox, b *boxpush.Bundle) (boxpush.Result, error) {
+	fmt.Fprintf(o.errw, "%s: %s at %s\n", o.p.name(), sandboxID(bx.handle), shortSHA(b.Head))
+	return boxpush.Push(ctx, boxpush.Exec(c, bx.target, bx.id), b, boxpush.PushOptions{Dest: o.push.dir})
 }
 
 // acquiredBox is a box boxJob holds: its binding, id and handle, and the
@@ -396,7 +413,13 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, in jobResult
 		return r.stopped(ctx, err)
 	}
 	r.PID = pid
-	return follow(ctx, c, target, id, o, time.Now().Add(o.timeout+jobKillGrace), r)
+	if r, err = follow(ctx, c, target, id, o, time.Now().Add(o.timeout+jobKillGrace), r); o.collect == nil || r.Exit == nil {
+		return r, err
+	}
+	var keep bool
+	r, keep, err = o.collect(ctx, acquiredBox{target: target, id: id, handle: h.Handle, key: key}, r, err)
+	o.keep = o.keep || keep // read by the deferred end of the sandbox above
+	return r, err
 }
 
 // jobCd runs "$@" in the checkout ($1, absolute or under HOME).

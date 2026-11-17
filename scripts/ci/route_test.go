@@ -116,3 +116,59 @@ func TestRunnerRouteUnconfigured(t *testing.T) {
 		t.Fatalf("label %q, want %q", l, fallback)
 	}
 }
+
+// CAPACITY_URL lists the report's home first and an old copy after it: the first fresh report is read, so a
+// home that does not answer or answers stale falls back to the copy, and a fresh home is never second-guessed.
+func TestRunnerRouteURLList(t *testing.T) {
+	if _, err := exec.LookPath("jq"); err != nil {
+		t.Skip("no jq here")
+	}
+	dir := t.TempDir()
+	// A curl that answers https://x.example/<name> with the file <name>, and fails like curl -f without it.
+	fake := "#!/bin/sh\nfor a; do u=$a; done\ncat \"" + dir + "/${u##*/}\" 2>/dev/null || exit 22\n"
+	if err := os.WriteFile(dir+"/curl", []byte(fake), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(dir+"/"+name, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("free", report(t, nil))
+	write("full", report(t, func(_, _, free map[string]any) { free[factory] = 0 }))
+	write("stale", report(t, func(r, _, _ map[string]any) {
+		r["at"] = time.Now().Add(-3 * time.Minute).UTC().Format("2006-01-02T15:04:05+00:00")
+	}))
+	write("html", "<html>")
+	for _, c := range []struct {
+		urls, want string
+	}{
+		{"https://x.example/free", factory},
+		{"https://x.example/missing https://x.example/free", factory},
+		{"https://x.example/stale https://x.example/free", factory},
+		{"https://x.example/html https://x.example/free", factory},
+		{"https://x.example/full https://x.example/free", fallback},
+		{"https://x.example/missing https://x.example/stale", fallback},
+	} {
+		out := t.TempDir() + "/out"
+		cmd := exec.Command("bash", "runner-route.sh")
+		var env []string
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "CAPACITY_JSON=") && !strings.HasPrefix(kv, "PATH=") {
+				env = append(env, kv)
+			}
+		}
+		cmd.Env = append(env, "PATH="+dir+":"+os.Getenv("PATH"), "GITHUB_OUTPUT="+out, "ROUTING=",
+			"ROUTE_LABEL="+factory, "ROUTE_FALLBACK="+fallback, "CAPACITY_URL="+c.urls)
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("runner-route.sh: %v\n%s", err, b)
+		}
+		b, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.TrimPrefix(strings.TrimSpace(string(b)), "label="); got != c.want {
+			t.Errorf("%s: label %q, want %q", c.urls, got, c.want)
+		}
+	}
+}

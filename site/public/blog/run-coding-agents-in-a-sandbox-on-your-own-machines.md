@@ -1,6 +1,6 @@
 # How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service
 
-Published 2026-11-16. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
+Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
 
 You can run a coding agent such as Claude Code or Codex in a sandbox on machines you own, with no hosted sandbox service. Potluck starts a fresh VM or container on a Mac or Linux box in your pool (the ready-made agent image needs a Linux box), runs the agent's commands inside it, and deletes it afterward. The sandbox cannot reach the machine that hosts it, that machine's network, or other sandboxes.
 
@@ -15,7 +15,7 @@ An agent runs shell commands, installs packages, edits files and fetches web pag
 - **Start clean and end for good.** Each sandbox starts from the same image and is deleted at its time limit or when you remove it.
 - **Block mail.** Outbound mail ports are closed.
 
-These are the claims in Potluck's isolation document. `potluck isolation test <machine>-c2m4` checks the host, local network, Tailscale network and peer-sandbox ones by sample on your own machine; `potluck host` checks mail. The repository lists the first recorded test on a real Mac as owed.
+These are the claims in Potluck's isolation document. `potluck isolation test <machine>-c2m4` checks the host, local network, Tailscale network and peer-sandbox ones by sample on your own machine; `potluck host` checks mail.
 
 ## Why run it on machines you own?
 
@@ -45,7 +45,7 @@ curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.s
 potluck doctor
 ```
 
-On a Mac you need Tart and Softnet. On Linux you need Docker with Kata or gVisor. `potluck doctor` says what is missing. The `agent` template in Step 3 and `potluck agent-runner` need a Linux box with Docker and Kata or gVisor in the pool; a Mac-only pool can run plain sandboxes but not those.
+On a Mac you need [Tart](/tart) and Softnet. On Linux you need Docker with Kata or gVisor. `potluck doctor` says what is missing. The `agent` template in Step 3 and `potluck agent-runner` need a Linux box with Docker and Kata or gVisor in the pool; a Mac-only pool can run plain sandboxes but not those.
 
 ### Step 2: Start a pool and share the machine
 
@@ -62,7 +62,7 @@ On a Mac you sit at, add `--reclaim-idle-s 0`. By default a Mac's sandbox ends w
 potluck sandbox create --template agent --ref HEAD
 ```
 
-The `agent` template is Potluck's Linux image plus git, gh, Node 22, Python 3, ripgrep, jq, build-essential, and the Claude Code and Codex command-line tools. It needs a Linux box in the pool, since the template is built from Potluck's Linux image. `--ref HEAD` sends the current commit of your checkout in as a git bundle. Add `--dirty` to include uncommitted changes.
+The `agent` template is Potluck's Linux image plus git, gh, Node 22, Go, Python 3, ripgrep, jq, build-essential, and the Claude Code and Codex command-line tools. It needs a Linux box in the pool, since the template is built from Potluck's Linux image. `--ref HEAD` sends the current commit of your checkout in as a git bundle. Add `--dirty` to include uncommitted changes.
 
 ### Step 4: Run commands in it
 
@@ -101,15 +101,10 @@ potluck agent-runner claude --secret-file ~/.config/claude/environment-secret --
 
 Potluck starts one fresh sandbox per runner and keeps a fresh one going as each ends. `--count` runs several at once, `--timeout` sets a time limit (default one hour), `--allow-tool` pre-approves a tool for sessions, and `--deny-tool` blocks one. The default image, the first one a machine lends, does not ship `claude`, so pass `--image` with the `agent` image, which ships `claude`, git and Python 3. Check that its `claude` has the runner mode before relying on it: `potluck sandbox create --template agent`, then `potluck sandbox exec <id> -- claude self-hosted-runner --help`. Potluck installs nothing itself.
 
-## What are the limits you should know about?
+## How do you keep the vendor key safe?
 
-Potluck's documents are plain about them. Isolation on a real Mac is also not yet recorded, and on Linux a sandbox that has a network relies on a firewall its owner sets up.
-
-- The vendor key is readable by the machine that runs the sandbox, and by the agent's session in it. A prompt that steers the agent can read it too.
-- Potluck does not yet limit a sandbox's network to the vendor's hosts. By default a sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Linux, once the root step `potluck doctor` prints has set up Potluck's filtered network). `--net off` gives no network at all.
-- The Claude Code runner is tested with stand-in adapters; the repository records no run of a real Claude Code environment through it yet.
-- Agent runners do not yet run on macOS boxes, because macOS guests take no secrets yet.
-- The quick start has run in CI with a stand-in VM layer and by hand on a Linux VM with gVisor. It has not yet been run end to end on a real Mac with Tart. Interfaces will change.
+- The machine that runs the sandbox, and the agent's session in it, can read the key. Lend runners only to machines you would give the key to, and rotate it after any session you suspect.
+- A sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Tart, apart from Softnet's DNS forwarder on the host). On Linux it reaches the internet only once the root line from `potluck doctor` has made the filtered network. `--net off` gives it no network at all.
 
 ## FAQ
 

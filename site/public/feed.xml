@@ -2,17 +2,17 @@
 <feed xmlns="http://www.w3.org/2005/Atom">
   <id>https://potluck.sh/blog</id>
   <title>Potluck blog</title>
-  <subtitle>Guides and notes on running coding agents and builds on the machines you already own, from the people who make Potluck.</subtitle>
+  <subtitle>Guides and notes on running GitHub Actions jobs and coding agents on your team's idle machines, from the people who make Potluck.</subtitle>
   <link rel="alternate" type="text/html" href="https://potluck.sh/blog"/>
   <link rel="self" type="application/atom+xml" href="https://potluck.sh/feed.xml"/>
-  <updated>2026-11-16T00:00:00Z</updated>
+  <updated>2026-11-17T00:00:00Z</updated>
   <author><name>Sengi</name></author>
   <entry>
     <id>https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents</id>
     <title>How to pool your team's spare Macs and Linux boxes for builds and coding agents</title>
     <link rel="alternate" type="text/html" href="https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents"/>
     <published>2026-11-16T00:00:00Z</published>
-    <updated>2026-11-16T00:00:00Z</updated>
+    <updated>2026-11-17T00:00:00Z</updated>
     <author><name>Sengi</name></author>
     <summary>How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.</summary>
     <content type="html">&lt;p&gt;A pool is a group of machines that a team or friends lend to each other for builds and coding agents. With Potluck, one machine runs the pool, other people join with one-time invite codes, and each job runs in a fresh VM or sandbox on whichever machine is free. A machine's owner chooses how much to share and can wind it down or stop it with one command.&lt;/p&gt;
@@ -37,7 +37,7 @@
 &lt;/table&gt;&lt;/div&gt;
 &lt;p&gt;A host's trust is the owner's choice at invite time, and the machine cannot change it. The difference matters:&lt;/p&gt;
 &lt;ul&gt;
-&lt;li&gt;A &lt;strong&gt;trusted&lt;/strong&gt; machine, a friend's, has sandboxes placed on it without being asked. It may run GitHub Actions jobs and receive the secrets a member sends to a sandbox.&lt;/li&gt;
+&lt;li&gt;A &lt;strong&gt;trusted&lt;/strong&gt; machine, a friend's, has sandboxes placed on it without being asked. It may run &lt;a href=&quot;/github-actions-runner&quot;&gt;GitHub Actions jobs&lt;/a&gt; and receive the secrets a member sends to a sandbox.&lt;/li&gt;
 &lt;li&gt;A &lt;strong&gt;public&lt;/strong&gt; machine, a stranger's, runs only sandboxes a member names with &lt;code&gt;--on&lt;/code&gt;. It never runs GitHub Actions jobs and never receives a secret.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;p&gt;Two limits are worth knowing before you invite anyone. The machine that runs a sandbox can read everything in it, including code, commands, output and secrets. The machine that runs the pool can read the commands, output and secrets passing through it, until commands are sealed to the host's key, and over &lt;code&gt;--via tunnel&lt;/code&gt; so can the tunnel's provider. Join only a pool whose owner you would trust with that.&lt;/p&gt;
@@ -46,13 +46,13 @@
 &lt;p&gt;A lender can check this on their own machine:&lt;/p&gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck isolation test &amp;lt;machine&amp;gt;-c2m4
 &lt;/code&gt;&lt;/pre&gt;
-&lt;p&gt;Sizes are matched by exact name, and &lt;code&gt;potluck host&lt;/code&gt; names each one &lt;code&gt;&amp;lt;machine&amp;gt;-&amp;lt;size&amp;gt;&lt;/code&gt; (&lt;code&gt;potluck isolation&lt;/code&gt; lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. The repository lists the first recorded run on a real Mac as owed, and on Linux a sandbox that has a network relies on a firewall the machine's owner sets up.&lt;/p&gt;
+&lt;p&gt;Sizes are matched by exact name, and &lt;code&gt;potluck host&lt;/code&gt; names each one &lt;code&gt;&amp;lt;machine&amp;gt;-&amp;lt;size&amp;gt;&lt;/code&gt; (&lt;code&gt;potluck isolation&lt;/code&gt; lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. On Linux, a sandbox that has a network relies on a firewall the machine's owner sets up.&lt;/p&gt;
 &lt;h2 id=&quot;how-do-you-start-a-pool-step-by-step&quot;&gt;How do you start a pool, step by step?&lt;/h2&gt;
 &lt;h3 id=&quot;step-1-install-and-check-the-first-machine&quot;&gt;Step 1: Install and check the first machine&lt;/h3&gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 potluck doctor
 &lt;/code&gt;&lt;/pre&gt;
-&lt;p&gt;A Mac needs to be Apple silicon with Tart and Softnet. A Linux box needs Docker with Kata or gVisor. &lt;code&gt;potluck doctor&lt;/code&gt; says what is missing.&lt;/p&gt;
+&lt;p&gt;A Mac needs to be Apple silicon with &lt;a href=&quot;/tart&quot;&gt;Tart&lt;/a&gt; and Softnet. A Linux box needs Docker with Kata or gVisor. &lt;code&gt;potluck doctor&lt;/code&gt; says what is missing.&lt;/p&gt;
 &lt;h3 id=&quot;step-2-create-the-pool-and-share-this-machine&quot;&gt;Step 2: Create the pool and share this machine&lt;/h3&gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck create friends
 potluck host
@@ -84,9 +84,9 @@ potluck host set closed
 potluck host set auto
 &lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;&lt;code&gt;auto&lt;/code&gt; returns to the machine's own rules. &lt;code&gt;--for 2h&lt;/code&gt; and &lt;code&gt;--until 23:00&lt;/code&gt; return the machine to &lt;code&gt;auto&lt;/code&gt; at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with &lt;code&gt;curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar&lt;/code&gt;, which installs the app but does not start it, then open it with &lt;code&gt;open ~/Applications/&amp;quot;Potluck Menu.app&amp;quot;&lt;/code&gt;. It is not yet signed with an Apple Developer ID.&lt;/p&gt;
-&lt;p&gt;To stop sharing for good, &lt;code&gt;potluck host stop&lt;/code&gt; removes every size the machine shared, and &lt;code&gt;potluck leave&lt;/code&gt; leaves the pool. On Linux, hand-back when the owner returns is a time window only today.&lt;/p&gt;
-&lt;h2 id=&quot;what-should-you-know-before-relying-on-it&quot;&gt;What should you know before relying on it?&lt;/h2&gt;
-&lt;p&gt;Potluck is early, and its README says interfaces will change. The one-machine path is tested in CI with a stand-in VM layer, and the whole quick start has run by hand on a Linux VM. It has not yet been run on two real machines in CI. Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.&lt;/p&gt;
+&lt;p&gt;To stop sharing for good, &lt;code&gt;potluck host stop&lt;/code&gt; removes every size the machine shared, and &lt;code&gt;potluck leave&lt;/code&gt; leaves the pool.&lt;/p&gt;
+&lt;h2 id=&quot;can-you-lend-a-mac&quot;&gt;Can you lend a Mac?&lt;/h2&gt;
+&lt;p&gt;Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.&lt;/p&gt;
 &lt;h2 id=&quot;faq&quot;&gt;FAQ&lt;/h2&gt;
 &lt;h3 id=&quot;is-it-a-cluster-scheduler&quot;&gt;Is it a cluster scheduler?&lt;/h3&gt;
 &lt;p&gt;No. Potluck runs builds, GitHub Actions jobs and coding agents in VMs and containers on ordinary Macs and Linux boxes, and its README says it is not a scheduler for clusters.&lt;/p&gt;
@@ -107,7 +107,7 @@ potluck host set auto
     <title>How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service</title>
     <link rel="alternate" type="text/html" href="https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines"/>
     <published>2026-11-16T00:00:00Z</published>
-    <updated>2026-11-16T00:00:00Z</updated>
+    <updated>2026-11-17T00:00:00Z</updated>
     <author><name>Sengi</name></author>
     <summary>Give Claude Code, Codex or another coding agent a throwaway sandbox on a Mac or Linux box you own. What a sandbox must isolate, and how Potluck sets it up.</summary>
     <content type="html">&lt;p&gt;You can run a coding agent such as Claude Code or Codex in a sandbox on machines you own, with no hosted sandbox service. Potluck starts a fresh VM or container on a Mac or Linux box in your pool (the ready-made agent image needs a Linux box), runs the agent's commands inside it, and deletes it afterward. The sandbox cannot reach the machine that hosts it, that machine's network, or other sandboxes.&lt;/p&gt;
@@ -121,7 +121,7 @@ potluck host set auto
 &lt;li&gt;&lt;strong&gt;Start clean and end for good.&lt;/strong&gt; Each sandbox starts from the same image and is deleted at its time limit or when you remove it.&lt;/li&gt;
 &lt;li&gt;&lt;strong&gt;Block mail.&lt;/strong&gt; Outbound mail ports are closed.&lt;/li&gt;
 &lt;/ul&gt;
-&lt;p&gt;These are the claims in Potluck's isolation document. &lt;code&gt;potluck isolation test &amp;lt;machine&amp;gt;-c2m4&lt;/code&gt; checks the host, local network, Tailscale network and peer-sandbox ones by sample on your own machine; &lt;code&gt;potluck host&lt;/code&gt; checks mail. The repository lists the first recorded test on a real Mac as owed.&lt;/p&gt;
+&lt;p&gt;These are the claims in Potluck's isolation document. &lt;code&gt;potluck isolation test &amp;lt;machine&amp;gt;-c2m4&lt;/code&gt; checks the host, local network, Tailscale network and peer-sandbox ones by sample on your own machine; &lt;code&gt;potluck host&lt;/code&gt; checks mail.&lt;/p&gt;
 &lt;h2 id=&quot;why-run-it-on-machines-you-own&quot;&gt;Why run it on machines you own?&lt;/h2&gt;
 &lt;p&gt;A hosted sandbox service runs your code on someone else's machines, which can be the right choice. A sandbox on your own machines is a different tradeoff, set against running the agent directly on your laptop:&lt;/p&gt;
 &lt;div class=&quot;table-wrap&quot;&gt;&lt;table&gt;
@@ -142,7 +142,7 @@ potluck host set auto
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 potluck doctor
 &lt;/code&gt;&lt;/pre&gt;
-&lt;p&gt;On a Mac you need Tart and Softnet. On Linux you need Docker with Kata or gVisor. &lt;code&gt;potluck doctor&lt;/code&gt; says what is missing. The &lt;code&gt;agent&lt;/code&gt; template in Step 3 and &lt;code&gt;potluck agent-runner&lt;/code&gt; need a Linux box with Docker and Kata or gVisor in the pool; a Mac-only pool can run plain sandboxes but not those.&lt;/p&gt;
+&lt;p&gt;On a Mac you need &lt;a href=&quot;/tart&quot;&gt;Tart&lt;/a&gt; and Softnet. On Linux you need Docker with Kata or gVisor. &lt;code&gt;potluck doctor&lt;/code&gt; says what is missing. The &lt;code&gt;agent&lt;/code&gt; template in Step 3 and &lt;code&gt;potluck agent-runner&lt;/code&gt; need a Linux box with Docker and Kata or gVisor in the pool; a Mac-only pool can run plain sandboxes but not those.&lt;/p&gt;
 &lt;h3 id=&quot;step-2-start-a-pool-and-share-the-machine&quot;&gt;Step 2: Start a pool and share the machine&lt;/h3&gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck create team --via tunnel
 potluck host
@@ -151,7 +151,7 @@ potluck host
 &lt;h3 id=&quot;step-3-create-a-sandbox-with-the-agent-image&quot;&gt;Step 3: Create a sandbox with the agent image&lt;/h3&gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck sandbox create --template agent --ref HEAD
 &lt;/code&gt;&lt;/pre&gt;
-&lt;p&gt;The &lt;code&gt;agent&lt;/code&gt; template is Potluck's Linux image plus git, gh, Node 22, Python 3, ripgrep, jq, build-essential, and the Claude Code and Codex command-line tools. It needs a Linux box in the pool, since the template is built from Potluck's Linux image. &lt;code&gt;--ref HEAD&lt;/code&gt; sends the current commit of your checkout in as a git bundle. Add &lt;code&gt;--dirty&lt;/code&gt; to include uncommitted changes.&lt;/p&gt;
+&lt;p&gt;The &lt;code&gt;agent&lt;/code&gt; template is Potluck's Linux image plus git, gh, Node 22, Go, Python 3, ripgrep, jq, build-essential, and the Claude Code and Codex command-line tools. It needs a Linux box in the pool, since the template is built from Potluck's Linux image. &lt;code&gt;--ref HEAD&lt;/code&gt; sends the current commit of your checkout in as a git bundle. Add &lt;code&gt;--dirty&lt;/code&gt; to include uncommitted changes.&lt;/p&gt;
 &lt;h3 id=&quot;step-4-run-commands-in-it&quot;&gt;Step 4: Run commands in it&lt;/h3&gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck sandbox exec &amp;lt;id&amp;gt; --timeout 600 -- npm test
 potluck sandbox shell &amp;lt;id&amp;gt;
@@ -171,14 +171,10 @@ potluck sandbox shell &amp;lt;id&amp;gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck agent-runner claude --secret-file ~/.config/claude/environment-secret --image ghcr.io/sengirunners/potluck-box-agent
 &lt;/code&gt;&lt;/pre&gt;
 &lt;p&gt;Potluck starts one fresh sandbox per runner and keeps a fresh one going as each ends. &lt;code&gt;--count&lt;/code&gt; runs several at once, &lt;code&gt;--timeout&lt;/code&gt; sets a time limit (default one hour), &lt;code&gt;--allow-tool&lt;/code&gt; pre-approves a tool for sessions, and &lt;code&gt;--deny-tool&lt;/code&gt; blocks one. The default image, the first one a machine lends, does not ship &lt;code&gt;claude&lt;/code&gt;, so pass &lt;code&gt;--image&lt;/code&gt; with the &lt;code&gt;agent&lt;/code&gt; image, which ships &lt;code&gt;claude&lt;/code&gt;, git and Python 3. Check that its &lt;code&gt;claude&lt;/code&gt; has the runner mode before relying on it: &lt;code&gt;potluck sandbox create --template agent&lt;/code&gt;, then &lt;code&gt;potluck sandbox exec &amp;lt;id&amp;gt; -- claude self-hosted-runner --help&lt;/code&gt;. Potluck installs nothing itself.&lt;/p&gt;
-&lt;h2 id=&quot;what-are-the-limits-you-should-know-about&quot;&gt;What are the limits you should know about?&lt;/h2&gt;
-&lt;p&gt;Potluck's documents are plain about them. Isolation on a real Mac is also not yet recorded, and on Linux a sandbox that has a network relies on a firewall its owner sets up.&lt;/p&gt;
+&lt;h2 id=&quot;how-do-you-keep-the-vendor-key-safe&quot;&gt;How do you keep the vendor key safe?&lt;/h2&gt;
 &lt;ul&gt;
-&lt;li&gt;The vendor key is readable by the machine that runs the sandbox, and by the agent's session in it. A prompt that steers the agent can read it too.&lt;/li&gt;
-&lt;li&gt;Potluck does not yet limit a sandbox's network to the vendor's hosts. By default a sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Linux, once the root step &lt;code&gt;potluck doctor&lt;/code&gt; prints has set up Potluck's filtered network). &lt;code&gt;--net off&lt;/code&gt; gives no network at all.&lt;/li&gt;
-&lt;li&gt;The Claude Code runner is tested with stand-in adapters; the repository records no run of a real Claude Code environment through it yet.&lt;/li&gt;
-&lt;li&gt;Agent runners do not yet run on macOS boxes, because macOS guests take no secrets yet.&lt;/li&gt;
-&lt;li&gt;The quick start has run in CI with a stand-in VM layer and by hand on a Linux VM with gVisor. It has not yet been run end to end on a real Mac with Tart. Interfaces will change.&lt;/li&gt;
+&lt;li&gt;The machine that runs the sandbox, and the agent's session in it, can read the key. Lend runners only to machines you would give the key to, and rotate it after any session you suspect.&lt;/li&gt;
+&lt;li&gt;A sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Tart, apart from Softnet's DNS forwarder on the host). On Linux it reaches the internet only once the root line from &lt;code&gt;potluck doctor&lt;/code&gt; has made the filtered network. &lt;code&gt;--net off&lt;/code&gt; gives it no network at all.&lt;/li&gt;
 &lt;/ul&gt;
 &lt;h2 id=&quot;faq&quot;&gt;FAQ&lt;/h2&gt;
 &lt;h3 id=&quot;can-i-run-claude-code-in-a-potluck-sandbox&quot;&gt;Can I run Claude Code in a Potluck sandbox?&lt;/h3&gt;
@@ -200,7 +196,7 @@ potluck sandbox shell &amp;lt;id&amp;gt;
     <title>How to run a self-hosted GitHub Actions runner on your own Mac, with a fresh VM for each job</title>
     <link rel="alternate" type="text/html" href="https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac"/>
     <published>2026-11-16T00:00:00Z</published>
-    <updated>2026-11-16T00:00:00Z</updated>
+    <updated>2026-11-17T00:00:00Z</updated>
     <author><name>Sengi</name></author>
     <summary>Run GitHub Actions jobs on your own Mac or Mac mini, each in a fresh throwaway VM, so one job never touches your files or the next job.</summary>
     <content type="html">&lt;p&gt;You can run GitHub Actions jobs on a Mac you own by registering it as a self-hosted runner, but a plain runner runs every job directly on that Mac, so jobs share its files, its keychain and each other's leftovers. Potluck runs each job in its own fresh VM on your Mac or Mac mini and deletes the VM when the job ends. It is open source (Apache-2.0), and you set it up with a handful of commands.&lt;/p&gt;
@@ -215,7 +211,7 @@ potluck sandbox shell &amp;lt;id&amp;gt;
 &lt;p&gt;A plain runner is therefore a poor fit for a Mac you also sit at.&lt;/p&gt;
 &lt;h2 id=&quot;what-does-a-fresh-vm-for-each-job-change&quot;&gt;What does a fresh VM for each job change?&lt;/h2&gt;
 &lt;p&gt;A fresh VM changes where the job runs. Instead of running on your Mac, the job runs inside a virtual machine that Potluck starts for that one job and deletes afterward. Nothing the job writes survives, and the next job starts from the same clean image.&lt;/p&gt;
-&lt;p&gt;Potluck's isolation claim (docs/isolation.md in the repository) is that a job's VM cannot reach the lending Mac on any port (on Tart, apart from Softnet's DNS forwarder on the host), cannot reach its local network or its Tailscale network, cannot reach another VM running at the same time, cannot send mail, and holds none of your credentials. The test that checks this, &lt;code&gt;potluck isolation test&lt;/code&gt;, has not yet been recorded on a real Mac; the repository lists that run as owed.&lt;/p&gt;
+&lt;p&gt;Potluck's isolation claim (docs/isolation.md in the repository) is that a job's VM cannot reach the lending Mac on any port (on Tart, apart from Softnet's DNS forwarder on the host), cannot reach its local network or its Tailscale network, cannot reach another VM running at the same time, cannot send mail, and holds none of your credentials. &lt;code&gt;potluck isolation test&lt;/code&gt; checks the host, local network, Tailscale network and second-VM claims by sample on your own machine; &lt;code&gt;potluck host&lt;/code&gt; checks mail.&lt;/p&gt;
 &lt;div class=&quot;table-wrap&quot;&gt;&lt;table&gt;
 &lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th&gt;Plain self-hosted runner&lt;/th&gt;&lt;th&gt;Potluck, a fresh VM per job&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
 &lt;tbody&gt;
@@ -235,7 +231,7 @@ potluck sandbox shell &amp;lt;id&amp;gt;
 &lt;/ol&gt;
 &lt;p&gt;Only code from people who can push to the repository is served. For a public repository, Potluck serves only its own branches, and pull requests from forks are never served. For a private repository, forks are refused unless you turn on &lt;code&gt;allow_fork_prs&lt;/code&gt; in the broker's config.&lt;/p&gt;
 &lt;h2 id=&quot;how-do-you-set-it-up-step-by-step&quot;&gt;How do you set it up, step by step?&lt;/h2&gt;
-&lt;p&gt;You need an Apple-silicon Mac with Tart and Softnet installed. The first &lt;code&gt;potluck host&lt;/code&gt; on a Mac pulls a macOS image of about 27 GB and wants about 60 GB free. Linux boxes with Docker and Kata or gVisor work too, for Linux jobs.&lt;/p&gt;
+&lt;p&gt;You need an Apple-silicon Mac with &lt;a href=&quot;/tart&quot;&gt;Tart&lt;/a&gt; and Softnet installed. The first &lt;code&gt;potluck host&lt;/code&gt; on a Mac pulls a macOS image of about 27 GB and wants about 60 GB free. Linux boxes with Docker and Kata or gVisor work too, for Linux jobs.&lt;/p&gt;
 &lt;h3 id=&quot;step-1-install-potluck&quot;&gt;Step 1: Install Potluck&lt;/h3&gt;
 &lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 &lt;/code&gt;&lt;/pre&gt;
@@ -276,8 +272,7 @@ potluck ci doctor acme/app
 &lt;p&gt;To add more machines later, the pool needs a way for them to reach this one. A pool made with &lt;code&gt;--via tunnel&lt;/code&gt; and no tunnel configured works on this machine alone. A second machine needs either Tailscale (run &lt;code&gt;potluck create ci&lt;/code&gt; again without &lt;code&gt;--via tunnel&lt;/code&gt;, which is safe on an existing pool and brings Tailscale up, then &lt;code&gt;potluck invite &amp;lt;name&amp;gt; --host&lt;/code&gt;) or a tunnel you configure in &lt;code&gt;~/.potluck/config.json&lt;/code&gt; (see the README's &amp;quot;A tunnel instead of Tailscale&amp;quot;, then &lt;code&gt;potluck invite &amp;lt;name&amp;gt; --host --via tunnel --pool ci&lt;/code&gt;). On the other machine, run &lt;code&gt;potluck host '&amp;lt;code&amp;gt;'&lt;/code&gt;. Jobs go to whichever machine is free.&lt;/p&gt;
 &lt;h2 id=&quot;what-does-the-mac-license-allow&quot;&gt;What does the Mac license allow?&lt;/h2&gt;
 &lt;p&gt;Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs on a Mac you own or control for uses such as development and testing, and its licence does not allow time-sharing or service-bureau use. The Potluck README's rule is that lending a macOS guest to your team or invited friends is fine and selling Mac time to the public is not. Potluck caps macOS guests at two per Mac. Read the license yourself; this is not legal advice.&lt;/p&gt;
-&lt;h2 id=&quot;what-works-today-and-what-does-not&quot;&gt;What works today and what does not?&lt;/h2&gt;
-&lt;p&gt;Potluck is early, and its README lists what has been tested. A GitHub Actions job has been run through the broker by hand on a Mac with Tart, and on a Linux box on another machine. Potluck's own CI does not yet run Actions jobs on pool machines every day. The &lt;code&gt;runs-on&lt;/code&gt; form that &lt;code&gt;potluck ci pr&lt;/code&gt; writes uses GitHub's &lt;code&gt;fromJSON&lt;/code&gt; function, and Potluck's docs say that form has not yet been run live. Interfaces will change.&lt;/p&gt;
+&lt;p&gt;How the runner picks and refuses jobs is on the &lt;a href=&quot;/github-actions-runner&quot;&gt;self-hosted GitHub Actions runner&lt;/a&gt; page.&lt;/p&gt;
 &lt;h2 id=&quot;faq&quot;&gt;FAQ&lt;/h2&gt;
 &lt;h3 id=&quot;can-i-use-a-mac-mini-as-a-github-actions-runner&quot;&gt;Can I use a Mac mini as a GitHub Actions runner?&lt;/h3&gt;
 &lt;p&gt;Yes, if it is Apple silicon. Install Potluck, run &lt;code&gt;potluck create&lt;/code&gt; and &lt;code&gt;potluck host --reclaim-idle-s 0&lt;/code&gt;, and each job runs in a fresh Tart VM on the mini.&lt;/p&gt;

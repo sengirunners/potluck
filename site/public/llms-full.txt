@@ -1,6 +1,6 @@
 # Potluck
 
-> Potluck is free, open-source software (Apache-2.0) that pools a team's spare Macs and Linux machines and runs coding agents and builds on them, each job in a fresh VM or sandbox that is thrown away afterwards. It is made by Sengi.
+> Potluck is free, open-source software (Apache-2.0) that puts a team's idle Macs and Linux machines to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox that is thrown away afterwards. It is made by Sengi.
 
 Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; friends and teammates join with a one-time code and lend machines to it. Work goes to a machine that is free, and a machine's owner can take it back at any time. There are no accounts: machines find each other over Tailscale (or a tunnel you set up).
 
@@ -13,9 +13,9 @@ Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; f
 
 Source: https://potluck.sh/
 
-# Potluck: run coding agents and builds on the computers you already own
+# Put your team's idle machines to work.
 
-Builds and agents make your laptop crawl. Potluck pools your team's spare machines and runs coding agents and builds on them, each in a fresh VM or sandbox. When someone needs their machine back, it's theirs.
+Self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox, on the Macs and Linux boxes you already own. When someone needs their machine back, it's theirs. Free and open source (Apache-2.0).
 
 Install on macOS or Linux:
 
@@ -23,7 +23,7 @@ Install on macOS or Linux:
 curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 ```
 
-Potluck is free and open source (Apache-2.0). Releases are signed: the installer checks the signature when it can (it needs OpenSSL 3) and says so when it can't. To lend a machine you need an Apple-silicon Mac with Tart and Softnet, or a Linux box with Docker and Kata or gVisor; `potluck doctor` says what is missing. Code: https://github.com/sengirunners/potluck
+Free and open source (Apache-2.0) · macOS and Linux. Code: https://github.com/sengirunners/potluck
 
 ## How it works
 
@@ -38,14 +38,19 @@ One machine runs the pool. Everyone else brings theirs. Work goes to whichever m
 - **Coding agents: give your agent a computer of its own.** An agent's commands run in a throwaway sandbox on a pool machine, not on your laptop: `potluck sandbox create`, `potluck sandbox exec <id> -- make test`, `potluck sandbox rm <id>`. Or hand the agent the sandbox tools over MCP with `{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}`. To run Claude Code's self-hosted runner in fresh sandboxes: `potluck agent-runner claude --secret-file <key-file>`.
 - **GitHub Actions: move a macOS job onto your own Mac.** `potluck ci pr acme/app` prepares a change to one line of your workflow (`runs-on: macos-15` becomes your Mac, with GitHub's runner kept for forks); then you open the pull request it prepares. Pull requests from forks keep using GitHub's runner.
 
-At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of November 2026), 5,000 macOS build minutes a month on a private repository, after your plan's included minutes, cost $310. On your own Mac with Potluck they cost nothing but electricity. Public repositories run on GitHub's runners for free.
+At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of November 2026), 5,000 macOS GitHub Actions minutes a month on a private repository, after your plan's included minutes, cost $310. On your own Mac with Potluck they cost nothing but electricity. Public repositories run on GitHub's runners for free.
 
 ## House rules
 
 - **Work stays in a box.** Every job runs in a throwaway VM or sandbox, not directly on your machine, and is deleted after.
 - **Keys go only where you send them.** A job gets a secret only when you grant it, only on a friend's machine, and as a file: never on the command line or in its environment.
 - **Friends and strangers.** Mark each machine as a friend's or a stranger's. A friend's machine takes your jobs and the keys you grant. A stranger's runs only the sandboxes you send it, and never gets a key.
-- **Share the Mac you already own.** Lend your Mac's spare time to your team and friends. Apple's licence forbids selling Mac time, not lending a macOS VM to your team (that is the makers' reading of the licence; read it yourself before you lend). Linux VMs on a Mac aren't affected.
+- **Share the Mac you already own.** Stop paying by the minute for macOS GitHub Actions jobs. Lend your Mac's spare time to your team and friends. Apple's licence forbids selling Mac time, not lending a macOS VM to your team (that is the makers' reading of the licence; read it yourself before you lend). Linux VMs on a Mac aren't affected.
+
+## Guides
+
+- A self-hosted GitHub Actions runner with a fresh VM for every job: https://potluck.sh/github-actions-runner
+- Tart, its licence, and what Potluck adds: https://potluck.sh/tart
 
 ## Who makes it
 
@@ -53,11 +58,180 @@ Jackson and Clay at Sengi make Potluck. Write to ops@sengi.run, or use the form 
 
 ---
 
+Source: https://potluck.sh/github-actions-runner
+
+# Self-hosted GitHub Actions runner with a fresh VM for every job
+
+Updated 2026-11-17. https://potluck.sh/github-actions-runner
+
+A self-hosted runner that lives on one machine for months collects state: caches, half-installed tools, files a
+job left behind, and anything a bad dependency dropped there. Potluck gives every job a fresh machine instead, on
+hardware your team already owns.
+
+## How a job runs
+
+1. One machine in your pool runs Potluck's runner broker. It is connected to GitHub through a GitHub App you create,
+   and it watches the repositories you connect. With a public address it takes GitHub's webhooks and catches up by
+   asking GitHub every 5 minutes; with none, it asks GitHub for queued jobs every 15 seconds.
+2. A queued job whose `runs-on` names your pool's label (for a pool called `friends`: `runs-on: friends`, or
+   `friends:<size>` for a size, with or without `self-hosted`) is the pool's. A job that names no OS goes to Linux,
+   as on GitHub's own runners.
+3. The broker registers a just-in-time runner for that one job and asks a pool machine for a fresh box of the right
+   size. GitHub's runner starts inside the box, takes the job, and the box is ended when the job is done.
+
+A box is a Tart VM on an Apple-silicon Mac, or a container under Kata (a lightweight VM) or gVisor on Linux. Nothing
+from one job is left for the next. On a Mac lent by a person, a job ends when its owner touches the keyboard or
+trackpad, and nothing new starts until the Mac has been idle for five minutes; `potluck host set drain` winds any
+machine down.
+
+## Which jobs it takes, and which it refuses
+
+- Only repositories you connect: `potluck runners allow <owner/repo>`. A public repository needs `--public`, your
+  yes to serve its own branches.
+- Only runs started by people who can push: `push`, `pull_request` from the repository's own branches,
+  `workflow_dispatch`, `schedule`, `merge_group`, `release` and `repository_dispatch`. Never `pull_request_target`,
+  `workflow_run`, `issue_comment` and the like, which act on outsiders' input.
+- Never a run from a fork, unless you turn on `allow_fork_prs` for a private repository.
+
+A refused job never runs on your machines. It stays queued on GitHub, or, if GitHub hands it a runner made for
+another job, the box stops it before its first step and it fails. A fork can edit `runs-on` in its own pull request, so the
+label alone would not keep it off your machines; the broker's refusal is what does. To have forks' pull requests
+run on GitHub's runner instead, use the `runs-on` that `potluck ci pr` writes (below).
+
+## Move one job onto your Mac: `potluck ci pr`
+
+`potluck ci pr <owner/repo>` changes one job's `runs-on` in a workflow and prepares the change as a pull request
+for you to open. A job that says `runs-on: macos-15` becomes:
+
+```yaml
+runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '["macos-15"]' || '["self-hosted","macos","<pool label>"]') }}
+```
+
+As written, pull requests from forks ask for `macos-15`, GitHub's runner. Pushes, manual runs, schedules and pull
+requests from the repository's own branches ask for your pool. Only that one value in the file changes
+([docs/ci-pr.md](https://github.com/sengirunners/potluck/blob/main/docs/ci-pr.md)).
+
+## Set it up
+
+Start with a pool and a machine that shares itself with it (the [quick start](https://github.com/sengirunners/potluck#quick-start)).
+Then, on the pool's machine:
+
+```sh
+potluck runners setup <pool>        # writes the broker's settings and prints the GitHub App's creation page
+potluck runners allow <owner/repo>  # connect a repository (add --public for a public one)
+potluck ci pr <owner/repo>          # prepare the pull request that moves one job onto the pool
+potluck ci doctor <owner/repo>      # 17 read-only checks, each failure with one next step
+```
+
+Creating the GitHub App and linking its installation need a public https address that GitHub can send your browser
+back to (for example a tunnel). Serving jobs afterwards does not need it: with no public address the broker asks GitHub itself, every 15 seconds. The details are in
+[docs/daemon.md](https://github.com/sengirunners/potluck/blob/main/docs/daemon.md#github-runner-broker) and
+[docs/ci-doctor.md](https://github.com/sengirunners/potluck/blob/main/docs/ci-doctor.md).
+
+## What it costs
+
+Potluck is free. GitHub does not charge for minutes on self-hosted runners; its billing docs list self-hosted runners
+as free (read November 17, 2026). On a private repository, after your plan's included minutes, GitHub's standard
+macOS runner costs $0.062 a minute and its 2-core Linux runner $0.006 a minute (GitHub's runner price list, read
+November 17, 2026). On your own machines you pay for the electricity.
+
+The machine that runs a job's VM can read everything in it, secrets included, so lend and use machines only among
+people you trust with that.
+
+On a Mac, Potluck uses Tart: [what Tart is and what Potluck adds](/tart).
+
+---
+
+Source: https://potluck.sh/tart
+
+# Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds
+
+Updated 2026-11-17. https://potluck.sh/tart
+
+## What Tart does
+
+Tart's README describes it as a virtualization toolset to build, run and manage macOS and Linux virtual machines on
+Apple silicon, built by CI engineers for automation. It uses Apple's own Virtualization framework, so VMs run at close
+to native speed. VM images are pushed to and pulled from any OCI-compatible container registry, the same kind of
+registry that holds Docker images, and a Packer plugin builds them. Its site is [tart.run](https://tart.run).
+
+Tart was started at Cirrus Labs. Its repository is now [github.com/openai/tart](https://github.com/openai/tart)
+(the old cirruslabs/tart address leads there), and its licence names OpenAI as the copyright holder.
+
+## Tart's licence: FSL-1.1-ALv2
+
+Tart's LICENSE file is the Functional Source License, version 1.1, with Apache 2.0 as its future licence
+(FSL-1.1-ALv2). In short:
+
+- You may use, copy, change and redistribute Tart for any purpose except a "Competing Use", which the licence defines
+  as "making the Software available to others in a commercial product or service that: 1. substitutes for the
+  Software; 2. substitutes for any other product or service we offer using the Software that exists as of the date
+  we make the Software available; or 3. offers the same or substantially similar functionality as the Software".
+- The licence names internal use, non-commercial education and research, and professional services to someone who
+  holds a licence as permitted.
+- Each version becomes available under Apache 2.0 two years after it is made available.
+
+Running Tart inside your own team to test your own code is internal use. Whether a particular business counts as a
+Competing Use is a question for the licence text and your lawyer, not this page.
+
+## Apple's limit: two macOS VMs per Mac
+
+Apple's software licence agreement for macOS (section 2B(iii), in the copy shipped with macOS 27.2.1) allows up to
+two additional copies or instances of macOS in virtual machines on each Apple-branded computer you own or control,
+for software development, testing during software development, macOS Server, or personal non-commercial use. The
+same agreement does not allow those VMs to be used for service-bureau, time-sharing, terminal-sharing or relay
+services. Linux VMs on a Mac are not affected.
+
+Potluck caps macOS guests at two per Mac. Its rule for lending: a macOS VM for people on your team or friends you
+invite is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time
+([the README's Macs section](https://github.com/sengirunners/potluck#macs)). That is Potluck's makers' reading of
+the licence.
+
+## Potluck does not bundle Tart
+
+Potluck's installer puts `potluck`, its drivers, `potluck-conformance` and `potluck-e2b` on your machine, and nothing
+else. On a Mac, you install Tart and Softnet (the helper Tart uses to give a VM an isolated network; it is setuid
+root) yourself, and accept Tart's licence yourself. `potluck doctor` says what is missing and where to get it,
+including the one sudo line Softnet needs. A Mac also needs about 60 GB free: the first `potluck host` pulls a macOS
+image of about 27 GB.
+
+## What Potluck adds on top of Tart
+
+Tart makes and runs VMs. Potluck decides which VM to make, for whom, on which machine, and when to end it:
+
+- **A fresh VM for every job.** Each GitHub Actions job or sandbox gets its own VM, thrown away when it is done.
+- **Your team's machines in one pool.** Teammates lend their Macs and Linux boxes; work goes to whichever is free.
+- **The Mac goes back to its owner.** By default a lent Mac works for the pool only while its owner is away: touch
+  the keyboard or trackpad and its job ends. VMs also end at their deadline, even if Potluck's daemon is down.
+- **GitHub Actions jobs.** A broker takes queued jobs from the repositories you connect and runs each in a fresh VM,
+  refusing runs from forks ([self-hosted GitHub Actions runner](/github-actions-runner)).
+- **Sandboxes for coding agents.** `potluck sandbox create`, `potluck sandbox exec`, or the same tools over MCP.
+- **Checks before a machine joins.** `potluck host` checks the machine and runs a quick conformance check for each
+  size before sharing it.
+
+On one Mac, the quick start is:
+
+```sh
+potluck doctor                          # what this machine can share, and what is missing
+potluck create trial --via tunnel       # a pool on this machine alone
+potluck host --reclaim-idle-s 0         # share this machine with that pool
+potluck sandbox create                  # prints the sandbox's id
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+This one-machine path has been run end to end by hand many times on an Apple-silicon Mac with Tart.
+
+Facts on this page were checked against the sources named in each section on November 17, 2026. Licences change;
+read them yourself. This is not legal advice.
+
+---
+
 Source: https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
 
 # How to pool your team's spare Macs and Linux boxes for builds and coding agents
 
-Published 2026-11-16. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
+Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
 
 A pool is a group of machines that a team or friends lend to each other for builds and coding agents. With Potluck, one machine runs the pool, other people join with one-time invite codes, and each job runs in a fresh VM or sandbox on whichever machine is free. A machine's owner chooses how much to share and can wind it down or stop it with one command.
 
@@ -84,7 +258,7 @@ The pool's owner decides, because every person and machine joins with a one-time
 
 A host's trust is the owner's choice at invite time, and the machine cannot change it. The difference matters:
 
-- A **trusted** machine, a friend's, has sandboxes placed on it without being asked. It may run GitHub Actions jobs and receive the secrets a member sends to a sandbox.
+- A **trusted** machine, a friend's, has sandboxes placed on it without being asked. It may run [GitHub Actions jobs](/github-actions-runner) and receive the secrets a member sends to a sandbox.
 - A **public** machine, a stranger's, runs only sandboxes a member names with `--on`. It never runs GitHub Actions jobs and never receives a secret.
 
 Two limits are worth knowing before you invite anyone. The machine that runs a sandbox can read everything in it, including code, commands, output and secrets. The machine that runs the pool can read the commands, output and secrets passing through it, until commands are sealed to the host's key, and over `--via tunnel` so can the tunnel's provider. Join only a pool whose owner you would trust with that.
@@ -99,7 +273,7 @@ A lender can check this on their own machine:
 potluck isolation test <machine>-c2m4
 ```
 
-Sizes are matched by exact name, and `potluck host` names each one `<machine>-<size>` (`potluck isolation` lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. The repository lists the first recorded run on a real Mac as owed, and on Linux a sandbox that has a network relies on a firewall the machine's owner sets up.
+Sizes are matched by exact name, and `potluck host` names each one `<machine>-<size>` (`potluck isolation` lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. On Linux, a sandbox that has a network relies on a firewall the machine's owner sets up.
 
 ## How do you start a pool, step by step?
 
@@ -110,7 +284,7 @@ curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.s
 potluck doctor
 ```
 
-A Mac needs to be Apple silicon with Tart and Softnet. A Linux box needs Docker with Kata or gVisor. `potluck doctor` says what is missing.
+A Mac needs to be Apple silicon with [Tart](/tart) and Softnet. A Linux box needs Docker with Kata or gVisor. `potluck doctor` says what is missing.
 
 ### Step 2: Create the pool and share this machine
 
@@ -161,11 +335,11 @@ potluck host set auto
 
 `auto` returns to the machine's own rules. `--for 2h` and `--until 23:00` return the machine to `auto` at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar`, which installs the app but does not start it, then open it with `open ~/Applications/"Potluck Menu.app"`. It is not yet signed with an Apple Developer ID.
 
-To stop sharing for good, `potluck host stop` removes every size the machine shared, and `potluck leave` leaves the pool. On Linux, hand-back when the owner returns is a time window only today.
+To stop sharing for good, `potluck host stop` removes every size the machine shared, and `potluck leave` leaves the pool.
 
-## What should you know before relying on it?
+## Can you lend a Mac?
 
-Potluck is early, and its README says interfaces will change. The one-machine path is tested in CI with a stand-in VM layer, and the whole quick start has run by hand on a Linux VM. It has not yet been run on two real machines in CI. Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.
+Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.
 
 ## FAQ
 
@@ -201,7 +375,7 @@ Source: https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machi
 
 # How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service
 
-Published 2026-11-16. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
+Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
 
 You can run a coding agent such as Claude Code or Codex in a sandbox on machines you own, with no hosted sandbox service. Potluck starts a fresh VM or container on a Mac or Linux box in your pool (the ready-made agent image needs a Linux box), runs the agent's commands inside it, and deletes it afterward. The sandbox cannot reach the machine that hosts it, that machine's network, or other sandboxes.
 
@@ -216,7 +390,7 @@ An agent runs shell commands, installs packages, edits files and fetches web pag
 - **Start clean and end for good.** Each sandbox starts from the same image and is deleted at its time limit or when you remove it.
 - **Block mail.** Outbound mail ports are closed.
 
-These are the claims in Potluck's isolation document. `potluck isolation test <machine>-c2m4` checks the host, local network, Tailscale network and peer-sandbox ones by sample on your own machine; `potluck host` checks mail. The repository lists the first recorded test on a real Mac as owed.
+These are the claims in Potluck's isolation document. `potluck isolation test <machine>-c2m4` checks the host, local network, Tailscale network and peer-sandbox ones by sample on your own machine; `potluck host` checks mail.
 
 ## Why run it on machines you own?
 
@@ -246,7 +420,7 @@ curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.s
 potluck doctor
 ```
 
-On a Mac you need Tart and Softnet. On Linux you need Docker with Kata or gVisor. `potluck doctor` says what is missing. The `agent` template in Step 3 and `potluck agent-runner` need a Linux box with Docker and Kata or gVisor in the pool; a Mac-only pool can run plain sandboxes but not those.
+On a Mac you need [Tart](/tart) and Softnet. On Linux you need Docker with Kata or gVisor. `potluck doctor` says what is missing. The `agent` template in Step 3 and `potluck agent-runner` need a Linux box with Docker and Kata or gVisor in the pool; a Mac-only pool can run plain sandboxes but not those.
 
 ### Step 2: Start a pool and share the machine
 
@@ -263,7 +437,7 @@ On a Mac you sit at, add `--reclaim-idle-s 0`. By default a Mac's sandbox ends w
 potluck sandbox create --template agent --ref HEAD
 ```
 
-The `agent` template is Potluck's Linux image plus git, gh, Node 22, Python 3, ripgrep, jq, build-essential, and the Claude Code and Codex command-line tools. It needs a Linux box in the pool, since the template is built from Potluck's Linux image. `--ref HEAD` sends the current commit of your checkout in as a git bundle. Add `--dirty` to include uncommitted changes.
+The `agent` template is Potluck's Linux image plus git, gh, Node 22, Go, Python 3, ripgrep, jq, build-essential, and the Claude Code and Codex command-line tools. It needs a Linux box in the pool, since the template is built from Potluck's Linux image. `--ref HEAD` sends the current commit of your checkout in as a git bundle. Add `--dirty` to include uncommitted changes.
 
 ### Step 4: Run commands in it
 
@@ -302,15 +476,10 @@ potluck agent-runner claude --secret-file ~/.config/claude/environment-secret --
 
 Potluck starts one fresh sandbox per runner and keeps a fresh one going as each ends. `--count` runs several at once, `--timeout` sets a time limit (default one hour), `--allow-tool` pre-approves a tool for sessions, and `--deny-tool` blocks one. The default image, the first one a machine lends, does not ship `claude`, so pass `--image` with the `agent` image, which ships `claude`, git and Python 3. Check that its `claude` has the runner mode before relying on it: `potluck sandbox create --template agent`, then `potluck sandbox exec <id> -- claude self-hosted-runner --help`. Potluck installs nothing itself.
 
-## What are the limits you should know about?
+## How do you keep the vendor key safe?
 
-Potluck's documents are plain about them. Isolation on a real Mac is also not yet recorded, and on Linux a sandbox that has a network relies on a firewall its owner sets up.
-
-- The vendor key is readable by the machine that runs the sandbox, and by the agent's session in it. A prompt that steers the agent can read it too.
-- Potluck does not yet limit a sandbox's network to the vendor's hosts. By default a sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Linux, once the root step `potluck doctor` prints has set up Potluck's filtered network). `--net off` gives no network at all.
-- The Claude Code runner is tested with stand-in adapters; the repository records no run of a real Claude Code environment through it yet.
-- Agent runners do not yet run on macOS boxes, because macOS guests take no secrets yet.
-- The quick start has run in CI with a stand-in VM layer and by hand on a Linux VM with gVisor. It has not yet been run end to end on a real Mac with Tart. Interfaces will change.
+- The machine that runs the sandbox, and the agent's session in it, can read the key. Lend runners only to machines you would give the key to, and rotate it after any session you suspect.
+- A sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Tart, apart from Softnet's DNS forwarder on the host). On Linux it reaches the internet only once the root line from `potluck doctor` has made the filtered network. `--net off` gives it no network at all.
 
 ## FAQ
 
@@ -346,7 +515,7 @@ Source: https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac
 
 # How to run a self-hosted GitHub Actions runner on your own Mac, with a fresh VM for each job
 
-Published 2026-11-16. https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac
+Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac
 
 You can run GitHub Actions jobs on a Mac you own by registering it as a self-hosted runner, but a plain runner runs every job directly on that Mac, so jobs share its files, its keychain and each other's leftovers. Potluck runs each job in its own fresh VM on your Mac or Mac mini and deletes the VM when the job ends. It is open source (Apache-2.0), and you set it up with a handful of commands.
 
@@ -366,7 +535,7 @@ A plain runner is therefore a poor fit for a Mac you also sit at.
 
 A fresh VM changes where the job runs. Instead of running on your Mac, the job runs inside a virtual machine that Potluck starts for that one job and deletes afterward. Nothing the job writes survives, and the next job starts from the same clean image.
 
-Potluck's isolation claim (docs/isolation.md in the repository) is that a job's VM cannot reach the lending Mac on any port (on Tart, apart from Softnet's DNS forwarder on the host), cannot reach its local network or its Tailscale network, cannot reach another VM running at the same time, cannot send mail, and holds none of your credentials. The test that checks this, `potluck isolation test`, has not yet been recorded on a real Mac; the repository lists that run as owed.
+Potluck's isolation claim (docs/isolation.md in the repository) is that a job's VM cannot reach the lending Mac on any port (on Tart, apart from Softnet's DNS forwarder on the host), cannot reach its local network or its Tailscale network, cannot reach another VM running at the same time, cannot send mail, and holds none of your credentials. `potluck isolation test` checks the host, local network, Tailscale network and second-VM claims by sample on your own machine; `potluck host` checks mail.
 
 | | Plain self-hosted runner | Potluck, a fresh VM per job |
 | --- | --- | --- |
@@ -388,7 +557,7 @@ Only code from people who can push to the repository is served. For a public rep
 
 ## How do you set it up, step by step?
 
-You need an Apple-silicon Mac with Tart and Softnet installed. The first `potluck host` on a Mac pulls a macOS image of about 27 GB and wants about 60 GB free. Linux boxes with Docker and Kata or gVisor work too, for Linux jobs.
+You need an Apple-silicon Mac with [Tart](/tart) and Softnet installed. The first `potluck host` on a Mac pulls a macOS image of about 27 GB and wants about 60 GB free. Linux boxes with Docker and Kata or gVisor work too, for Linux jobs.
 
 ### Step 1: Install Potluck
 
@@ -467,9 +636,7 @@ To add more machines later, the pool needs a way for them to reach this one. A p
 
 Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs on a Mac you own or control for uses such as development and testing, and its licence does not allow time-sharing or service-bureau use. The Potluck README's rule is that lending a macOS guest to your team or invited friends is fine and selling Mac time to the public is not. Potluck caps macOS guests at two per Mac. Read the license yourself; this is not legal advice.
 
-## What works today and what does not?
-
-Potluck is early, and its README lists what has been tested. A GitHub Actions job has been run through the broker by hand on a Mac with Tart, and on a Linux box on another machine. Potluck's own CI does not yet run Actions jobs on pool machines every day. The `runs-on` form that `potluck ci pr` writes uses GitHub's `fromJSON` function, and Potluck's docs say that form has not yet been run live. Interfaces will change.
+How the runner picks and refuses jobs is on the [self-hosted GitHub Actions runner](/github-actions-runner) page.
 
 ## FAQ
 

@@ -204,7 +204,8 @@ type Service struct {
 	// approval rule for outside contributors are read again (default 1 h).
 	RepoCheckEvery time.Duration
 
-	selfCheck doctorState // the self-check's rotation (doctor_watch.go)
+	selfCheck doctorState   // the self-check's rotation (doctor_watch.go)
+	capacity  capacityStore // hosts' capacity reports (capacity.go)
 	mu        sync.Mutex
 	cfgMu     sync.RWMutex // guards d.Config.File.Runners against appCreated's write
 	linkMu    sync.Mutex   // serializes link changes (doLink)
@@ -254,6 +255,9 @@ func New(d *core.Deps) *Service {
 	if link := teamlink.From(d); link != nil {
 		link.RegisterRoutes("runners", teamlink.RouteRule{
 			Pattern: "GET /v0/runners/pool", Kind: teamlink.KindWrite, Hedge: teamlink.Hedged,
+		}, teamlink.RouteRule{
+			Pattern: "PUT /v0/runners/capacity/{host}", Kind: teamlink.KindWrite, Hedge: teamlink.Once,
+			Why: "it replaces the host's last report and the host publishes again within seconds: no write id to record",
 		})
 	}
 	s := &Service{d: d, Command: DefaultCommand, Now: time.Now, HTTP: &http.Client{Timeout: 15 * time.Second}, Secrets: secrets.Default(),
@@ -366,6 +370,8 @@ func (s *Service) Routes(r *core.Router) {
 	r.HandleFunc("POST /v0/runners/repos", core.Local, "local: the machine's owner, also owner of the pool project; connects a repository of a linked installation (a public one with its owner's yes); answers its record", s.handle(s.allow))
 	r.HandleFunc("DELETE /v0/runners/repos/{owner}/{name}", core.Local, "local: the machine's owner, also owner of the pool project; disconnects a repository", s.handle(s.disallow))
 	r.HandleFunc("GET /v0/runners/repos", core.Authed, "connected repositories of links in the caller's readable areas of the pool project", s.handle(s.repos))
+	r.HandleFunc("PUT /v0/runners/capacity/{host}", core.Authed, "the named host's own machine (its node-bound token, a reader of the pool project) or the authority's owner on its socket; replaces the host's capacity report", s.handle(s.capacityPut))
+	r.HandleFunc("GET /v0/runners/capacity/{host}", core.Public, "none: a host's capacity report as it published it, for routers on cloud runners; nothing scoped", s.capacityGet)
 	r.HandleFunc("GET /v0/runners/setup", core.Local, "local: the machine's owner; the broker's config and listener (secret references only, never values)", s.handle(s.setupStatus))
 }
 
@@ -444,6 +450,7 @@ func (s *Service) PublicHandler() http.Handler {
 	m.HandleFunc("GET /v0/runners/app/new", getOnly(s.appPage))
 	m.HandleFunc("GET /v0/runners/app/created", getOnly(s.appCreated))
 	m.HandleFunc("GET /v0/runners/app/installed", getOnly(s.installed))
+	m.HandleFunc("GET /v0/runners/capacity/{host}", s.capacityGet)
 	return m
 }
 

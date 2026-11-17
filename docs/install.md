@@ -33,8 +33,11 @@ Which keys are trusted, and how the signing key is replaced: [release-keys.md](r
 
 ### Options
 
-- `GH_TOKEN` (or `GITHUB_TOKEN`), if set, goes with each GitHub request, which lifts GitHub's rate limit. A private
-  repository needs one that can read it (fetch the script with
+- With no token the script makes no GitHub API call: it downloads the newest release from github.com's release
+  links, which GitHub's anonymous API limit (60 calls an hour per address, shared by everyone behind one office, CI
+  or cloud NAT) does not count.
+- `GH_TOKEN` (or `GITHUB_TOKEN`), if set, makes the script read the release through GitHub's API with that token. A
+  private repository needs one that can read it (fetch the script with
   `curl -fsSL -H "Authorization: Bearer $GH_TOKEN" …`). A token GitHub refuses fails the download; it is not ignored.
 - `sh install.sh --from <dir>` installs from a release's files you already downloaded. It needs `--trust-dir` when
   no signature check can be made.

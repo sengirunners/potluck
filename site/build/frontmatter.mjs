@@ -1,7 +1,9 @@
-// Front matter of a blog post: the fields the growth content job writes (farm/sengi-content-job in agent-hub:
-// slug, kind, engine, path, title, page_title, page_description, target_searches, data_sources, drafted, model),
-// plus `date` (first published) and `updated` (last changed), both written by hand and committed, never read from git,
-// and an optional `summary` (the short answer shown above the post; without it the post's first paragraph leads).
+// Front matter of a blog post and of a page. A post carries the fields the growth content job writes
+// (farm/sengi-content-job in agent-hub: slug, kind, engine, path, title, page_title, page_description,
+// target_searches, data_sources, drafted, model), plus `date` (first published) and `updated` (last changed), both
+// written by hand and committed, never read from git, an optional `summary` (the short answer shown above the post;
+// without it the post's first paragraph leads) and an optional `author` (a person's name; without it the byline,
+// feed and JSON-LD name Sengi). A page (content/pages/<slug>.md) carries the same fields minus the content job's.
 //
 // The syntax is the small YAML subset the job writes: `key: value`, values plain or "double quoted" (JSON escapes),
 // and lists as `  - item` lines. A " #" after a value starts a comment (so quote a value that contains one).
@@ -16,9 +18,17 @@ export class FrontMatterError extends Error {
 export const KINDS = ["new", "refresh"];
 export const ENGINES = ["claude", "chatgpt"]; // farm/growth/article-policy.mjs
 
-const SCALARS = ["slug", "kind", "engine", "path", "title", "page_title", "page_description", "model", "date", "updated", "drafted", "summary"];
-const LISTS = ["target_searches", "data_sources"];
-const REQUIRED = ["slug", "kind", "engine", "title", "page_title", "page_description", "target_searches", "data_sources", "model", "date", "updated"];
+/** Which fields a kind of file takes: one-line values, lists, and the ones it must have. */
+export const POST_FIELDS = {
+  scalars: ["slug", "kind", "engine", "path", "title", "page_title", "page_description", "model", "date", "updated", "drafted", "summary", "author"],
+  lists: ["target_searches", "data_sources"],
+  required: ["slug", "kind", "engine", "title", "page_title", "page_description", "target_searches", "data_sources", "model", "date", "updated"],
+};
+export const PAGE_FIELDS = {
+  scalars: ["slug", "title", "page_title", "page_description", "date", "updated", "summary", "author"],
+  lists: ["target_searches", "data_sources"],
+  required: ["slug", "title", "page_title", "page_description", "target_searches", "date", "updated"],
+};
 
 // Characters XML 1.0 (the feed) and JSON-LD readers do not accept, other than tab, newline and carriage return.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
@@ -54,7 +64,14 @@ function scalar(text, where) {
 }
 
 /** Splits a post file into its parsed front matter and its Markdown body. */
-export function parsePost(text, file = "post") {
+export const parsePost = (text, file = "post") => parseFile(text, file, POST_FIELDS, validatePost);
+
+/** Splits a page file (content/pages/<slug>.md) into its parsed front matter and its Markdown body. */
+export const parsePage = (text, file = "page") => parseFile(text, file, PAGE_FIELDS, validatePage);
+
+function parseFile(text, file, fields, check) {
+  const SCALARS = fields.scalars;
+  const LISTS = fields.lists;
   const src = String(text).replace(/\r\n?/g, "\n");
   const all = src.split("\n");
   const close = all[0] === "---" ? all.indexOf("---", 1) : -1;
@@ -85,16 +102,17 @@ export function parsePost(text, file = "post") {
       throw new FrontMatterError(`${where}: unknown field ${key} (known: ${[...SCALARS, ...LISTS].join(", ")})`);
     }
   }
-  return { meta: validate(data, file), body: m[2].replace(/^\n+/, "").replace(/\s+$/, "") + "\n" };
+  return { meta: check(data, file), body: m[2].replace(/^\n+/, "").replace(/\s+$/, "") + "\n" };
 }
 
-/** Checks a post's fields; returns them normalised. Throws FrontMatterError naming the file and the field. */
-export function validate(d, file = "post") {
+/** Checks the fields every kind shares: present, non-empty, one line, real dates, a well-formed slug. */
+function validateCommon(d, file, fields) {
   const bad = (msg) => {
     throw new FrontMatterError(`${file}: ${msg}`);
   };
-  for (const k of REQUIRED) if (d[k] === undefined) bad(`missing required field ${k}`);
-  for (const k of [...SCALARS, ...LISTS]) {
+  const LISTS = fields.lists;
+  for (const k of fields.required) if (d[k] === undefined) bad(`missing required field ${k}`);
+  for (const k of [...fields.scalars, ...LISTS]) {
     if (d[k] === undefined) continue;
     if (LISTS.includes(k)) {
       if (!Array.isArray(d[k]) || !d[k].length) bad(`${k} must list at least one item`);
@@ -108,10 +126,22 @@ export function validate(d, file = "post") {
     }
   }
   if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(d.slug)) bad(`slug ${JSON.stringify(d.slug)} must be lowercase letters, digits and single hyphens`);
-  if (!KINDS.includes(d.kind)) bad(`kind must be one of ${KINDS.join(", ")}`);
-  if (!ENGINES.includes(d.engine)) bad(`engine must be one of ${ENGINES.join(", ")}`);
   for (const k of ["date", "updated", "drafted"]) if (d[k] !== undefined && !isDay(d[k])) bad(`${k} must be a real YYYY-MM-DD date`);
   if (d.updated < d.date) bad("updated is before date");
+  return bad;
+}
+
+/** Checks a post's fields; returns them normalised. Throws FrontMatterError naming the file and the field. */
+export function validatePost(d, file = "post") {
+  const bad = validateCommon(d, file, POST_FIELDS);
+  if (!KINDS.includes(d.kind)) bad(`kind must be one of ${KINDS.join(", ")}`);
+  if (!ENGINES.includes(d.engine)) bad(`engine must be one of ${ENGINES.join(", ")}`);
   if (d.path !== undefined && d.path !== `/blog/${d.slug}`) bad(`path ${d.path} must be /blog/${d.slug}`);
+  return d;
+}
+
+/** Checks a page's fields; returns them. Throws FrontMatterError naming the file and the field. */
+export function validatePage(d, file = "page") {
+  validateCommon(d, file, PAGE_FIELDS);
   return d;
 }

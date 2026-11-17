@@ -10,6 +10,7 @@
     "build:check": "node build/build.mjs --check",
     "notify": "node build/notify.mjs",
     "readme-hero": "node build/readme-hero.mjs",
+    "og-assets": "node build/og-assets.mjs",
     "deploy": "node build/deploy.mjs"
   }
 }

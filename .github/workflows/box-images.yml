@@ -107,7 +107,7 @@ jobs:
           set -euo pipefail
           box='for t in sh bash timeout awk sleep cat kill ps perl git nc ip ping; do command -v "$t" >/dev/null || { echo "lacks $t"; exit 1; }; done; test -x /home/runner/run.sh'
           # The agent image's own tools, each run (not only found): a broken install fails here.
-          agent='claude --version && codex --version && node --version && npm --version && git --version && gh --version && python3 --version && python3 -m venv /tmp/v && rg --version && jq --version && sudo -n true'
+          agent='claude --version && codex --version && node --version && go version && echo "package p" | gofmt >/dev/null && npm --version && git --version && gh --version && python3 --version && python3 -m venv /tmp/v && rg --version && jq --version && sudo -n true'
           # Run each platform's own manifest, not the index: on the runner's Docker a second `docker run` of the
           # same index digest for another platform fails "cannot overwrite digest" (box-images run 42510606609).
           check() { # image pin, script

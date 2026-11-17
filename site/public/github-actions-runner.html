@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-hosted GitHub Actions runner, a fresh VM per job | Potluck</title>
+<meta name="description" content="Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.">
+<link rel="canonical" href="https://potluck.sh/github-actions-runner">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Self-hosted GitHub Actions runner, a fresh VM per job | Potluck">
+<meta property="og:description" content="Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.">
+<meta property="og:url" content="https://potluck.sh/github-actions-runner">
+<meta property="og:image" content="https://potluck.sh/og/github-actions-runner.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Self-hosted GitHub Actions runner with a fresh VM for every job">
+<meta property="article:published_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-17">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Self-hosted GitHub Actions runner, a fresh VM per job | Potluck">
+<meta name="twitter:description" content="Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.">
+<meta name="twitter:image" content="https://potluck.sh/og/github-actions-runner.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="generator" content="potluck.sh build from content/pages/github-actions-runner.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://potluck.sh/github-actions-runner#article","mainEntityOfPage":"https://potluck.sh/github-actions-runner","url":"https://potluck.sh/github-actions-runner","headline":"Self-hosted GitHub Actions runner with a fresh VM for every job","description":"Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.","datePublished":"2026-11-17","dateModified":"2026-11-17","inLanguage":"en","keywords":"github self hosted runner, github actions self hosted runner, ephemeral self hosted runner, self hosted runner fresh vm per job, github actions macos runner","image":"https://potluck.sh/og/github-actions-runner.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"about":{"@id":"https://potluck.sh/#software"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Self-hosted GitHub Actions runner with a fresh VM for every job","item":"https://potluck.sh/github-actions-runner"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a></nav>
+  <h1>Self-hosted GitHub Actions runner with a fresh VM for every job</h1>
+  <p class="meta">Updated <time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
+<p>Every GitHub Actions job gets a fresh VM on one of your team's idle Macs or Linux boxes, and the VM is thrown away when the job ends. Free and open source (Apache-2.0).</p>
+  </aside>
+  <div class="prose">
+<p>A self-hosted runner that lives on one machine for months collects state: caches, half-installed tools, files a job left behind, and anything a bad dependency dropped there. Potluck gives every job a fresh machine instead, on hardware your team already owns.</p>
+<h2 id="how-a-job-runs">How a job runs</h2>
+<ol>
+<li>One machine in your pool runs Potluck's runner broker. It is connected to GitHub through a GitHub App you create, and it watches the repositories you connect. With a public address it takes GitHub's webhooks and catches up by asking GitHub every 5 minutes; with none, it asks GitHub for queued jobs every 15 seconds.</li>
+<li>A queued job whose <code>runs-on</code> names your pool's label (for a pool called <code>friends</code>: <code>runs-on: friends</code>, or <code>friends:&lt;size&gt;</code> for a size, with or without <code>self-hosted</code>) is the pool's. A job that names no OS goes to Linux, as on GitHub's own runners.</li>
+<li>The broker registers a just-in-time runner for that one job and asks a pool machine for a fresh box of the right size. GitHub's runner starts inside the box, takes the job, and the box is ended when the job is done.</li>
+</ol>
+<p>A box is a Tart VM on an Apple-silicon Mac, or a container under Kata (a lightweight VM) or gVisor on Linux. Nothing from one job is left for the next. On a Mac lent by a person, a job ends when its owner touches the keyboard or trackpad, and nothing new starts until the Mac has been idle for five minutes; <code>potluck host set drain</code> winds any machine down.</p>
+<h2 id="which-jobs-it-takes-and-which-it-refuses">Which jobs it takes, and which it refuses</h2>
+<ul>
+<li>Only repositories you connect: <code>potluck runners allow &lt;owner/repo&gt;</code>. A public repository needs <code>--public</code>, your yes to serve its own branches.</li>
+<li>Only runs started by people who can push: <code>push</code>, <code>pull_request</code> from the repository's own branches, <code>workflow_dispatch</code>, <code>schedule</code>, <code>merge_group</code>, <code>release</code> and <code>repository_dispatch</code>. Never <code>pull_request_target</code>, <code>workflow_run</code>, <code>issue_comment</code> and the like, which act on outsiders' input.</li>
+<li>Never a run from a fork, unless you turn on <code>allow_fork_prs</code> for a private repository.</li>
+</ul>
+<p>A refused job never runs on your machines. It stays queued on GitHub, or, if GitHub hands it a runner made for another job, the box stops it before its first step and it fails. A fork can edit <code>runs-on</code> in its own pull request, so the label alone would not keep it off your machines; the broker's refusal is what does. To have forks' pull requests run on GitHub's runner instead, use the <code>runs-on</code> that <code>potluck ci pr</code> writes (below).</p>
+<h2 id="move-one-job-onto-your-mac-potluck-ci-pr">Move one job onto your Mac: <code>potluck ci pr</code></h2>
+<p><code>potluck ci pr &lt;owner/repo&gt;</code> changes one job's <code>runs-on</code> in a workflow and prepares the change as a pull request for you to open. A job that says <code>runs-on: macos-15</code> becomes:</p>
+<pre><code class="language-yaml">runs-on: ${{ fromJSON(github.event.pull_request &amp;&amp; github.event.pull_request.head.repo.full_name != github.repository &amp;&amp; '[&quot;macos-15&quot;]' || '[&quot;self-hosted&quot;,&quot;macos&quot;,&quot;&lt;pool label&gt;&quot;]') }}
+</code></pre>
+<p>As written, pull requests from forks ask for <code>macos-15</code>, GitHub's runner. Pushes, manual runs, schedules and pull requests from the repository's own branches ask for your pool. Only that one value in the file changes (<a href="https://github.com/sengirunners/potluck/blob/main/docs/ci-pr.md">docs/ci-pr.md</a>).</p>
+<h2 id="set-it-up">Set it up</h2>
+<p>Start with a pool and a machine that shares itself with it (the <a href="https://github.com/sengirunners/potluck#quick-start">quick start</a>). Then, on the pool's machine:</p>
+<pre><code class="language-sh">potluck runners setup &lt;pool&gt;        # writes the broker's settings and prints the GitHub App's creation page
+potluck runners allow &lt;owner/repo&gt;  # connect a repository (add --public for a public one)
+potluck ci pr &lt;owner/repo&gt;          # prepare the pull request that moves one job onto the pool
+potluck ci doctor &lt;owner/repo&gt;      # 17 read-only checks, each failure with one next step
+</code></pre>
+<p>Creating the GitHub App and linking its installation need a public https address that GitHub can send your browser back to (for example a tunnel). Serving jobs afterwards does not need it: with no public address the broker asks GitHub itself, every 15 seconds. The details are in <a href="https://github.com/sengirunners/potluck/blob/main/docs/daemon.md#github-runner-broker">docs/daemon.md</a> and <a href="https://github.com/sengirunners/potluck/blob/main/docs/ci-doctor.md">docs/ci-doctor.md</a>.</p>
+<h2 id="what-it-costs">What it costs</h2>
+<p>Potluck is free. GitHub does not charge for minutes on self-hosted runners; its billing docs list self-hosted runners as free (read November 17, 2026). On a private repository, after your plan's included minutes, GitHub's standard macOS runner costs $0.062 a minute and its 2-core Linux runner $0.006 a minute (GitHub's runner price list, read November 17, 2026). On your own machines you pay for the electricity.</p>
+<p>The machine that runs a job's VM can read everything in it, secrets included, so lend and use machines only among people you trust with that.</p>
+<p>On a Mac, Potluck uses Tart: <a href="/tart">what Tart is and what Potluck adds</a>.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+    <li><a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">How to pool your team's spare Macs and Linux boxes for builds and coding agents</a></li>
+    <li><a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service</a></li>
+    <li><a href="/blog/self-hosted-github-actions-runner-on-your-mac">How to run a self-hosted GitHub Actions runner on your own Mac, with a fresh VM for each job</a></li>
+  </ul>
+</nav>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

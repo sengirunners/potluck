@@ -127,7 +127,7 @@ func newApp(h Host) *app {
 func (a *app) mountable() []*cobra.Command {
 	return []*cobra.Command{a.createCmd(), a.inviteCmd(), a.joinCmd(), a.leaveCmd(), a.forgetCmd(), a.remotesCmd(),
 		a.doctorCmd(), a.isolationCmd(), a.hostCmd(), a.ciCmd(), a.sandboxCmd(), a.usageCmd(), a.sealingCmd(),
-		a.runCmd(), a.agentRunnerCmd(), a.runnersCmd(), a.secretsCmd(), a.driverCmd()}
+		a.runCmd(), a.agentTaskCmd(), a.agentRunnerCmd(), a.runnersCmd(), a.secretsCmd(), a.driverCmd()}
 }
 
 // programCommands are ProgramCommands, built.

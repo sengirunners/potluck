@@ -10,7 +10,9 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"sort"
 	"strconv"
@@ -29,10 +31,50 @@ import (
 func (a *app) runnersCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "runners",
-		Short: "Run a GitHub org's Actions jobs in the pool's sandboxes: setup, set, link, unlink, allow, disallow, repos, ls, jobs",
+		Short: "Run a GitHub org's Actions jobs in the pool's sandboxes: setup, set, link, unlink, allow, disallow, repos, ls, jobs, capacity",
 	}
 	cmd.AddCommand(a.runnersSetupCmd(), a.runnersSetCmd(), a.runnersLinkCmd(), a.runnersUnlinkCmd(),
-		a.runnersAllowCmd(), a.runnersDisallowCmd(), a.runnersReposCmd(), a.runnersLsCmd(), a.runnersJobsCmd())
+		a.runnersAllowCmd(), a.runnersDisallowCmd(), a.runnersReposCmd(), a.runnersLsCmd(), a.runnersJobsCmd(), a.runnersCapacityCmd())
+	return cmd
+}
+
+func (a *app) runnersCapacityCmd() *cobra.Command {
+	ttl := 0
+	cmd := &cobra.Command{
+		Use:   "capacity <host> < report.json",
+		Short: "Publish this host's capacity report (a JSON object on stdin) at the pool's public URL for its ttl",
+		Long: `Publishes the JSON object on stdin as <host>'s capacity report at the pool authority's runner broker, which
+serves it without a token at <public_url>/v0/runners/capacity/<host> until --ttl-s passes (default 60). Only
+<host>'s own machine may publish it. A host's admission controller runs this every few seconds so routers on
+cloud CI runners, which cannot reach the host, see what it has room for (docs/daemon.md, "Host capacity reports").`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			body, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 64<<10+1))
+			if err != nil {
+				return err
+			}
+			if !json.Valid(body) {
+				return fmt.Errorf("the report on stdin is not JSON")
+			}
+			cl, _, err := a.client()
+			if err != nil {
+				return err
+			}
+			path := "/v0/runners/capacity/" + url.PathEscape(args[0])
+			if ttl != 0 {
+				path += "?ttl_s=" + strconv.Itoa(ttl)
+			}
+			var out struct {
+				ExpiresAt string `json:"expires_at"`
+			}
+			if err := cl.Do(cmd.Context(), "PUT", path, json.RawMessage(body), &out); err != nil {
+				return err
+			}
+			a.say("%s: %s's capacity report published until %s", a.name(), args[0], out.ExpiresAt)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&ttl, "ttl-s", 0, "seconds the report is served (10 to 600; default 60)")
 	return cmd
 }
 

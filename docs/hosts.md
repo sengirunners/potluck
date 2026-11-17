@@ -388,8 +388,8 @@ A template is a named box image for coding agents, one of Potluck's own (`comput
 `cmd/potluck-driver-tart/images/agent`.
 
 - It is built FROM the default Linux image, so it keeps the runner and the box tools, and adds git, gh, Node 22 with
-  npm and corepack, Python 3 with pip and venv, ripgrep, jq, build-essential and the Claude Code and Codex CLIs.
-- Every version is pinned; the Node and gh tarballs also by SHA-256, the npm CLIs by version only, with no integrity
+  npm and corepack, Go 1.27, Python 3 with pip and venv, ripgrep, jq, build-essential and the Claude Code and Codex CLIs.
+- Every version is pinned; the Node, gh and Go tarballs also by SHA-256, the npm CLIs by version only, with no integrity
   pin.
 - `images.pin` pins it on its own line, `oci linux <pin or -> runner_dir=/home/runner template=agent`. A line with
   `template=NAME` (lowercase letters, digits and `-`; one per layer, OS and name, beside the one plain line) is never

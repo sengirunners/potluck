@@ -283,6 +283,22 @@ func TestDockerDaemonDown(t *testing.T) {
 	}
 }
 
+// Right after usermod -aG docker, before the next login, the daemon runs but
+// docker info is refused at the socket: that is not "daemon is down".
+func TestDockerSocketPermissionDenied(t *testing.T) {
+	f := linux("docker", "runsc")
+	r := Detect(context.Background(), &fakeRunner{out: map[string]Result{"docker --version": ok("Docker version 29.1.3\n"),
+		"docker info --format {{json .Runtimes}}": {Exit: 1, Stderr: "permission denied while trying to connect to the docker API at unix:///var/run/docker.sock"}}}, f, "")
+	l, _ := r.Layer("oci")
+	if l.Available || len(l.Problems) != 1 || strings.Contains(l.Problems[0], "daemon is down") ||
+		!strings.Contains(l.Problems[0], "docker group") || !strings.Contains(l.Problems[0], "log in again") {
+		t.Errorf("%+v", l)
+	}
+	if got := RootCommand(r.RootSteps("oci")); !strings.Contains(got, `usermod -aG docker "${SUDO_USER:-$USER}"`) || strings.Contains(got, "runsc") {
+		t.Errorf("%q", got)
+	}
+}
+
 func TestRuntimeChoiceDeterministic(t *testing.T) {
 	f := linux("docker")
 	f.paths["/dev/kvm"] = true

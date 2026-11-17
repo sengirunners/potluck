@@ -1,26 +1,29 @@
-// The site's build: Markdown posts in content/blog/ become pages under public/, with a sitemap, feed, robots.txt,
-// llms.txt and llms-full.txt. No dependencies (Node's standard library). The output is committed, so a deploy is
+// The site's build: Markdown posts in content/blog/ and pages in content/pages/ become pages under public/, with a
+// share image for every page, a sitemap, feed, robots.txt, llms.txt and llms-full.txt. No dependencies (Node's
+// standard library). The output is committed, so a deploy is
 // still `wrangler deploy`; `npm test` fails when the committed output differs from a fresh build.
 //
 //   node build/build.mjs           write the output
 //   node build/build.mjs --check   exit 1 if the committed output differs from a fresh build
 //
-// Generated: public/blog.html, public/blog/<slug>.html and .md, public/sitemap.xml, feed.xml, llms.txt,
-// llms-full.txt, robots.txt, and the parts of public/index.html between its `seo:` and `blog-link:` markers.
-// Everything else under public/ is hand-written.
+// Generated: public/blog.html, public/blog/<slug>.html and .md, public/<page>.html, public/og/**.png,
+// public/sitemap.xml, feed.xml, llms.txt, llms-full.txt, robots.txt, and the parts of public/index.html between its
+// `seo:` and `blog-link:` markers. Everything else under public/ is hand-written (the icons and the template the
+// share images are drawn on come from `npm run og-assets`).
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { articlePage, BLOG_LINK, FEED_LINK, homeGraph, indexPage, seoTags, url } from "./layout.mjs";
+import { articlePage, authorName, BLOG_LINK, FEED_LINK, homeGraph, indexPage, PAGE_MARKER_PREFIX, seoTags, shareImagePath, url } from "./layout.mjs";
 import { dropTitleHeading, escapeHtml as esc, inline, MarkdownError, toHtml } from "./markdown.mjs";
-import { parsePost } from "./frontmatter.mjs";
-import { BLOG, GOOGLE_SITE_VERIFICATION, HOME, ORIGIN, PAGES } from "./pages.mjs";
+import { parsePage, parsePost } from "./frontmatter.mjs";
+import { BLOG, GOOGLE_SITE_VERIFICATION, HOME, ORIGIN, PAGES, RESERVED_SLUGS } from "./pages.mjs";
+import { samePixels, shareImage } from "./share.mjs";
 
 export const SITE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Generated paths under public/ that exist only when there is something to say; stale copies are deleted. */
 const GENERATED_ROOT_FILES = ["blog.html", "sitemap.xml", "feed.xml", "llms.txt", "llms-full.txt", "robots.txt"];
-const GENERATED_DIR = "blog";
+const GENERATED_DIRS = ["blog", "og"];
 
 // Bots that crawl for search and AI assistants, each allowed by name (a named group replaces the * group, so each
 // repeats the one disallowed path).
@@ -31,16 +34,19 @@ export function robotsTxt() {
   return `${["*", ...BOTS].map(group).join("\n")}\nSitemap: ${ORIGIN}/sitemap.xml\n`;
 }
 
-/** Reads and checks every post in `dir`. A file that is not <slug>.md, or whose front matter or body fails, throws. */
-export function loadPosts(dir) {
+/**
+ * Reads and checks every Markdown file in `dir` (`content/<kind>/`): each is <slug>.md, its front matter parsed by
+ * `parse`, its body converted. A file that is not <slug>.md, or whose front matter or body fails, throws.
+ */
+function loadMarkdown(dir, rel, parse, what) {
   if (!existsSync(dir)) return [];
-  const posts = [];
+  const items = [];
   for (const name of readdirSync(dir).sort()) {
     if (name.startsWith(".")) continue;
     const m = name.match(/^([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/);
-    if (!m) throw new Error(`${dir}/${name}: posts are <slug>.md files (lowercase letters, digits, hyphens)`);
-    const file = `content/blog/${name}`;
-    const { meta, body } = parsePost(readFileSync(join(dir, name), "utf8"), file);
+    if (!m) throw new Error(`${dir}/${name}: ${what} are <slug>.md files (lowercase letters, digits, hyphens)`);
+    const file = `${rel}/${name}`;
+    const { meta, body } = parse(readFileSync(join(dir, name), "utf8"), file);
     if (meta.slug !== m[1]) throw new Error(`${file}: slug ${meta.slug} must match the file name`);
     const text = dropTitleHeading(body, meta.title);
     let html;
@@ -52,26 +58,46 @@ export function loadPosts(dir) {
       if (e instanceof MarkdownError) throw new Error(`${file}: ${e.message}`);
       throw e;
     }
-    const path = `/blog/${meta.slug}`;
-    const markdown = `# ${meta.title}\n\nPublished ${meta.date}${meta.updated !== meta.date ? `, updated ${meta.updated}` : ""}. ${url(path)}\n\n${text.trim()}\n`;
-    posts.push({ meta, path, html, summaryHtml, markdown });
+    items.push({ meta, file, text, html, summaryHtml });
   }
+  return items;
+}
+
+/** Reads and checks every post in `dir`, newest published first. */
+export function loadPosts(dir) {
+  const posts = loadMarkdown(dir, "content/blog", parsePost, "posts").map((p) => {
+    const path = `/blog/${p.meta.slug}`;
+    const m = p.meta;
+    const markdown = `# ${m.title}\n\nPublished ${m.date}${m.updated !== m.date ? `, updated ${m.updated}` : ""}. ${url(path)}\n\n${p.text.trim()}\n`;
+    return { ...p, kind: "post", path, markdown };
+  });
   // Newest published first; ties by slug so the order never depends on the file system.
   return posts.sort((a, b) => (a.meta.date < b.meta.date ? 1 : a.meta.date > b.meta.date ? -1 : a.meta.slug < b.meta.slug ? -1 : 1));
+}
+
+/** Reads and checks every page in `dir` (content/pages/<slug>.md, served at /<slug>), in slug order. */
+export function loadPages(dir) {
+  return loadMarkdown(dir, "content/pages", parsePage, "pages").map((p) => {
+    if (RESERVED_SLUGS.includes(p.meta.slug)) throw new Error(`${p.file}: the slug ${p.meta.slug} is taken (build/pages.mjs RESERVED_SLUGS)`);
+    const path = `/${p.meta.slug}`;
+    const markdown = `# ${p.meta.title}\n\nUpdated ${p.meta.updated}. ${url(path)}\n\n${p.text.trim()}\n`;
+    return { ...p, kind: "page", path, markdown };
+  });
 }
 
 const maxDay = (days) => days.reduce((a, b) => (a > b ? a : b));
 
 /** Every page that is public: {loc, lastmod}. The blog index is listed only when a post exists. */
-export function sitemapEntries(posts) {
+export function sitemapEntries(posts, pages = []) {
   const entries = PAGES.map((p) => ({ loc: url(p.path), lastmod: p.lastmod }));
+  for (const p of pages) entries.push({ loc: url(p.path), lastmod: p.meta.updated });
   if (posts.length) entries.push({ loc: url(BLOG.path), lastmod: maxDay(posts.map((p) => p.meta.updated)) });
   for (const p of posts) entries.push({ loc: url(p.path), lastmod: p.meta.updated });
   return entries;
 }
 
-export function sitemapXml(posts) {
-  const urls = sitemapEntries(posts).map((e) => `  <url><loc>${esc(e.loc)}</loc><lastmod>${e.lastmod}</lastmod></url>`);
+export function sitemapXml(posts, pages) {
+  const urls = sitemapEntries(posts, pages).map((e) => `  <url><loc>${esc(e.loc)}</loc><lastmod>${e.lastmod}</lastmod></url>`);
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`;
 }
 
@@ -85,7 +111,7 @@ export function feedXml(posts) {
     <link rel="alternate" type="text/html" href="${esc(url(p.path))}"/>
     <published>${stamp(p.meta.date)}</published>
     <updated>${stamp(p.meta.updated)}</updated>
-    <author><name>Sengi</name></author>
+    <author><name>${esc(authorName(p.meta))}</name></author>
     <summary>${esc(p.meta.page_description)}</summary>
     <content type="html">${esc(p.html)}</content>
   </entry>`,
@@ -106,17 +132,23 @@ ${entries.join("\n")}
 
 const read = (siteDir, rel) => readFileSync(join(siteDir, rel), "utf8");
 
-export function llmsTxt(siteDir, posts) {
+const linkText = (t) => t.replace(/[[\]]/g, "\\$&");
+
+export function llmsTxt(siteDir, posts, contentPages = []) {
   const intro = read(siteDir, "content/llms-intro.md").trim();
-  const pages = PAGES.map((p) => `- [${p.title}](${url(p.path)}): ${p.description}`);
-  const blog = posts.map((p) => `- [${p.meta.title.replace(/[[\]]/g, "\\$&")}](${url(p.path)}.md): ${p.meta.page_description}`);
+  const pages = [
+    ...PAGES.map((p) => `- [${linkText(p.title)}](${url(p.path)}): ${p.description}`),
+    ...contentPages.map((p) => `- [${linkText(p.meta.title)}](${url(p.path)}): ${p.meta.page_description}`),
+  ];
+  const blog = posts.map((p) => `- [${linkText(p.meta.title)}](${url(p.path)}.md): ${p.meta.page_description}`);
   return `${intro}\n\n## Pages\n\n${pages.join("\n")}\n${posts.length ? `\n## Blog\n\n${blog.join("\n")}\n` : ""}\n## Full text\n\n- [llms-full.txt](${url("/llms-full.txt")}): the text of every page above in one file\n`;
 }
 
-export function llmsFullTxt(siteDir, posts) {
+export function llmsFullTxt(siteDir, posts, pages = []) {
   const intro = read(siteDir, "content/llms-intro.md").trim();
   const sections = [
     ...PAGES.map((p) => `Source: ${url(p.path)}\n\n${read(siteDir, p.markdown).trim()}`),
+    ...pages.map((p) => `Source: ${url(p.path)}\n\n${p.markdown.trim()}`),
     ...posts.map((p) => `Source: ${url(p.path)}\n\n${p.markdown.trim()}`),
   ];
   return `${intro}\n\n${sections.map((s) => `---\n\n${s}`).join("\n\n")}\n`;
@@ -133,6 +165,7 @@ export function homePage(source, posts) {
     title: HOME.title,
     description: HOME.description,
     path: HOME.path,
+    image: HOME.headline,
     graph: homeGraph(),
     extra: [`<meta name="google-site-verification" content="${GOOGLE_SITE_VERIFICATION}">`, ...(posts.length ? [FEED_LINK] : [])],
   });
@@ -141,35 +174,68 @@ export function homePage(source, posts) {
   return source;
 }
 
-/** The generated files as Map<path under public/, text>, from the posts in `contentDir` and the page in `publicDir`. */
-export function build({ siteDir = SITE_DIR, contentDir = join(siteDir, "content/blog"), publicDir = join(siteDir, "public") } = {}) {
+/**
+ * The generated files as Map<path under public/, text or Buffer>, from the posts in `contentDir`, the pages in
+ * `pagesDir` and the home page in `publicDir`.
+ */
+export function build({ siteDir = SITE_DIR, contentDir = join(siteDir, "content/blog"), pagesDir = join(siteDir, "content/pages"), publicDir = join(siteDir, "public") } = {}) {
   const posts = loadPosts(contentDir);
+  const pages = loadPages(pagesDir);
   const home = readFileSync(join(publicDir, "index.html"), "utf8");
-  const iconLine = home.match(/<link rel="icon"[^\n]*>/);
-  if (!iconLine) throw new Error("public/index.html has no <link rel=\"icon\"> line");
+  const iconLine = home.match(/<link rel="icon" href="data:[^\n]*>/);
+  if (!iconLine) throw new Error("public/index.html has no <link rel=\"icon\" href=\"data:...\"> line");
+  for (const p of pages) {
+    const file = join(publicDir, `${p.meta.slug}.html`);
+    if (existsSync(file) && !readFileSync(file, "utf8").includes(PAGE_MARKER_PREFIX)) throw new Error(`${p.file}: public/${p.meta.slug}.html is a hand-written file; pick another slug`);
+  }
   const out = new Map();
+  const image = (path, title) => out.set(shareImagePath(path), shareImage({ title, address: url(path).replace(/^https:\/\//, "").replace(/\/$/, ""), where: path }));
   out.set("index.html", homePage(home, posts));
+  image(HOME.path, HOME.headline);
   out.set("robots.txt", robotsTxt());
-  out.set("sitemap.xml", sitemapXml(posts));
-  out.set("llms.txt", llmsTxt(siteDir, posts));
-  out.set("llms-full.txt", llmsFullTxt(siteDir, posts));
+  out.set("sitemap.xml", sitemapXml(posts, pages));
+  out.set("llms.txt", llmsTxt(siteDir, posts, pages));
+  out.set("llms-full.txt", llmsFullTxt(siteDir, posts, pages));
+  // Each article lists the pages, and a page also lists the posts, so every one is a link away from the rest.
+  const pageLinks = pages.map((p) => ({ path: p.path, title: p.meta.title }));
+  const postLinks = posts.map((p) => ({ path: p.path, title: p.meta.title }));
+  for (const p of pages) {
+    out.set(`${p.meta.slug}.html`, articlePage(p, iconLine[0], [...pageLinks, ...postLinks].filter((l) => l.path !== p.path)));
+    image(p.path, p.meta.title);
+  }
   if (posts.length) {
     out.set("feed.xml", feedXml(posts));
     out.set("blog.html", indexPage(posts, iconLine[0]));
+    image(BLOG.path, BLOG.title);
     for (const p of posts) {
-      out.set(`blog/${p.meta.slug}.html`, articlePage(p, p.html, iconLine[0]));
+      out.set(`blog/${p.meta.slug}.html`, articlePage(p, iconLine[0], pageLinks));
       out.set(`blog/${p.meta.slug}.md`, p.markdown);
+      image(p.path, p.meta.title);
     }
   }
-  return { files: out, posts };
+  return { files: out, posts, pages };
 }
 
-/** Paths under publicDir that a build owns and may delete: the generated files and everything in public/blog/. */
+const walk = (dir, base) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name), `${base}/${e.name}`) : [`${base}/${e.name}`]));
+
+/**
+ * Paths under publicDir that a build owns and may delete: the generated files, everything in public/blog/ and
+ * public/og/, and every top-level .html file that carries the page marker.
+ */
 export function ownedPaths(publicDir) {
   const owned = GENERATED_ROOT_FILES.filter((f) => existsSync(join(publicDir, f)));
-  const dir = join(publicDir, GENERATED_DIR);
-  if (existsSync(dir)) for (const f of readdirSync(dir)) owned.push(`${GENERATED_DIR}/${f}`);
+  for (const d of GENERATED_DIRS) if (existsSync(join(publicDir, d))) owned.push(...walk(join(publicDir, d), d));
+  for (const f of readdirSync(publicDir)) {
+    if (f.endsWith(".html") && readFileSync(join(publicDir, f), "utf8").includes(PAGE_MARKER_PREFIX)) owned.push(f);
+  }
   return owned;
+}
+
+/** True when what is on disk is what the build makes: the same text, or for a PNG the same pixels. */
+function same(file, made) {
+  const disk = readFileSync(file);
+  if (typeof made === "string") return disk.toString("utf8") === made;
+  return file.endsWith(".png") ? samePixels(disk, made) : disk.equals(made);
 }
 
 /** Differences between a fresh build and what is on disk: [{path, why}]. Empty when the committed output is current. */
@@ -180,7 +246,7 @@ export function drift({ siteDir = SITE_DIR, ...opts } = {}) {
   for (const [path, text] of files) {
     const file = join(publicDir, path);
     if (!existsSync(file)) problems.push({ path, why: "missing" });
-    else if (readFileSync(file, "utf8") !== text) problems.push({ path, why: "differs" });
+    else if (!same(file, text)) problems.push({ path, why: "differs" });
   }
   for (const path of ownedPaths(publicDir)) if (!files.has(path)) problems.push({ path, why: "stale: nothing builds it" });
   return problems;
@@ -188,13 +254,16 @@ export function drift({ siteDir = SITE_DIR, ...opts } = {}) {
 
 export function write({ siteDir = SITE_DIR, ...opts } = {}) {
   const publicDir = opts.publicDir ?? join(siteDir, "public");
-  const { files, posts } = build({ siteDir, ...opts });
+  const { files, posts, pages } = build({ siteDir, ...opts });
   for (const path of ownedPaths(publicDir)) if (!files.has(path)) rmSync(join(publicDir, path), { recursive: true, force: true });
   for (const [path, text] of files) {
-    mkdirSync(dirname(join(publicDir, path)), { recursive: true });
-    writeFileSync(join(publicDir, path), text);
+    const file = join(publicDir, path);
+    // A PNG with the same pixels is left alone, so a different zlib does not rewrite every picture.
+    if (typeof text !== "string" && existsSync(file) && same(file, text)) continue;
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
   }
-  return { written: [...files.keys()], posts: posts.length };
+  return { written: [...files.keys()], posts: posts.length, pages: pages.length };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -208,8 +277,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       }
       console.log("build output is current");
     } else {
-      const { written, posts } = write();
-      console.log(`built ${posts} post${posts === 1 ? "" : "s"}; wrote ${written.map((p) => relative(".", join("public", p))).join(", ")}`);
+      const { written, posts, pages } = write();
+      console.log(`built ${posts} post${posts === 1 ? "" : "s"} and ${pages} page${pages === 1 ? "" : "s"}; wrote ${written.map((p) => relative(".", join("public", p))).join(", ")}`);
     }
   } catch (e) {
     console.error(`build failed: ${e.message}`);

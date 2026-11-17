@@ -227,20 +227,32 @@ func Start(ctx context.Context, b Box, j Job) (pid string, err error) {
 
 // needs refuses a box lacking a command the adapter needs, naming them.
 func needs(ctx context.Context, b Box, a Adapter) error {
-	if len(a.Needs) == 0 {
-		return nil
-	}
-	exit, out, stderr, err := b.Exec(ctx, append([]string{"sh", "-c", probe, "potluck-agent-runner"}, a.Needs...), "")
+	missing, err := Missing(ctx, b, a.Needs...)
 	if err != nil {
-		return fmt.Errorf("check the box for %s: %w", strings.Join(a.Needs, ", "), err)
+		return err
 	}
-	if exit != 0 {
-		return fmt.Errorf("check the box for %s: exit %d: %s", strings.Join(a.Needs, ", "), exit, oneLine(stderr))
-	}
-	if missing := strings.Fields(out); len(missing) > 0 {
+	if len(missing) > 0 {
 		return fmt.Errorf("the box has no %s on PATH: the %s adapter needs an image that ships it (%s)", strings.Join(missing, ", "), a.Name, a.About)
 	}
 	return nil
+}
+
+// Missing asks the box which of cmds are not commands on its PATH, and
+// answers those (none: every one is there). Any box job that needs a
+// command its image ships checks it so before starting (potluck agent-task
+// too).
+func Missing(ctx context.Context, b Box, cmds ...string) ([]string, error) {
+	if len(cmds) == 0 {
+		return nil, nil
+	}
+	exit, out, stderr, err := b.Exec(ctx, append([]string{"sh", "-c", probe, "potluck-probe"}, cmds...), "")
+	if err != nil {
+		return nil, fmt.Errorf("check the box for %s: %w", strings.Join(cmds, ", "), err)
+	}
+	if exit != 0 {
+		return nil, fmt.Errorf("check the box for %s: exit %d: %s", strings.Join(cmds, ", "), exit, oneLine(stderr))
+	}
+	return strings.Fields(out), nil
 }
 
 // probe prints each of its arguments that is not a command on PATH.

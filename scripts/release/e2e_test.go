@@ -45,7 +45,10 @@ import (
 //     (and ignores TERM), is stopped, the old programs go back, and the old
 //     daemon starts again from its own program (even outside the install
 //     directory);
-//   - install.sh's GitHub path works against a fake private API over TLS.
+//   - install.sh's GitHub path works against a fake GitHub over TLS: a
+//     private repository through the API with a token, and a public one with
+//     no token while every anonymous API call is refused (a spent per-address
+//     rate limit), through the release links alone.
 func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds two releases")
@@ -458,15 +461,19 @@ exec %s "$@"
 	}
 
 	t.Run("install.sh from GitHub", func(t *testing.T) {
-		srv, ca := fakeGitHub(t, relB, "potluck-"+verB, "tok")
+		srv, ca := fakeGitHub(t, relB, "potluck-"+verB, "tok", false)
 		bin2 := filepath.Join(tmp, "bin2")
 		home2, _ := os.MkdirTemp("", "plu")
 		defer os.RemoveAll(home2)
 		_ = os.WriteFile(filepath.Join(home2, "config.json"), cfg, 0o600)
+		// ghEnv points install.sh's API and web host at s.
+		ghEnv := func(s *httptest.Server, ca, dir, path string) []string {
+			return cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home2, "POTLUCK_INSTALL_DIR="+dir,
+				"POTLUCK_UPDATE_KEY="+pub, "POTLUCK_GITHUB_API="+s.URL, "POTLUCK_GITHUB="+s.URL, "CURL_CA_BUNDLE="+ca, "PATH="+path+":"+sysPath)
+		}
 		gh := func(extra ...string) (string, error) {
 			c := exec.Command("sh", filepath.Join(root, "install.sh"))
-			c.Env = append(cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home2, "POTLUCK_INSTALL_DIR="+bin2,
-				"POTLUCK_UPDATE_KEY="+pub, "POTLUCK_GITHUB_API="+srv.URL, "CURL_CA_BUNDLE="+ca, "PATH="+tools+":"+sysPath), extra...)
+			c.Env = append(ghEnv(srv, ca, bin2, tools), extra...)
 			out, err := c.CombinedOutput()
 			return string(out), err
 		}
@@ -491,14 +498,22 @@ exec %s "$@"
 		}
 		// With no openssl that checks Ed25519, the download is trusted over
 		// HTTPS, and the script says so.
-		weakEnv := append(cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home2, "POTLUCK_INSTALL_DIR="+filepath.Join(tmp, "bin4"),
-			"POTLUCK_UPDATE_KEY="+pub, "POTLUCK_GITHUB_API="+srv.URL, "CURL_CA_BUNDLE="+ca, "PATH="+filepath.Join(tmp, "weak")+":"+sysPath), "GH_TOKEN=tok")
+		weakEnv := append(ghEnv(srv, ca, filepath.Join(tmp, "bin4"), filepath.Join(tmp, "weak")), "GH_TOKEN=tok")
 		c := exec.Command("sh", filepath.Join(root, "install.sh"))
 		c.Env = weakEnv
 		o, err := c.CombinedOutput()
 		if err != nil || !strings.Contains(string(o), "the signature was NOT checked") || !strings.Contains(string(o), "trusting the download over HTTPS") ||
 			!strings.Contains(string(o), "delete "+filepath.Join(tmp, "bin4", "potluck")) {
 			t.Fatalf("no openssl, from GitHub (%v):\n%s", err, o)
+		}
+		// A public repository behind an address whose anonymous API allowance
+		// is spent: with no token, install.sh takes no API call.
+		pubSrv, pubCA := fakeGitHub(t, relB, "potluck-"+verB, "tok", true)
+		pc := exec.Command("sh", filepath.Join(root, "install.sh"))
+		pc.Env = ghEnv(pubSrv, pubCA, filepath.Join(tmp, "bin-public"), tools)
+		if po, perr := pc.CombinedOutput(); perr != nil || !strings.Contains(string(po), "installed potluck "+verB) ||
+			(ossl != "" && !strings.Contains(string(po), "signature verified")) {
+			t.Fatalf("public, no token, API refused (%v):\n%s", perr, po)
 		}
 	})
 }
@@ -704,17 +719,52 @@ func copyFile2(t *testing.T, src, dst string) {
 }
 
 // fakeGitHub serves dir's files as release tag of sengirunners/potluck over
-// TLS the way GitHub's API does for a private repository (everything 404s
-// without token). It returns the server and its certificate's PEM file.
-func fakeGitHub(t *testing.T, dir, tag, token string) (*httptest.Server, string) {
+// TLS, through GitHub's API and through github.com's release links (each
+// redirecting to the next, then to storage, as GitHub does). Private: the API
+// 404s without token, and so does every release link. Public: the release
+// links answer anyone, and the API answers 403 to every call without token,
+// as it does once an address has spent its 60 anonymous calls an hour. It
+// returns the server and its certificate's PEM file.
+func fakeGitHub(t *testing.T, dir, tag, token string, public bool) (*httptest.Server, string) {
 	t.Helper()
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var srv *httptest.Server
+	has := func(name string) bool {
+		for _, e := range ents {
+			if e.Name() == name {
+				return true
+			}
+		}
+		return false
+	}
 	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		web := "/sengirunners/potluck/releases/"
+		if rest, ok := strings.CutPrefix(r.URL.Path, web); ok || strings.HasPrefix(r.URL.Path, "/storage/") {
+			name, isLatest := strings.CutPrefix(rest, "latest/download/")
+			atTag, isTag := strings.CutPrefix(rest, "download/"+tag+"/")
+			stored, isStored := strings.CutPrefix(r.URL.Path, "/storage/")
+			switch {
+			case !public:
+				http.NotFound(w, r)
+			case isLatest && has(name):
+				http.Redirect(w, r, web+"download/"+tag+"/"+name, http.StatusFound)
+			case isTag && has(atTag):
+				http.Redirect(w, r, "/storage/"+atTag, http.StatusFound)
+			case isStored && has(stored):
+				http.ServeFile(w, r, filepath.Join(dir, stored))
+			default:
+				http.NotFound(w, r)
+			}
+			return
+		}
 		if r.Header.Get("Authorization") != "Bearer "+token {
+			if public {
+				http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
+				return
+			}
 			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
 			return
 		}

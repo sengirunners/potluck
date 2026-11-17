@@ -1,6 +1,6 @@
-# Potluck: run coding agents and builds on the computers you already own
+# Put your team's idle machines to work.
 
-Builds and agents make your laptop crawl. Potluck pools your team's spare machines and runs coding agents and builds on them, each in a fresh VM or sandbox. When someone needs their machine back, it's theirs.
+Self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox, on the Macs and Linux boxes you already own. When someone needs their machine back, it's theirs. Free and open source (Apache-2.0).
 
 Install on macOS or Linux:
 
@@ -8,7 +8,7 @@ Install on macOS or Linux:
 curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 ```
 
-Potluck is free and open source (Apache-2.0). Releases are signed: the installer checks the signature when it can (it needs OpenSSL 3) and says so when it can't. To lend a machine you need an Apple-silicon Mac with Tart and Softnet, or a Linux box with Docker and Kata or gVisor; `potluck doctor` says what is missing. Code: https://github.com/sengirunners/potluck
+Free and open source (Apache-2.0) · macOS and Linux. Code: https://github.com/sengirunners/potluck
 
 ## How it works
 
@@ -23,14 +23,19 @@ One machine runs the pool. Everyone else brings theirs. Work goes to whichever m
 - **Coding agents: give your agent a computer of its own.** An agent's commands run in a throwaway sandbox on a pool machine, not on your laptop: `potluck sandbox create`, `potluck sandbox exec <id> -- make test`, `potluck sandbox rm <id>`. Or hand the agent the sandbox tools over MCP with `{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}`. To run Claude Code's self-hosted runner in fresh sandboxes: `potluck agent-runner claude --secret-file <key-file>`.
 - **GitHub Actions: move a macOS job onto your own Mac.** `potluck ci pr acme/app` prepares a change to one line of your workflow (`runs-on: macos-15` becomes your Mac, with GitHub's runner kept for forks); then you open the pull request it prepares. Pull requests from forks keep using GitHub's runner.
 
-At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of November 2026), 5,000 macOS build minutes a month on a private repository, after your plan's included minutes, cost $310. On your own Mac with Potluck they cost nothing but electricity. Public repositories run on GitHub's runners for free.
+At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of November 2026), 5,000 macOS GitHub Actions minutes a month on a private repository, after your plan's included minutes, cost $310. On your own Mac with Potluck they cost nothing but electricity. Public repositories run on GitHub's runners for free.
 
 ## House rules
 
 - **Work stays in a box.** Every job runs in a throwaway VM or sandbox, not directly on your machine, and is deleted after.
 - **Keys go only where you send them.** A job gets a secret only when you grant it, only on a friend's machine, and as a file: never on the command line or in its environment.
 - **Friends and strangers.** Mark each machine as a friend's or a stranger's. A friend's machine takes your jobs and the keys you grant. A stranger's runs only the sandboxes you send it, and never gets a key.
-- **Share the Mac you already own.** Lend your Mac's spare time to your team and friends. Apple's licence forbids selling Mac time, not lending a macOS VM to your team (that is the makers' reading of the licence; read it yourself before you lend). Linux VMs on a Mac aren't affected.
+- **Share the Mac you already own.** Stop paying by the minute for macOS GitHub Actions jobs. Lend your Mac's spare time to your team and friends. Apple's licence forbids selling Mac time, not lending a macOS VM to your team (that is the makers' reading of the licence; read it yourself before you lend). Linux VMs on a Mac aren't affected.
+
+## Guides
+
+- A self-hosted GitHub Actions runner with a fresh VM for every job: https://potluck.sh/github-actions-runner
+- Tart, its licence, and what Potluck adds: https://potluck.sh/tart
 
 ## Who makes it
 

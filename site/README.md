@@ -1,7 +1,8 @@
 # potluck.sh
 
-One static page (`public/index.html`, with its stylesheet `public/site.css` and script `public/site.js`) and a Markdown blog (`content/blog/`, built into `public/blog/`; see "The blog and indexing") served by a Cloudflare Worker (`src/worker.js`) with static assets. The Worker
-answers the founders form (`src/contact.js`) and the two routes of the closed waitlist (`src/waitlist.js`), kept
+One static home page (`public/index.html`, with its stylesheet `public/site.css` and script `public/site.js`), Markdown pages (`content/pages/`, built into `public/<slug>.html`) and a Markdown blog (`content/blog/`, built into `public/blog/`; see "The blog and indexing") served by a Cloudflare Worker (`src/worker.js`) with static assets. The Worker
+answers the founders form (`src/contact.js`), the two routes of the closed waitlist (`src/waitlist.js`) and
+`/install.sh`, a 302 to the installer in the repository (`src/install.js`; the site never serves a copy of it), kept
 apart from `src/worker.js` because a Worker's entry module may export only handlers; every other path is a static
 file. No framework, no dependencies, no tracking scripts, and no
 third-party requests: the font (Newsreader, OFL, latin subset, variable, one file each for roman and italic) is
@@ -23,8 +24,8 @@ because `potluck host` shares half unless told otherwise (`--share`).
 Posts are Markdown files, `content/blog/<slug>.md`, built into static pages by `npm run build` (`build/build.mjs`, Node's
 standard library only). The built files are committed under `public/`, so a deploy stays `npx wrangler deploy`;
 `npm test` fails when the committed files differ from a fresh build, so run `npm run build` after any change to
-`content/`, `build/` or `index.html`'s seo block, and commit the result. There is no post yet, and no placeholder: with
-none, the blog page, the feed and the home page's Blog link are not built.
+`content/`, `build/` or `index.html`'s seo block, and commit the result. With no post there is no placeholder: the
+blog page, the feed and the home page's Blog link are not built.
 
 A post starts with front matter in the fields the growth content job writes (`farm/sengi-content-job` in agent-hub), plus
 `date` and `updated`:
@@ -48,7 +49,9 @@ summary: "Optional. The short answer shown above the post."
 ---
 ```
 
-`drafted:` and `path:` (a refresh's `/blog/<slug>`) are accepted too. A missing or malformed field, an unknown field, or
+`drafted:` and `path:` (a refresh's `/blog/<slug>`) are accepted too, and `author:` (a person's name, for an essay
+someone signs): the byline, the feed's `<author>` and the JSON-LD (a `Person`) name them; without it all three name
+Sengi. A missing or malformed field, an unknown field, or
 a slug that is not the file name fails the build. The body is the Markdown subset `build/markdown.mjs` reads: `##` to
 `######` headings (not `#`: the title is the page's h1; a first line that repeats the title is dropped), paragraphs,
 bullet and numbered lists, fenced code, blockquotes, pipe tables, and inline code, bold, italic and links. Anything
@@ -56,19 +59,42 @@ else (raw HTML, images, nested lists, rules, indented code, strikethrough) fails
 than rendering wrong. Put the answer first: the first paragraph, or `summary`, is what a search result or an assistant
 quotes.
 
+A page is the same kind of file in `content/pages/<slug>.md`, served at `/<slug>`: an answer-first guide that is not
+dated news. It takes `slug`, `title`, `page_title`, `page_description`, `target_searches`, `date` and `updated`,
+and optionally `summary`, `author` and `data_sources` (name the sources and the day each fact was read). It renders
+with the article layout, a TechArticle and BreadcrumbList JSON-LD, and no Markdown copy; it is in the sitemap,
+`llms.txt` and `llms-full.txt`. A slug in `RESERVED_SLUGS` (`build/pages.mjs`) or the name of a hand-written file in
+`public/` fails the build. Every article ends with "More from Potluck": a post lists the pages, a page lists the other
+pages and the posts.
+
 What the build writes:
 
 | file | what |
 | --- | --- |
 | `public/blog/<slug>.html`, `public/blog.html` | the post and the index, served at `/blog/<slug>` and `/blog` (no trailing slash: Workers assets redirect the `.html` and slash forms, so the canonical address is the 200 one) |
 | `public/blog/<slug>.md` | the post as Markdown, for assistants |
-| `public/sitemap.xml` | every public page with `<lastmod>`: the home page's comes from `HOME.lastmod` in `build/pages.mjs` (bump it when the home page's content changes), posts' from `updated`; `/blog` only when a post exists |
+| `public/<slug>.html` | a page from `content/pages/`, served at `/<slug>`; it carries a `generator` meta tag naming its source, which is how the build knows it may delete it when the source goes |
+| `public/og/` | one share image per page (1200x630 PNG): `home.png`, `blog.png`, `blog/<slug>.png`, `<slug>.png`, named in that page's `og:image` and `twitter:image` |
+| `public/sitemap.xml` | every public page with `<lastmod>`: the home page's comes from `HOME.lastmod` in `build/pages.mjs` (bump it when the home page's content changes), pages' and posts' from `updated`; `/blog` only when a post exists |
 | `public/feed.xml` | Atom, posts newest updated first |
 | `public/robots.txt` | allow all; the search and AI crawlers named (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, PerplexityBot, Google-Extended, Bingbot); `/api/` closed; the sitemap |
 | `public/llms.txt`, `public/llms-full.txt` | `content/llms-intro.md` plus the page list; and the intro plus every page's Markdown (`content/home.md` for the home page; keep it in step with `index.html`) |
-| `public/index.html` (between its markers) | title, description, canonical, Open Graph, Twitter tags and JSON-LD (SoftwareApplication, Organization, WebSite), and the footer's Blog link |
+| `public/index.html` (between its markers) | title, description, canonical, Open Graph, Twitter tags, the icon links and JSON-LD (SoftwareApplication with `sameAs` the repository, Organization, WebSite), and the footer's Blog link |
 
-`public/og.png` (1200x630, the share image) and `public/blog.css` are hand-made. `docs/img/readme-hero.webp`, the
+The share images are drawn by the build itself (`build/share.mjs`, standard library only): the page's title (the h1;
+for the home page `HOME.headline`, which must match `index.html`'s h1, and a test checks it) in the site's font on
+`build/og/template.png`, at the largest of three sizes it fits, with the page's address under it. A title with a
+character the font set lacks fails the build, naming it. What the build cannot make without a font renderer is drawn
+once by hand: `npm run og-assets` (`build/og-assets.mjs`; it needs Chrome) writes the blank template, the glyphs and
+kerning of each size (`build/og/glyphs.json`), `public/favicon.ico` (16, 32 and 48 px),
+`public/apple-touch-icon.png` (180 px), and `public/icon-192.png` and `icon-512.png` for `public/site.webmanifest`
+(hand-written). Run it after the font, the logo or the quilt changes, or when `CHARS` in `build/share.mjs` gains a
+character, then `npm run build`, and commit both. The drift check compares share images by their pixels, so a
+different zlib does not count as a change.
+
+`public/blog.css` is hand-made. `public/og.png`, the old hand-made share image that every page named before the
+build drew one per page, stays for one release so share cards made before then keep their picture; nothing names it
+now, so delete it after the next release. `docs/img/readme-hero.webp`, the
 picture at the top of the repository's README, is drawn from the home page's headline and picnic by `npm run readme-hero`
 (`build/readme-hero.mjs` and `build/readme-hero.css`; it needs Chrome and `cwebp`). Run it after the home page's hero
 changes and commit the picture. `public/7b1a88c94e3d01e8f2150746ddb8a872.txt`
@@ -208,11 +234,13 @@ for h in potluck.sh www.potluck.sh; do
   curl -s -o /dev/null -w "$h page %{http_code}\n" "https://$h/"
   curl -s -o /dev/null -w "$h waitlist post %{http_code}\n" -X POST "https://$h/api/waitlist"
 done
+curl -s -o /dev/null -w "favicon %{http_code}\n" https://potluck.sh/favicon.ico
+curl -s -o /dev/null -w "install.sh %{http_code} %{redirect_url}\n" https://potluck.sh/install.sh
 curl -s -H "authorization: Bearer $WAITLIST_ADMIN_TOKEN" https://potluck.sh/api/waitlist/count; echo
 curl -s -o /dev/null -w "contact read %{http_code}\n" -H "authorization: Bearer $CONTACT_ADMIN_TOKEN" https://potluck.sh/api/contact
 npm run notify
 ```
 
-Expect 200 for the page, 410 for the post, the counts, and 200 for the contact read. After a change to the form or the email, send one
+Expect 200 for the page, 410 for the post, 200 for the favicon, 302 to the installer's raw GitHub address for install.sh, the counts, and 200 for the contact read. After a change to the form or the email, send one
 test message (with `origin: https://potluck.sh` and a content length), check ops@sengi.run got the notice, then
 delete the test message's key.

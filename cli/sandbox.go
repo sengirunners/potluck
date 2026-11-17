@@ -74,7 +74,7 @@ func (a *app) sandboxCreateCmd() *cobra.Command {
 		Long: `With --ref (or --dirty) the sandbox gets that commit of this checkout, sent
 as a git bundle, checked out in ~/checkout (--dir); no credential enters it.
 
---template agent boots the coding-agent image (git, gh, Node, Python, the
+--template agent boots the coding-agent image (git, gh, Node, Go, Python, the
 Claude Code and Codex CLIs). --template browser adds sandboxed Chromium,
 Playwright and PNG screenshots. The machine must share the selected image.
 

@@ -42,6 +42,11 @@
 .cta h2{font-size:26px;line-height:1.1;font-weight:600;letter-spacing:-.012em;margin-bottom:6px}
 .cta pre{background:#F6F2E8;border-radius:10px;padding:10px 12px;margin:12px 0;overflow-x:auto;white-space:pre;line-height:1.6}
 .cta .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+/* The guides list under the ending: every page and post a link away from the rest. */
+.related{margin-top:34px;border-top:1.5px solid var(--line);padding-top:18px}
+.related h2{font-size:15px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--soft);margin-bottom:8px}
+.related ul{list-style:none;display:grid;gap:6px}
+.related a{font-size:19px;line-height:1.35}
 .alt{margin-top:18px;font-size:16px;color:var(--soft)}
 
 /* The index. */

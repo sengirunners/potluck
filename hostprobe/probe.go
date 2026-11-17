@@ -321,7 +321,7 @@ func detectOCI(ctx context.Context, run Runner, f Facts, r Report, pm string) La
 		}
 	}
 	registered := map[string]bool{}
-	daemonDown := false
+	daemonDown, socketDenied := false, false
 	runtimesJSON := "" // docker info's Runtimes (sudo.go reads runsc-root's entry)
 	if l.CLI == "" {
 		l.Problems = append(l.Problems, "no container CLI (docker, podman or nerdctl) is installed (Docker: https://docs.docker.com/engine/install/)")
@@ -340,13 +340,23 @@ func detectOCI(ctx context.Context, run Runner, f Facts, r Report, pm string) La
 	if l.CLI == "docker" {
 		res, err := run.Run(ctx, "docker", "info", "--format", "{{json .Runtimes}}")
 		if err != nil || res.Exit != 0 {
+			// A running daemon whose socket this user may not open answers
+			// "permission denied" (the state right after usermod -aG docker,
+			// before the next login); anything else is a daemon that is down.
 			daemonDown = true
+			socketDenied = err == nil && strings.Contains(strings.ToLower(res.Stderr+res.Stdout), "permission denied")
 		} else {
 			runtimesJSON = res.Stdout
 			for _, n := range runtimeNames(res.Stdout) {
 				registered[n] = true
 			}
 		}
+	}
+	if socketDenied {
+		// Nothing about runtimes can be known: no runsc or kata steps.
+		l.Problems = append(l.Problems, "docker's daemon is running but this user cannot reach its socket (`docker info`: permission denied): add the user to the docker group, then log in again (a new group takes effect at the next login) and run doctor again")
+		l.RootSteps = []string{`usermod -aG docker "${SUDO_USER:-$USER}"`}
+		return l
 	}
 	if daemonDown {
 		// Nothing about runtimes can be known: no runsc or kata steps.

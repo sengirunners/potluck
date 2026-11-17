@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tart VMs for CI and agents: licence, limits, and what Potluck adds | Potluck</title>
+<meta name="description" content="Tart runs macOS and Linux VMs on Apple silicon. What it does, its FSL-1.1-ALv2 licence, Apple's two-VM limit, and what Potluck adds to use it for GitHub Actions jobs and coding agents.">
+<link rel="canonical" href="https://potluck.sh/tart">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Tart VMs for CI and agents: licence, limits, and what Potluck adds | Potluck">
+<meta property="og:description" content="Tart runs macOS and Linux VMs on Apple silicon. What it does, its FSL-1.1-ALv2 licence, Apple's two-VM limit, and what Potluck adds to use it for GitHub Actions jobs and coding agents.">
+<meta property="og:url" content="https://potluck.sh/tart">
+<meta property="og:image" content="https://potluck.sh/og/tart.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds">
+<meta property="article:published_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-17">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Tart VMs for CI and agents: licence, limits, and what Potluck adds | Potluck">
+<meta name="twitter:description" content="Tart runs macOS and Linux VMs on Apple silicon. What it does, its FSL-1.1-ALv2 licence, Apple's two-VM limit, and what Potluck adds to use it for GitHub Actions jobs and coding agents.">
+<meta name="twitter:image" content="https://potluck.sh/og/tart.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="generator" content="potluck.sh build from content/pages/tart.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://potluck.sh/tart#article","mainEntityOfPage":"https://potluck.sh/tart","url":"https://potluck.sh/tart","headline":"Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds","description":"Tart runs macOS and Linux VMs on Apple silicon. What it does, its FSL-1.1-ALv2 licence, Apple's two-VM limit, and what Potluck adds to use it for GitHub Actions jobs and coding agents.","datePublished":"2026-11-17","dateModified":"2026-11-17","inLanguage":"en","keywords":"tart vm, tart macos vm, tart virtualization licence, tart ci runner","image":"https://potluck.sh/og/tart.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"about":{"@id":"https://potluck.sh/#software"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds","item":"https://potluck.sh/tart"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a></nav>
+  <h1>Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</h1>
+  <p class="meta">Updated <time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
+<p>Tart runs macOS and Linux VMs on Apple-silicon Macs. It is fair-source (FSL-1.1-ALv2) and lives at github.com/openai/tart. Potluck uses it to give each GitHub Actions job or coding agent a fresh VM on your team's idle Macs.</p>
+  </aside>
+  <div class="prose">
+<h2 id="what-tart-does">What Tart does</h2>
+<p>Tart's README describes it as a virtualization toolset to build, run and manage macOS and Linux virtual machines on Apple silicon, built by CI engineers for automation. It uses Apple's own Virtualization framework, so VMs run at close to native speed. VM images are pushed to and pulled from any OCI-compatible container registry, the same kind of registry that holds Docker images, and a Packer plugin builds them. Its site is <a href="https://tart.run">tart.run</a>.</p>
+<p>Tart was started at Cirrus Labs. Its repository is now <a href="https://github.com/openai/tart">github.com/openai/tart</a> (the old cirruslabs/tart address leads there), and its licence names OpenAI as the copyright holder.</p>
+<h2 id="tarts-licence-fsl-11-alv2">Tart's licence: FSL-1.1-ALv2</h2>
+<p>Tart's LICENSE file is the Functional Source License, version 1.1, with Apache 2.0 as its future licence (FSL-1.1-ALv2). In short:</p>
+<ul>
+<li>You may use, copy, change and redistribute Tart for any purpose except a &quot;Competing Use&quot;, which the licence defines as &quot;making the Software available to others in a commercial product or service that: 1. substitutes for the Software; 2. substitutes for any other product or service we offer using the Software that exists as of the date we make the Software available; or 3. offers the same or substantially similar functionality as the Software&quot;.</li>
+<li>The licence names internal use, non-commercial education and research, and professional services to someone who holds a licence as permitted.</li>
+<li>Each version becomes available under Apache 2.0 two years after it is made available.</li>
+</ul>
+<p>Running Tart inside your own team to test your own code is internal use. Whether a particular business counts as a Competing Use is a question for the licence text and your lawyer, not this page.</p>
+<h2 id="apples-limit-two-macos-vms-per-mac">Apple's limit: two macOS VMs per Mac</h2>
+<p>Apple's software licence agreement for macOS (section 2B(iii), in the copy shipped with macOS 27.2.1) allows up to two additional copies or instances of macOS in virtual machines on each Apple-branded computer you own or control, for software development, testing during software development, macOS Server, or personal non-commercial use. The same agreement does not allow those VMs to be used for service-bureau, time-sharing, terminal-sharing or relay services. Linux VMs on a Mac are not affected.</p>
+<p>Potluck caps macOS guests at two per Mac. Its rule for lending: a macOS VM for people on your team or friends you invite is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time (<a href="https://github.com/sengirunners/potluck#macs">the README's Macs section</a>). That is Potluck's makers' reading of the licence.</p>
+<h2 id="potluck-does-not-bundle-tart">Potluck does not bundle Tart</h2>
+<p>Potluck's installer puts <code>potluck</code>, its drivers, <code>potluck-conformance</code> and <code>potluck-e2b</code> on your machine, and nothing else. On a Mac, you install Tart and Softnet (the helper Tart uses to give a VM an isolated network; it is setuid root) yourself, and accept Tart's licence yourself. <code>potluck doctor</code> says what is missing and where to get it, including the one sudo line Softnet needs. A Mac also needs about 60 GB free: the first <code>potluck host</code> pulls a macOS image of about 27 GB.</p>
+<h2 id="what-potluck-adds-on-top-of-tart">What Potluck adds on top of Tart</h2>
+<p>Tart makes and runs VMs. Potluck decides which VM to make, for whom, on which machine, and when to end it:</p>
+<ul>
+<li><strong>A fresh VM for every job.</strong> Each GitHub Actions job or sandbox gets its own VM, thrown away when it is done.</li>
+<li><strong>Your team's machines in one pool.</strong> Teammates lend their Macs and Linux boxes; work goes to whichever is free.</li>
+<li><strong>The Mac goes back to its owner.</strong> By default a lent Mac works for the pool only while its owner is away: touch the keyboard or trackpad and its job ends. VMs also end at their deadline, even if Potluck's daemon is down.</li>
+<li><strong>GitHub Actions jobs.</strong> A broker takes queued jobs from the repositories you connect and runs each in a fresh VM, refusing runs from forks (<a href="/github-actions-runner">self-hosted GitHub Actions runner</a>).</li>
+<li><strong>Sandboxes for coding agents.</strong> <code>potluck sandbox create</code>, <code>potluck sandbox exec</code>, or the same tools over MCP.</li>
+<li><strong>Checks before a machine joins.</strong> <code>potluck host</code> checks the machine and runs a quick conformance check for each size before sharing it.</li>
+</ul>
+<p>On one Mac, the quick start is:</p>
+<pre><code class="language-sh">potluck doctor                          # what this machine can share, and what is missing
+potluck create trial --via tunnel       # a pool on this machine alone
+potluck host --reclaim-idle-s 0         # share this machine with that pool
+potluck sandbox create                  # prints the sandbox's id
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>This one-machine path has been run end to end by hand many times on an Apple-silicon Mac with Tart.</p>
+<p>Facts on this page were checked against the sources named in each section on November 17, 2026. Licences change; read them yourself. This is not legal advice.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">How to pool your team's spare Macs and Linux boxes for builds and coding agents</a></li>
+    <li><a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service</a></li>
+    <li><a href="/blog/self-hosted-github-actions-runner-on-your-mac">How to run a self-hosted GitHub Actions runner on your own Mac, with a fresh VM for each job</a></li>
+  </ul>
+</nav>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

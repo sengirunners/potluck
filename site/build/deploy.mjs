@@ -39,7 +39,8 @@ if (!previous) {
 const wrangler = spawnSync("npx", ["wrangler", "deploy"], { cwd: SITE_DIR, stdio: "inherit" });
 if (wrangler.status !== 0) fail("wrangler deploy failed");
 
-// The README's checks: the page on both hosts, the closed waitlist, and the two admin reads (when their tokens are set).
+// The README's checks: the page on both hosts, the closed waitlist, the favicon, the installer's redirect, and the two
+// admin reads (when their tokens are set).
 const check = async (label, want, url, init) => {
   const res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS), ...init });
   const ok = res.status === want;
@@ -51,6 +52,8 @@ for (const h of ["potluck.sh", "www.potluck.sh"]) {
   ok = (await check(`${h} page`, 200, `https://${h}/`)) && ok;
   ok = (await check(`${h} waitlist post`, 410, `https://${h}/api/waitlist`, { method: "POST" })) && ok;
 }
+ok = (await check("favicon", 200, "https://potluck.sh/favicon.ico")) && ok;
+ok = (await check("install.sh redirect", 302, "https://potluck.sh/install.sh")) && ok;
 const auth = (token) => ({ headers: { authorization: `Bearer ${token}` } });
 if (process.env.WAITLIST_ADMIN_TOKEN) ok = (await check("waitlist count", 200, "https://potluck.sh/api/waitlist/count", auth(process.env.WAITLIST_ADMIN_TOKEN))) && ok;
 else console.log("skip waitlist count (WAITLIST_ADMIN_TOKEN not set)");

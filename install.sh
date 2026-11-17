@@ -22,9 +22,13 @@
 # Environment:
 #   POTLUCK_INSTALL_DIR  where the programs go (default ~/.local/bin)
 #   POTLUCK_MENUBAR_DIR  where --menubar puts Potluck Menu.app (default ~/Applications)
-#   GH_TOKEN, GITHUB_TOKEN  a token sent with every GitHub request: needed if the repository is private; also lifts the rate limit
+#   GH_TOKEN, GITHUB_TOKEN  a token: the release is then read through GitHub's API with it (a private repository needs
+#                        one). Without a token the script takes no API call: it downloads from github.com's release
+#                        links, which GitHub's anonymous API limit (60 calls an hour per address, shared by everyone
+#                        behind one office, CI or cloud NAT) does not count.
 #   POTLUCK_UPDATE_KEY   another trusted release key (ed25519:<base64>), as config update_keys adds to potluck's
 #   POTLUCK_GITHUB_API   GitHub's API (default https://api.github.com; tests)
+#   POTLUCK_GITHUB       GitHub's web host, for the release links (default https://github.com; tests)
 set -eu
 
 # RELEASE_KEYS are the release keys this script trusts, separated by spaces: the list in
@@ -51,15 +55,15 @@ usage() {
 	say "--trust-dir installs from --from without a signature check when none can be made here."
 }
 
-# fetch URL OUT ACCEPT: download URL into OUT over HTTPS; a refusal says why. The token goes to curl on stdin,
-# never on its command line.
+# fetch URL OUT ACCEPT [NOT_FOUND]: download URL into OUT over HTTPS, redirects included; a refusal says why, and a
+# 404 says NOT_FOUND when it is given. The token goes to curl on stdin, never on its command line.
 fetch() {
 	if command -v curl >/dev/null 2>&1; then
 		if [ -n "$TOKEN" ]; then
 			code=$(printf 'Authorization: Bearer %s\n' "$TOKEN" |
-				curl -sSL --proto '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" -H @- "$1") || code=000
+				curl -sSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" -H @- "$1") || code=000
 		else
-			code=$(curl -sSL --proto '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" "$1") || code=000
+			code=$(curl -sSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" "$1") || code=000
 		fi
 	elif command -v wget >/dev/null 2>&1; then
 		# wget would put the token on its command line, and send it on to the storage host GitHub redirects
@@ -73,13 +77,19 @@ fetch() {
 	case "$code" in
 	200) return 0 ;;
 	404)
+		[ -z "${4:-}" ] || die "$4"
 		if [ -z "$TOKEN" ]; then
 			die "github.com/$REPO answered 404 with no token: it is private (set GH_TOKEN or GITHUB_TOKEN to a token that can read it) or has no release yet. Or use --from <release dir>."
 		fi
 		die "github.com/$REPO answered 404: the token in GH_TOKEN/GITHUB_TOKEN cannot read it (or it has no release yet)."
 		;;
 	401) die "github.com/$REPO answered 401: the token in GH_TOKEN/GITHUB_TOKEN is not valid." ;;
-	403 | 429) die "github.com/$REPO answered $code: rate limited or refused. Set GH_TOKEN, or try again later." ;;
+	403 | 429)
+		if [ -n "$TOKEN" ]; then
+			die "github.com/$REPO answered $code: the token in GH_TOKEN/GITHUB_TOKEN is rate limited or refused. Try again later."
+		fi
+		die "github.com answered $code for $1: rate limited or refused. Try again later."
+		;;
 	000)
 		if [ -z "$TOKEN" ]; then
 			die "could not download $1 (no network?)"
@@ -103,6 +113,11 @@ assets() {
 		$0 == "}" { if (u[d] != "" && n[d] != "") print n[d], u[d]; d--; next }
 		/^[[:space:]]*"url"[[:space:]]*:/ { v = $0; sub(/^[^:]*:[[:space:]]*"/, "", v); sub(/".*$/, "", v); if (v ~ /\/releases\/assets\/[0-9]+$/) u[d] = v; next }
 		/^[[:space:]]*"name"[[:space:]]*:/ { v = $0; sub(/^[^:]*:[[:space:]]*"/, "", v); sub(/".*$/, "", v); n[d] = v }'
+}
+
+# manifest_version FILE: the version a release manifest names (letters, digits, . _ -), else nothing.
+manifest_version() {
+	sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$1" | head -n 1
 }
 
 # sha256 FILE: its SHA-256 in hex.
@@ -208,7 +223,7 @@ menu_running() {
 install_menubar() {
 	[ "$os" = darwin ] || die "--menubar is for macOS: Potluck Menu.app is a Mac menu bar item"
 	command -v ditto >/dev/null 2>&1 || die "--menubar needs ditto (macOS)"
-	mv_version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$1/manifest.json" | head -n 1)
+	mv_version=$(manifest_version "$1/manifest.json")
 	mv_tarball="potluck_${mv_version}_${os}_${arch}.tar.gz"
 	mv_want=$(awk -v f="\"$mv_tarball\":" '$1 == f { v = $2; gsub(/[",]/, "", v); print v; exit }' "$1/manifest.json")
 	[ -n "$mv_want" ] && [ "$(sha256 "$1/$mv_tarball")" = "$mv_want" ] || die "$mv_tarball does not match the manifest: not installing the menu bar item"
@@ -308,6 +323,7 @@ next_steps() {
 
 main() {
 	API="${POTLUCK_GITHUB_API:-https://api.github.com}"
+	WEB="${POTLUCK_GITHUB:-https://github.com}"
 	INSTALL_DIR="${POTLUCK_INSTALL_DIR:-${HOME:?HOME is not set}/.local/bin}"
 	TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 	FROM=""
@@ -378,11 +394,23 @@ main() {
 		if [ -e "$src/manifest.json.sig" ]; then
 			cat "$src/manifest.json.sig" >"$dl/manifest.json.sig" || die "could not read $src/manifest.json.sig"
 		fi
-		v=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$dl/manifest.json" | head -n 1)
+		v=$(manifest_version "$dl/manifest.json")
 		[ -n "$v" ] || die "the manifest names no version"
 		t="potluck_${v}_${os}_${arch}.tar.gz"
 		[ -e "$src/$t" ] || die "release $v has no build for $os/$arch ($t)"
 		cat "$src/$t" >"$dl/$t" || die "could not read $src/$t"
+	elif [ -z "$TOKEN" ]; then
+		# No token: github.com's release links, which take no API call. The newest release's manifest names its
+		# version, and the release is tagged potluck-<version>; the signature and the tarball come from that tag, so
+		# a release published meanwhile cannot mix two releases' files.
+		fetch "$WEB/$REPO/releases/latest/download/manifest.json" "$dl/manifest.json" "application/octet-stream"
+		v=$(manifest_version "$dl/manifest.json")
+		[ -n "$v" ] || die "the newest release of $REPO has a manifest that names no version, not a potluck release"
+		t="potluck_${v}_${os}_${arch}.tar.gz"
+		fetch "$WEB/$REPO/releases/download/potluck-$v/manifest.json.sig" "$dl/manifest.json.sig" "application/octet-stream" \
+			"the release has no signature (manifest.json.sig): not installing"
+		fetch "$WEB/$REPO/releases/download/potluck-$v/$t" "$dl/$t" "application/octet-stream" \
+			"release potluck-$v has no build for $os/$arch ($t)"
 	else
 		fetch "$API/repos/$REPO/releases/latest" "$tmp/latest.json" "application/vnd.github+json"
 		tag=$(tr ',{}' '\n\n\n' <"$tmp/latest.json" | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
@@ -437,7 +465,7 @@ main() {
 	fi
 
 	# The version and the tarball's hash come from the manifest (signed, when checked above).
-	version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$dl/manifest.json" | head -n 1)
+	version=$(manifest_version "$dl/manifest.json")
 	[ -n "$version" ] || die "the manifest names no version"
 	grep -q '"schema":[[:space:]]*"potluck-release/1"' "$dl/manifest.json" || die "the manifest is not a potluck-release/1 manifest"
 	tarball="potluck_${version}_${os}_${arch}.tar.gz"

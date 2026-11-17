@@ -1012,6 +1012,13 @@ whole tree down in 0.7 s.
   "exit"?, "error"?, "kept", "released", "seconds"}` on stdout alone (the command's output then goes to stderr).
 - Agents use the sandbox tools in the same order. There is no job tool, since a job outlives a tool call.
 
+### Agent tasks
+
+`potluck agent-task [claude] --prompt-file <file|->` runs a coding agent CLI once in a fresh box on the renter's
+pushed commit, with the renter's credential as the agent's spawn secret, and fetches the commits it made into
+`refs/potluck/agent-task/<sandbox>` in the renter's checkout. It is `potluck run`'s box job with one step before the
+release (the box's bundle copied back), with no routes or state of its own. See `docs/agent-tasks.md`.
+
 ### Agent runners
 
 `potluck agent-runner <adapter> --secret-file <file>` keeps a coding agent vendor's self-hosted runners going, one
@@ -1090,8 +1097,8 @@ sizes are config.
   fits).
 - `label` (default: the pool project's slug, so a pool `friends` serves `runs-on: friends` or `friends:<size>`, with
   or without `self-hosted`; an explicit label works the same).
-- `public_url`: an https URL that forwards only the broker's five public paths (`/v0/runners/hook`,
-  `/v0/runners/oauth` and `/v0/runners/app/{new,created,installed}`) to the daemon unsigned, for example Tailscale
+- `public_url`: an https URL that forwards only the broker's public paths (`/v0/runners/hook`,
+  `/v0/runners/oauth`, `/v0/runners/app/{new,created,installed}` and `/v0/runners/capacity/<host>`) to the daemon unsigned, for example Tailscale
   Funnel on just those paths or a reverse proxy, never the rest of the API. The tunnel's door takes only
   member-signed requests, which GitHub and a browser cannot make.
 - `listen`: a loopback `host:port` the broker opens serving those paths and nothing else; HEAD is refused where a
@@ -1536,6 +1543,26 @@ machine's socket (`POST /v0/runners/setup`, local):
   a host and no path.
 - A taken or bad `listen` at daemon start leaves the broker running without its listener (logged), so `potluck
   runners setup` can pick a free port.
+
+### Host capacity reports
+
+A lending host that runs its own admission controller (for example one that also decides between the host's own CI
+runners and pool boxes) can publish what it has room for, so routers on cloud CI runners, which cannot reach the host, pick
+the host or another runner from one fresh answer. The broker keeps the report as an opaque JSON object; its shape
+is the host's (a `schema` field naming it is the reader's best check).
+
+- `PUT /v0/runners/capacity/<host>?ttl_s=N` (authed), the report as the body: a JSON object of at most 64 KiB,
+  kept compacted for `ttl_s` (10 to 600, default 60) and then dropped. Only `<host>`'s own machine publishes it:
+  its replica's node-bound token, whose machine is `<host>`, seeing the pool project; or the authority's owner on
+  its socket. Any other caller is refused (`403`). On a member machine the team proxy sends it to the pool's
+  authority once (no write id: the next report replaces it). `<host>` is a machine name: lowercase letters, digits
+  and `-`. Reports are held in memory, at most 256 hosts: a restart loses at most one report, which the host
+  publishes again within seconds.
+- `GET /v0/runners/capacity/<host>` (public, on `listen` too): the live report exactly as kept,
+  `content-type: application/json`, `cache-control: no-store`; `404` when the host has none or its ttl passed. A
+  reader treats `404`, no answer and a stale report the same way: not this host.
+- `potluck runners capacity <host> [--ttl-s N] < report.json` publishes stdin as the report (on the host, as the
+  user its daemon runs as; under zm, `zm runners capacity <host> -P <pool>`).
 
 ## Secrets issuers
 

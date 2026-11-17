@@ -11,19 +11,22 @@
 <meta property="og:title" content="Pool spare Macs and Linux boxes for builds and agents | Potluck">
 <meta property="og:description" content="How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.">
 <meta property="og:url" content="https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">
-<meta property="og:image" content="https://potluck.sh/og.png">
+<meta property="og:image" content="https://potluck.sh/og/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Potluck: run coding agents and builds on the computers you already own">
+<meta property="og:image:alt" content="How to pool your team's spare Macs and Linux boxes for builds and coding agents">
 <meta property="article:published_time" content="2026-11-16">
-<meta property="article:modified_time" content="2026-11-16">
+<meta property="article:modified_time" content="2026-11-17">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Pool spare Macs and Linux boxes for builds and agents | Potluck">
 <meta name="twitter:description" content="How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.">
-<meta name="twitter:image" content="https://potluck.sh/og.png">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 <link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
 <link rel="alternate" type="text/markdown" href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.md">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents#post","mainEntityOfPage":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","url":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","headline":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","description":"How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.","datePublished":"2026-11-16","dateModified":"2026-11-16","inLanguage":"en","keywords":"pool spare computers for builds, share idle mac with team for ci, cluster spare homelab machines and share with friends","image":"https://potluck.sh/og.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","item":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents#post","mainEntityOfPage":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","url":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","headline":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","description":"How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.","datePublished":"2026-11-16","dateModified":"2026-11-17","inLanguage":"en","keywords":"pool spare computers for builds, share idle mac with team for ci, cluster spare homelab machines and share with friends","image":"https://potluck.sh/og/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","item":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents"}]}]}</script>
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
 <link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
@@ -46,7 +49,7 @@
 <article class="post">
   <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
   <h1>How to pool your team's spare Macs and Linux boxes for builds and coding agents</h1>
-  <p class="meta"><time datetime="2026-11-16">November 16, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <p class="meta"><time datetime="2026-11-16">November 16, 2026</time> · updated <time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
   <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
 <p>With Potluck, one machine runs a pool, friends join with one-time codes, and work goes to whichever machine is free. Each machine's owner decides how much it shares and can take it back at any time.</p>
   </aside>
@@ -73,7 +76,7 @@
 </table></div>
 <p>A host's trust is the owner's choice at invite time, and the machine cannot change it. The difference matters:</p>
 <ul>
-<li>A <strong>trusted</strong> machine, a friend's, has sandboxes placed on it without being asked. It may run GitHub Actions jobs and receive the secrets a member sends to a sandbox.</li>
+<li>A <strong>trusted</strong> machine, a friend's, has sandboxes placed on it without being asked. It may run <a href="/github-actions-runner">GitHub Actions jobs</a> and receive the secrets a member sends to a sandbox.</li>
 <li>A <strong>public</strong> machine, a stranger's, runs only sandboxes a member names with <code>--on</code>. It never runs GitHub Actions jobs and never receives a secret.</li>
 </ul>
 <p>Two limits are worth knowing before you invite anyone. The machine that runs a sandbox can read everything in it, including code, commands, output and secrets. The machine that runs the pool can read the commands, output and secrets passing through it, until commands are sealed to the host's key, and over <code>--via tunnel</code> so can the tunnel's provider. Join only a pool whose owner you would trust with that.</p>
@@ -82,13 +85,13 @@
 <p>A lender can check this on their own machine:</p>
 <pre><code class="language-sh">potluck isolation test &lt;machine&gt;-c2m4
 </code></pre>
-<p>Sizes are matched by exact name, and <code>potluck host</code> names each one <code>&lt;machine&gt;-&lt;size&gt;</code> (<code>potluck isolation</code> lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. The repository lists the first recorded run on a real Mac as owed, and on Linux a sandbox that has a network relies on a firewall the machine's owner sets up.</p>
+<p>Sizes are matched by exact name, and <code>potluck host</code> names each one <code>&lt;machine&gt;-&lt;size&gt;</code> (<code>potluck isolation</code> lists the names this machine serves). The test boots sandboxes of that size and tries to reach this machine's addresses, the router, Tailscale's resolver and a second sandbox. It passes only if every check ran and failed to get through. On Linux, a sandbox that has a network relies on a firewall the machine's owner sets up.</p>
 <h2 id="how-do-you-start-a-pool-step-by-step">How do you start a pool, step by step?</h2>
 <h3 id="step-1-install-and-check-the-first-machine">Step 1: Install and check the first machine</h3>
 <pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 potluck doctor
 </code></pre>
-<p>A Mac needs to be Apple silicon with Tart and Softnet. A Linux box needs Docker with Kata or gVisor. <code>potluck doctor</code> says what is missing.</p>
+<p>A Mac needs to be Apple silicon with <a href="/tart">Tart</a> and Softnet. A Linux box needs Docker with Kata or gVisor. <code>potluck doctor</code> says what is missing.</p>
 <h3 id="step-2-create-the-pool-and-share-this-machine">Step 2: Create the pool and share this machine</h3>
 <pre><code class="language-sh">potluck create friends
 potluck host
@@ -120,9 +123,9 @@ potluck host set closed
 potluck host set auto
 </code></pre>
 <p><code>auto</code> returns to the machine's own rules. <code>--for 2h</code> and <code>--until 23:00</code> return the machine to <code>auto</code> at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with <code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar</code>, which installs the app but does not start it, then open it with <code>open ~/Applications/&quot;Potluck Menu.app&quot;</code>. It is not yet signed with an Apple Developer ID.</p>
-<p>To stop sharing for good, <code>potluck host stop</code> removes every size the machine shared, and <code>potluck leave</code> leaves the pool. On Linux, hand-back when the owner returns is a time window only today.</p>
-<h2 id="what-should-you-know-before-relying-on-it">What should you know before relying on it?</h2>
-<p>Potluck is early, and its README says interfaces will change. The one-machine path is tested in CI with a stand-in VM layer, and the whole quick start has run by hand on a Linux VM. It has not yet been run on two real machines in CI. Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.</p>
+<p>To stop sharing for good, <code>potluck host stop</code> removes every size the machine shared, and <code>potluck leave</code> leaves the pool.</p>
+<h2 id="can-you-lend-a-mac">Can you lend a Mac?</h2>
+<p>Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.</p>
 <h2 id="faq">FAQ</h2>
 <h3 id="is-it-a-cluster-scheduler">Is it a cluster scheduler?</h3>
 <p>No. Potluck runs builds, GitHub Actions jobs and coding agents in VMs and containers on ordinary Macs and Linux boxes, and its README says it is not a scheduler for clusters.</p>
@@ -144,6 +147,13 @@ potluck host set auto
   <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
   <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
 </aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
   <p class="alt"><a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.md">This post as Markdown</a></p>
 </article>
 </main>
