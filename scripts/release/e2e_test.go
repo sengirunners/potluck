@@ -34,10 +34,11 @@ import (
 //   - install.sh refuses forged releases whose potluck is replaced by a
 //     program that writes a canary file (no signature, another key's
 //     signature, a tarball the signed manifest does not name), both on a
-//     first install (it checks the signature itself, with openssl) and with
-//     a potluck installed (that potluck checks it); none ever runs;
-//   - with no openssl that can check Ed25519, --from is refused without
-//     --trust-dir;
+//     first install and with a potluck installed (the script checks the
+//     signature itself either way; the tarball's hash is the installed
+//     potluck's to check); none ever runs;
+//   - with this machine's own tools (ssh-keygen, and an openssl that cannot
+//     check Ed25519, as on a stock Mac) the SSHSIG signature is checked;
 //   - install.sh installs release A, a daemon runs on it, and potluck
 //     upgrade --release refuses forgeries of B, then installs B and
 //     restarts the daemon on it, re-pinning the driver it placed;
@@ -55,6 +56,9 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 	}
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("no sh")
+	}
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("no ssh-keygen: install.sh would refuse every release (install_test.go covers OpenSSL alone)")
 	}
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -164,12 +168,6 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		return cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home5, "POTLUCK_INSTALL_DIR="+installDir,
 			"POTLUCK_UPDATE_KEY="+pub, "PATH="+path)
 	}
-	trust := func(args ...string) []string {
-		if ossl == "" {
-			return append(args, "--trust-dir")
-		}
-		return args
-	}
 
 	// --from reads each file from the directory once: a directory that
 	// serves the release on the first read of each file and a forgery on
@@ -180,17 +178,17 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		fifos := filepath.Join(tmp, "fifos")
 		_ = os.MkdirAll(fifos, 0o755)
 		opens := map[string]*atomic.Int32{}
-		for _, f := range []string{release.ManifestFile, release.SignatureFile, release.Potluck.Tarball(verA, runtime.GOOS, runtime.GOARCH)} {
+		for _, f := range []string{release.ManifestFile, release.SignatureFile, release.SSHSIGFile, release.Potluck.Tarball(verA, runtime.GOOS, runtime.GOARCH)} {
 			genuine, _ := os.ReadFile(filepath.Join(relA, f))
 			forgery, _ := os.ReadFile(filepath.Join(unsigned, f))
-			if f == release.SignatureFile {
+			if f == release.SignatureFile || f == release.SSHSIGFile {
 				forgery, _ = os.ReadFile(filepath.Join(wrongKey, f))
 			}
 			opens[f] = serveFIFO(t, filepath.Join(fifos, f), genuine, forgery)
 		}
 		bin5 := filepath.Join(tmp, "bin5")
 		for _, what := range []string{"first install", "over an install"} {
-			out, err := install(sideEnv(bin5, tools+":"+sysPath), trust("--from", fifos)...)
+			out, err := install(sideEnv(bin5, tools+":"+sysPath), "--from", fifos)
 			if err != nil {
 				for f, n := range opens {
 					t.Logf("%s read %d times", f, n.Load())
@@ -215,7 +213,6 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		}
 		for i, path := range []string{".:" + tools + ":" + sysPath, ":" + tools + ":" + sysPath, dir + ":" + tools + ":" + sysPath} {
 			c := exec.Command("sh", filepath.Join(root, "install.sh"), "--from", ".")
-			c.Args = append(c.Args, trust()...)
 			c.Dir = dir
 			c.Env = sideEnv(filepath.Join(tmp, fmt.Sprintf("bin6-%d", i)), path)
 			o, _ := c.CombinedOutput()
@@ -224,21 +221,22 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 	}
 
 	// An openssl that says yes to everything is not trusted to check
-	// signatures: a forged --from is then refused (it needs --trust-dir).
+	// signatures: a forged --from is refused.
 	{
 		yes := filepath.Join(tmp, "yes")
 		_ = os.MkdirAll(yes, 0o755)
 		_ = os.WriteFile(filepath.Join(yes, "openssl"), []byte("#!/bin/sh\nexit 0\n"), 0o755)
 		bin7 := filepath.Join(tmp, "bin7")
-		if out, err := install(sideEnv(bin7, yes+":"+sysPath), "--from", wrongKey); err == nil || !strings.Contains(out, "Pass --trust-dir") {
+		if out, err := install(sideEnv(bin7, yes+":"+sysPath), "--from", wrongKey); err == nil || !strings.Contains(out, "does not verify") {
 			t.Fatalf("an openssl that always succeeds was trusted (%v):\n%s", err, out)
 		}
 		empty(bin7)
 		noCanary("an openssl that always succeeds")
 	}
 
-	// No openssl that can check Ed25519 (a stand-in that fails): --from is
-	// refused unless --trust-dir says to install unchecked.
+	// The machine's own tools and an openssl that cannot check Ed25519 (a
+	// stand-in that fails, as LibreSSL does on a stock Mac): ssh-keygen
+	// checks the SSHSIG signature.
 	{
 		weak := filepath.Join(tmp, "weak")
 		_ = os.MkdirAll(weak, 0o755)
@@ -246,49 +244,37 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		bin3 := filepath.Join(tmp, "bin3")
 		env3 := cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home, "POTLUCK_INSTALL_DIR="+bin3,
 			"POTLUCK_UPDATE_KEY="+pub, "PATH="+weak+":"+sysPath)
-		if out, err := install(env3, "--from", relA); err == nil || !strings.Contains(out, "Pass --trust-dir") {
-			t.Fatalf("--from with no signature check (%v):\n%s", err, out)
+		if out, err := install(env3, "--from", relA); err != nil || !strings.Contains(out, "SSHSIG, checked with ssh-keygen") {
+			t.Fatalf("--from with ssh-keygen and no Ed25519 openssl (%v):\n%s", err, out)
 		}
-		empty(bin3)
-		if out, err := install(env3, "--from", relA, "--trust-dir"); err != nil || !strings.Contains(out, "the signature was NOT checked") {
-			t.Fatalf("--from --trust-dir (%v):\n%s", err, out)
-		}
-		// A malformed trusted key refuses before anything else, --trust-dir or not.
+		// A malformed trusted key refuses before anything else.
 		bin8 := filepath.Join(tmp, "bin8")
 		env8 := cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home, "POTLUCK_INSTALL_DIR="+bin8,
 			"POTLUCK_UPDATE_KEY=ssh-ed25519", "PATH="+weak+":"+sysPath)
-		if out, err := install(env8, "--from", relA, "--trust-dir"); err == nil || !strings.Contains(out, "is not ed25519:<base64>") {
+		if out, err := install(env8, "--from", relA); err == nil || !strings.Contains(out, "is not ed25519:<base64>") {
 			t.Fatalf("a malformed POTLUCK_UPDATE_KEY was accepted (%v):\n%s", err, out)
 		}
 		empty(bin8)
 	}
 
 	// A first install refuses all three forgeries; nothing from them runs.
-	if ossl == "" {
-		t.Log("no openssl here can check Ed25519: first-install signature checks are tested where one can (CI)")
-	} else {
-		for _, c := range []struct{ dir, want string }{
-			{unsigned, "has no signature"},
-			{wrongKey, "does not verify with any release key"},
-			{notInManifest, "does not match the manifest"},
-		} {
-			if out, err := install(env, "--from", c.dir); err == nil || !strings.Contains(out, c.want) {
-				t.Fatalf("install.sh --from %s (%v), want %q:\n%s", filepath.Base(c.dir), err, c.want, out)
-			}
-			empty(bin)
-			noCanary("first install from " + filepath.Base(c.dir))
+	for _, c := range []struct{ dir, want string }{
+		{unsigned, "has no signature"},
+		{wrongKey, "does not verify with any release key"},
+		{notInManifest, "does not match the signed manifest"},
+	} {
+		if out, err := install(env, "--from", c.dir); err == nil || !strings.Contains(out, c.want) {
+			t.Fatalf("install.sh --from %s (%v), want %q:\n%s", filepath.Base(c.dir), err, c.want, out)
 		}
+		empty(bin)
+		noCanary("first install from " + filepath.Base(c.dir))
 	}
 
-	installArgs := []string{"--from", relA}
-	if ossl == "" {
-		installArgs = append(installArgs, "--trust-dir")
-	}
-	out, err := install(env, installArgs...)
+	out, err := install(env, "--from", relA)
 	if err != nil {
 		t.Fatalf("install.sh: %v\n%s", err, out)
 	}
-	if ossl != "" && !strings.Contains(out, "signature verified") {
+	if !strings.Contains(out, "signature verified") {
 		t.Fatalf("install.sh did not check the signature:\n%s", out)
 	}
 	if !strings.Contains(out, "potluck create <pool>") || !strings.Contains(out, "potluck join '<invite code>'") {
@@ -305,18 +291,38 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 	otherA := filepath.Join(tmp, "src", "potluck") // A, as if built from source elsewhere
 	copyFile2(t, filepath.Join(bin, "potluck"), otherA)
 
-	// With potluck installed, install.sh has it check the release: the
-	// forgeries are refused and never run.
+	// With potluck installed, install.sh still checks the signature, then
+	// has that potluck check the tarball: the forgeries are refused and
+	// never run.
 	unsignedB, wrongKeyB, notInManifestB := forged("B", verB, commitB)
 	for _, c := range []struct{ dir, want string }{
-		{unsignedB, "manifest.json.sig"},
-		{wrongKeyB, "does not verify with any configured update key"},
+		{unsignedB, "has no signature"},
+		{wrongKeyB, "does not verify with any release key"},
+		{notInManifestB, "already installed"},
 		{notInManifestB, "does not match the signed manifest"},
 	} {
-		if out, err := install(env, "--from", c.dir); err == nil || !strings.Contains(out, "already installed") || !strings.Contains(out, c.want) {
+		if out, err := install(env, "--from", c.dir); err == nil || !strings.Contains(out, c.want) {
 			t.Fatalf("install.sh over an install, --from %s (%v), want %q:\n%s", filepath.Base(c.dir), err, c.want, out)
 		}
 		noCanary("install over an install from " + filepath.Base(c.dir))
+	}
+	// With no tool here that can check (no ssh-keygen, no Ed25519 openssl:
+	// a Mac before its release carries an SSHSIG), the installed potluck's
+	// own check is the one made: it refuses the forgeries, which never run.
+	{
+		noTools := toolDir(t, filepath.Join(tmp, "notools"), map[string]string{"openssl": "#!/bin/sh\nexit 1\n"})
+		envNT := append(append([]string(nil), env...), "PATH="+bin+":"+noTools)
+		for _, c := range []struct{ dir, want string }{
+			{wrongKeyB, "does not verify with any configured update key"},
+			{notInManifestB, "does not match the signed manifest"},
+		} {
+			out, err := install(envNT, "--from", c.dir)
+			if err == nil || !strings.Contains(out, "this script cannot check the signature here") || !strings.Contains(out, "already installed") ||
+				!strings.Contains(out, c.want) {
+				t.Fatalf("install.sh over an install with no tool that can check, --from %s (%v), want %q:\n%s", filepath.Base(c.dir), err, c.want, out)
+			}
+			noCanary("install over an install with no tool that can check, from " + filepath.Base(c.dir))
+		}
 	}
 	if out, _ := potluck("--version"); !strings.Contains(out, verA) {
 		t.Fatalf("a refused install changed the install: %s", out)
@@ -489,22 +495,21 @@ exec %s "$@"
 		if !strings.Contains(out, ">> ~/.zshrc") || strings.Contains(out, ".profile") || strings.Contains(out, "/release:") {
 			t.Fatalf("the PATH hint or the verified line:\n%s", out)
 		}
-		if ossl != "" && !strings.Contains(out, "signature verified") {
+		if !strings.Contains(out, "signature verified") {
 			t.Fatalf("the download's signature was not checked:\n%s", out)
 		}
 		// Another shell, another hint (fish quotes the directory).
 		if fo, ferr := gh("GH_TOKEN=tok", "SHELL=/usr/bin/fish"); ferr != nil || !strings.Contains(fo, `fish_add_path "`) {
 			t.Fatalf("fish hint (%v):\n%s", ferr, fo)
 		}
-		// With no openssl that checks Ed25519, the download is trusted over
-		// HTTPS, and the script says so.
+		// With no openssl that checks Ed25519 (a stock Mac), ssh-keygen checks
+		// the download's SSHSIG signature.
 		weakEnv := append(ghEnv(srv, ca, filepath.Join(tmp, "bin4"), filepath.Join(tmp, "weak")), "GH_TOKEN=tok")
 		c := exec.Command("sh", filepath.Join(root, "install.sh"))
 		c.Env = weakEnv
 		o, err := c.CombinedOutput()
-		if err != nil || !strings.Contains(string(o), "the signature was NOT checked") || !strings.Contains(string(o), "trusting the download over HTTPS") ||
-			!strings.Contains(string(o), "delete "+filepath.Join(tmp, "bin4", "potluck")) {
-			t.Fatalf("no openssl, from GitHub (%v):\n%s", err, o)
+		if err != nil || !strings.Contains(string(o), "SSHSIG, checked with ssh-keygen") {
+			t.Fatalf("no Ed25519 openssl, from GitHub (%v):\n%s", err, o)
 		}
 		// A public repository behind an address whose anonymous API allowance
 		// is spent: with no token, install.sh takes no API call.
@@ -512,7 +517,7 @@ exec %s "$@"
 		pc := exec.Command("sh", filepath.Join(root, "install.sh"))
 		pc.Env = ghEnv(pubSrv, pubCA, filepath.Join(tmp, "bin-public"), tools)
 		if po, perr := pc.CombinedOutput(); perr != nil || !strings.Contains(string(po), "installed potluck "+verB) ||
-			(ossl != "" && !strings.Contains(string(po), "signature verified")) {
+			!strings.Contains(string(po), "signature verified") {
 			t.Fatalf("public, no token, API refused (%v):\n%s", perr, po)
 		}
 	})

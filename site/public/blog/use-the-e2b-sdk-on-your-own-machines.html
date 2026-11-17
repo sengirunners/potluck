@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Use the E2B SDK on your own machines, self-hosted | Potluck</title>
+<meta name="description" content="potluck-e2b answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B sandboxes runs on your team's idle Macs and Linux boxes with only its environment changed. What it covers and how to set it up.">
+<link rel="canonical" href="https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Use the E2B SDK on your own machines, self-hosted | Potluck">
+<meta property="og:description" content="potluck-e2b answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B sandboxes runs on your team's idle Macs and Linux boxes with only its environment changed. What it covers and how to set it up.">
+<meta property="og:url" content="https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines">
+<meta property="og:image" content="https://potluck.sh/og/blog/use-the-e2b-sdk-on-your-own-machines.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Use the E2B SDK on your own machines">
+<meta property="article:published_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-17">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Use the E2B SDK on your own machines, self-hosted | Potluck">
+<meta name="twitter:description" content="potluck-e2b answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B sandboxes runs on your team's idle Macs and Linux boxes with only its environment changed. What it covers and how to set it up.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/use-the-e2b-sdk-on-your-own-machines.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/use-the-e2b-sdk-on-your-own-machines.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines#post","mainEntityOfPage":"https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines","url":"https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines","headline":"Use the E2B SDK on your own machines","description":"potluck-e2b answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B sandboxes runs on your team's idle Macs and Linux boxes with only its environment changed. What it covers and how to set it up.","datePublished":"2026-11-17","dateModified":"2026-11-17","inLanguage":"en","keywords":"e2b alternative, self hosted e2b, e2b sandbox on your own machine","image":"https://potluck.sh/og/blog/use-the-e2b-sdk-on-your-own-machines.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Use the E2B SDK on your own machines","item":"https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Use the E2B SDK on your own machines</h1>
+  <p class="meta"><time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
+<p>Run <code>potluck-e2b</code> on a machine in your Potluck pool and point the E2B SDK at it with <code>E2B_DOMAIN</code>, <code>E2B_API_KEY</code> and a CA file it prints. <code>Sandbox.create</code>, <code>commands.run</code>, <code>files.read</code> and <code>files.write</code>, list, timeouts, connect and kill then run on your own machines instead of E2B's cloud. Potluck is free and open source (Apache-2.0).</p>
+  </aside>
+  <div class="prose">
+<p>If you have code written against E2B's SDK and spare machines on your team, you can run that code's sandboxes on those machines without changing it. <code>potluck-e2b</code> is a small gateway that the Potluck installer puts beside <code>potluck</code>. It answers the E2B control plane and the parts of a sandbox's own API the SDK uses, and turns them into Potluck sandboxes.</p>
+<h2 id="set-it-up">Set it up</h2>
+<p>You need a Potluck pool with a machine sharing itself (the <a href="https://github.com/sengirunners/potluck#quick-start">quick start</a>, or the prompt on the <a href="/agent-sandbox">agent sandbox page</a>). Then, on a machine in the pool:</p>
+<pre><code class="language-sh">potluck-e2b keygen     # makes an API key and prints it; keys live in $POTLUCK_HOME/e2b/keys (mode 0600)
+potluck-e2b            # serves on localhost:49982 and prints the lines to export
+</code></pre>
+<p>On start it prints three things to set in the program that uses the SDK: <code>E2B_DOMAIN</code> (by default <code>e2b.localhost:49982</code>), <code>E2B_API_KEY</code> (a key from the keys file), and <code>SSL_CERT_FILE</code> for Python on Linux or <code>NODE_EXTRA_CA_CERTS</code> for Node, naming the certificate authority the gateway made for itself (on macOS the Python SDK trusts only the keychain). Code that uses only the calls listed below needs no other change; network rules, pause, volumes, PTY, stdin streaming and lower-case environment variable names are refused. Names under <code>.localhost</code> always point at your own machine, and the gateway signs a certificate for each name it serves, limited to its own domain.</p>
+<h2 id="what-it-covers">What it covers</h2>
+<ul>
+<li><code>Sandbox.create</code>, placed on your pool's machines the way <code>potluck sandbox create</code> places them;</li>
+<li><code>commands.run</code>, with its exit code, standard output and standard error;</li>
+<li><code>files.read</code> and <code>files.write</code>;</li>
+<li><code>get_info</code>, <code>Sandbox.list</code>, <code>set_timeout</code>, <code>Sandbox.connect</code> and <code>kill</code>.</li>
+</ul>
+<p>A sandbox's environment variables reach a command as secret files, never on its command line, so the secrets rules apply: they go only to a machine you trust whose sandboxes can hold secrets.</p>
+<h2 id="how-it-is-checked">How it is checked</h2>
+<p>A test runs the unmodified E2B Python and TypeScript SDKs against the gateway: it creates a sandbox, runs commands, writes and reads a file, lists, connects and kills (<code>TestRealSDK</code> in internal/e2bgateway).</p>
+<h2 id="when-to-use-e2b-instead">When to use E2B instead</h2>
+<p>E2B runs the machines for you, in its cloud, and covers more of its own API. Use it when you have no spare machines or need more sandboxes at once than your team owns. Use <code>potluck-e2b</code> when the machines are already yours and you would rather your code ran on them.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/mezze">Run a brigade of coding agents without losing track of them</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/use-the-e2b-sdk-on-your-own-machines.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

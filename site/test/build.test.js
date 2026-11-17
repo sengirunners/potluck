@@ -138,8 +138,12 @@ test("the feed lists posts newest updated first", (t) => {
 });
 
 test("every internal link and asset in a built page resolves to a built file or anchor", (t) => {
-  // The home page links the real pages, so the scratch build keeps them beside the fixture post.
-  for (const publicDir of [PUBLIC, scratch(t, FIXTURES, join(SITE_DIR, "content/pages"))]) {
+  // The home page links the real pages and they link the real posts, so the scratch build keeps them all beside the
+  // fixture post.
+  const posts = emptyDir(t);
+  cpSync(join(SITE_DIR, "content/blog"), posts, { recursive: true });
+  cpSync(FIXTURES, posts, { recursive: true });
+  for (const publicDir of [PUBLIC, scratch(t, posts, join(SITE_DIR, "content/pages"))]) {
     const pages = walk(publicDir).filter((f) => f.endsWith(".html"));
     const pageIds = new Map(pages.map((f) => [f, ids(readFileSync(join(publicDir, f), "utf8"))]));
     const target = (p) => {
@@ -331,4 +335,16 @@ test("the home page's JSON-LD names the repository in sameAs and claims no versi
   const graph = graphOf(readFileSync(join(PUBLIC, "index.html"), "utf8"));
   assert.deepEqual(graph[0].sameAs, ["https://github.com/sengirunners/potluck"]);
   assert.equal(graph[0].softwareVersion, undefined);
+});
+
+test("the getting-started prompt is one text: the home page, content/home.md and /agent-sandbox carry AGENT_PROMPT", async () => {
+  const { AGENT_PROMPT, INSTALL } = await import("../build/pages.mjs");
+  const unescape = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+  const home = readFileSync(join(PUBLIC, "index.html"), "utf8").match(/<!-- agent-prompt:start[^>]*-->([\s\S]*?)<!-- agent-prompt:end -->/)[1];
+  assert.equal(unescape(home), AGENT_PROMPT);
+  const fence = (file) => readFileSync(join(SITE_DIR, file), "utf8").match(/```text\n([\s\S]*?)\n```/)[1];
+  assert.equal(fence("content/home.md"), AGENT_PROMPT);
+  assert.equal(fence("content/pages/agent-sandbox.md"), AGENT_PROMPT);
+  assert.ok(AGENT_PROMPT.includes(INSTALL), "it installs with the README's command");
+  assert.match(AGENT_PROMPT, /do not run sudo yourself/);
 });

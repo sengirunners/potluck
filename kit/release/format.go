@@ -14,18 +14,21 @@ import (
 // accepts, and Name, which starts every tarball
 // (<Name>_<version>_<os>_<arch>.tar.gz) and is the program each must carry.
 // A manifest of one format never verifies as another's, whatever key
-// signed it.
+// signed it. Namespace is the SSHSIG namespace its manifests are signed
+// under (sshsig.go), so an SSHSIG of one channel never verifies as the
+// other's either.
 type Format struct {
-	Schema string
-	Name   string
+	Schema    string
+	Name      string
+	Namespace string
 }
 
 var (
 	// ZM is zm's channel (zm's own release scripts build it, not this module).
-	ZM = Format{Schema: Schema, Name: "zm"}
+	ZM = Format{Schema: Schema, Name: "zm", Namespace: "zm-release"}
 	// Potluck is Potluck's channel (scripts/release here), signed with its
 	// own keys (internal/upgrade/release_keys.txt).
-	Potluck = Format{Schema: "potluck-release/1", Name: "potluck"}
+	Potluck = Format{Schema: "potluck-release/1", Name: "potluck", Namespace: "potluck-release"}
 )
 
 // Tarball is the release tarball name for a platform.
@@ -43,8 +46,10 @@ func (f Format) Unpack(m Manifest, tarball []byte, goos, goarch, dir string) ([]
 	return f.Extract(tarball, m.Version, goos, goarch, dir)
 }
 
-// SignDir reads the SHA256SUMS in dir and writes the signed manifest
-// (ManifestFile, SignatureFile) beside it.
+// SignDir reads the SHA256SUMS in dir and writes the signed manifest beside
+// it: ManifestFile, its raw Ed25519 signature (SignatureFile, which potluck
+// upgrade checks) and the same key's SSHSIG signature (SSHSIGFile, which
+// install.sh checks with ssh-keygen).
 func (f Format) SignDir(dir, version, commit string, created time.Time, key ed25519.PrivateKey) (Manifest, error) {
 	sums, err := os.ReadFile(filepath.Join(dir, "SHA256SUMS"))
 	if err != nil {
@@ -61,7 +66,10 @@ func (f Format) SignDir(dir, version, commit string, created time.Time, key ed25
 	if err := os.WriteFile(filepath.Join(dir, ManifestFile), body, 0o644); err != nil {
 		return Manifest{}, err
 	}
-	return m, os.WriteFile(filepath.Join(dir, SignatureFile), []byte(sig+"\n"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, SignatureFile), []byte(sig+"\n"), 0o644); err != nil {
+		return Manifest{}, err
+	}
+	return m, os.WriteFile(filepath.Join(dir, SSHSIGFile), f.SSHSign(key, body), 0o644)
 }
 
 // NewKey makes a signing key pair: seed is the private key as a CI secret

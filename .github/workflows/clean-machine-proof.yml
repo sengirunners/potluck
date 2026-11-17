@@ -1,27 +1,43 @@
 # The README quick start on a fresh GitHub-hosted VM with no zm (scripts/clean-machine-proof.sh): install from the
-# newest signed release, a pool, this VM shared with it from a second home over a Cloudflare quick tunnel, a sandbox
-# and a job on it. Run by hand; it reads only this repository (the release) and pulls the public box images.
+# newest signed release with no token, a pool, this VM shared with it from a second home over a Cloudflare quick
+# tunnel, a sandbox and a job on it. Every run of this workflow that is not skipped runs the proof, so its badge is
+# the proof's last result.
+#
+# When: every night, within the hour after each release (clean-machine-release-check.yml dispatches this), and on
+# demand. The schedule acts only in the public repository sengirunners/potluck, where standard GitHub-hosted runners
+# cost nothing; in any other copy (potluck-private) a scheduled run skips every job, and only a workflow_dispatch
+# runs the proof.
+#
+# In the public repository a failed proof opens one issue titled "clean-machine proof failing", or comments on the
+# open one; the next passing proof comments and closes it.
 name: clean-machine-proof
 on:
+  schedule:
+    - cron: "17 4 * * *"
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: clean-machine-proof
+  cancel-in-progress: false
 jobs:
   proof:
+    if: github.repository == 'sengirunners/potluck' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: scripts/clean-machine-proof.sh
           sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: keep the script, drop the checkout (the machine holds no Potluck source)
         run: |
           cp scripts/clean-machine-proof.sh "$RUNNER_TEMP/proof.sh"
           find "$GITHUB_WORKSPACE" -mindepth 1 -delete
+      # No GH_TOKEN: the install takes the stranger's path, the public release read with no token.
       - name: proof
         env:
-          GH_TOKEN: ${{ github.token }}
           WORK: ${{ runner.temp }}/p
         shell: bash
         run: |
@@ -34,8 +50,37 @@ jobs:
           for f in "$RUNNER_TEMP"/p/owner/daemon.log "$RUNNER_TEMP"/p/lender/daemon.log "$RUNNER_TEMP"/p/cloudflared.log; do
             if [ -f "$f" ]; then echo "== $f"; tail -n 80 "$f"; fi
           done
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: proof-log
           path: ${{ runner.temp }}/proof.log
+  report:
+    needs: proof
+    if: always() && github.repository == 'sengirunners/potluck' && (needs.proof.result == 'success' || needs.proof.result == 'failure')
+    runs-on: ubuntu-slim
+    permissions:
+      issues: write
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.proof.result }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="clean-machine proof failing"
+          open=$(gh issue list --state open --limit 100 --json number,title)
+          n=$(jq -r --arg t "$title" '[.[] | select(.title == $t) | .number] | first // empty' <<<"$open")
+          if [[ "$RESULT" == failure ]]; then
+            if [[ -n "$n" ]]; then
+              gh issue comment "$n" --body "Failed again: $URL"
+            else
+              gh issue create --title "$title" --body "The clean-machine proof (scripts/clean-machine-proof.sh) failed: $URL. Later failures comment here; the next passing proof closes this issue."
+            fi
+          elif [[ -n "$n" ]]; then
+            gh issue comment "$n" --body "Passing again: $URL"
+            gh issue close "$n" --reason completed
+          fi

@@ -4,9 +4,11 @@
 # shares this machine with it from a second home over a Cloudflare quick tunnel
 # (an https invite code), and runs a sandbox and a job on it. Two daemons on one
 # machine: "owner" runs the pool, "lender" shares the machine. It needs sudo
-# (the root step potluck doctor prints), docker, curl, git and jq, and GH_TOKEN
-# while the repository is private. It changes the machine (gVisor, a systemd
-# unit, a docker network, cloudflared): run it on a throwaway VM only, as
+# (the root step potluck doctor prints), docker, curl, git and jq; no token:
+# the repository and its releases are public. A GH_TOKEN or GITHUB_TOKEN in the
+# environment is passed on to install.sh, which reads the release with it
+# (higher API rate limit). It changes the machine (gVisor, a systemd unit, a
+# docker network, cloudflared): run it on a throwaway VM only, as
 # .github/workflows/clean-machine-proof.yml does.
 set -eu
 
@@ -37,14 +39,18 @@ done
 echo "no zm binary, no ~/.zm"
 
 step "install from the signed release (README quick start)"
-printf 'Authorization: Bearer %s\n' "$GH_TOKEN" |
-	curl -fsSL -H @- https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+if [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then echo "a token is set: install.sh reads the release with it"; else echo "no token"; fi
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 potluck --version
 ls -l "$BIN"
 if command -v zm >/dev/null 2>&1; then die "the install put zm on PATH"; fi
 
 step "tunnel: cloudflared quick tunnel to the owner's loopback listener"
-curl -fsSL -o "$WORK/cloudflared.deb" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+# Pinned by version and the sha256 from that release's notes; bump both together.
+CLOUDFLARED=2026.11.1
+CLOUDFLARED_SHA256=744ce90be92adb361103d51c85f78646314c47e4a68bbaadfe12ab5acc16c9b6
+curl -fsSL -o "$WORK/cloudflared.deb" "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED/cloudflared-linux-amd64.deb"
+echo "$CLOUDFLARED_SHA256  $WORK/cloudflared.deb" | sha256sum -c - || die "cloudflared $CLOUDFLARED checksum mismatch"
 sudo dpkg -i "$WORK/cloudflared.deb" >/dev/null
 cloudflared --version
 cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:$PORT" >"$WORK/cloudflared.log" 2>&1 &

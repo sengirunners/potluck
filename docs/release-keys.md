@@ -1,6 +1,8 @@
 # Release keys and how to rotate them
 
-Every Potluck release carries a manifest of its tarballs' SHA-256 sums, signed with an Ed25519 key. This page says
+Every Potluck release carries a manifest of its tarballs' SHA-256 sums, signed with an Ed25519 key twice: raw
+(`manifest.json.sig`) and as SSHSIG (`manifest.json.sshsig`, namespace `potluck-release`, which `ssh-keygen -Y verify`
+reads). This page says
 which keys a build trusts, what checks a release with them, and how to replace the signing key without stranding any
 install.
 
@@ -9,7 +11,8 @@ install.
 - **The trusted list:** `internal/upgrade/release_keys.txt`, one `ed25519:<base64>` public key per line. It is
   built into every potluck. Normally it holds one key; during a rotation, two.
 - **install.sh** carries the same list as `RELEASE_KEYS`, because a first install has no potluck yet to check with.
-  `TestInstallScriptCarriesTheReleaseKeys` fails if the two differ.
+  `TestInstallScriptCarriesTheReleaseKeys` fails if the two differ. For ssh-keygen it turns each key into an
+  allowed_signers line itself, so there is no second copy to keep in step.
 - **The signing key:** the private seed of one key on the list, only in the `potluck-release` environment's secret
   `POTLUCK_RELEASE_KEY` (deploying from main only, see [public-sync.md](public-sync.md)), plus one copy kept offline
   by the owners. Never in a repository, chat, issue, log or file left on disk.
@@ -20,15 +23,16 @@ install.
 | check | keys it uses |
 | --- | --- |
 | `potluck upgrade` (`internal/upgrade.Stage`, called from `cli/upgrade.go`) | the built-in list plus config `update_keys` |
-| `install.sh` when a potluck is installed | that potluck's own `potluck upgrade` |
-| `install.sh` on a first install | `RELEASE_KEYS` plus `POTLUCK_UPDATE_KEY`, with OpenSSL 3 |
+| `install.sh` | `RELEASE_KEYS` plus `POTLUCK_UPDATE_KEY`: the SSHSIG with ssh-keygen, else the raw signature with OpenSSL 3 ([install.md](install.md#what-is-checked)) |
+| `install.sh` when a potluck is installed | the above, then that potluck's own `potluck upgrade` |
 | the release workflow's "verify with the built-in keys" step | the new release's own potluck, with an empty home |
+| the release workflow's "install with install.sh" step | `install.sh` with only the system's tools, which must check the SSHSIG |
 
 A release verifies when any trusted key signed it. An empty list, a line that is not a key or a key listed twice
 refuses the upgrade with an error naming `release_keys.txt`; a malformed `update_keys` entry refuses it with an error
 naming `config update_keys`. Nothing is installed. The release
-workflow refuses to publish a release that its own potluck cannot verify, so a secret that matches no listed key
-never publishes.
+workflow refuses to publish a release that its own potluck or install.sh cannot verify, so a secret that matches no
+listed key never publishes.
 
 The daemon has no updater of its own: `potluck upgrade` is the only path, and it restarts the daemon on the new build.
 

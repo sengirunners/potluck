@@ -15,19 +15,36 @@ pool's sandboxes ([daemon.md](daemon.md#e2b-gateway)); ignore it if you do not u
 
 ### What is checked
 
-- A release lists the SHA-256 of each tarball in a manifest, and the manifest carries an Ed25519 signature.
-- If potluck is already installed, it checks the signature with the keys built into it before anything from the
-  release runs. That is only as good as the first install of that potluck.
-- On a first install the script checks the signature itself, with the release keys it carries and an openssl that
-  can verify Ed25519 (OpenSSL 3 or later). macOS's own LibreSSL cannot, and Homebrew's `openssl@3` is keg-only, so
-  it is not on `PATH` after `brew install openssl@3`: run
-  `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | PATH="$(brew --prefix openssl@3)/bin:$PATH" sh`
-  instead.
-- With no such openssl, the script says the signature was not checked, trusts the download over HTTPS, and still
-  checks the tarball against the manifest. The potluck it installs then checks the manifest's signature against the
-  keys built into itself, but those came in the same download, so it adds no independent proof. To get the full
-  check, remove the installed programs and run the script again with an OpenSSL 3 first on `PATH`; once potluck is
-  installed, the script hands the release to that potluck instead.
+Each release publishes `manifest.json`, which names the SHA-256 of every tarball, and two signatures of it made with
+the same Ed25519 release key: `manifest.json.sshsig` (SSHSIG, namespace `potluck-release`) and `manifest.json.sig`
+(raw Ed25519). The script carries the public half of each trusted key (`RELEASE_KEYS`, the list in
+`internal/upgrade/release_keys.txt`; a test holds them equal) and, before any program from the release runs:
+
+1. verifies `manifest.json.sshsig` with `ssh-keygen -Y verify` (OpenSSH 8.1 or newer: macOS 10.15 and later, and Linux
+   with `openssh-client`) against those keys;
+2. without a usable ssh-keygen, or when the release has no `manifest.json.sshsig` or it does not verify, verifies
+   `manifest.json.sig` with `openssl pkeyutl -verify -rawin` (OpenSSL 3 or newer, as in current Ubuntu, Debian and
+   Fedora; macOS's LibreSSL cannot check Ed25519, so on a Mac step 1 is the check);
+3. counts a tool only if it verifies a built-in probe signature and refuses that probe changed, and only if it also
+   refuses the release's manifest with one byte added, so a tool that says yes to anything is never trusted;
+4. refuses an unsigned release, a manifest neither signature verifies, a tarball whose SHA-256 is not the one the
+   verified manifest names, and, with `--version` or a token, a signed manifest of another release than the one
+   asked for.
+
+A download without a token takes the newest release's version from its manifest and fetches the signatures and the
+tarball from that release's own tag, so two releases' files never mix.
+
+If potluck is already installed, the script still checks the signature, then hands the release to that potluck
+(`potluck upgrade --release`), which checks the raw signature again with the keys built into it and the tarball's
+SHA-256, then installs it.
+
+With neither tool, the script installs nothing and says what to install (on Debian or Ubuntu:
+`sudo apt-get install openssh-client`), unless potluck is already installed, whose own check is then the one made.
+`--unsafe-skip-signature-check` installs a download from GitHub without the check, trusting HTTPS alone, and says so in
+capitals; it never applies to `--from`, and a signature that does not verify is refused even with it. Before publishing,
+the release workflow runs the script on the new Linux build for its runner's architecture, with only the system's
+tools, and requires the SSHSIG check to pass, so a release whose SSHSIG does not verify with the keys the script
+carries is never published.
 
 Which keys are trusted, and how the signing key is replaced: [release-keys.md](release-keys.md).
 
@@ -39,8 +56,10 @@ Which keys are trusted, and how the signing key is replaced: [release-keys.md](r
 - `GH_TOKEN` (or `GITHUB_TOKEN`), if set, makes the script read the release through GitHub's API with that token. A
   private repository needs one that can read it (fetch the script with
   `curl -fsSL -H "Authorization: Bearer $GH_TOKEN" …`). A token GitHub refuses fails the download; it is not ignored.
-- `sh install.sh --from <dir>` installs from a release's files you already downloaded. It needs `--trust-dir` when
-  no signature check can be made.
+- `sh install.sh --version potluck-main-<12 hex>` installs that release instead of the newest.
+- `sh install.sh --from <dir>` installs from a release's files you already downloaded (`manifest.json`, its
+  signatures and the tarball for this machine).
+- With curl missing, a wget that has `--https-only` works; one without it (BusyBox) needs `--version`.
 
 ## Upgrading
 

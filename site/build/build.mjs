@@ -8,7 +8,7 @@
 //
 // Generated: public/blog.html, public/blog/<slug>.html and .md, public/<page>.html, public/og/**.png,
 // public/sitemap.xml, feed.xml, llms.txt, llms-full.txt, robots.txt, and the parts of public/index.html between its
-// `seo:` and `blog-link:` markers. Everything else under public/ is hand-written (the icons and the template the
+// `seo:`, `blog-link:` and `agent-prompt:` markers. Everything else under public/ is hand-written (the icons and the template the
 // share images are drawn on come from `npm run og-assets`).
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { articlePage, authorName, BLOG_LINK, FEED_LINK, homeGraph, indexPage, PAGE_MARKER_PREFIX, seoTags, shareImagePath, url } from "./layout.mjs";
 import { dropTitleHeading, escapeHtml as esc, inline, MarkdownError, toHtml } from "./markdown.mjs";
 import { parsePage, parsePost } from "./frontmatter.mjs";
-import { BLOG, GOOGLE_SITE_VERIFICATION, HOME, ORIGIN, PAGES, RESERVED_SLUGS } from "./pages.mjs";
+import { AGENT_PROMPT, BLOG, GOOGLE_SITE_VERIFICATION, HOME, ORIGIN, PAGES, RESERVED_SLUGS } from "./pages.mjs";
 import { samePixels, shareImage } from "./share.mjs";
 
 export const SITE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -171,6 +171,7 @@ export function homePage(source, posts) {
   });
   region("seo:start", "seo:end", `\n${tags}\n`);
   region("blog-link:start", "blog-link:end", posts.length ? BLOG_LINK : "");
+  region("agent-prompt:start", "agent-prompt:end", esc(AGENT_PROMPT));
   return source;
 }
 

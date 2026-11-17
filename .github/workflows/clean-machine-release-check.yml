@@ -1,0 +1,39 @@
+# Hourly: when no clean-machine proof run has started since the newest release was published, start one
+# (gh workflow run clean-machine-proof.yml; a dispatch made with the workflow token does start a run). A cancelled
+# run does not count. It lives apart from clean-machine-proof.yml so every run of that workflow is a real proof and
+# its badge tells the truth. It acts only in the public repository sengirunners/potluck (free standard runners);
+# anywhere else its job is skipped. Any failed API call fails this run rather than skipping the proof.
+name: clean-machine-release-check
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.repository == 'sengirunners/potluck'
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+      actions: write
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rel=$(gh api "repos/$GH_REPO/releases/latest" --jq '.tag_name+" "+.published_at')
+          read -r tag pub <<<"$rel"
+          [[ -n "$tag" && -n "$pub" ]]
+          echo "newest release $tag, published $pub"
+          runs=$(gh api "repos/$GH_REPO/actions/workflows/clean-machine-proof.yml/runs?created=%3E%3D$pub&per_page=100" \
+            --jq '[.workflow_runs[] | select(.status != "completed" or .conclusion == "success" or .conclusion == "failure") | .html_url]')
+          if [[ $(jq length <<<"$runs") -gt 0 ]]; then
+            echo "already proved since $tag: $(jq -r 'first' <<<"$runs")"
+          else
+            echo "no proof since $tag: starting one"
+            gh workflow run clean-machine-proof.yml --ref main
+          fi

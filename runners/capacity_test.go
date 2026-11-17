@@ -124,6 +124,11 @@ func TestCapacityReportRefusals(t *testing.T) {
 	if err := bo.Do(ctx, "PUT", "/v0/runners/capacity/factory-1", rawJSON(`{}`), nil); !api.IsCode(err, api.CodeForbidden) {
 		t.Fatalf("a member's token publishing a host's report: %v, want forbidden", err)
 	}
+	// A caller who may not publish learns nothing from a host name's form:
+	// a malformed one is refused the same way.
+	if err := bo.Do(ctx, "PUT", "/v0/runners/capacity/Factory_1", rawJSON(`{}`), nil); !api.IsCode(err, api.CodeForbidden) {
+		t.Fatalf("a member's token publishing a malformed host's report: %v, want forbidden", err)
+	}
 }
 
 type rawJSON string

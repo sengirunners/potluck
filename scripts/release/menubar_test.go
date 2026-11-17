@@ -142,7 +142,7 @@ func TestInstallMenubar(t *testing.T) {
 	}
 	install := func(name string, args ...string) (string, string, string) {
 		bin, apps := filepath.Join(tmp, name, "bin"), filepath.Join(tmp, name, "apps")
-		c := exec.Command("sh", append([]string{filepath.Join(root, "install.sh"), "--from", rel, "--trust-dir"}, args...)...)
+		c := exec.Command("sh", append([]string{filepath.Join(root, "install.sh"), "--from", rel}, args...)...)
 		c.Env = []string{"HOME=" + filepath.Join(tmp, name, "home"), "POTLUCK_INSTALL_DIR=" + bin, "POTLUCK_MENUBAR_DIR=" + apps,
 			"POTLUCK_HOME=" + potluckHome(name), "POTLUCK_NO_AUTOSTART=1", "POTLUCK_UPDATE_KEY=" + pub, "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}
 		out, err := c.CombinedOutput()
@@ -189,7 +189,7 @@ func TestInstallMenubar(t *testing.T) {
 	if _, err := release.Potluck.SignDir(bare, version, strings.Repeat("a", 40), time.Now(), key); err != nil {
 		t.Fatal(err)
 	}
-	c := exec.Command("sh", filepath.Join(root, "install.sh"), "--from", bare, "--trust-dir", "--menubar")
+	c := exec.Command("sh", filepath.Join(root, "install.sh"), "--from", bare, "--menubar")
 	c.Env = []string{"HOME=" + filepath.Join(tmp, "h3"), "POTLUCK_INSTALL_DIR=" + filepath.Join(tmp, "b3"), "POTLUCK_MENUBAR_DIR=" + filepath.Join(tmp, "a3"),
 		"POTLUCK_HOME=" + potluckHome("three"), "POTLUCK_NO_AUTOSTART=1", "POTLUCK_UPDATE_KEY=" + pub, "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}
 	if out, err := c.CombinedOutput(); err == nil || !strings.Contains(string(out), "has no Potluck Menu.app") {

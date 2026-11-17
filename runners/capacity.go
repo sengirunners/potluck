@@ -90,15 +90,18 @@ func mayPublishCapacity(sub *authz.Subject, host, pool string) bool {
 // JSON object) as the body.
 func (s *Service) capacityPut(r *http.Request) (any, error) {
 	host := r.PathValue("host")
-	if !capacityHost.MatchString(host) {
-		return nil, api.Errorf(api.CodeBadRequest, "host %q: a machine name (lowercase letters, digits and -)", host)
-	}
+	// The pool and the caller's right come before the name's form, so a
+	// caller who may not publish learns the same for any host, well formed
+	// or not (only the owner on the socket gets as far as the form).
 	p, err := s.readablePool(r)
 	if err != nil {
 		return nil, err
 	}
 	if !mayPublishCapacity(core.SubjectOf(r.Context()), host, p.ID) {
-		return nil, api.Errorf(api.CodeForbidden, "only %s's own machine publishes its capacity report", host)
+		return nil, api.Errorf(api.CodeForbidden, "only %q's own machine publishes its capacity report", host)
+	}
+	if !capacityHost.MatchString(host) {
+		return nil, api.Errorf(api.CodeBadRequest, "host %q: a machine name (lowercase letters, digits and -)", host)
 	}
 	ttl := capacityTTLDefault
 	if v := r.URL.Query().Get("ttl_s"); v != "" {

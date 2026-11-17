@@ -9,6 +9,16 @@ export const SENGI = "https://sengi.run";
 
 export const INSTALL = `curl -fsSL ${INSTALLER_URL} | sh`;
 
+// The getting-started prompt a person pastes into their coding agent. One copy: the build writes it into the home page
+// (between its agent-prompt markers) and a test holds content/home.md and content/pages/agent-sandbox.md to it. Every
+// command in it is one the README's quick start documents.
+export const AGENT_PROMPT = `Set up Potluck (https://github.com/sengirunners/potluck) on this machine so I can try it alone. Read https://potluck.sh/llms-full.txt first. Then:
+1. Install: ${INSTALL} (if it says ~/.local/bin is not on PATH, run the line it prints).
+2. Run \`potluck doctor\` and tell me what is missing. On a Mac that is usually Tart, Softnet and about 60 GB of free disk. Show me any sudo line it prints; do not run sudo yourself.
+3. When doctor is clean: potluck create trial --via tunnel, then potluck host --reclaim-idle-s 0 (on a Mac the first run pulls about 27 GB).
+4. potluck sandbox create, then potluck sandbox exec <id> -- uname -a, then potluck sandbox rm <id>.
+Stop and ask me before anything that needs a password, a sign-in or deleting files. If a command fails, show me its exact output.`;
+
 // IndexNow's key. It is public on purpose: the protocol has the site serve it at /<key>.txt to prove it owns the host.
 export const INDEXNOW_KEY = "7b1a88c94e3d01e8f2150746ddb8a872";
 

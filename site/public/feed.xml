@@ -8,6 +8,55 @@
   <updated>2026-11-17T00:00:00Z</updated>
   <author><name>Sengi</name></author>
   <entry>
+    <id>https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp</id>
+    <title>Give your AI agent a sandbox over MCP, on a machine you own</title>
+    <link rel="alternate" type="text/html" href="https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp"/>
+    <published>2026-11-17T00:00:00Z</published>
+    <updated>2026-11-17T00:00:00Z</updated>
+    <author><name>Sengi</name></author>
+    <summary>Add one line of MCP configuration and a coding agent gets throwaway VMs and sandboxes on your team's idle Macs and Linux boxes to run its commands in. What it can do and what it keeps away.</summary>
+    <content type="html">&lt;p&gt;A coding agent is most useful when it can run things: tests, builds, a server, a script it just wrote. It is most dangerous for the same reason. Potluck's MCP server gives the agent a separate machine for that work, a fresh VM or sandbox on one of your team's idle computers, and lets it throw that machine away when it is done.&lt;/p&gt;
+&lt;h2 id=&quot;what-you-need&quot;&gt;What you need&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Potluck installed, a pool, and one machine sharing itself with it. On one computer that is the quick start:&lt;/li&gt;
+&lt;/ul&gt;
+&lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck create trial --via tunnel
+potluck host --reclaim-idle-s 0
+&lt;/code&gt;&lt;/pre&gt;
+&lt;ul&gt;
+&lt;li&gt;On an Apple-silicon Mac, Tart and Softnet; on Linux, Docker with Kata or gVisor. &lt;code&gt;potluck doctor&lt;/code&gt; says what is missing. The &lt;a href=&quot;/agent-sandbox&quot;&gt;agent sandbox page&lt;/a&gt; has a prompt your agent can follow to do all of this for you.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id=&quot;add-the-server&quot;&gt;Add the server&lt;/h2&gt;
+&lt;p&gt;Put this in your MCP client's configuration (Claude Code and most editors read this shape):&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-json&quot;&gt;{&amp;quot;mcpServers&amp;quot;:{&amp;quot;potluck&amp;quot;:{&amp;quot;command&amp;quot;:&amp;quot;potluck&amp;quot;,&amp;quot;args&amp;quot;:[&amp;quot;mcp&amp;quot;]}}}
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Codex reads TOML, in &lt;code&gt;~/.codex/config.toml&lt;/code&gt;:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-toml&quot;&gt;[mcp_servers.potluck]
+command = &amp;quot;potluck&amp;quot;
+args = [&amp;quot;mcp&amp;quot;]
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;With more than one pool, name it: &lt;code&gt;&amp;quot;args&amp;quot;:[&amp;quot;--pool&amp;quot;,&amp;quot;friends&amp;quot;,&amp;quot;mcp&amp;quot;]&lt;/code&gt;. The daemon must be running and the pool made before the tools work; the client can list the tools without a daemon, and a call says the daemon is missing.&lt;/p&gt;
+&lt;h2 id=&quot;what-the-agent-can-do&quot;&gt;What the agent can do&lt;/h2&gt;
+&lt;p&gt;The server offers sandbox tools and nothing else:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;create a sandbox, list sandboxes, extend one's time limit, stop, restart and delete it;&lt;/li&gt;
+&lt;li&gt;run a command in it, and start and follow background processes;&lt;/li&gt;
+&lt;li&gt;read and write files in it.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;It does not give the agent your pool's settings, invites or keys. It acts as your local identity, or as a caller named with &lt;code&gt;POTLUCK_AS&lt;/code&gt;; &lt;code&gt;POTLUCK_TOKEN&lt;/code&gt; hands it a restricted token instead. All of its standard output is MCP traffic, so nothing else prints into the client.&lt;/p&gt;
+&lt;p&gt;A typical session: the agent creates a sandbox, writes the files it needs (or you create one with &lt;code&gt;--ref HEAD&lt;/code&gt; from the terminal so it starts with your checkout), runs the tests, reads the output, and deletes the sandbox.&lt;/p&gt;
+&lt;h2 id=&quot;what-stays-away-from-the-agent&quot;&gt;What stays away from the agent&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Your laptop.&lt;/strong&gt; Its commands run on the pool's machine, inside the sandbox.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;The lending machine and its network.&lt;/strong&gt; On a machine you trust, a sandbox reaches the internet but never the machine itself (on Tart, apart from Softnet's DNS forwarder on the host) or its local network (docs/network.md).&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Your keys.&lt;/strong&gt; A sandbox starts with none of your credentials.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Yesterday's mess.&lt;/strong&gt; Each sandbox starts from the same image and is deleted at its time limit or when removed.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Treat what comes back from a sandbox as untrusted data: a test's output can carry text written to steer an agent.&lt;/p&gt;
+&lt;p&gt;Give the agent no secret you would not want it to send elsewhere: a sandbox with a network can reach the internet.&lt;/p&gt;
+&lt;p&gt;For Claude Code sessions started from claude.ai, or code written for E2B, see the other ways in on the &lt;a href=&quot;/agent-sandbox&quot;&gt;agent sandbox page&lt;/a&gt;.&lt;/p&gt;</content>
+  </entry>
+  <entry>
     <id>https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents</id>
     <title>How to pool your team's spare Macs and Linux boxes for builds and coding agents</title>
     <link rel="alternate" type="text/html" href="https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents"/>
@@ -287,5 +336,33 @@ potluck ci doctor acme/app
 &lt;h3 id=&quot;what-does-it-cost&quot;&gt;What does it cost?&lt;/h3&gt;
 &lt;p&gt;Potluck is open source under Apache-2.0 and has no price. The Mac and its power are the costs.&lt;/p&gt;
 &lt;p&gt;Code and docs: &lt;a href=&quot;https://github.com/sengirunners/potluck&quot;&gt;github.com/sengirunners/potluck&lt;/a&gt;&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <id>https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines</id>
+    <title>Use the E2B SDK on your own machines</title>
+    <link rel="alternate" type="text/html" href="https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines"/>
+    <published>2026-11-17T00:00:00Z</published>
+    <updated>2026-11-17T00:00:00Z</updated>
+    <author><name>Sengi</name></author>
+    <summary>potluck-e2b answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B sandboxes runs on your team's idle Macs and Linux boxes with only its environment changed. What it covers and how to set it up.</summary>
+    <content type="html">&lt;p&gt;If you have code written against E2B's SDK and spare machines on your team, you can run that code's sandboxes on those machines without changing it. &lt;code&gt;potluck-e2b&lt;/code&gt; is a small gateway that the Potluck installer puts beside &lt;code&gt;potluck&lt;/code&gt;. It answers the E2B control plane and the parts of a sandbox's own API the SDK uses, and turns them into Potluck sandboxes.&lt;/p&gt;
+&lt;h2 id=&quot;set-it-up&quot;&gt;Set it up&lt;/h2&gt;
+&lt;p&gt;You need a Potluck pool with a machine sharing itself (the &lt;a href=&quot;https://github.com/sengirunners/potluck#quick-start&quot;&gt;quick start&lt;/a&gt;, or the prompt on the &lt;a href=&quot;/agent-sandbox&quot;&gt;agent sandbox page&lt;/a&gt;). Then, on a machine in the pool:&lt;/p&gt;
+&lt;pre&gt;&lt;code class=&quot;language-sh&quot;&gt;potluck-e2b keygen     # makes an API key and prints it; keys live in $POTLUCK_HOME/e2b/keys (mode 0600)
+potluck-e2b            # serves on localhost:49982 and prints the lines to export
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;On start it prints three things to set in the program that uses the SDK: &lt;code&gt;E2B_DOMAIN&lt;/code&gt; (by default &lt;code&gt;e2b.localhost:49982&lt;/code&gt;), &lt;code&gt;E2B_API_KEY&lt;/code&gt; (a key from the keys file), and &lt;code&gt;SSL_CERT_FILE&lt;/code&gt; for Python on Linux or &lt;code&gt;NODE_EXTRA_CA_CERTS&lt;/code&gt; for Node, naming the certificate authority the gateway made for itself (on macOS the Python SDK trusts only the keychain). Code that uses only the calls listed below needs no other change; network rules, pause, volumes, PTY, stdin streaming and lower-case environment variable names are refused. Names under &lt;code&gt;.localhost&lt;/code&gt; always point at your own machine, and the gateway signs a certificate for each name it serves, limited to its own domain.&lt;/p&gt;
+&lt;h2 id=&quot;what-it-covers&quot;&gt;What it covers&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;Sandbox.create&lt;/code&gt;, placed on your pool's machines the way &lt;code&gt;potluck sandbox create&lt;/code&gt; places them;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;commands.run&lt;/code&gt;, with its exit code, standard output and standard error;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;files.read&lt;/code&gt; and &lt;code&gt;files.write&lt;/code&gt;;&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;get_info&lt;/code&gt;, &lt;code&gt;Sandbox.list&lt;/code&gt;, &lt;code&gt;set_timeout&lt;/code&gt;, &lt;code&gt;Sandbox.connect&lt;/code&gt; and &lt;code&gt;kill&lt;/code&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;A sandbox's environment variables reach a command as secret files, never on its command line, so the secrets rules apply: they go only to a machine you trust whose sandboxes can hold secrets.&lt;/p&gt;
+&lt;h2 id=&quot;how-it-is-checked&quot;&gt;How it is checked&lt;/h2&gt;
+&lt;p&gt;A test runs the unmodified E2B Python and TypeScript SDKs against the gateway: it creates a sandbox, runs commands, writes and reads a file, lists, connects and kills (&lt;code&gt;TestRealSDK&lt;/code&gt; in internal/e2bgateway).&lt;/p&gt;
+&lt;h2 id=&quot;when-to-use-e2b-instead&quot;&gt;When to use E2B instead&lt;/h2&gt;
+&lt;p&gt;E2B runs the machines for you, in its cloud, and covers more of its own API. Use it when you have no spare machines or need more sandboxes at once than your team owns. Use &lt;code&gt;potluck-e2b&lt;/code&gt; when the machines are already yours and you would rather your code ran on them.&lt;/p&gt;</content>
   </entry>
 </feed>

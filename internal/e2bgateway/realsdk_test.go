@@ -28,8 +28,8 @@ killed True
 `
 
 // TestRealSDK runs the unmodified E2B SDKs against the gateway over a real
-// listener (scripts/e2b-sdk-check.sh sets these up with the pinned
-// versions; skipped otherwise):
+// listener. It is skipped unless one of these is set (install the SDKs
+// yourself: `pip install e2b`, `npm install e2b`):
 //
 //	ZM_E2B_SDK_PYTHON  a python with e2b installed
 //	ZM_E2B_SDK_NODE    a directory whose node_modules holds e2b (needs node on PATH)
@@ -39,7 +39,7 @@ killed True
 func TestRealSDK(t *testing.T) {
 	py, nodeDir := os.Getenv("ZM_E2B_SDK_PYTHON"), os.Getenv("ZM_E2B_SDK_NODE")
 	if py == "" && nodeDir == "" {
-		t.Skip("set ZM_E2B_SDK_PYTHON or ZM_E2B_SDK_NODE (scripts/e2b-sdk-check.sh)")
+		t.Skip("set ZM_E2B_SDK_PYTHON or ZM_E2B_SDK_NODE to run the real E2B SDKs")
 	}
 	h := newHarness(t)
 	l4, err := net.Listen("tcp", "127.0.0.1:0")

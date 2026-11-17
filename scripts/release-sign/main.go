@@ -1,6 +1,8 @@
 // Command release-sign signs a Potluck release: it reads the SHA256SUMS
-// scripts/release wrote and writes manifest.json (schema potluck-release/1)
-// and manifest.json.sig beside it, signed with the Ed25519 key in
+// scripts/release wrote and writes manifest.json (schema potluck-release/1),
+// its raw Ed25519 signature manifest.json.sig (potluck upgrade checks it) and
+// the same key's SSHSIG signature manifest.json.sshsig (install.sh checks it
+// with ssh-keygen) beside it, signed with the Ed25519 key in
 // POTLUCK_RELEASE_KEY (base64 of the 32-byte seed, as scripts/release-keygen
 // prints it). The release workflow is the only place that key exists.
 //

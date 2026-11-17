@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/sengirunners/potluck/actions/workflows/ci.yml"><img src="https://github.com/sengirunners/potluck/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/sengirunners/potluck/actions/workflows/clean-machine-proof.yml"><img src="https://github.com/sengirunners/potluck/actions/workflows/clean-machine-proof.yml/badge.svg?branch=main" alt="Clean-machine proof"></a>
   <a href="https://github.com/sengirunners/potluck/releases/latest"><img src="https://img.shields.io/github/release-date/sengirunners/potluck?label=latest%20release&color=2F6B34" alt="Latest release"></a>
   <a href="https://pkg.go.dev/github.com/sengirunners/potluck"><img src="https://pkg.go.dev/badge/github.com/sengirunners/potluck.svg" alt="Go reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2F6B34" alt="Licence: Apache-2.0"></a>
@@ -72,7 +73,8 @@ Other ways to install, and what the script checks:
 | --- | --- |
 | The newest release | the line above |
 | A release you downloaded | `sh install.sh --from <dir>` ([docs/install.md](docs/install.md)) |
-| To check the signature before anything runs | an OpenSSL 3 first on `PATH` ([docs/install.md](docs/install.md#what-is-checked)) |
+| A given release | `sh install.sh --version potluck-main-<12 hex>` |
+| What the script checks | the release signature, with macOS's own `ssh-keygen` or OpenSSL 3, before anything runs ([docs/install.md](docs/install.md#what-is-checked)) |
 | The Mac menu bar item (not Developer ID signed yet) | `sh install.sh --menubar` on a Mac ([docs/menubar.md](docs/menubar.md)) |
 | Later releases | `potluck upgrade`, or once a day: `potluck upgrade enable` |
 | To build from source | `go build -o ~/bin/ ./cmd/potluck ./cmd/potluck-driver-tart ./cmd/potluck-conformance` |
@@ -162,8 +164,8 @@ potluck create friends --via tunnel
 potluck invite ana --via tunnel --pool friends   # an https code, for a friend's `potluck join`
 ```
 
-A quick tunnel's address changes each time it starts, so this suits a trial. This path is run by hand in CI on a
-Linux VM (`scripts/clean-machine-proof.sh`).
+A quick tunnel's address changes each time it starts, so this suits a trial. This path runs every night, and within the
+hour after each release, on a fresh GitHub-hosted Linux VM (`scripts/clean-machine-proof.sh`).
 
 ### Share compute
 
@@ -212,8 +214,8 @@ goes). `potluck host --help` lists the rest.
   request ([docs/ci-pr.md](docs/ci-pr.md)).
 - **E2B's SDKs on your sandboxes:** `potluck-e2b` ([docs/daemon.md](docs/daemon.md#e2b-gateway)); skip it if you do not use E2B.
 
-This flow is tested in CI with the reference driver standing in for the VM layer (`cli/cli_test.go`), and run by hand
-on a fresh GitHub-hosted Linux VM with gVisor (`scripts/clean-machine-proof.sh`, the `clean-machine-proof`
+This flow is tested in CI with the reference driver standing in for the VM layer (`cli/cli_test.go`), and runs every night
+and after each release on a fresh GitHub-hosted Linux VM with gVisor (`scripts/clean-machine-proof.sh`, the `clean-machine-proof`
 workflow). Its one-machine part has been run by hand many times on an Apple-silicon Mac with Tart; it has not
 yet been run across two machines.
 
@@ -239,7 +241,7 @@ All standard output is MCP protocol traffic.
 | --- | --- |
 | `go build`, `go vet`, `go test` in CI on Linux; signed releases and `install.sh`; a daily upgrade job (`potluck upgrade enable`) | |
 | OCI and Incus layers tested against stand-in CLIs; Tart through a fake layer | Tests on real VMs in CI (a manual run) |
-| The quick start on a fresh GitHub-hosted Linux VM with no earlier Potluck or zm on it, run by hand (the `clean-machine-proof` workflow): install, a pool over a Cloudflare quick tunnel, the VM shared through gVisor, a sandbox and `potluck run` | The quick start across two real machines in CI |
+| The quick start on a fresh GitHub-hosted Linux VM with no earlier Potluck or zm on it, every night and after each release (the `clean-machine-proof` workflow): install, a pool over a Cloudflare quick tunnel, the VM shared through gVisor, a sandbox and `potluck run` | The quick start across two real machines in CI |
 | The one-machine quick start on an Apple-silicon Mac with Tart, run end to end by hand many times | |
 | The VM driver passes the full suite over a fake layer (isolation is not exercised there) | |
 | Every check the reference driver passes is also shown to fail on a driver broken on purpose | |

@@ -25,6 +25,19 @@ curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.s
 
 Free and open source (Apache-2.0) · macOS and Linux. Code: https://github.com/sengirunners/potluck
 
+## Or have your coding agent set it up
+
+Copy this prompt into Claude Code, Codex or any coding agent, and it sets Potluck up on that machine.
+
+```text
+Set up Potluck (https://github.com/sengirunners/potluck) on this machine so I can try it alone. Read https://potluck.sh/llms-full.txt first. Then:
+1. Install: curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh (if it says ~/.local/bin is not on PATH, run the line it prints).
+2. Run `potluck doctor` and tell me what is missing. On a Mac that is usually Tart, Softnet and about 60 GB of free disk. Show me any sudo line it prints; do not run sudo yourself.
+3. When doctor is clean: potluck create trial --via tunnel, then potluck host --reclaim-idle-s 0 (on a Mac the first run pulls about 27 GB).
+4. potluck sandbox create, then potluck sandbox exec <id> -- uname -a, then potluck sandbox rm <id>.
+Stop and ask me before anything that needs a password, a sign-in or deleting files. If a command fails, show me its exact output.
+```
+
 ## How it works
 
 One machine runs the pool. Everyone else brings theirs. Work goes to whichever machine is free, and each job gets a fresh VM or sandbox that is thrown away after.
@@ -35,7 +48,7 @@ One machine runs the pool. Everyone else brings theirs. Work goes to whichever m
 
 ## What you can do with it
 
-- **Coding agents: give your agent a computer of its own.** An agent's commands run in a throwaway sandbox on a pool machine, not on your laptop: `potluck sandbox create`, `potluck sandbox exec <id> -- make test`, `potluck sandbox rm <id>`. Or hand the agent the sandbox tools over MCP with `{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}`. To run Claude Code's self-hosted runner in fresh sandboxes: `potluck agent-runner claude --secret-file <key-file>`.
+- **Coding agents: give your agent a computer of its own.** An agent's commands run in a throwaway sandbox on a pool machine, not on your laptop: `potluck sandbox create`, `potluck sandbox exec <id> -- make test`, `potluck sandbox rm <id>`. Or hand the agent the sandbox tools over MCP with `{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}`. To run Claude Code's self-hosted runner in fresh sandboxes: `potluck agent-runner claude --secret-file <key-file> --image ghcr.io/sengirunners/potluck-box-agent`.
 - **GitHub Actions: move a macOS job onto your own Mac.** `potluck ci pr acme/app` prepares a change to one line of your workflow (`runs-on: macos-15` becomes your Mac, with GitHub's runner kept for forks); then you open the pull request it prepares. Pull requests from forks keep using GitHub's runner.
 
 At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of November 2026), 5,000 macOS GitHub Actions minutes a month on a private repository, after your plan's included minutes, cost $310. On your own Mac with Potluck they cost nothing but electricity. Public repositories run on GitHub's runners for free.
@@ -51,10 +64,104 @@ At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of Nov
 
 - A self-hosted GitHub Actions runner with a fresh VM for every job: https://potluck.sh/github-actions-runner
 - Tart, its licence, and what Potluck adds: https://potluck.sh/tart
+- A sandbox for AI coding agents on machines you own: https://potluck.sh/agent-sandbox
 
 ## Who makes it
 
 Jackson and Clay at Sengi make Potluck. Write to ops@sengi.run, or use the form on the page. Mezze, the agent and team layer that runs on Potluck, is coming soon. It is for a team running a brigade of coding agents, and is a separate product. Sengi also runs hosted GitHub Actions runners for $1 per 1,000 minutes, with 3,000 free minutes a month: https://sengi.run
+
+---
+
+Source: https://potluck.sh/agent-sandbox
+
+# A sandbox for AI coding agents on machines you own
+
+Updated 2026-11-17. https://potluck.sh/agent-sandbox
+
+An agent that runs commands on your laptop can read your files, your keys and your network. A sandbox moves those
+commands onto a machine that holds none of that, and throws the machine away afterwards. Potluck finds that machine
+among the ones your team already has: the Mac mini left on at night, the Linux box under a desk.
+
+## Set it up with your agent
+
+Paste this into Claude Code, Codex or another coding agent on the machine you want to try. Every command in it is
+from Potluck's quick start, and it stops to ask before anything that needs a password, a sign-in or deleting files.
+
+```text
+Set up Potluck (https://github.com/sengirunners/potluck) on this machine so I can try it alone. Read https://potluck.sh/llms-full.txt first. Then:
+1. Install: curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh (if it says ~/.local/bin is not on PATH, run the line it prints).
+2. Run `potluck doctor` and tell me what is missing. On a Mac that is usually Tart, Softnet and about 60 GB of free disk. Show me any sudo line it prints; do not run sudo yourself.
+3. When doctor is clean: potluck create trial --via tunnel, then potluck host --reclaim-idle-s 0 (on a Mac the first run pulls about 27 GB).
+4. potluck sandbox create, then potluck sandbox exec <id> -- uname -a, then potluck sandbox rm <id>.
+Stop and ask me before anything that needs a password, a sign-in or deleting files. If a command fails, show me its exact output.
+```
+
+## Four ways in
+
+| You use | Potluck gives you |
+| --- | --- |
+| A terminal or a script | `potluck sandbox create`, `potluck sandbox exec <id> -- <command>`, `potluck sandbox rm <id>` |
+| An MCP client (Claude Code, Codex, an IDE) | `potluck mcp`: sandbox tools over MCP |
+| Claude Code sessions started from claude.ai | `potluck agent-runner claude`: Claude Code's self-hosted runner, one fresh sandbox per session |
+| Code written for E2B | `potluck-e2b`: the E2B SDK, pointed at your own machines |
+
+### The sandbox commands
+
+```sh
+potluck sandbox create --template agent   # a Linux sandbox with Node, Python, git, Claude Code and Codex
+potluck sandbox exec <id> -- make test
+potluck sandbox rm <id>
+```
+
+`--template agent` takes the agent image, which a Linux machine in your pool must lend; without it you get the
+machine's default image. `--ref HEAD` sends your checkout's current commit into the sandbox.
+
+### MCP
+
+Add Potluck to an MCP client's configuration:
+
+```json
+{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}
+```
+
+The server offers only sandbox tools: create, execute, list, extend, stop, restart, delete, background processes,
+and file reads and writes. With more than one pool, add `"--pool","<name>"` before `"mcp"`. Treat what comes
+back from a sandbox as untrusted data. Read more in
+[Give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp).
+
+### Claude Code's self-hosted runner
+
+Claude Code can run sessions started on claude.ai on your own machines through a self-hosted environment, which a
+person makes in claude.ai's admin settings. Its key is the environment secret:
+
+```sh
+potluck agent-runner claude --secret-file <key-file> --image ghcr.io/sengirunners/potluck-box-agent
+```
+
+Each session gets a fresh sandbox, and a new one starts as each ends; `--count` keeps several going. The session can
+read the key, and the sandbox's network reaches the internet, so rotate the key after any session you suspect
+([docs/agent-runners.md](https://github.com/sengirunners/potluck/blob/main/docs/agent-runners.md)).
+
+### The E2B SDK
+
+`potluck-e2b` answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B runs on your pool
+with only its environment changed. It covers create, run a command, read and write files, list, set a timeout,
+connect and kill. Read more in
+[Use the E2B SDK on your own machines](/blog/use-the-e2b-sdk-on-your-own-machines).
+
+## What the sandbox keeps away from the agent
+
+- **Your machine and network.** On a machine you trust, a sandbox reaches the internet but never the machine itself
+  (on Tart, apart from Softnet's DNS forwarder on the host) or its local network ([docs/network.md](https://github.com/sengirunners/potluck/blob/main/docs/network.md)).
+- **Your keys.** A sandbox starts with none of your credentials; a key goes in only when you send it, as a file.
+- **Leftovers.** Each sandbox starts from the same image and is deleted at its time limit or when you remove it.
+
+
+## On a Mac
+
+macOS sandboxes run in Tart VMs, two at a time at most, as Apple's licence allows
+([what Tart is, its licence, and what Potluck adds](/tart)). On a Mac, `potluck sandbox create` and the MCP tools give an agent a macOS VM to work in; `--template agent` and
+`potluck agent-runner` use Linux machines.
 
 ---
 
@@ -142,6 +249,89 @@ On a Mac, Potluck uses Tart: [what Tart is and what Potluck adds](/tart).
 
 ---
 
+Source: https://potluck.sh/mezze
+
+# Run a brigade of coding agents without losing track of them
+
+Updated 2026-11-17. https://potluck.sh/mezze
+
+Mezze, the agent and team layer on Potluck, is for the moment you have six agent sessions open in six terminals and
+can no longer say which one is fixing what. It gives every agent and every person on the project the same small set
+of tools: a mailbox, a list of work items that each agent claims before starting, and a way to ask a person a
+question and carry on until the answer comes back. You don't need Potluck to use it: Mezze works on one machine with
+no pool.
+
+## What zm is
+
+`zm` is Mezze's one command. The first time you run `zm init` in a repository it starts a small daemon that stays
+running on your machine and keeps its state under `~/.zm`, in SQLite files. Agents use the same `zm` command you
+do. On one machine it needs no account, no
+cloud and no network: it listens only on a Unix socket that just your user can reach.
+
+## What it does
+
+- **Mail between agents and people.** Send a message to a session, to a person, or to whoever holds a work item:
+  `zm send local:k3x9qa "the migration needs a down step"`. Mail is data, never authority: a message never runs
+  anything and is never typed into an agent's terminal. An idle agent gets one fixed line telling it to read its
+  inbox; a session someone has open is never typed into.
+- **Work items whose claims really expire.** Every claim is a lease with a deadline, renewed by claiming again.
+  When an agent stops or stalls, its lease runs out and another agent can claim the item; the session that held it
+  sees a notice at its next prompt. Nothing stays "in progress" forever.
+- **Decisions approved from your phone.** An agent leaves a question with `zm ask new` and keeps working. You
+  pair a phone on your tailnet with `zm approver add`, tap Approve on it, and every decision becomes a
+  signed receipt a CI gate can check offline with `zm receipt verify`.
+- **Agent sessions you can attach to.** `zm run --work <item> claude` starts the agent in a terminal the daemon
+  owns, holding the item. Detach and it keeps running; `zm attach` brings you back, `zm ls` lists sessions with the
+  ones that need you first. Each session records its agent, command, model and worktree, and ends with a typed
+  outcome (`ok`, `quota`, `auth`, `failed` and a few more), so a usage-limit stop is never reported as success.
+- **Claude Code and Codex, on every machine.** `zm install claude --yes` and `zm install codex --yes` add hooks
+  that register each session and tell it when mail is waiting (without `--yes` they only show the change; Codex runs
+  the hooks once you trust them in its `/hooks`), and `zm mcp` gives any MCP client the same verbs as the command. Make
+  one always-on machine a team project's home and invite teammates' machines with a one-time code: claims, mail and
+  the list of sessions then reach across all of them over your Tailscale tailnet.
+
+## Works with Beads
+
+If your agents already use [Beads](https://github.com/steveyegge/beads)' `bd` commands, Mezze's `bd-zm` answers
+them from the project's native issues (`zm tracker add native --prefix bd` turns those on), with Beads' flags and
+output for the daily commands. Link it as `bd` and your agents keep typing what they know; on that machine the link
+hides a real Beads `bd`, so do it only if your issues live in zm. It does not run, bundle or need Beads, and it does not import issues from a Beads database.
+
+## Who can answer a question
+
+Only a paired phone makes an answer provably a person's. On one machine, every program running as your user can
+reach the daemon's socket, so an agent there can answer an ask too; the receipt then records that the machine's
+socket took the answer, not that a person pressed a button. A pull request's ask, and a choice that runs something
+when picked, are refused from the socket and need a signed answer, such as the paired phone's. Pair one before you let a receipt gate a
+merge.
+
+## Source and install
+
+Mezze's licence is Apache-2.0. Its source is not public yet. When it is, the quick start will look like this
+(from Mezze's README; you need Go 1.27.4 or newer, plus git and make for the full install):
+
+```sh
+git clone https://github.com/sengirunners/mezze && cd mezze && make install
+
+cd ~/code/myapp
+zm init                                    # starts the daemon and makes this repo a project
+zm work new "Add the down migration"       # -> created myapp/local:k3x9qa
+zm run --work local:k3x9qa claude          # the agent runs holding the item; detach with ctrl-]
+zm send local:k3x9qa "the migration needs a down step"   # reaches whoever holds the item
+zm ls                                      # sessions, the ones that need you first
+```
+
+`make install` puts `zm`, `bd-zm`, the drivers that lend a machine to a Potluck pool and `potluck-conformance` in
+Go's bin directory (`$(go env GOBIN)`, or `$(go env GOPATH)/bin`), which you add to your `PATH`. `zm doctor`
+checks the machine's setup and says how to fix what is missing.
+
+## Talk to us
+
+To use Mezze before its source is public, tell us what you run: use the form on [the home page](/#founders) and pick
+"Try Mezze early", or write to ops@sengi.run. Jackson and Clay, who make Potluck and Mezze, read every message.
+
+---
+
 Source: https://potluck.sh/tart
 
 # Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds
@@ -224,6 +414,130 @@ This one-machine path has been run end to end by hand many times on an Apple-sil
 
 Facts on this page were checked against the sources named in each section on November 17, 2026. Licences change;
 read them yourself. This is not legal advice.
+
+---
+
+Source: https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp
+
+# Give your AI agent a sandbox over MCP, on a machine you own
+
+Published 2026-11-17. https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp
+
+A coding agent is most useful when it can run things: tests, builds, a server, a script it just wrote. It is most
+dangerous for the same reason. Potluck's MCP server gives the agent a separate machine for that work, a fresh VM or
+sandbox on one of your team's idle computers, and lets it throw that machine away when it is done.
+
+## What you need
+
+- Potluck installed, a pool, and one machine sharing itself with it. On one computer that is the quick start:
+
+```sh
+potluck create trial --via tunnel
+potluck host --reclaim-idle-s 0
+```
+
+- On an Apple-silicon Mac, Tart and Softnet; on Linux, Docker with Kata or gVisor. `potluck doctor` says what is
+  missing. The [agent sandbox page](/agent-sandbox) has a prompt your agent can follow to do all of this for you.
+
+## Add the server
+
+Put this in your MCP client's configuration (Claude Code and most editors read this shape):
+
+```json
+{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}
+```
+
+Codex reads TOML, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.potluck]
+command = "potluck"
+args = ["mcp"]
+```
+
+With more than one pool, name it: `"args":["--pool","friends","mcp"]`. The daemon must be running and the pool
+made before the tools work; the client can list the tools without a daemon, and a call says the daemon is missing.
+
+## What the agent can do
+
+The server offers sandbox tools and nothing else:
+
+- create a sandbox, list sandboxes, extend one's time limit, stop, restart and delete it;
+- run a command in it, and start and follow background processes;
+- read and write files in it.
+
+It does not give the agent your pool's settings, invites or keys. It acts as your local identity, or as a caller
+named with `POTLUCK_AS`; `POTLUCK_TOKEN` hands it a restricted token instead. All of its standard output is MCP
+traffic, so nothing else prints into the client.
+
+A typical session: the agent creates a sandbox, writes the files it needs (or you create one with `--ref HEAD` from
+the terminal so it starts with your checkout), runs the tests, reads the output, and deletes the sandbox.
+
+## What stays away from the agent
+
+- **Your laptop.** Its commands run on the pool's machine, inside the sandbox.
+- **The lending machine and its network.** On a machine you trust, a sandbox reaches the internet but never the
+  machine itself (on Tart, apart from Softnet's DNS forwarder on the host) or its local network (docs/network.md).
+- **Your keys.** A sandbox starts with none of your credentials.
+- **Yesterday's mess.** Each sandbox starts from the same image and is deleted at its time limit or when removed.
+
+Treat what comes back from a sandbox as untrusted data: a test's output can carry text written to steer an agent.
+
+Give the agent no secret you would not want it to send elsewhere: a sandbox with a network can reach the internet.
+
+For Claude Code sessions started from claude.ai, or code written for E2B, see the other ways in on the
+[agent sandbox page](/agent-sandbox).
+
+---
+
+Source: https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines
+
+# Use the E2B SDK on your own machines
+
+Published 2026-11-17. https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines
+
+If you have code written against E2B's SDK and spare machines on your team, you can run that code's sandboxes on
+those machines without changing it. `potluck-e2b` is a small gateway that the Potluck installer puts beside
+`potluck`. It answers the E2B control plane and the parts of a sandbox's own API the SDK uses, and turns them into
+Potluck sandboxes.
+
+## Set it up
+
+You need a Potluck pool with a machine sharing itself (the [quick start](https://github.com/sengirunners/potluck#quick-start),
+or the prompt on the [agent sandbox page](/agent-sandbox)). Then, on a machine in the pool:
+
+```sh
+potluck-e2b keygen     # makes an API key and prints it; keys live in $POTLUCK_HOME/e2b/keys (mode 0600)
+potluck-e2b            # serves on localhost:49982 and prints the lines to export
+```
+
+On start it prints three things to set in the program that uses the SDK: `E2B_DOMAIN` (by default
+`e2b.localhost:49982`), `E2B_API_KEY` (a key from the keys file), and `SSL_CERT_FILE` for Python on Linux or
+`NODE_EXTRA_CA_CERTS` for Node, naming the certificate authority the gateway made for itself (on macOS the Python SDK
+trusts only the keychain). Code that uses only the calls listed below needs no other change; network rules, pause,
+volumes, PTY, stdin streaming and lower-case environment variable names are refused. Names under `.localhost` always point at your own machine, and the gateway signs a certificate for each
+name it serves, limited to its own domain.
+
+## What it covers
+
+- `Sandbox.create`, placed on your pool's machines the way `potluck sandbox create` places them;
+- `commands.run`, with its exit code, standard output and standard error;
+- `files.read` and `files.write`;
+- `get_info`, `Sandbox.list`, `set_timeout`, `Sandbox.connect` and `kill`.
+
+A sandbox's environment variables reach a command as secret files, never on its command line, so the secrets rules
+apply: they go only to a machine you trust whose sandboxes can hold secrets.
+
+## How it is checked
+
+A test runs the unmodified E2B Python and TypeScript SDKs against the gateway: it creates a sandbox, runs commands,
+writes and reads a file, lists, connects and kills (`TestRealSDK` in internal/e2bgateway).
+
+## When to use E2B instead
+
+E2B runs the machines for you, in its cloud, and covers more of its own API. Use it when you have no spare machines
+or need more sandboxes at once than your team owns. Use `potluck-e2b`
+when the machines are already yours and you would rather your code ran on them.
 
 ---
 

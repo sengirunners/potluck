@@ -360,6 +360,24 @@
   </div>
 </section>
 
+<section class="prompt wrap" id="agent-prompt" aria-labelledby="prompt-h">
+  <h2 id="prompt-h">Or have your coding agent set it up</h2>
+  <p>Copy one prompt into Claude Code, Codex or any coding agent, and it sets Potluck up on that machine.</p>
+  <div class="box">
+    <button class="btn solid copy-prompt" type="button" data-copy="agent-prompt-text" hidden>Copy the prompt</button>
+    <details>
+      <summary>Show the prompt</summary>
+      <pre id="agent-prompt-text"><!-- agent-prompt:start (written by build/build.mjs from AGENT_PROMPT in build/pages.mjs) -->Set up Potluck (https://github.com/sengirunners/potluck) on this machine so I can try it alone. Read https://potluck.sh/llms-full.txt first. Then:
+1. Install: curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh (if it says ~/.local/bin is not on PATH, run the line it prints).
+2. Run `potluck doctor` and tell me what is missing. On a Mac that is usually Tart, Softnet and about 60 GB of free disk. Show me any sudo line it prints; do not run sudo yourself.
+3. When doctor is clean: potluck create trial --via tunnel, then potluck host --reclaim-idle-s 0 (on a Mac the first run pulls about 27 GB).
+4. potluck sandbox create, then potluck sandbox exec &lt;id&gt; -- uname -a, then potluck sandbox rm &lt;id&gt;.
+Stop and ask me before anything that needs a password, a sign-in or deleting files. If a command fails, show me its exact output.<!-- agent-prompt:end --></pre>
+    </details>
+  </div>
+  <p class="more">More on agents: <a href="/agent-sandbox">a sandbox for AI coding agents on machines you own</a>.</p>
+</section>
+
 <section class="block wrap" id="how" aria-labelledby="how-h">
   <h2 class="big" id="how-h">How it works</h2>
   <p class="intro">One machine runs the pool. Everyone else brings theirs. Work goes to whichever machine is free, and each job gets a fresh VM or sandbox that is thrown away after.</p>
@@ -945,7 +963,7 @@
       <p style="margin-top:16px">Or hand it the sandbox tools over MCP:</p>
       <pre class="cmd">{"mcpServers":{"potluck":{"command":"potluck","args":["mcp"]}}}</pre>
       <p style="margin-top:16px">Using Claude Code's self-hosted runner? Run it in fresh sandboxes:</p>
-      <pre class="cmd"><span class="p">$</span> potluck agent-runner claude <span class="nw">--secret-file</span> &lt;key-file&gt;</pre>
+      <pre class="cmd"><span class="p">$</span> potluck agent-runner claude <span class="nw">--secret-file</span> &lt;key-file&gt; <span class="nw">--image</span> ghcr.io/sengirunners/potluck-box-agent</pre>
     </article>
 
     <article class="use actions">
@@ -961,7 +979,7 @@
       <p class="exact">Simplified. <a href="https://github.com/sengirunners/potluck/blob/main/docs/ci-pr.md#what-it-writes">The exact line it writes</a>.</p>
     </article>
   </div>
-  <p class="guides">Guides: <a href="/github-actions-runner">a self-hosted GitHub Actions runner with a fresh VM for every job</a> · <a href="/tart">Tart, its licence, and what Potluck adds</a></p>
+  <p class="guides">Guides: <a href="/github-actions-runner">a self-hosted GitHub Actions runner with a fresh VM for every job</a> · <a href="/tart">Tart, its licence, and what Potluck adds</a> · <a href="/agent-sandbox">a sandbox for AI coding agents</a></p>
 </section>
 
 <section class="band" aria-labelledby="save-h">
@@ -1026,7 +1044,7 @@
       <div class="body">
         <div>
           <p>Mezze is the agent and team layer that runs on Potluck. For a team running a brigade of coding agents: claim and track work, send messages between your agents and your people, and watch it all from one desktop app. It is a separate product from Potluck.</p>
-          <a href="#founders" data-topic="dish">Ask to try it early</a>
+          <a href="/mezze">What Mezze does</a> · <a href="#founders" data-topic="dish">Ask to try it early</a>
         </div>
         <svg viewBox="0 0 80 60" aria-hidden="true">
           <ellipse cx="40" cy="52" rx="36" ry="7" fill="#fff" stroke="#D8CFBF" stroke-width="1.2"/>

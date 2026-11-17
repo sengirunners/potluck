@@ -3,16 +3,15 @@
 
     python3 -I docs/img/social-preview.py
 
-The picture is built with the SVG helpers in diagram.py (svg, box, text, group) from the explainer-video skill
-(~/.claude/skills/explainer-video; set DIAGRAM_DIR to use another copy). Those helpers are written for a dark slide,
-so this script sets their colour constants to the site's palette before it calls them. What the helpers do not do, and
-this script adds: Newsreader (the site's font, embedded in the SVG so the file draws the same anywhere), the quilt
+The picture is built with four small SVG helpers below (svg, box, text, group), in the site's palette. On top of
+them it draws: Newsreader (the site's font, embedded in the SVG so the file draws the same anywhere), the quilt
 (the patchwork strip and diamond stitching of site/public/site.css, as SVG patterns), and the logo. The PNG is the
 SVG screenshotted by headless Chrome (CHROME names the binary), as site/build/chrome.mjs does for the other pictures.
 
 GitHub shows this image under Settings > Social preview; this script never uploads it.
 """
 import base64
+import html
 import os
 import subprocess
 import sys
@@ -20,14 +19,31 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FONTS = os.path.join(HERE, "..", "..", "site", "public", "fonts")
-sys.path.insert(0, os.environ.get("DIAGRAM_DIR", os.path.expanduser("~/.claude/skills/explainer-video")))
-import diagram as d  # noqa: E402
 
 W, H = 1280, 640
 CREAM, INK, SOFT, GREEN, RED = "#FBF7EE", "#1D261D", "#4B5648", "#2F6B34", "#C8402F"
 
-# diagram.py's colours are for a dark slide: its helpers read these names when they draw.
-d.INK, d.MUTED, d.PANEL, d.LINE, d.BG = INK, SOFT, "#FFFBF0", "#E5DCCA", CREAM
+
+class d:
+    """The SVG helpers the picture is built from."""
+
+    @staticmethod
+    def svg(w, h, *parts):
+        return f'<svg viewBox="0 0 {w} {h}" xmlns="http://www.w3.org/2000/svg"><defs></defs>{"".join(parts)}</svg>'
+
+    @staticmethod
+    def text(x, y, s, size, color, weight, anchor):
+        return (f'<text x="{x}" y="{y}" font-size="{size}" fill="{color}" font-weight="{weight}" '
+                f'text-anchor="{anchor}" dominant-baseline="middle"><tspan x="{x}" dy="0">{html.escape(s)}</tspan></text>')
+
+    @staticmethod
+    def box(x, y, w, h, fill, color):
+        """A rounded box with a 3 px outline."""
+        return f'<g><rect x="{x}" y="{y}" width="{w}" height="{h}" rx="16" fill="{fill}" stroke="{color}" stroke-width="3"/></g>'
+
+    @staticmethod
+    def group(*parts):
+        return f'<g>{"".join(parts)}</g>'
 
 
 def font_face(name, weight, style, file):

@@ -333,6 +333,7 @@
   const copyKey = /Mac|iPhone|iPad/.test(navigator.userAgentData?.platform ?? navigator.platform) ? "⌘C" : "Ctrl+C";
   for (const b of document.querySelectorAll("[data-copy]")) {
     b.hidden = false;
+    const label = b.textContent; // each button goes back to its own words ("Copy", "Copy the prompt")
     b.addEventListener("click", async () => {
       const text = $(b.dataset.copy).textContent;
       let said;
@@ -340,12 +341,14 @@
         await navigator.clipboard.writeText(text);
         b.textContent = said = "Copied";
       } catch {
-        getSelection().selectAllChildren($(b.dataset.copy));
+        const target = $(b.dataset.copy);
+        target.closest("details")?.setAttribute("open", ""); // a folded prompt must be visible to be selected
+        getSelection().selectAllChildren(target);
         b.textContent = `Press ${copyKey}`;
         said = `Selected. Press ${copyKey} to copy`;
       }
       $("copy-status").textContent = said;
-      setTimeout(() => { b.textContent = "Copy"; $("copy-status").textContent = ""; }, 1800);
+      setTimeout(() => { b.textContent = label; $("copy-status").textContent = ""; }, 1800);
     });
   }
 

@@ -160,7 +160,7 @@ func clean(out string) error {
 		return err
 	}
 	for _, p := range append(old, filepath.Join(out, "SHA256SUMS"), filepath.Join(out, release.ManifestFile),
-		filepath.Join(out, release.SignatureFile), filepath.Join(out, ".build")) {
+		filepath.Join(out, release.SignatureFile), filepath.Join(out, release.SSHSIGFile), filepath.Join(out, ".build")) {
 		if err := os.RemoveAll(p); err != nil {
 			return err
 		}

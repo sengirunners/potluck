@@ -2,22 +2,28 @@
 # install.sh: install Potluck from its newest signed release.
 #
 #   curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+#   sh install.sh --version potluck-main-<12 hex>   # a given release, not the newest
 #   sh install.sh --from <dir>     # a release directory you already have (air-gapped hosts)
 #   sh install.sh --menubar        # on a Mac, also install Potluck Menu.app (docs/menubar.md), off unless asked
 #
-# It needs no Go. It gets the release for this machine (from GitHub, or from --from) and, except in the last case
-# below, never runs a program from it before its signature is checked by something the download does not control:
+# It needs no Go. It gets the release for this machine (from GitHub, or from --from) and checks it before any
+# program from it runs. Every release has a manifest naming each tarball's SHA-256, signed with the release key
+# twice: an SSHSIG signature (manifest.json.sshsig) and a raw Ed25519 one (manifest.json.sig). This script checks
+# the manifest against the release keys below:
 #
-#   - If potluck is already installed ($POTLUCK_INSTALL_DIR/potluck, else potluck on PATH), that potluck installs
-#     it: `potluck upgrade --release` checks the manifest's Ed25519 signature with the key built into it and the
-#     tarball against the signed manifest. The new programs are never run first. This is only as good as that
-#     potluck's own first install.
-#   - Otherwise (a first install) this script checks the signature itself, with the release keys below and
-#     `openssl pkeyutl -verify -rawin` (an openssl that can do Ed25519: OpenSSL 3, not macOS's LibreSSL), then the
-#     tarball's SHA-256 against the hash inside the signed manifest. Only then is it unpacked and installed (the
-#     new potluck places the files).
-#   - With no installed potluck and no such openssl, a download from GitHub is trusted over HTTPS alone, and the
-#     script says that the signature was not checked. A --from directory is refused unless you pass --trust-dir.
+#   - with `ssh-keygen -Y verify` (OpenSSH 8.1 or later: macOS 10.15 on, and Linux with openssh-client), else
+#   - with `openssl pkeyutl -verify -rawin` (OpenSSL 3 or later; macOS's LibreSSL cannot check Ed25519).
+#
+# A tool counts only if it verifies a built-in probe signature and refuses that probe altered, and it must also
+# refuse the release's manifest with one byte added: a tool that says yes to anything is never trusted. Then the
+# tarball must have the SHA-256 the verified manifest names. A manifest that does not verify, or an unsigned
+# release, is refused. If potluck is already installed ($POTLUCK_INSTALL_DIR/potluck, else potluck on PATH), it
+# installs the release (`potluck upgrade --release`), checking the raw signature again with the keys built into it;
+# otherwise the new potluck places the files after the checks above.
+#
+# With no tool here that can check the signature, it installs nothing and says what to install, unless potluck is
+# already installed (that potluck's check is then the one made). --unsafe-skip-signature-check installs a download
+# from GitHub over HTTPS anyway, with a warning.
 #
 # Environment:
 #   POTLUCK_INSTALL_DIR  where the programs go (default ~/.local/bin)
@@ -33,14 +39,26 @@ set -eu
 
 # RELEASE_KEYS are the release keys this script trusts, separated by spaces: the list in
 # internal/upgrade/release_keys.txt (a test holds them equal). During a key rotation it holds two
-# (docs/release-keys.md).
+# (docs/release-keys.md). ssh-keygen gets the same keys as allowed_signers lines, made from these.
 RELEASE_KEYS="ed25519:Z9tq+TU7lP6IwxiY2qzZC+bRNEv1G1fzxlLJYHtvTMc="
 REPO="sengirunners/potluck"
+# The SSHSIG principal and namespace (kit/release.Potluck.Namespace): a signature the release key made for
+# anything else (a git commit, a file) never verifies as a release.
+PRINCIPAL="potluck-release"
+NAMESPACE="potluck-release"
 
-# A known Ed25519 signature: an openssl that verifies it can check releases.
-PROBE_KEY="EAFL1w8YsYTHEzxxNSDehKoog8guGYONSlbvKUcUHoI="
-PROBE_SIG="nhHl6R/+lb1vtwRobzNh1j9QFJJeKKD7jeZ66O+FRkP287r1+abKSfur0rY2CXjvVq/3a5lzbFoloBf1l30YDw=="
-PROBE_MSG="potluck openssl ed25519 probe"
+# A throwaway key's signatures of PROBE_MSG (plus a newline), raw and SSHSIG: a tool counts only if it verifies
+# these and refuses them over another message. OpenSSL 1.1.1 and LibreSSL fail the raw probe; an ssh-keygen older
+# than OpenSSH 8.1 fails the SSHSIG one. (scripts/release/install_test.go checks them.)
+PROBE_KEY="Pcoj7oZ08n9RkIWdzV/B4rIPZ7vUHMCG8Qls5i66Lsc="
+PROBE_SIG="XyU0MQ+H0DvwYmaxNnslPNgjfa/+muwv8j1AS7+IRs1aBNHIr+rmH95+4Fi9Iw1ZFXaFggwyAmdo7GuqfPE7BQ=="
+PROBE_SSHSIG="-----BEGIN SSH SIGNATURE-----
+U1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgPcoj7oZ08n9RkIWdzV/B4rIPZ7
+vUHMCG8Qls5i66LscAAAAPcG90bHVjay1yZWxlYXNlAAAAAAAAAAZzaGE1MTIAAABTAAAA
+C3NzaC1lZDI1NTE5AAAAQGbM7os6n93KaS6DMYG6HB5lzWuQ8wfmDgQ7dvjGdBmrbp33J7
+ppa9eQFggPkzXfrPTSIBn65wxFdUZ2nZ0nlAo=
+-----END SSH SIGNATURE-----"
+PROBE_MSG="potluck install.sh signature probe"
 
 say() { printf '%s\n' "$*"; }
 die() {
@@ -49,14 +67,18 @@ die() {
 }
 
 usage() {
-	say "usage: install.sh [--from <release dir> [--trust-dir]] [--menubar]"
-	say "Installs potluck into \$POTLUCK_INSTALL_DIR (default ~/.local/bin)."
+	say "usage: install.sh [--version <release>] [--from <release dir>] [--menubar] [--unsafe-skip-signature-check]"
+	say "Installs potluck into \$POTLUCK_INSTALL_DIR (default ~/.local/bin), checking the release's signature first."
+	say "--version takes a release (potluck-main-<12 hex>) instead of the newest."
+	say "--from installs from a directory holding a release's files (its manifest, signatures and tarball)."
 	say "--menubar also installs Potluck Menu.app into \$POTLUCK_MENUBAR_DIR (default ~/Applications); macOS only."
-	say "--trust-dir installs from --from without a signature check when none can be made here."
+	say "--unsafe-skip-signature-check installs a download from GitHub even when no tool here can check its signature,"
+	say "  trusting HTTPS alone (not with --from). A signature that does not verify is refused even then."
 }
 
 # fetch URL OUT ACCEPT [NOT_FOUND]: download URL into OUT over HTTPS, redirects included; a refusal says why, and a
-# 404 says NOT_FOUND when it is given. The token goes to curl on stdin, never on its command line.
+# 404 says NOT_FOUND when it is given, or returns 1 when NOT_FOUND is "optional". The token goes to curl on stdin,
+# never on its command line.
 fetch() {
 	if command -v curl >/dev/null 2>&1; then
 		if [ -n "$TOKEN" ]; then
@@ -70,18 +92,29 @@ fetch() {
 		# downloads to: a token needs curl.
 		[ -z "$TOKEN" ] || die "downloading with GH_TOKEN/GITHUB_TOKEN needs curl"
 		code=000
-		if wget -q --https-only -O "$2" --header="Accept: $3" "$1"; then code=200; fi
+		if wget -q $WGET_HTTPS -O "$2" --header="Accept: $3" "$1"; then code=200; fi
+		if [ "$code" = 000 ] && [ "${4:-}" = optional ]; then
+			rm -f "$2"
+			# wget does not say why it failed: a missing optional file and a network error look the same.
+			WGET_MISSED="$WGET_MISSED ${2##*/}"
+			return 1
+		fi
+		[ "$code" = 200 ] || die "could not download $1 with wget (not found, refused, or no network; curl would say which)"
 	else
 		die "need curl or wget to download potluck"
 	fi
 	case "$code" in
 	200) return 0 ;;
 	404)
+		if [ "${4:-}" = optional ]; then
+			rm -f "$2"
+			return 1
+		fi
 		[ -z "${4:-}" ] || die "$4"
 		if [ -z "$TOKEN" ]; then
-			die "github.com/$REPO answered 404 with no token: it is private (set GH_TOKEN or GITHUB_TOKEN to a token that can read it) or has no release yet. Or use --from <release dir>."
+			die "github.com/$REPO answered 404 with no token: it is private (set GH_TOKEN or GITHUB_TOKEN to a token that can read it) or has no such release. Or use --from <release dir>."
 		fi
-		die "github.com/$REPO answered 404: the token in GH_TOKEN/GITHUB_TOKEN cannot read it (or it has no release yet)."
+		die "github.com/$REPO answered 404: the token in GH_TOKEN/GITHUB_TOKEN cannot read it (or it has no such release)."
 		;;
 	401) die "github.com/$REPO answered 401: the token in GH_TOKEN/GITHUB_TOKEN is not valid." ;;
 	403 | 429)
@@ -133,6 +166,48 @@ sha256() {
 	fi
 }
 
+# b64d, b64e: base64 decode and encode (one line) on stdin, with base64(1) or else openssl (LibreSSL does this
+# much). B64 is empty when neither works.
+pick_base64() {
+	B64=""
+	if [ "$(printf 'cG90bHVjaw==' | base64 -d 2>/dev/null)" = potluck ]; then
+		B64=base64
+	elif command -v openssl >/dev/null 2>&1 && [ "$(printf 'cG90bHVjaw==' | openssl base64 -d -A 2>/dev/null)" = potluck ]; then
+		B64=openssl
+	fi
+}
+b64d() { if [ "$B64" = base64 ]; then base64 -d; else openssl base64 -d -A; fi; }
+b64e() { if [ "$B64" = base64 ]; then base64 | tr -d '\n'; else openssl base64 -A; fi; }
+
+# signer_line KEY_B64: the allowed_signers line for a raw Ed25519 key: the key in SSH wire format (the string
+# "ssh-ed25519", then the 32 key bytes, each length-prefixed), limited to the release namespace.
+signer_line() {
+	printf '%s' "$1" | b64d >"$tmp/key.bin" 2>/dev/null || return 1
+	[ "$(wc -c <"$tmp/key.bin" | tr -d ' ')" = 32 ] || return 1
+	w=$({
+		printf '\000\000\000\013ssh-ed25519\000\000\000\040'
+		cat "$tmp/key.bin"
+	} | b64e) || return 1
+	printf '%s namespaces="%s" ssh-ed25519 %s\n' "$PRINCIPAL" "$NAMESPACE" "$w"
+}
+
+# sshsig_verify SIGNERS SIG FILE: whether SIG is an SSHSIG signature of FILE by a key in SIGNERS (allowed_signers).
+sshsig_verify() {
+	ssh-keygen -Y verify -f "$1" -I "$PRINCIPAL" -n "$NAMESPACE" -s "$2" <"$3" >/dev/null 2>&1
+}
+
+# can_sshsig: whether this machine's ssh-keygen checks SSHSIG signatures: it verifies the probe, and refuses it
+# over another message (an ssh-keygen that always succeeds is not trusted).
+can_sshsig() {
+	command -v ssh-keygen >/dev/null 2>&1 && [ -n "$B64" ] || return 1
+	signer_line "$PROBE_KEY" >"$tmp/probe_signers" || return 1
+	say "$PROBE_SSHSIG" >"$tmp/probe.sshsig"
+	say "$PROBE_MSG" >"$tmp/probe.txt"
+	say "$PROBE_MSG, changed" >"$tmp/probe-bad.txt"
+	sshsig_verify "$tmp/probe_signers" "$tmp/probe.sshsig" "$tmp/probe.txt" || return 1
+	! sshsig_verify "$tmp/probe_signers" "$tmp/probe.sshsig" "$tmp/probe-bad.txt"
+}
+
 # ed25519_verify KEY_B64 FILE SIG_B64: whether SIG_B64 is KEY_B64's signature of FILE (openssl).
 ed25519_verify() {
 	{
@@ -149,8 +224,8 @@ ed25519_verify() {
 	openssl pkeyutl -verify -pubin -inkey "$tmp/key.pem" -rawin -in "$2" -sigfile "$tmp/sig.bin" >/dev/null 2>&1
 }
 
-# can_verify: whether this machine's openssl checks Ed25519 signatures: it verifies a known signature, and refuses
-# that signature over another message (an openssl that always succeeds is not trusted).
+# can_verify: whether this machine's openssl checks Ed25519 signatures: it verifies the probe, and refuses it over
+# another message (an openssl that always succeeds is not trusted).
 can_verify() {
 	command -v openssl >/dev/null 2>&1 || return 1
 	say "$PROBE_MSG" >"$tmp/probe.txt"
@@ -159,8 +234,9 @@ can_verify() {
 	! ed25519_verify "$PROBE_KEY" "$tmp/probe-bad.txt" "$PROBE_SIG"
 }
 
-# check_signature DIR: 0 when manifest.json verifies with a trusted key; 2 when this machine's openssl cannot check
-# it (why in $why); any other result ends the script: an empty or malformed key list, or no key that verifies.
+# check_signature DIR: 0 when manifest.json verifies with a trusted key (how in $checked); 2 when no tool here can
+# check it (why in $why, what to install in $fix). Anything else ends the script: an empty or malformed key list,
+# an unsigned release, a signature that does not verify, or a tool that also accepts an altered manifest.
 check_signature() {
 	keys="$RELEASE_KEYS ${POTLUCK_UPDATE_KEY:-}"
 	[ -n "$(printf '%s' "$RELEASE_KEYS" | tr -d ' ')" ] || die "this install.sh trusts no release key (RELEASE_KEYS is empty): not installing"
@@ -171,18 +247,58 @@ check_signature() {
 		*) die "release key \"$k\" is not ed25519:<base64>: not installing" ;;
 		esac
 	done
-	if ! can_verify; then
-		why="no openssl here can check Ed25519 signatures"
-		return 2
-	fi
-	[ -f "$1/manifest.json.sig" ] || die "the release has no signature (manifest.json.sig): not installing"
-	sig=$(cat "$1/manifest.json.sig")
-	for k in $keys; do
-		if ed25519_verify "${k#ed25519:}" "$1/manifest.json" "$sig"; then
+	[ -s "$1/manifest.json.sshsig" ] || [ -s "$1/manifest.json.sig" ] ||
+		die "the release has no signature (manifest.json.sshsig or manifest.json.sig): not installing"
+	cat "$1/manifest.json" >"$tmp/altered.json"
+	printf ' ' >>"$tmp/altered.json"
+	pick_base64
+	tried=""
+	if [ -s "$1/manifest.json.sshsig" ] && can_sshsig; then
+		tried="ssh-keygen"
+		: >"$tmp/allowed_signers"
+		for k in $keys; do
+			signer_line "${k#ed25519:}" >>"$tmp/allowed_signers" || die "release key \"$k\" is not an Ed25519 key: not installing"
+		done
+		if sshsig_verify "$tmp/allowed_signers" "$1/manifest.json.sshsig" "$1/manifest.json"; then
+			! sshsig_verify "$tmp/allowed_signers" "$1/manifest.json.sshsig" "$tmp/altered.json" ||
+				die "ssh-keygen here accepts an altered manifest, so it cannot be trusted to check this one: not installing"
+			checked="SSHSIG, checked with ssh-keygen"
 			return 0
 		fi
-	done
-	die "the release's manifest does not verify with any release key: not installing"
+	fi
+	if [ -s "$1/manifest.json.sig" ] && can_verify; then
+		tried="${tried:+$tried and }openssl"
+		sig=$(cat "$1/manifest.json.sig")
+		for k in $keys; do
+			if ed25519_verify "${k#ed25519:}" "$1/manifest.json" "$sig"; then
+				! ed25519_verify "${k#ed25519:}" "$tmp/altered.json" "$sig" ||
+					die "openssl here accepts an altered manifest, so it cannot be trusted to check this one: not installing"
+				checked="Ed25519, checked with OpenSSL"
+				return 0
+			fi
+		done
+	fi
+	if [ -n "$tried" ]; then
+		die "the release's manifest does not verify with any release key (checked with $tried): not installing. The download may have been tampered with; try again, and if it repeats, report it."
+	fi
+	if [ ! -s "$1/manifest.json.sshsig" ]; then
+		case " $WGET_MISSED " in
+		*" manifest.json.sshsig "*)
+			why="could not download manifest.json.sshsig with wget (not found, refused, or no network) and no openssl here can check the Ed25519 signature"
+			fix="run this again, install curl (which says why a download fails), or put an OpenSSL 3 or newer first on PATH"
+			return 2
+			;;
+		esac
+		why="this release has no SSHSIG signature (manifest.json.sshsig) and no openssl here can check its Ed25519 one"
+		fix="run this again once the next release is out (every new release carries one), or put an OpenSSL 3 or newer first on PATH"
+	elif command -v ssh-keygen >/dev/null 2>&1; then
+		why="this ssh-keygen cannot check SSHSIG signatures (it needs OpenSSH 8.1 or newer) and no openssl here can check Ed25519 ones"
+		fix="install OpenSSH 8.1 or newer, or put an OpenSSL 3 or newer first on PATH"
+	else
+		why="neither ssh-keygen (OpenSSH) nor an OpenSSL 3 or newer is installed"
+		fix="install OpenSSH's ssh-keygen (Debian, Ubuntu: sudo apt-get install openssh-client; Fedora: sudo dnf install openssh-clients; Alpine: apk add openssh-keygen) and run this again"
+	fi
+	return 2
 }
 
 # installed_potluck: the potluck already installed that can install a release (it has upgrade), else nothing.
@@ -327,8 +443,11 @@ main() {
 	INSTALL_DIR="${POTLUCK_INSTALL_DIR:-${HOME:?HOME is not set}/.local/bin}"
 	TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 	FROM=""
-	TRUST_DIR=0
+	VERSION=""
+	VERSION_SET=0
+	WGET_MISSED=""
 	MENUBAR=0
+	UNSAFE=0
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--from)
@@ -340,12 +459,23 @@ main() {
 			FROM="${1#--from=}"
 			shift
 			;;
-		--trust-dir)
-			TRUST_DIR=1
+		--version)
+			[ $# -ge 2 ] || die "--version needs a release, like potluck-main-<12 hex>"
+			VERSION="$2"
+			VERSION_SET=1
+			shift 2
+			;;
+		--version=*)
+			VERSION="${1#--version=}"
+			VERSION_SET=1
 			shift
 			;;
 		--menubar)
 			MENUBAR=1
+			shift
+			;;
+		--unsafe-skip-signature-check)
+			UNSAFE=1
 			shift
 			;;
 		-h | --help)
@@ -358,6 +488,14 @@ main() {
 			;;
 		esac
 	done
+	# A release is tagged potluck-<version>; --version takes either form.
+	VERSION="${VERSION#potluck-}"
+	[ "$VERSION_SET" = 0 ] || [ -n "$VERSION" ] || die "--version needs a release, like potluck-main-<12 hex>"
+	case "$VERSION" in
+	*[!A-Za-z0-9._-]* | [._-]*) die "--version $VERSION is not a release (potluck-main-<12 hex>)" ;;
+	esac
+	[ "$UNSAFE" != 1 ] || [ -z "$FROM" ] ||
+		die "--unsafe-skip-signature-check is only for a download from GitHub over HTTPS, not --from: a directory has nothing else vouching for it"
 
 	# This machine's OS and architecture, as the release names them.
 	case "$(uname -s)" in
@@ -377,6 +515,19 @@ main() {
 
 	[ "$MENUBAR" != 1 ] || [ "$os" = darwin ] || die "--menubar is for macOS: Potluck Menu.app is a Mac menu bar item"
 
+	# A wget without --https-only (BusyBox's) may follow a redirect to plain http: then the newest release is not
+	# taken on its word (name one with --version, whose signed manifest must say so), and nothing is installed
+	# unchecked.
+	WGET_HTTPS=""
+	if [ -z "$FROM" ] && ! command -v curl >/dev/null 2>&1 && command -v wget >/dev/null 2>&1; then
+		if wget --help 2>&1 | grep -q -- '--https-only'; then
+			WGET_HTTPS=--https-only
+		else
+			[ -n "$VERSION" ] || die "this wget cannot insist on HTTPS (BusyBox?): install curl, or name the release with --version"
+			[ "$UNSAFE" != 1 ] || die "--unsafe-skip-signature-check needs curl or a wget that has --https-only"
+		fi
+	fi
+
 	tmp=$(mktemp -d "${TMPDIR:-/tmp}/potluck.XXXXXX" 2>/dev/null || mktemp -d -t potluck)
 	trap 'rm -rf "$tmp"' EXIT
 	trap 'exit 1' HUP INT TERM
@@ -384,6 +535,8 @@ main() {
 	dl="$tmp/release"
 	mkdir "$dl"
 	src=""
+	# want: the release the files must be, once the manifest is verified: --version, or the tag GitHub's API named.
+	want_version="$VERSION"
 	if [ -n "$FROM" ]; then
 		# Each file is read from --from exactly once, into this script's own (0700) directory; every later step
 		# reads only those copies, so a directory that changes underneath cannot swap what was checked.
@@ -391,45 +544,91 @@ main() {
 		src=$(cd "$FROM" && pwd -P)
 		[ -e "$src/manifest.json" ] || die "$src has no manifest.json: not a potluck release directory"
 		cat "$src/manifest.json" >"$dl/manifest.json" || die "could not read $src/manifest.json"
-		if [ -e "$src/manifest.json.sig" ]; then
-			cat "$src/manifest.json.sig" >"$dl/manifest.json.sig" || die "could not read $src/manifest.json.sig"
-		fi
+		for f in manifest.json.sshsig manifest.json.sig; do
+			if [ -e "$src/$f" ]; then
+				cat "$src/$f" >"$dl/$f" || die "could not read $src/$f"
+			fi
+		done
 		v=$(manifest_version "$dl/manifest.json")
 		[ -n "$v" ] || die "the manifest names no version"
 		t="potluck_${v}_${os}_${arch}.tar.gz"
 		[ -e "$src/$t" ] || die "release $v has no build for $os/$arch ($t)"
 		cat "$src/$t" >"$dl/$t" || die "could not read $src/$t"
 	elif [ -z "$TOKEN" ]; then
-		# No token: github.com's release links, which take no API call. The newest release's manifest names its
-		# version, and the release is tagged potluck-<version>; the signature and the tarball come from that tag, so
-		# a release published meanwhile cannot mix two releases' files.
-		fetch "$WEB/$REPO/releases/latest/download/manifest.json" "$dl/manifest.json" "application/octet-stream"
+		# No token: github.com's release links, which take no API call. The release is tagged potluck-<version>; the
+		# newest one's manifest names its version, and the signatures and the tarball come from that tag, so a
+		# release published meanwhile cannot mix two releases' files.
+		if [ -n "$VERSION" ]; then
+			fetch "$WEB/$REPO/releases/download/potluck-$VERSION/manifest.json" "$dl/manifest.json" "application/octet-stream" \
+				"github.com/$REPO has no release potluck-$VERSION"
+		else
+			fetch "$WEB/$REPO/releases/latest/download/manifest.json" "$dl/manifest.json" "application/octet-stream"
+		fi
 		v=$(manifest_version "$dl/manifest.json")
-		[ -n "$v" ] || die "the newest release of $REPO has a manifest that names no version, not a potluck release"
+		[ -n "$v" ] || die "the ${VERSION:-newest} release of $REPO has a manifest that names no version, not a potluck release"
+		[ -n "$VERSION" ] || want_version="$v"
 		t="potluck_${v}_${os}_${arch}.tar.gz"
-		fetch "$WEB/$REPO/releases/download/potluck-$v/manifest.json.sig" "$dl/manifest.json.sig" "application/octet-stream" \
-			"the release has no signature (manifest.json.sig): not installing"
-		fetch "$WEB/$REPO/releases/download/potluck-$v/$t" "$dl/$t" "application/octet-stream" \
-			"release potluck-$v has no build for $os/$arch ($t)"
+		fetch "$WEB/$REPO/releases/download/potluck-$want_version/manifest.json.sshsig" "$dl/manifest.json.sshsig" "application/octet-stream" optional || true
+		fetch "$WEB/$REPO/releases/download/potluck-$want_version/manifest.json.sig" "$dl/manifest.json.sig" "application/octet-stream" optional || true
+		fetch "$WEB/$REPO/releases/download/potluck-$want_version/$t" "$dl/$t" "application/octet-stream" \
+			"release potluck-$want_version has no build for $os/$arch ($t)"
 	else
-		fetch "$API/repos/$REPO/releases/latest" "$tmp/latest.json" "application/vnd.github+json"
+		if [ -n "$VERSION" ]; then
+			fetch "$API/repos/$REPO/releases/tags/potluck-$VERSION" "$tmp/latest.json" "application/vnd.github+json"
+		else
+			fetch "$API/repos/$REPO/releases/latest" "$tmp/latest.json" "application/vnd.github+json"
+		fi
 		tag=$(tr ',{}' '\n\n\n' <"$tmp/latest.json" | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
 		case "$tag" in
 		potluck-?*) ;;
-		*) die "the newest release of $REPO is \"$tag\", not a potluck release" ;;
+		*) die "the ${VERSION:-newest} release of $REPO is \"$tag\", not a potluck release" ;;
 		esac
+		want_version="${tag#potluck-}"
 		assets "$tmp/latest.json" >"$tmp/assets"
-		for f in manifest.json manifest.json.sig "potluck_${tag#potluck-}_${os}_${arch}.tar.gz"; do
+		for f in manifest.json manifest.json.sshsig manifest.json.sig "potluck_${want_version}_${os}_${arch}.tar.gz"; do
 			url=$(awk -v f="$f" '$1 == f { print $2; exit }' "$tmp/assets")
-			[ -n "$url" ] || die "release $tag has no $f (no build for $os/$arch?)"
+			if [ -z "$url" ]; then
+				case "$f" in
+				*.sshsig | *.sig) continue ;; # check_signature says which a release lacks
+				esac
+				die "release $tag has no $f (no build for $os/$arch?)"
+			fi
 			fetch "$url" "$dl/$f" "application/octet-stream"
 		done
 	fi
 
-	# An installed potluck checks the release and installs it; nothing from the release runs first.
+	# The signature is checked here, before anything from the release runs, whether or not potluck is installed.
 	installed=$(installed_potluck)
+	why=""
+	fix=""
+	checked=""
+	if check_signature "$dl"; then
+		say "signature verified with a release key ($checked)"
+	elif [ -n "$installed" ]; then
+		say "this script cannot check the signature here ($why); the potluck already installed checks it with the keys built into it"
+	elif [ "$UNSAFE" = 1 ]; then
+		say "WARNING: THE RELEASE SIGNATURE WAS NOT CHECKED ($why)."
+		say "WARNING: --unsafe-skip-signature-check: trusting the download from github.com over HTTPS alone."
+	else
+		msg="cannot check the release's signature here: $why. Not installing.
+  Fix: $fix."
+		[ -n "$FROM" ] || msg="$msg
+  To install without the check, trusting the HTTPS download alone, add --unsafe-skip-signature-check."
+		die "$msg"
+	fi
+
+	# The version, schema and the tarball's hash come from the manifest (verified above, unless unsafe).
+	version=$(manifest_version "$dl/manifest.json")
+	[ -n "$version" ] || die "the manifest names no version"
+	grep -q '"schema":[[:space:]]*"potluck-release/1"' "$dl/manifest.json" || die "the manifest is not a potluck-release/1 manifest"
+	if [ -n "$want_version" ] && [ "$version" != "$want_version" ]; then
+		die "asked for release potluck-$want_version, but the signed manifest is release potluck-$version: not installing"
+	fi
+
+	# An installed potluck installs the release, checking it again with its own keys; nothing from the release runs
+	# first.
 	if [ -n "$installed" ]; then
-		say "checking and installing the release with the potluck already installed ($installed)"
+		say "installing the release with the potluck already installed ($installed)"
 		if ! POTLUCK_NO_AUTOSTART=1 "$installed" upgrade --release "$dl" --dir "$INSTALL_DIR"; then
 			die "potluck did not install (see above); nothing was changed"
 		fi
@@ -438,42 +637,12 @@ main() {
 		return 0
 	fi
 
-	# A first install: this script checks the signature before anything from the release runs.
-	why=""
-	if check_signature "$dl"; then
-		say "signature verified with a release key"
-	else
-		if [ -n "$FROM" ] && [ "$TRUST_DIR" != 1 ]; then
-			die "cannot check the release's signature here ($why), so not installing from $FROM. Pass --trust-dir to install it unchecked, or put an OpenSSL 3 or newer first on PATH (Homebrew's openssl@3 is keg-only)."
-		fi
-		if [ -n "$FROM" ]; then
-			say "note: the signature was NOT checked ($why); installing from the --from directory because of --trust-dir."
-			say "      The new potluck will say its manifest is signed by a key it trusts: that key came in the same directory, so it adds no independent proof."
-		else
-			say "note: the signature was NOT checked by this script ($why); trusting the download over HTTPS from github.com."
-			say "      It still checks the tarball against the release's manifest, and the new potluck then checks the manifest's"
-			say "      signature against the key built into it, but that key came in the same download, so this adds no independent proof."
-			case "$why" in
-			*openssl*)
-				say "      Once that potluck has run, running this script again as it is adds nothing. To check the signature"
-				say "      before anything from the release runs: install OpenSSL 3 or newer and put its bin directory first on PATH"
-				say "      (Homebrew's openssl@3 is keg-only: its bin directory is under brew --prefix openssl@3), delete $INSTALL_DIR/potluck,"
-				say "      and run this script again."
-				;;
-			esac
-		fi
-	fi
-
-	# The version and the tarball's hash come from the manifest (signed, when checked above).
-	version=$(manifest_version "$dl/manifest.json")
-	[ -n "$version" ] || die "the manifest names no version"
-	grep -q '"schema":[[:space:]]*"potluck-release/1"' "$dl/manifest.json" || die "the manifest is not a potluck-release/1 manifest"
 	tarball="potluck_${version}_${os}_${arch}.tar.gz"
 	[ -f "$dl/$tarball" ] || die "release $version has no build for $os/$arch ($tarball)"
 	want=$(awk -v f="\"$tarball\":" '$1 == f { v = $2; gsub(/[",]/, "", v); print v; exit }' "$dl/manifest.json")
 	[ -n "$want" ] || die "the manifest names no $tarball"
 	got=$(sha256 "$dl/$tarball")
-	[ "$got" = "$want" ] || die "$tarball does not match the manifest (sha256 $got, manifest $want): not installing"
+	[ "$got" = "$want" ] || die "$tarball does not match the signed manifest (sha256 $got, manifest $want): not installing"
 	say "installing potluck $version for $os/$arch"
 
 	mkdir "$tmp/unpacked"

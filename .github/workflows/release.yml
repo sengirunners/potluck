@@ -1,7 +1,8 @@
 # Potluck's release channel: after each push to main whose ci passes (and on demand), build the newest green main
-# into release tarballs for macOS and Linux, sign a manifest of their SHA-256 sums with the channel's Ed25519 key,
-# and publish a GitHub release tagged potluck-<version>. install.sh and `potluck upgrade` install only what verifies
-# with a public key built into potluck (internal/upgrade/release_keys.txt; install.sh carries the same list).
+# into release tarballs for macOS and Linux, sign a manifest of their SHA-256 sums with the channel's Ed25519 key
+# (raw, and as SSHSIG for ssh-keygen), and publish a GitHub release tagged potluck-<version>. install.sh and
+# `potluck upgrade` install only what verifies with a public key built into potluck
+# (internal/upgrade/release_keys.txt; install.sh carries the same list).
 # The private key lives only in the potluck-release environment (secret POTLUCK_RELEASE_KEY), which deploys from
 # main alone.
 #
@@ -180,6 +181,18 @@ jobs:
           HOME="$t/home" POTLUCK_HOME="$t/potluck" POTLUCK_NO_AUTOSTART=1 \
             "$t/potluck_${{ needs.pick.outputs.version }}_linux_$(go env GOARCH)/potluck" upgrade --release dist --dir "$t/bin"
           "$t/bin/potluck" --version
+      # install.sh checks the release as a stranger's machine would, in an empty home with only the system's tools:
+      # the SSHSIG signature with ssh-keygen against the keys it carries, then the tarball's SHA-256. A release it
+      # would refuse is never published.
+      - name: install with install.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          t=$(mktemp -d)
+          env -i HOME="$t/home" POTLUCK_HOME="$t/potluck" POTLUCK_INSTALL_DIR="$t/bin" POTLUCK_NO_AUTOSTART=1 \
+            PATH=/usr/bin:/bin:/usr/sbin:/sbin sh install.sh --from dist 2>&1 | tee "$t/log"
+          grep -q 'signature verified with a release key (SSHSIG, checked with ssh-keygen)' "$t/log"
+          "$t/bin/potluck" --version
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -191,7 +204,7 @@ jobs:
           if [[ "${{ needs.menubar.result }}" == success && "${{ steps.app.outcome }}" == success && -f "$RUNNER_TEMP/menubar/Potluck-Menu.zip" ]]; then
             notes="$notes. The darwin tarballs also carry Potluck Menu.app (the menu bar item), NOT Developer ID signed or notarized: install it with install.sh --menubar (docs/menubar.md)."
           fi
-          gh release create "${{ needs.pick.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/manifest.json.sig \
+          gh release create "${{ needs.pick.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/manifest.json.sig dist/manifest.json.sshsig \
             --target "${{ needs.pick.outputs.sha }}" --title "potluck ${{ needs.pick.outputs.version }}" --latest --notes "$notes"
       # Keep the newest 30 releases and any younger than 14 days; a failure here never fails the release.
       - name: prune old releases

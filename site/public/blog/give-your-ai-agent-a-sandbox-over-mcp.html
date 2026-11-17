@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Give your AI agent a sandbox over MCP on your own machine | Potluck</title>
+<meta name="description" content="Add one line of MCP configuration and a coding agent gets throwaway VMs and sandboxes on your team's idle Macs and Linux boxes to run its commands in. What it can do and what it keeps away.">
+<link rel="canonical" href="https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Give your AI agent a sandbox over MCP on your own machine | Potluck">
+<meta property="og:description" content="Add one line of MCP configuration and a coding agent gets throwaway VMs and sandboxes on your team's idle Macs and Linux boxes to run its commands in. What it can do and what it keeps away.">
+<meta property="og:url" content="https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp">
+<meta property="og:image" content="https://potluck.sh/og/blog/give-your-ai-agent-a-sandbox-over-mcp.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Give your AI agent a sandbox over MCP, on a machine you own">
+<meta property="article:published_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-17">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Give your AI agent a sandbox over MCP on your own machine | Potluck">
+<meta name="twitter:description" content="Add one line of MCP configuration and a coding agent gets throwaway VMs and sandboxes on your team's idle Macs and Linux boxes to run its commands in. What it can do and what it keeps away.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/give-your-ai-agent-a-sandbox-over-mcp.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/give-your-ai-agent-a-sandbox-over-mcp.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp#post","mainEntityOfPage":"https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp","url":"https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp","headline":"Give your AI agent a sandbox over MCP, on a machine you own","description":"Add one line of MCP configuration and a coding agent gets throwaway VMs and sandboxes on your team's idle Macs and Linux boxes to run its commands in. What it can do and what it keeps away.","datePublished":"2026-11-17","dateModified":"2026-11-17","inLanguage":"en","keywords":"sandbox for ai agents, mcp sandbox, ai agent sandbox, coding agent sandbox","image":"https://potluck.sh/og/blog/give-your-ai-agent-a-sandbox-over-mcp.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Give your AI agent a sandbox over MCP, on a machine you own","item":"https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Give your AI agent a sandbox over MCP, on a machine you own</h1>
+  <p class="meta"><time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
+<p>Add <code>{&quot;mcpServers&quot;:{&quot;potluck&quot;:{&quot;command&quot;:&quot;potluck&quot;,&quot;args&quot;:[&quot;mcp&quot;]}}}</code> to your agent's MCP configuration. The agent then gets tools to create a sandbox on one of your pool's machines, run commands and read and write files in it, and delete it, so its commands run on a throwaway machine instead of your laptop. Potluck is free and open source (Apache-2.0).</p>
+  </aside>
+  <div class="prose">
+<p>A coding agent is most useful when it can run things: tests, builds, a server, a script it just wrote. It is most dangerous for the same reason. Potluck's MCP server gives the agent a separate machine for that work, a fresh VM or sandbox on one of your team's idle computers, and lets it throw that machine away when it is done.</p>
+<h2 id="what-you-need">What you need</h2>
+<ul>
+<li>Potluck installed, a pool, and one machine sharing itself with it. On one computer that is the quick start:</li>
+</ul>
+<pre><code class="language-sh">potluck create trial --via tunnel
+potluck host --reclaim-idle-s 0
+</code></pre>
+<ul>
+<li>On an Apple-silicon Mac, Tart and Softnet; on Linux, Docker with Kata or gVisor. <code>potluck doctor</code> says what is missing. The <a href="/agent-sandbox">agent sandbox page</a> has a prompt your agent can follow to do all of this for you.</li>
+</ul>
+<h2 id="add-the-server">Add the server</h2>
+<p>Put this in your MCP client's configuration (Claude Code and most editors read this shape):</p>
+<pre><code class="language-json">{&quot;mcpServers&quot;:{&quot;potluck&quot;:{&quot;command&quot;:&quot;potluck&quot;,&quot;args&quot;:[&quot;mcp&quot;]}}}
+</code></pre>
+<p>Codex reads TOML, in <code>~/.codex/config.toml</code>:</p>
+<pre><code class="language-toml">[mcp_servers.potluck]
+command = &quot;potluck&quot;
+args = [&quot;mcp&quot;]
+</code></pre>
+<p>With more than one pool, name it: <code>&quot;args&quot;:[&quot;--pool&quot;,&quot;friends&quot;,&quot;mcp&quot;]</code>. The daemon must be running and the pool made before the tools work; the client can list the tools without a daemon, and a call says the daemon is missing.</p>
+<h2 id="what-the-agent-can-do">What the agent can do</h2>
+<p>The server offers sandbox tools and nothing else:</p>
+<ul>
+<li>create a sandbox, list sandboxes, extend one's time limit, stop, restart and delete it;</li>
+<li>run a command in it, and start and follow background processes;</li>
+<li>read and write files in it.</li>
+</ul>
+<p>It does not give the agent your pool's settings, invites or keys. It acts as your local identity, or as a caller named with <code>POTLUCK_AS</code>; <code>POTLUCK_TOKEN</code> hands it a restricted token instead. All of its standard output is MCP traffic, so nothing else prints into the client.</p>
+<p>A typical session: the agent creates a sandbox, writes the files it needs (or you create one with <code>--ref HEAD</code> from the terminal so it starts with your checkout), runs the tests, reads the output, and deletes the sandbox.</p>
+<h2 id="what-stays-away-from-the-agent">What stays away from the agent</h2>
+<ul>
+<li><strong>Your laptop.</strong> Its commands run on the pool's machine, inside the sandbox.</li>
+<li><strong>The lending machine and its network.</strong> On a machine you trust, a sandbox reaches the internet but never the machine itself (on Tart, apart from Softnet's DNS forwarder on the host) or its local network (docs/network.md).</li>
+<li><strong>Your keys.</strong> A sandbox starts with none of your credentials.</li>
+<li><strong>Yesterday's mess.</strong> Each sandbox starts from the same image and is deleted at its time limit or when removed.</li>
+</ul>
+<p>Treat what comes back from a sandbox as untrusted data: a test's output can carry text written to steer an agent.</p>
+<p>Give the agent no secret you would not want it to send elsewhere: a sandbox with a network can reach the internet.</p>
+<p>For Claude Code sessions started from claude.ai, or code written for E2B, see the other ways in on the <a href="/agent-sandbox">agent sandbox page</a>.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/mezze">Run a brigade of coding agents without losing track of them</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/give-your-ai-agent-a-sandbox-over-mcp.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

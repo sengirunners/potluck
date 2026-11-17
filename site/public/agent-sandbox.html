@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI agent sandbox on your own machines: MCP, Claude Code, E2B SDK | Potluck</title>
+<meta name="description" content="Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.">
+<link rel="canonical" href="https://potluck.sh/agent-sandbox">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="AI agent sandbox on your own machines: MCP, Claude Code, E2B SDK | Potluck">
+<meta property="og:description" content="Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.">
+<meta property="og:url" content="https://potluck.sh/agent-sandbox">
+<meta property="og:image" content="https://potluck.sh/og/agent-sandbox.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A sandbox for AI coding agents on machines you own">
+<meta property="article:published_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-17">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="AI agent sandbox on your own machines: MCP, Claude Code, E2B SDK | Potluck">
+<meta name="twitter:description" content="Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.">
+<meta name="twitter:image" content="https://potluck.sh/og/agent-sandbox.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="generator" content="potluck.sh build from content/pages/agent-sandbox.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://potluck.sh/agent-sandbox#article","mainEntityOfPage":"https://potluck.sh/agent-sandbox","url":"https://potluck.sh/agent-sandbox","headline":"A sandbox for AI coding agents on machines you own","description":"Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.","datePublished":"2026-11-17","dateModified":"2026-11-17","inLanguage":"en","keywords":"ai agent sandbox, sandbox for ai agents, coding agent sandbox, run claude code in sandbox, e2b alternative","image":"https://potluck.sh/og/agent-sandbox.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"about":{"@id":"https://potluck.sh/#software"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"A sandbox for AI coding agents on machines you own","item":"https://potluck.sh/agent-sandbox"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a></nav>
+  <h1>A sandbox for AI coding agents on machines you own</h1>
+  <p class="meta">Updated <time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
+<p>Potluck gives a coding agent its own throwaway machine on one of your team's idle computers, deleted when the agent is done. Use it from the terminal, over MCP, as Claude Code's self-hosted runner, or through the E2B SDK.</p>
+  </aside>
+  <div class="prose">
+<p>An agent that runs commands on your laptop can read your files, your keys and your network. A sandbox moves those commands onto a machine that holds none of that, and throws the machine away afterwards. Potluck finds that machine among the ones your team already has: the Mac mini left on at night, the Linux box under a desk.</p>
+<h2 id="set-it-up-with-your-agent">Set it up with your agent</h2>
+<p>Paste this into Claude Code, Codex or another coding agent on the machine you want to try. Every command in it is from Potluck's quick start, and it stops to ask before anything that needs a password, a sign-in or deleting files.</p>
+<pre><code class="language-text">Set up Potluck (https://github.com/sengirunners/potluck) on this machine so I can try it alone. Read https://potluck.sh/llms-full.txt first. Then:
+1. Install: curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh (if it says ~/.local/bin is not on PATH, run the line it prints).
+2. Run `potluck doctor` and tell me what is missing. On a Mac that is usually Tart, Softnet and about 60 GB of free disk. Show me any sudo line it prints; do not run sudo yourself.
+3. When doctor is clean: potluck create trial --via tunnel, then potluck host --reclaim-idle-s 0 (on a Mac the first run pulls about 27 GB).
+4. potluck sandbox create, then potluck sandbox exec &lt;id&gt; -- uname -a, then potluck sandbox rm &lt;id&gt;.
+Stop and ask me before anything that needs a password, a sign-in or deleting files. If a command fails, show me its exact output.
+</code></pre>
+<h2 id="four-ways-in">Four ways in</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>You use</th><th>Potluck gives you</th></tr></thead>
+<tbody>
+<tr><td>A terminal or a script</td><td><code>potluck sandbox create</code>, <code>potluck sandbox exec &lt;id&gt; -- &lt;command&gt;</code>, <code>potluck sandbox rm &lt;id&gt;</code></td></tr>
+<tr><td>An MCP client (Claude Code, Codex, an IDE)</td><td><code>potluck mcp</code>: sandbox tools over MCP</td></tr>
+<tr><td>Claude Code sessions started from claude.ai</td><td><code>potluck agent-runner claude</code>: Claude Code's self-hosted runner, one fresh sandbox per session</td></tr>
+<tr><td>Code written for E2B</td><td><code>potluck-e2b</code>: the E2B SDK, pointed at your own machines</td></tr>
+</tbody>
+</table></div>
+<h3 id="the-sandbox-commands">The sandbox commands</h3>
+<pre><code class="language-sh">potluck sandbox create --template agent   # a Linux sandbox with Node, Python, git, Claude Code and Codex
+potluck sandbox exec &lt;id&gt; -- make test
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p><code>--template agent</code> takes the agent image, which a Linux machine in your pool must lend; without it you get the machine's default image. <code>--ref HEAD</code> sends your checkout's current commit into the sandbox.</p>
+<h3 id="mcp">MCP</h3>
+<p>Add Potluck to an MCP client's configuration:</p>
+<pre><code class="language-json">{&quot;mcpServers&quot;:{&quot;potluck&quot;:{&quot;command&quot;:&quot;potluck&quot;,&quot;args&quot;:[&quot;mcp&quot;]}}}
+</code></pre>
+<p>The server offers only sandbox tools: create, execute, list, extend, stop, restart, delete, background processes, and file reads and writes. With more than one pool, add <code>&quot;--pool&quot;,&quot;&lt;name&gt;&quot;</code> before <code>&quot;mcp&quot;</code>. Treat what comes back from a sandbox as untrusted data. Read more in <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">Give your AI agent a sandbox over MCP</a>.</p>
+<h3 id="claude-codes-self-hosted-runner">Claude Code's self-hosted runner</h3>
+<p>Claude Code can run sessions started on claude.ai on your own machines through a self-hosted environment, which a person makes in claude.ai's admin settings. Its key is the environment secret:</p>
+<pre><code class="language-sh">potluck agent-runner claude --secret-file &lt;key-file&gt; --image ghcr.io/sengirunners/potluck-box-agent
+</code></pre>
+<p>Each session gets a fresh sandbox, and a new one starts as each ends; <code>--count</code> keeps several going. The session can read the key, and the sandbox's network reaches the internet, so rotate the key after any session you suspect (<a href="https://github.com/sengirunners/potluck/blob/main/docs/agent-runners.md">docs/agent-runners.md</a>).</p>
+<h3 id="the-e2b-sdk">The E2B SDK</h3>
+<p><code>potluck-e2b</code> answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B runs on your pool with only its environment changed. It covers create, run a command, read and write files, list, set a timeout, connect and kill. Read more in <a href="/blog/use-the-e2b-sdk-on-your-own-machines">Use the E2B SDK on your own machines</a>.</p>
+<h2 id="what-the-sandbox-keeps-away-from-the-agent">What the sandbox keeps away from the agent</h2>
+<ul>
+<li><strong>Your machine and network.</strong> On a machine you trust, a sandbox reaches the internet but never the machine itself (on Tart, apart from Softnet's DNS forwarder on the host) or its local network (<a href="https://github.com/sengirunners/potluck/blob/main/docs/network.md">docs/network.md</a>).</li>
+<li><strong>Your keys.</strong> A sandbox starts with none of your credentials; a key goes in only when you send it, as a file.</li>
+<li><strong>Leftovers.</strong> Each sandbox starts from the same image and is deleted at its time limit or when you remove it.</li>
+</ul>
+<h2 id="on-a-mac">On a Mac</h2>
+<p>macOS sandboxes run in Tart VMs, two at a time at most, as Apple's licence allows (<a href="/tart">what Tart is, its licence, and what Potluck adds</a>). On a Mac, <code>potluck sandbox create</code> and the MCP tools give an agent a macOS VM to work in; <code>--template agent</code> and <code>potluck agent-runner</code> use Linux machines.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/mezze">Run a brigade of coding agents without losing track of them</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+    <li><a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">Give your AI agent a sandbox over MCP, on a machine you own</a></li>
+    <li><a href="/blog/use-the-e2b-sdk-on-your-own-machines">Use the E2B SDK on your own machines</a></li>
+    <li><a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">How to pool your team's spare Macs and Linux boxes for builds and coding agents</a></li>
+    <li><a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service</a></li>
+    <li><a href="/blog/self-hosted-github-actions-runner-on-your-mac">How to run a self-hosted GitHub Actions runner on your own Mac, with a fresh VM for each job</a></li>
+  </ul>
+</nav>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>
