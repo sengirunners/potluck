@@ -117,8 +117,7 @@ all get it. What wins over it:
 
 - an image whose own environment sets `GOPROXY` keeps its value (the driver checks the image's config at
   create and then sets nothing);
-- a `GOPROXY` the run sets in its environment (`potluck run --env`, a workflow's `env:`, `export`) wins, as
-  any environment variable does;
+- a `GOPROXY` set in a workflow's `env:` or exported in the job script overrides the shelf's value;
 - `GOPRIVATE` and `GONOPROXY` keep their meaning: Go fetches the modules they match directly, never through
   any proxy, so they never read from the shelf.
 
