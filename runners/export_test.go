@@ -335,3 +335,9 @@ func (s *Service) ServeAgainKeepingBox(ctx context.Context, job int64) error {
 	}
 	return s.requeue(ctx, job, j.runner)
 }
+
+// Stored counts every delivery in the inbox, applied or not.
+func (s *Service) Stored(ctx context.Context) (n int) {
+	_ = s.db().QueryRowContext(ctx, `SELECT count(*) FROM runners_inbox`).Scan(&n)
+	return n
+}

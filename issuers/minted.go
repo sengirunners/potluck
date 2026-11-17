@@ -40,10 +40,12 @@ type Options struct {
 	JobHolds JobHolds
 	Events   Publisher // the pool's event log: renewed, revoked and refused (nil: none published)
 
-	// Tokens and BoxExpires are a potluck issuer's (required there): the
-	// pool's token mint, and each box's lease end.
+	// Tokens, BoxExpires and Home are a potluck issuer's (required there):
+	// the pool's token mint, each box's lease end, and the authority a box
+	// reaches (its tunnel URL and key fingerprint).
 	Tokens     TokenMint
 	BoxExpires BoxExpires
+	Home       Home
 
 	// Secrets, HTTP and Sleep are a github-app issuer's: its App key
 	// reference (default secrets.Default()), its HTTP client, and the wait
@@ -73,6 +75,12 @@ type Credential interface {
 	Reveal() string
 	Expires() time.Time
 	Hashed() string
+}
+
+// secretParts is a credential whose Reveal bundles secrets that may also
+// appear alone (a box credential's token and key): each is scrubbed too.
+type secretParts interface {
+	parts() []string
 }
 
 // backend is one kind's own part of an issuer: what it checks in a request,
@@ -565,7 +573,7 @@ func (g *Minted) mint(ctx context.Context, e Entry, req *Request, p plan) (Crede
 		return tok, nil
 	}
 	var ue *unrevokedError
-	if errors.As(err, &ue) && ue.cred != nil && ue.cred.Reveal() != "" {
+	if errors.As(err, &ue) && ue.cred != nil && ue.cred.Hashed() != "" {
 		u := ue.cred
 		e.ExpiresAt, e.HashedToken = u.Expires(), u.Hashed()
 		g.record(ctx, e, EventFailed, scrub(err.Error(), u))
@@ -601,6 +609,13 @@ func scrub(s string, tok Credential) string {
 	}
 	if v := tok.Reveal(); v != "" {
 		s = strings.ReplaceAll(s, v, "[secret]")
+	}
+	if p, ok := tok.(secretParts); ok {
+		for _, v := range p.parts() {
+			if v != "" {
+				s = strings.ReplaceAll(s, v, "[secret]")
+			}
+		}
 	}
 	return s
 }

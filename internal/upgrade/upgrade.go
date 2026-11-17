@@ -6,6 +6,7 @@
 package upgrade
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,26 +14,54 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/sengirunners/potluck/kit/release"
 )
 
-// KeyPlaceholder stands in for ReleaseKey until the channel's key exists. A
-// build that still has it trusts only config update_keys, and a release
-// build refuses it (scripts/release, TestReleaseKeyIsSet).
-const KeyPlaceholder = "ed25519:PLACEHOLDER-run-go-run-./scripts/release-keygen"
-
-// ReleaseKey is the public key of Potluck's release channel: every build
-// trusts it, and config update_keys may add more. Its private half lives
-// only in the potluck-release environment of sengirunners/potluck (secret
-// POTLUCK_RELEASE_KEY), which deploys from main alone.
+// releaseKeysFile is the list of release keys every build trusts
+// (release_keys.txt). It is data so a rotation edits one file; tests swap it.
 //
-// PLACEHOLDER: replace KeyPlaceholder here, and RELEASE_KEY in install.sh,
-// with the "public key" line `go run ./scripts/release-keygen` prints
-// (TestInstallScriptCarriesTheReleaseKey holds them equal).
-const ReleaseKey = "ed25519:Z9tq+TU7lP6IwxiY2qzZC+bRNEv1G1fzxlLJYHtvTMc="
+//go:embed release_keys.txt
+var releaseKeysFile string
+
+// ReleaseKeys are the release keys every build trusts, read from
+// release_keys.txt: the channel's current key, and during a rotation the
+// next one too (docs/release-keys.md). An empty or malformed list is an
+// error, so a build that carries one refuses every upgrade.
+func ReleaseKeys() ([]string, error) {
+	keys, err := ParseKeyList(releaseKeysFile)
+	if err != nil {
+		return nil, fmt.Errorf("this potluck's built-in release keys (internal/upgrade/release_keys.txt): %w", err)
+	}
+	return keys, nil
+}
+
+// ParseKeyList reads a list of release keys: one ed25519:<base64> public key
+// per line; blank lines and lines starting with # are skipped. A line that
+// is not a key, a key named twice, or no key at all is an error.
+func ParseKeyList(text string) ([]string, error) {
+	var keys []string
+	for i, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if _, err := release.ParseKey(line); err != nil {
+			return nil, fmt.Errorf("line %d: %w", i+1, err)
+		}
+		if slices.Contains(keys, line) {
+			return nil, fmt.Errorf("line %d names a key already listed", i+1)
+		}
+		keys = append(keys, line)
+	}
+	if len(keys) == 0 {
+		return nil, errors.New("it names no key")
+	}
+	return keys, nil
+}
 
 // Repo publishes the releases; every release tag is TagPrefix<version>.
 const (
@@ -40,19 +69,24 @@ const (
 	TagPrefix = "potluck-"
 )
 
-// Keys are the release keys this build trusts: ReleaseKey (unless it is
-// still the placeholder) and extra (config update_keys).
-func Keys(extra []string) []string {
-	var keys []string
-	if ReleaseKey != KeyPlaceholder {
-		keys = append(keys, ReleaseKey)
+// Keys are the release keys this build trusts: ReleaseKeys and extra
+// (config update_keys; blank entries are skipped). A malformed key in
+// either is an error: an upgrade refuses rather than trust part of a list.
+func Keys(extra []string) ([]string, error) {
+	keys, err := ReleaseKeys()
+	if err != nil {
+		return nil, err
 	}
 	for _, k := range extra {
-		if k = strings.TrimSpace(k); k != "" && k != ReleaseKey {
-			keys = append(keys, k)
+		if k = strings.TrimSpace(k); k == "" || slices.Contains(keys, k) {
+			continue
 		}
+		if _, err := release.ParseKey(k); err != nil {
+			return nil, fmt.Errorf("config update_keys: %w", err)
+		}
+		keys = append(keys, k)
 	}
-	return keys
+	return keys, nil
 }
 
 // Source is where one release's files come from.
@@ -259,8 +293,7 @@ type Staged struct {
 // installed.
 func Stage(src Source, keys []string, goos, goarch, stage string) (Staged, error) {
 	if len(keys) == 0 {
-		return Staged{}, errors.New("this potluck trusts no release key: it is a development build, and config update_keys is empty. " +
-			"Install a release (install.sh), or add the channel's key to update_keys in $POTLUCK_HOME/config.json")
+		return Staged{}, errors.New("no trusted release key: refusing the release")
 	}
 	body, sig, err := src.Manifest()
 	if err != nil {

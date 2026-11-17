@@ -2,6 +2,7 @@ package issuers
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/sengirunners/potluck/kit/authz"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/ids"
+	"github.com/sengirunners/potluck/kit/tunnel"
 )
 
 // KindPotluckToken is the credential kind a potluck issuer mints.
@@ -38,6 +40,11 @@ type TokenMint interface {
 // BoxExpires is when box's lease ends, as the run targets record it (zero:
 // it has no end).
 type BoxExpires func(ctx context.Context, box Box) (time.Time, error)
+
+// Home is the authority a box's credential names: this daemon's tunnel URL
+// and key fingerprint (kit/tunnel's Service.Home). An error is why a box
+// could not reach it (no tunnel URL).
+type Home func() (url, fingerprint string, err error)
 
 // potluckLife is the longest a potluck-token lives: it is renewed at two
 // thirds of it while its box lives, and never outlives the box's lease.
@@ -122,30 +129,43 @@ func checkPotluckRule(r config.SecretsCeiling) (Rule, error) {
 // box's lease. A person's token acts as that person; a GitHub job's acts as
 // the issuer's identity (Spec.As). The identity must already hold that role
 // there: the token only ever narrows what it holds.
+//
+// The token is bound to a key made for this one mint (a per-box key): the
+// tunnel takes it only on requests that key signed. What lands in the box
+// is one file (tunnel.BoxCredential): the token, the key, and the
+// authority's tunnel URL and key fingerprint. A renewal mints a new token
+// with a new key and replaces the file whole. The authority keeps the key
+// only inside the held credential, in memory, like the token.
 type potluckBackend struct {
 	spec    Spec
 	tokens  TokenMint
 	expires BoxExpires
+	home    Home
 	now     func() time.Time
 }
 
-// potluckToken is a minted token as a Credential.
+// potluckToken is a minted token as a Credential: Reveal is the box
+// credential file, Hashed the token's hash (the ledger's and the tokens
+// table's).
 type potluckToken struct {
 	id, secret string
+	cred       string // the box credential file (tunnel.BoxCredential)
+	seed       string // the per-box key's seed, hex, as the file holds it
 	exp        time.Time
 }
 
-func (t potluckToken) Reveal() string     { return t.secret }
+func (t potluckToken) Reveal() string     { return t.cred }
+func (t potluckToken) parts() []string    { return []string{t.secret, t.seed} }
 func (t potluckToken) Expires() time.Time { return t.exp }
 func (t potluckToken) Hashed() string     { return authz.HashToken(t.secret) }
 func (t potluckToken) String() string     { return "potluck-token " + t.id }
 func (t potluckToken) GoString() string   { return t.String() }
 
 func newPotluckBackend(s Spec, o Options) (*potluckBackend, error) {
-	if o.Tokens == nil || o.BoxExpires == nil {
-		return nil, fmt.Errorf("secrets.issuers.%s: a %s issuer needs the token mint and the boxes' leases", s.Name, KindPotluck)
+	if o.Tokens == nil || o.BoxExpires == nil || o.Home == nil {
+		return nil, fmt.Errorf("secrets.issuers.%s: a %s issuer needs the token mint, the boxes' leases and the authority's tunnel", s.Name, KindPotluck)
 	}
-	return &potluckBackend{spec: s, tokens: o.Tokens, expires: o.BoxExpires, now: o.Now}, nil
+	return &potluckBackend{spec: s, tokens: o.Tokens, expires: o.BoxExpires, home: o.Home, now: o.Now}, nil
 }
 
 func (b *potluckBackend) kind() string { return KindPotluckToken }
@@ -178,6 +198,9 @@ func (b *potluckBackend) check(ctx context.Context, req Request) (plan, string, 
 	role, err := potluckRole(req.Role)
 	if err != nil {
 		return plan{}, err.Error(), nil
+	}
+	if _, _, err := b.home(); err != nil {
+		return plan{}, "a box could not reach this authority: " + err.Error(), nil
 	}
 	if req.Box.Area != "" && !b.tokens.HasArea(req.Box.Project, req.Box.Area) {
 		return plan{}, "the box's area is not an area of its project", nil
@@ -255,15 +278,32 @@ func (b *potluckBackend) mint(ctx context.Context, req *Request, p plan) (Creden
 	}
 	// Whole seconds, less one: the registry stamps the expiry from its own
 	// clock a moment later.
+	url, fp, err := b.home()
+	if err != nil {
+		return nil, err
+	}
+	key, err := tunnel.NewBoxKey()
+	if err != nil {
+		return nil, err
+	}
 	limit := exp
 	ttl := int64(exp.Sub(now)/time.Second) - 1
 	exp = now.Add(time.Duration(ttl) * time.Second)
 	out, err := b.tokens.Mint(ctx, b.tokens.Local(""), api.MintTokenRequest{As: p.as, Project: req.Box.Project, Area: req.Box.Area,
-		Role: p.perms["role"], TTLSeconds: ttl, NoGrant: true, Note: "potluck-token " + req.Name + " for box " + req.Box.ID})
+		Role: p.perms["role"], TTLSeconds: ttl, NoGrant: true, Note: "potluck-token " + req.Name + " for box " + req.Box.ID,
+		BoxKey: tunnel.BoxKeyID(key)})
 	if err != nil {
 		return nil, err
 	}
-	tok := potluckToken{id: out.Token.ID, secret: out.Secret, exp: exp}
+	tok := potluckToken{id: out.Token.ID, secret: out.Secret, seed: hex.EncodeToString(key.Seed()), exp: exp}
+	cred, cerr := tunnel.BoxCredential{Token: out.Secret, Key: key, URL: url, Home: fp}.Encode()
+	if cerr != nil {
+		if err := b.revoke(context.WithoutCancel(ctx), tok); err != nil {
+			return nil, &unrevokedError{cred: tok, err: errors.New("the box credential could not be made, and revoking its token failed")}
+		}
+		return nil, fmt.Errorf("the box credential could not be made (its token was revoked): %w", cerr)
+	}
+	tok.cred = cred
 	if out.Token.Expires == nil || out.Token.Expires.After(limit) {
 		// The registry stamped its expiry from its own clock, later: a mint
 		// that stalled past the margin would outlive the cap, so it is

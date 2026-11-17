@@ -453,6 +453,10 @@ type Subject struct {
 	Node         string
 	Machine      string
 	ScopeVersion int64
+	// BoxKey is set for a box's token (the potluck-token kind): the key id
+	// of the per-box key it is bound to, which signed this request over the
+	// tunnel. Such a token is never a replica's: Node stays empty.
+	BoxKey string
 	// Cap is the token's cap (nil for the socket and tailnet logins).
 	Cap *Cap
 }

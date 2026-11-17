@@ -948,6 +948,9 @@ func (r *Registry) Mint(ctx context.Context, sub *authz.Subject, req api.MintTok
 	if req.TTLSeconds < 0 {
 		return api.MintTokenResponse{}, api.Errorf(api.CodeBadRequest, "ttl must be positive")
 	}
+	if err := checkBoxKey(req); err != nil {
+		return api.MintTokenResponse{}, err
+	}
 	var pid, area string
 	if req.Project != "" {
 		if !req.NoGrant {
@@ -976,8 +979,8 @@ func (r *Registry) Mint(ctx context.Context, sub *authz.Subject, req api.MintTok
 		e := store.FromMillis(store.Millis(now.Add(time.Duration(req.TTLSeconds) * time.Second)))
 		t.Expires, exp = &e, store.Millis(e)
 	}
-	if _, err := r.st.Registry().ExecContext(ctx, `INSERT INTO tokens (id, hash, identity, project, area, role, note, created, expires)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, t.ID, authz.HashToken(secret), who.ID, pid, area, t.Role, t.Note, store.Millis(now), exp); err != nil {
+	if _, err := r.st.Registry().ExecContext(ctx, `INSERT INTO tokens (id, hash, identity, project, area, role, note, created, expires, box_key)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, t.ID, authz.HashToken(secret), who.ID, pid, area, t.Role, t.Note, store.Millis(now), exp, req.BoxKey); err != nil {
 		return api.MintTokenResponse{}, err
 	}
 	return api.MintTokenResponse{Token: t, Secret: secret}, nil
@@ -1095,7 +1098,8 @@ func (r *Registry) Local(address string) *authz.Subject {
 // tokens all get the same unauthenticated error. A node-bound token (a team
 // replica's, SPEC 17.4) answers the same error from any node other than its
 // own (FromTokenAt names the caller's), on a listener without WhoIs, and on
-// any Unix socket (remote false).
+// any Unix socket (remote false). So does a box's token (box_key) from any
+// caller but its box key: only the tunnel names a key as the node.
 func (r *Registry) FromToken(ctx context.Context, secret string, remote bool) (*authz.Subject, error) {
 	return r.FromTokenAt(ctx, secret, remote, "")
 }
@@ -1107,10 +1111,10 @@ func (r *Registry) FromTokenAt(ctx context.Context, secret string, remote bool, 
 	if !authz.LooksLikeToken(secret) {
 		return nil, bad
 	}
-	var tid, identityID, pid, area, role, boundNode, machine string
+	var tid, identityID, pid, area, role, boundNode, machine, boxKey string
 	var exp, rev, used sql.NullInt64
-	err := r.st.Registry().QueryRowContext(ctx, `SELECT id, identity, project, area, role, expires, revoked, last_used, node, machine FROM tokens WHERE hash = ?`,
-		authz.HashToken(secret)).Scan(&tid, &identityID, &pid, &area, &role, &exp, &rev, &used, &boundNode, &machine)
+	err := r.st.Registry().QueryRowContext(ctx, `SELECT id, identity, project, area, role, expires, revoked, last_used, node, machine, box_key FROM tokens WHERE hash = ?`,
+		authz.HashToken(secret)).Scan(&tid, &identityID, &pid, &area, &role, &exp, &rev, &used, &boundNode, &machine, &boxKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, bad
@@ -1122,6 +1126,9 @@ func (r *Registry) FromTokenAt(ctx context.Context, secret string, remote bool, 
 		return nil, bad
 	}
 	if boundNode != "" && (!remote || node == "" || node != boundNode) {
+		return nil, bad
+	}
+	if boxKey != "" && (!remote || node != boxKey) {
 		return nil, bad
 	}
 	if !used.Valid || store.Millis(now)-used.Int64 > 60_000 {
@@ -1143,7 +1150,7 @@ func (r *Registry) FromTokenAt(ctx context.Context, secret string, remote bool, 
 	cp := &authz.Cap{Project: pid, Area: area, Role: authz.Relation(role)}
 	sc := authz.FromTuples(tuples, cp)
 	return &authz.Subject{Identity: who, Address: identityAddress(who), Via: authz.ViaToken, Remote: remote, TokenID: tid, Scope: sc,
-		Node: boundNode, Machine: machine, ScopeVersion: sv, Cap: cp}, nil
+		Node: boundNode, Machine: machine, BoxKey: boxKey, ScopeVersion: sv, Cap: cp}, nil
 }
 
 // FromTailscale authenticates a tailnet caller by its WhoIs login.

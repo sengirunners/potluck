@@ -80,6 +80,7 @@ func TestQuickGroupsCoverTheSuite(t *testing.T) {
 		"warm":             "share binds no warm boxes (an owner's setting), so a SKIP",
 		"box-secrets-ops":  "waits out a 5 s reader; unset, an exec's own secrets, atomic replace, refusals and conflict are the driver's code, the same on every size (box-secrets, the isolation checks, is quick)",
 		"acquire-progress": "share's driver lists no acquire-progress capability, so a SKIP; progress and cancel are the driver's code, the same on every size",
+		"box-authority":    "share passes no --box-credential (it needs a live authority's credential), so a SKIP",
 		"agent-runner":     "waits out background jobs with secrets and a TERM drain; spawn, secrets and signal are the driver's code, the same on every size (procs and box-secrets-ops, likewise dropped)",
 	}
 	quick := strings.Split(QuickGroups, ",")

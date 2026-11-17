@@ -324,7 +324,7 @@ func detectOCI(ctx context.Context, run Runner, f Facts, r Report, pm string) La
 	daemonDown := false
 	runtimesJSON := "" // docker info's Runtimes (sudo.go reads runsc-root's entry)
 	if l.CLI == "" {
-		l.Problems = append(l.Problems, "no container CLI (docker, podman or nerdctl) is installed")
+		l.Problems = append(l.Problems, "no container CLI (docker, podman or nerdctl) is installed (Docker: https://docs.docker.com/engine/install/)")
 		l.RootSteps = append(l.RootSteps, installStep(pm, "docker"))
 		l.RootSteps = dedupe(l.RootSteps)
 		return l
@@ -496,7 +496,7 @@ func detectTart(ctx context.Context, run Runner, f Facts, r *Report) Layer {
 		l.Problems = append(l.Problems, "Virtualization.framework is not available on this Mac")
 	}
 	if _, ok := f.LookPath("tart"); !ok {
-		l.Problems = append(l.Problems, "tart is not installed (install it from its release; no root needed)")
+		l.Problems = append(l.Problems, "tart is not installed: download tart.tar.gz from https://github.com/openai/tart/releases/latest, unpack it and link tart.app/Contents/MacOS/tart onto your PATH (no root needed; guide: https://tart.run/quick-start/)")
 	} else if res, err := run.Run(ctx, "tart", "--version"); err == nil && res.Exit == 0 {
 		l.Version = strings.TrimSpace(strings.SplitN(res.Stdout, "\n", 2)[0])
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"tailscale.com/client/local"
 	"tailscale.com/tailcfg"
@@ -163,8 +164,8 @@ type tsNode struct {
 func newTSNode(c NodeConfig) Node {
 	return &tsNode{s: &tsnet.Server{
 		Dir: c.Dir, Hostname: c.Hostname, AuthKey: c.AuthKey, ControlURL: c.ControlURL,
-		UserLogf: c.Logf,
-		Logf:     func(string, ...any) {}, // backend logs are very verbose
+		UserLogf: quietLogin(c.Logf, time.Now), // tsnet repeats the login URL every 5 s
+		Logf:     func(string, ...any) {},      // backend logs are very verbose
 	}}
 }
 

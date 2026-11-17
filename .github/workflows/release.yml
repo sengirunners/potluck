@@ -1,14 +1,19 @@
 # Potluck's release channel: after each push to main whose ci passes (and on demand), build the newest green main
 # into release tarballs for macOS and Linux, sign a manifest of their SHA-256 sums with the channel's Ed25519 key,
 # and publish a GitHub release tagged potluck-<version>. install.sh and `potluck upgrade` install only what verifies
-# with the public key built into potluck (internal/upgrade.ReleaseKey; install.sh carries the same key).
+# with a public key built into potluck (internal/upgrade/release_keys.txt; install.sh carries the same list).
 # The private key lives only in the potluck-release environment (secret POTLUCK_RELEASE_KEY), which deploys from
 # main alone.
+#
+# Three jobs: pick (the newest green main), menubar (builds Potluck Menu.app on a GitHub-hosted Mac: swiftc is
+# not Go) and release (builds the tarballs, with the app's zip inside each darwin one, signs and publishes). The
+# app is ad hoc signed, not Developer ID signed or notarized, until the owners provide an Apple Developer ID
+# (docs/menubar.md). A failed app build never blocks a release: the tarballs ship without the zip, with a warning.
 #
 # Why this polls ci instead of running after it: a workflow_run trigger, or a release job inside ci.yml (needs: on
 # its jobs, or a workflow_call), puts a write-scoped job in a workflow a fork's pull request can start, which
 # internal/workflowlint refuses. So this runs on push, waits at most 20 minutes for that commit's ci (it takes about
-# 12), and otherwise releases the newest main whose ci passed. Until ReleaseKey is set it does nothing (a notice).
+# 12), and otherwise releases the newest main whose ci passed. Key rotation: docs/release-keys.md.
 name: release
 on:
   push:
@@ -20,33 +25,28 @@ concurrency:
   group: potluck-release
   cancel-in-progress: false
 jobs:
-  release:
-    name: build, sign, publish
+  pick:
+    name: pick the last green main
     runs-on: ${{ vars.RELEASE_RUNNER || 'sengi-standard-4-ubuntu-2404' }}
-    environment: potluck-release
     if: github.ref == 'refs/heads/main' && github.repository == 'sengirunners/potluck'
     permissions:
-      contents: write
+      contents: read
       actions: read
-    timeout-minutes: 45
+    timeout-minutes: 30
+    outputs:
+      go: ${{ steps.decide.outputs.go }}
+      sha: ${{ steps.pick.outputs.sha }}
+      version: ${{ steps.pick.outputs.version }}
+      tag: ${{ steps.pick.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
-      # No release key yet: nothing to sign with, so succeed with a notice instead of failing every push.
-      - name: release key set?
-        id: key
-        run: |
-          if grep -q '^const ReleaseKey = KeyPlaceholder$' internal/upgrade/upgrade.go; then
-            echo "::notice::internal/upgrade.ReleaseKey is still the placeholder: no release until it is set"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
       # On a push, wait (at most 20 minutes) for this commit's ci run; then take the newest main push whose ci
       # passed, so a red commit never releases and a run that queued behind another never releases an older one.
       - name: pick the last green main
         id: pick
-        if: steps.key.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -79,53 +79,122 @@ jobs:
             # A tag without its release was deleted by hand: never publish it again. Yank with --prerelease.
             echo "skip=true" >> "$GITHUB_OUTPUT"; echo "$tag was deleted; not republishing it"
           fi
+      - name: release this commit?
+        id: decide
+        run: |
+          if [[ "${{ steps.pick.outputs.skip }}" != true ]]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+  # Potluck Menu.app, built on a GitHub-hosted Mac (never a self-hosted runner, whose owner a release must not
+  # depend on) from the picked commit: arm64 and x86_64 joined, ad hoc signed, zipped with ditto.
+  menubar:
+    name: build Potluck Menu.app
+    needs: pick
+    if: needs.pick.outputs.go == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
         with:
-          ref: ${{ steps.pick.outputs.sha }}
+          ref: ${{ needs.pick.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: build and zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          # An older picked commit may predate the universal build: fail (the release then ships without the app).
+          grep -q POTLUCK_MENU_UNIVERSAL macos/PotluckMenu/build.sh
+          app="$RUNNER_TEMP/app/Potluck Menu.app"
+          POTLUCK_MENU_UNIVERSAL=1 macos/PotluckMenu/build.sh "$RUNNER_TEMP/app"
+          archs=$(lipo -archs "$app/Contents/MacOS/PotluckMenu")
+          echo "archs: $archs"
+          [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]]
+          codesign --verify --deep --strict "$app"
+          mkdir -p menubar
+          ditto -c -k --keepParent "$app" menubar/Potluck-Menu.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: potluck-menu
+          path: menubar/Potluck-Menu.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: build, sign, publish
+    needs: [pick, menubar]
+    if: ${{ !cancelled() && needs.pick.outputs.go == 'true' }}
+    runs-on: ${{ vars.RELEASE_RUNNER || 'sengi-standard-4-ubuntu-2404' }}
+    environment: potluck-release
+    permissions:
+      contents: write
+      actions: read
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.pick.outputs.sha }}
           fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
         with:
           go-version-file: go.mod
           cache: false
-      # The picked commit must carry the channel's public key, in potluck and in install.sh alike.
-      - name: release key is set
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
-        run: POTLUCK_RELEASE_BUILD=1 go test -count=1 -run '^(TestReleaseKeyIsSet|TestInstallScriptCarriesTheReleaseKey)$' ./internal/upgrade/
+      # The picked commit's trusted key list must parse, in potluck and in install.sh alike.
+      - name: release keys are set
+        run: go test -count=1 -run '^(TestReleaseKeys|TestInstallScriptCarriesTheReleaseKeys)$' ./internal/upgrade/
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        id: app
+        if: needs.menubar.result == 'success'
+        continue-on-error: true # a failed download ships the release without the app, like a failed build
+        with:
+          name: potluck-menu
+          path: ${{ runner.temp }}/menubar
       - name: build
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
-        run: go run ./scripts/release -version "${{ steps.pick.outputs.version }}" -commit "${{ steps.pick.outputs.sha }}" -out dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=()
+          if [[ "${{ needs.menubar.result }}" == success && "${{ steps.app.outcome }}" == success && -f "$RUNNER_TEMP/menubar/Potluck-Menu.zip" ]]; then
+            app=(-menubar "$RUNNER_TEMP/menubar/Potluck-Menu.zip")
+          else
+            echo "::warning::no Potluck Menu.app this release (the menubar job ${{ needs.menubar.result }}): the darwin tarballs ship without it"
+          fi
+          go run ./scripts/release -version "${{ needs.pick.outputs.version }}" -commit "${{ needs.pick.outputs.sha }}" -out dist "${app[@]}"
       - name: sign
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
         env:
           POTLUCK_RELEASE_KEY: ${{ secrets.POTLUCK_RELEASE_KEY }}
-        run: go run ./scripts/release-sign -version "${{ steps.pick.outputs.version }}" -commit "${{ steps.pick.outputs.sha }}" -out dist
-      # The release's own potluck must verify it with its built-in key alone (an empty home: no update_keys), so a
-      # secret that does not match ReleaseKey never publishes.
-      - name: verify with the built-in key
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
+        run: go run ./scripts/release-sign -version "${{ needs.pick.outputs.version }}" -commit "${{ needs.pick.outputs.sha }}" -out dist
+      # The release's own potluck must verify it with its built-in keys alone (an empty home: no update_keys), so a
+      # secret that matches no key in release_keys.txt never publishes.
+      - name: verify with the built-in keys
         shell: bash
         run: |
           set -euo pipefail
           t=$(mktemp -d)
-          tar -xzf "dist/potluck_${{ steps.pick.outputs.version }}_linux_$(go env GOARCH).tar.gz" -C "$t"
+          tar -xzf "dist/potluck_${{ needs.pick.outputs.version }}_linux_$(go env GOARCH).tar.gz" -C "$t"
           HOME="$t/home" POTLUCK_HOME="$t/potluck" POTLUCK_NO_AUTOSTART=1 \
-            "$t/potluck_${{ steps.pick.outputs.version }}_linux_$(go env GOARCH)/potluck" upgrade --release dist --dir "$t/bin"
+            "$t/potluck_${{ needs.pick.outputs.version }}_linux_$(go env GOARCH)/potluck" upgrade --release dist --dir "$t/bin"
           "$t/bin/potluck" --version
       - name: publish
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+        shell: bash
         run: |
-          gh release create "${{ steps.pick.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/manifest.json.sig \
-            --target "${{ steps.pick.outputs.sha }}" --title "potluck ${{ steps.pick.outputs.version }}" --latest \
-            --notes "Signed potluck release of green main ${{ steps.pick.outputs.sha }}. Install: install.sh (README). Upgrade: potluck upgrade. Yank it (nothing installs it): gh release edit ${{ steps.pick.outputs.tag }} --prerelease"
+          set -euo pipefail
+          notes="Signed potluck release of green main ${{ needs.pick.outputs.sha }}. Install: install.sh (README). Upgrade: potluck upgrade. Yank it (nothing installs it): gh release edit ${{ needs.pick.outputs.tag }} --prerelease"
+          if [[ "${{ needs.menubar.result }}" == success && "${{ steps.app.outcome }}" == success && -f "$RUNNER_TEMP/menubar/Potluck-Menu.zip" ]]; then
+            notes="$notes. The darwin tarballs also carry Potluck Menu.app (the menu bar item), NOT Developer ID signed or notarized: install it with install.sh --menubar (docs/menubar.md)."
+          fi
+          gh release create "${{ needs.pick.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/manifest.json.sig \
+            --target "${{ needs.pick.outputs.sha }}" --title "potluck ${{ needs.pick.outputs.version }}" --latest --notes "$notes"
       # Keep the newest 30 releases and any younger than 14 days; a failure here never fails the release.
       - name: prune old releases
-        if: steps.key.outputs.skip != 'true' && steps.pick.outputs.skip != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}

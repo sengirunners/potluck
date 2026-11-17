@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: scripts/clean-machine-proof.sh
           sparse-checkout-cone-mode: false
@@ -34,7 +34,7 @@ jobs:
           for f in "$RUNNER_TEMP"/p/owner/daemon.log "$RUNNER_TEMP"/p/lender/daemon.log "$RUNNER_TEMP"/p/cloudflared.log; do
             if [ -f "$f" ]; then echo "== $f"; tail -n 80 "$f"; fi
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: proof-log

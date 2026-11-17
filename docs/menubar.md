@@ -39,17 +39,47 @@ cores. Cores in use are the running boxes' cores; a stopped box with a kept disk
 which item is checked and what a click runs all come from that command (Go package `menubar`, with tests); the
 app only draws them.
 
-## Build and run it (from source)
+## Install it
 
-It is not in the release tarball yet. On a Mac with the Xcode command line tools:
+On a Mac, with the release's installer:
 
 ```sh
-macos/PotluckMenu/build.sh ~/Applications   # writes ~/Applications/Potluck Menu.app (ad hoc signed)
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar
 open ~/Applications/"Potluck Menu.app"
 ```
 
+`--menubar` is off unless you ask for it. It installs potluck as usual, then takes `Potluck-Menu.zip` out of the same
+signed tarball (its hash is in the signed manifest, and install.sh checks it again), unpacks it into
+`~/Applications` (`POTLUCK_MENUBAR_DIR` changes that) and replaces an older copy, asking a running one to quit first.
+A release built without the app makes `--menubar` stop after installing potluck and say so. The app is a universal
+binary (Apple silicon and Intel), macOS 13 or newer.
+
+**This build is not Developer ID signed or notarized yet.** It is signed ad hoc. Installed this way (curl, not a
+browser download) macOS runs it. If you unzip a copy you downloaded in a browser and macOS refuses it, right-click
+it in Finder and choose Open once. The installer says "not Developer ID signed" while that is true.
+
+To start it at login, add it in System Settings > General > Login Items. Quit it from its menu. To update the app,
+run the installer with `--menubar` again; `potluck upgrade` does not touch it yet.
+
 It looks for `potluck` in `$POTLUCK_BIN`, then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and
-`~/go/bin`. To start it at login, add it in System Settings > General > Login Items. Quit it from its menu.
+`~/go/bin`.
 
 Setting the switch writes `/Users/Shared/Potluck/host-override.json` as you, so run the app as the user who owns
 the host (the one who ran `potluck host`).
+
+## Build it from source
+
+On a Mac with the Xcode command line tools:
+
+```sh
+macos/PotluckMenu/build.sh ~/Applications   # writes ~/Applications/Potluck Menu.app (ad hoc signed, this Mac's CPU)
+open ~/Applications/"Potluck Menu.app"
+```
+
+`POTLUCK_MENU_UNIVERSAL=1` builds both CPUs, as the release does.
+
+## How the release builds it
+
+`.github/workflows/release.yml` builds the app in its own job on a GitHub-hosted Mac (`macos-latest`, never a
+self-hosted runner), zips it (`ditto`), and `scripts/release -menubar` puts the zip into each darwin tarball. If that
+job fails, the release still ships, without the app.

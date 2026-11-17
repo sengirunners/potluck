@@ -21,6 +21,7 @@ import (
 	"github.com/sengirunners/potluck/kit/project"
 	"github.com/sengirunners/potluck/kit/secrets"
 	"github.com/sengirunners/potluck/kit/store"
+	"github.com/sengirunners/potluck/kit/tunnel"
 	"github.com/sengirunners/potluck/runtarget/rt"
 )
 
@@ -89,6 +90,7 @@ func moduleDeps(t *testing.T, iss map[string]config.SecretsIssuer) (*core.Deps, 
 	t.Cleanup(func() { st.Close() })
 	cfg := &config.Config{Home: home, Human: "judy", Machine: "mini"}
 	cfg.File.Secrets = config.Secrets{Issuers: iss}
+	cfg.File.Tunnel.URL = testTunnelURL
 	reg, err := project.Open(ctx, st, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +103,7 @@ func moduleDeps(t *testing.T, iss map[string]config.SecretsIssuer) (*core.Deps, 
 	rts := &fakeRunTargets{}
 	d.Provide(rt.Name, rt.Service(rts))
 	d.Provide(rt.DoorName, rt.Door(rts))
+	tunnel.New(d)
 	return d, rts, ref.ID
 }
 

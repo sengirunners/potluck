@@ -67,6 +67,26 @@ func TestRunNeedsItsFlags(t *testing.T) {
 	}
 }
 
+// The box-authority flags go together, on a box target, with a file that
+// is a box credential; anything else is a usage error before any call.
+func TestBoxAuthorityFlags(t *testing.T) {
+	p, _ := ref(t, "")
+	notCred := filepath.Join(t.TempDir(), "cred")
+	if err := os.WriteFile(notCred, []byte("potluck_not-a-credential"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, argv := range map[string][]string{
+		"client without a credential": {p, "--kind", "box", "--box-client", "potluck status", "--box-want", "orchid"},
+		"credential without a client": {p, "--kind", "box", "--box-credential", notCred, "--box-want", "orchid"},
+		"not a credential":            {p, "--kind", "box", "--box-credential", notCred, "--box-client", "potluck status", "--box-want", "orchid"},
+		"no such file":                {p, "--kind", "box", "--box-credential", notCred + "-gone", "--box-client", "potluck status", "--box-want", "orchid"},
+	} {
+		if code := run(argv); code != 2 {
+			t.Errorf("%s: %d, want 2", name, code)
+		}
+	}
+}
+
 func TestExitCodes(t *testing.T) {
 	argv := func(p string, repo refdriver.Repo, extra ...string) []string {
 		return append([]string{p, "--kind", "run", "--config", "remote=" + repo.Remote, "--ref", "main", "--commit", repo.Commit,

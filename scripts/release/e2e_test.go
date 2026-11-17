@@ -76,7 +76,7 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		if err := os.MkdirAll(r.dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := run(r.version, r.commit, r.dir, []string{target}, true); err != nil {
+		if err := run(r.version, r.commit, r.dir, []string{target}, ""); err != nil {
 			t.Fatalf("build %s: %v", r.version, err)
 		}
 		if _, err := release.Potluck.SignDir(r.dir, r.version, r.commit, r.created, key); err != nil {
@@ -250,6 +250,14 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		if out, err := install(env3, "--from", relA, "--trust-dir"); err != nil || !strings.Contains(out, "the signature was NOT checked") {
 			t.Fatalf("--from --trust-dir (%v):\n%s", err, out)
 		}
+		// A malformed trusted key refuses before anything else, --trust-dir or not.
+		bin8 := filepath.Join(tmp, "bin8")
+		env8 := cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home, "POTLUCK_INSTALL_DIR="+bin8,
+			"POTLUCK_UPDATE_KEY=ssh-ed25519", "PATH="+weak+":"+sysPath)
+		if out, err := install(env8, "--from", relA, "--trust-dir"); err == nil || !strings.Contains(out, "is not ed25519:<base64>") {
+			t.Fatalf("a malformed POTLUCK_UPDATE_KEY was accepted (%v):\n%s", err, out)
+		}
+		empty(bin8)
 	}
 
 	// A first install refuses all three forgeries; nothing from them runs.
@@ -258,7 +266,7 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 	} else {
 		for _, c := range []struct{ dir, want string }{
 			{unsigned, "has no signature"},
-			{wrongKey, "does not verify with the release key"},
+			{wrongKey, "does not verify with any release key"},
 			{notInManifest, "does not match the manifest"},
 		} {
 			if out, err := install(env, "--from", c.dir); err == nil || !strings.Contains(out, c.want) {
@@ -465,12 +473,21 @@ exec %s "$@"
 		if out, err := gh(); err == nil || !strings.Contains(out, "answered 404 with no token") {
 			t.Fatalf("no token (%v):\n%s", err, out)
 		}
-		out, err := gh("GH_TOKEN=tok")
+		out, err := gh("GH_TOKEN=tok", "SHELL=/bin/zsh")
 		if err != nil || !strings.Contains(out, "installed potluck "+verB) || !strings.Contains(out, "is not on your PATH") {
 			t.Fatalf("with a token (%v):\n%s", err, out)
 		}
+		// zsh does not read ~/.profile: the hint names ~/.zshrc, and the
+		// verified line names no temporary directory.
+		if !strings.Contains(out, ">> ~/.zshrc") || strings.Contains(out, ".profile") || strings.Contains(out, "/release:") {
+			t.Fatalf("the PATH hint or the verified line:\n%s", out)
+		}
 		if ossl != "" && !strings.Contains(out, "signature verified") {
 			t.Fatalf("the download's signature was not checked:\n%s", out)
+		}
+		// Another shell, another hint (fish quotes the directory).
+		if fo, ferr := gh("GH_TOKEN=tok", "SHELL=/usr/bin/fish"); ferr != nil || !strings.Contains(fo, `fish_add_path "`) {
+			t.Fatalf("fish hint (%v):\n%s", ferr, fo)
 		}
 		// With no openssl that checks Ed25519, the download is trusted over
 		// HTTPS, and the script says so.
@@ -479,7 +496,8 @@ exec %s "$@"
 		c := exec.Command("sh", filepath.Join(root, "install.sh"))
 		c.Env = weakEnv
 		o, err := c.CombinedOutput()
-		if err != nil || !strings.Contains(string(o), "the signature was NOT checked") || !strings.Contains(string(o), "trusting the download over HTTPS") {
+		if err != nil || !strings.Contains(string(o), "the signature was NOT checked") || !strings.Contains(string(o), "trusting the download over HTTPS") ||
+			!strings.Contains(string(o), "delete "+filepath.Join(tmp, "bin4", "potluck")) {
 			t.Fatalf("no openssl, from GitHub (%v):\n%s", err, o)
 		}
 	})

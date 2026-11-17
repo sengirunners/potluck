@@ -155,6 +155,7 @@ type boxes struct {
 	mu      sync.Mutex
 	vals    map[string]map[string]string
 	fail    error
+	quote   func(string) string // set with fail: what the refusal quotes of the value (default all of it)
 	pan     bool
 	gate    chan struct{} // set: Deliver waits for it
 	slow    time.Duration
@@ -178,7 +179,11 @@ func (b *boxes) Deliver(_ context.Context, box Box, name string, v secrets.Value
 		panic("deliver blew up holding " + v.Reveal())
 	}
 	if b.fail != nil {
-		return fmt.Errorf("%w: the box refused %s", b.fail, v.Reveal())
+		q := v.Reveal()
+		if b.quote != nil {
+			q = b.quote(q)
+		}
+		return fmt.Errorf("%w: the box refused %s", b.fail, q)
 	}
 	if b.vals[box.key()] == nil {
 		b.vals[box.key()] = map[string]string{}

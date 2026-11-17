@@ -311,6 +311,10 @@ type MintTokenRequest struct {
 	Note       string `json:"note,omitempty"`
 	// NoGrant mints without adding the matching grant (the identity must already have one).
 	NoGrant bool `json:"no_grant,omitempty"`
+	// BoxKey binds the token to one box's key (its key id, "zmkey:<fp>"):
+	// it then works only over the tunnel, on requests that key signed. Set
+	// by the potluck-token kind in process; never read from the wire.
+	BoxKey string `json:"-"`
 }
 
 // MintTokenResponse carries the secret, once.

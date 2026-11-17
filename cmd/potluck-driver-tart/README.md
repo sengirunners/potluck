@@ -1,6 +1,6 @@
 # potluck-driver-tart
 
-Built from `cmd/potluck-driver-tart` (and under its old name `zm-run-tart` from `cmd/zm-run-tart`); the code is in `vmhost`.
+Built from `cmd/potluck-driver-tart`; the code is in `vmhost`. (A machine that ran it under its old name, `zm-run-tart`: [docs/coming-from-zm.md](../../docs/coming-from-zm.md).)
 
 A run target ([driver protocol](../../docs/protocol.md); `kind = "run"`, `isolation = "ephemeral"`, `credentials = false`) that runs each job in a
 throwaway [Tart](https://github.com/openai/tart) VM on this Mac.
@@ -12,7 +12,7 @@ outbound mail to anywhere (`out proto tcp port 25`, `465`, `587`), so a guest ca
 no IPv6 out. It holds a clean checkout of exactly `commit`. The script runs through
 the Tart guest agent and its exit code passes through. `acquire` answers once the script has started (about 6 s
 for an Ubuntu guest). A detached supervisor per run ends it at `expires_at` (exit 124), on release, on reclaim,
-or when the script exits, then deletes the clone, whether or not zm is up. If a supervisor dies, the next call
+or when the script exits, then deletes the clone, whether or not the daemon is up. If a supervisor dies, the next call
 to the driver ends its VM. `expires_at` counts from the script's start, not the clone's; the lifetime cap counts
 from `acquire`.
 
@@ -21,11 +21,11 @@ from `acquire`.
 ```sh
 # Tart from its release (Homebrew's cirruslabs tap is stale); Softnet must be setuid root:
 sudo install -o root -g wheel -m 4755 softnet /usr/local/bin/softnet
-tart clone ghcr.io/cirruslabs/ubuntu:latest zmrt-base-ubuntu        # Linux: ~5 GB, uncapped
-tart clone ghcr.io/cirruslabs/macos-tahoe-base:latest zmrt-base-macos # macOS: at most 2 running per Mac
+tart clone ghcr.io/cirruslabs/ubuntu:latest potluck-base-ubuntu     # Linux: ~5 GB, uncapped
+tart clone ghcr.io/cirruslabs/macos-tahoe-base:latest potluck-base-macos  # macOS: at most 2 running per Mac
 ```
 
-The base image needs `git` and the Tart guest agent (Cirrus images have both). zm drives a guest only through that agent: before a VM serves
+The base image needs `git` and the Tart guest agent (Cirrus images have both). Potluck drives a guest only through that agent: before a VM serves
 anything, the driver stops its SSH and macOS Screen Sharing (Cirrus images keep both on with admin/admin, and Softnet
 takes inbound connections) as root through `sudo -n`, and ends the VM while port 22 or 5900 still answers.
 
@@ -37,7 +37,7 @@ takes inbound connections) as root through `sudo -n`, and ends the VM while port
 | `remote` | required | the repo's remote. A URL is fetched inside the guest (`--depth 1` of `commit`). A local path, or `fetch = "host"`, is fetched on the host and copied in as a bundle, so private repos need no credential in the guest. A URL with credentials and guest fetch is refused. |
 | `fetch` | `auto` | `auto`, `guest` or `host` |
 | `scripts_dir` | repo root | where script names resolve. An executable file runs directly, any other runs with `sh`. |
-| `network` | `softnet` | `nat` is for development only: the guest reaches the host and the LAN, so the binding describes `isolation = "none"` (on every layer: Softnet off on Tart, the fence unchecked on Incus, any `oci_network` on OCI), and zm refuses it as a box |
+| `network` | `softnet` | `nat` is for development only: the guest reaches the host and the LAN, so the binding describes `isolation = "none"` (on every layer: Softnet off on Tart, the fence unchecked on Incus, any `oci_network` on OCI), and Potluck refuses it as a box |
 | `linux_slots` / `macos_slots` | 2 / 2 | concurrent runs. macOS is capped at 2 per host, counting every running macOS VM. |
 | `cpu`, `memory` | the image's | per-VM CPUs and MB |
 | `ttl_max_s` | 14400 | lifetime cap since acquire |
@@ -62,21 +62,21 @@ takes inbound connections) as root through `sudo -n`, and ends the VM while port
 | `shelf_fill_mbit` | 16 | the host's download rate for shelf fills, in Mbit/s (at least 1) |
 | `shelf_fill_delay_s` | 300 | how long a live box's requests wait before the host fetches them (or until the box ends) |
 | `warm` | 0 | a box binding keeps this many boxes booted and idle; an acquire of the default image (no persist, volumes or jit_config) takes one at once. Warm boxes hold the binding's slots (a cold acquire ends one for its slot) but no `admission_url` lease until taken |
-| `persist_keep_s` | 2592000 (30 days) | how long a stopped box's disk is kept before the driver deletes it (at least 60). On `vm=oci` a kept box is the same container, its HOME also on a volume `<vm>-home`; under runsc (Docker) it gets the annotation `dev.gvisor.flag.overlay2=none` so its root's changes survive a stop too (runsc's default overlay drops them; a runsc whose override allowlist lacks overlay2 fails the kept box's boot, and the error names its version). Stopped boxes are live handles: rebinding or removing the binding is refused until they are released (`zm sandbox ls` lists them, `zm sandbox rm` deletes each disk) |
+| `persist_keep_s` | 2592000 (30 days) | how long a stopped box's disk is kept before the driver deletes it (at least 60). On `vm=oci` a kept box is the same container, its HOME also on a volume `<vm>-home`; under runsc (Docker) it gets the annotation `dev.gvisor.flag.overlay2=none` so its root's changes survive a stop too (runsc's default overlay drops them; a runsc whose override allowlist lacks overlay2 fails the kept box's boot, and the error names its version). Stopped boxes are live handles: rebinding or removing the binding is refused until they are released (`potluck sandbox ls` lists them, `potluck sandbox rm` deletes each disk) |
 | `tart` | `tart` on PATH | the tart binary |
 | `vm` | `tart` | the VM layer: `tart` (a Mac) or `oci` (a Linux box, below). |
 | `oci_runtime` | required with `vm=oci` | a runtime that is a boundary: Kata (`io.containerd.kata.v2`, `kata-fc`, ...) or gVisor (`runsc`, or `runsc-root` for `root`/`docker`). `runc`, `crun` and `youki` are refused. |
 | `oci_cli` | `docker` | the container CLI: verified local Docker; Podman and nerdctl are unavailable for isolated boxes |
 | `root` | off | `on`, tart: a box binding on Softnet keeps its macOS image's passwordless `sudo` (Cirrus Labs' images give `admin` it): root inside a throwaway VM, as on GitHub's own macOS runners. Nothing in the VM changes; describe lists capability `root` for a macOS image only, and a Linux image on such a binding is refused (its root would hold `NET_ADMIN` and `NET_RAW`). Refused with `network=nat`, on a run binding, and with `docker`. Without it, conformance's root group fails an image whose sudo works. Root and Docker below. `on`, oci: the box's user has working `sudo` (no password); describe lists capability `root`. Drops `no-new-privileges` and `MKNOD` (and `NET_RAW` with no network) from the create and nothing else; needs a runtime that honours setuid in the box: `runsc-root` (docker only, checked against docker's runtimes before every box) or Kata, not plain `runsc`. Root and Docker below. |
 | `docker` | off | `on` (oci only; implies `root`): rootless Docker in the box, started by PID 1 (`zm-dockerd`), `DOCKER_HOST` set for every exec; describe lists capability `docker`. Root and Docker below. |
-| `oci_network` | `none` | `none`: no network, checkouts come in from the host (`fetch=auto` becomes host). Else a network you made for zm with egress filtered (below); the shared ones (`bridge`, `host`, `default`) are refused for isolated runs. A box binding lists capability `net-off` and takes `acquire`'s `net`: `off` makes that box with network `none` (and a host-fetched checkout) whatever the binding's network, `on` puts it on the binding's network (see `runner_dir`). Every box's acquire answer says `net`: `off` for a box made with network `none`, else `on`. zm sends `on` only for a trusted host's box, `off` for a public host's or when the renter asks (`zm sandbox create --net off`). |
-| `oci_dns` | `1.1.1.1,8.8.8.8` on a named network | the box's resolvers, comma-separated public IPs (at most 3; IPv6 only in `2000::/3`; private, CGNAT, loopback, link-local, multicast, documentation, Teredo, 6to4 and NAT64 are refused: the filter drops them, they can tunnel to a private address, or they are the host). Passed as `--dns` and, for docker and podman, as a read-only `/etc/resolv.conf` zm writes per box (`state_dir/oci-resolv/<vm>.conf`, removed with the box): on a user-defined network their own resolv.conf names Docker's embedded `127.0.0.11` or Podman's aardvark-dns on the gateway, which gVisor, Kata and the filter cannot reach. Refused with `oci_network=none` (and with a `container:`/`ns:` network, which keeps that namespace's DNS). DNS notes below. |
-| `incus_profile` | required with `vm=incus` | the profile every run's VM uses: the root disk and one NIC on your zm bridge with `security.port_isolation=true` and `security.acls` set (checked before boot) |
-| `incus_project` | `zm` | the Incus project made for zm (never `default`); its limits cap your share |
+| `oci_network` | `none` | `none`: no network, checkouts come in from the host (`fetch=auto` becomes host). Else a network you made for Potluck with egress filtered (below); the shared ones (`bridge`, `host`, `default`) are refused for isolated runs. A box binding lists capability `net-off` and takes `acquire`'s `net`: `off` makes that box with network `none` (and a host-fetched checkout) whatever the binding's network, `on` puts it on the binding's network (see `runner_dir`). Every box's acquire answer says `net`: `off` for a box made with network `none`, else `on`. Potluck sends `on` only for a trusted host's box, `off` for a public host's or when the renter asks (`potluck sandbox create --net off`). |
+| `oci_dns` | `1.1.1.1,8.8.8.8` on a named network | the box's resolvers, comma-separated public IPs (at most 3; IPv6 only in `2000::/3`; private, CGNAT, loopback, link-local, multicast, documentation, Teredo, 6to4 and NAT64 are refused: the filter drops them, they can tunnel to a private address, or they are the host). Passed as `--dns` and, for docker and podman, as a read-only `/etc/resolv.conf` Potluck writes per box (`state_dir/oci-resolv/<vm>.conf`, removed with the box): on a user-defined network their own resolv.conf names Docker's embedded `127.0.0.11` or Podman's aardvark-dns on the gateway, which gVisor, Kata and the filter cannot reach. Refused with `oci_network=none` (and with a `container:`/`ns:` network, which keeps that namespace's DNS). DNS notes below. |
+| `incus_profile` | required with `vm=incus` | the profile every run's VM uses: the root disk and one NIC on your Potluck bridge with `security.port_isolation=true` and `security.acls` set (checked before boot) |
+| `incus_project` | `zm` | the Incus project made for Potluck (named `zm` by default, never `default`); its limits cap your share |
 | `incus_remote` | the CLI's default | a remote reached with a client certificate restricted to that project; a unix-socket remote (incus-admin) is refused |
 | `incus_conf` | the CLI's own | `INCUS_CONF` for the incus CLI: the directory holding that certificate and remote |
 | `incus` | `incus` on PATH | the incus binary |
-| `admission_url` | off | the host's admission controller: zm asks it for room before every VM (contract below); needs `cpu` and `memory` |
+| `admission_url` | off | the host's admission controller: Potluck asks it for room before every VM (contract below); needs `cpu` and `memory` |
 | `admission_token_file` | none | a 0600 file whose contents go as `Authorization: Bearer` on every admission call |
 | `admission_ttl_s` | 120 (at least `boot_timeout_s` + 30) | the lease TTL; the supervisor renews at a third of it |
 
@@ -90,10 +90,10 @@ A box is a VM kept up for its lease, which its holder drives with `exec` ([proto
   own process group and enforces `timeout_s` with exit 124. When the command exits, the wrapper kills whatever
   it left behind, so nothing holds the output open.
 - `stdout` and `stderr` keep their first 1 MiB each. The image needs `perl` (Ubuntu's `perl-base`, macOS's
-  `/usr/bin/perl`), plus `git` for a checkout, and `nc` for the network checks `zm host share` runs (Debian and
+  `/usr/bin/perl`), plus `git` for a checkout, and `nc` for the network checks `potluck host` runs (Debian and
   Ubuntu: `netcat-openbsd`; `ip` from `iproute2` for the VM-to-VM check). A box image without `nc` fails them.
 - `exec`'s `secrets` (capability `secrets`): framed ahead of the command's stdin, written by the guest wrapper as
-  0600 files in a fresh 0700 dir under `/dev/shm`, named by `POTLUCK_SECRETS` and `ZM_SECRETS` for that command
+  0600 files in a fresh 0700 dir under `/dev/shm`, named by `POTLUCK_SECRETS` and `ZM_SECRETS` (the old name) for that command
   only, and removed when it ends or times out. Never in argv, the environment or the VM's config, and never on a
   disk: the wrapper checks the guest's `/proc/self/mounts` shows the dir on a tmpfs or ramfs and `/proc/swaps` lists
   no swap but zram (a tmpfs page can be swapped out), and the call is refused (`forbidden`) where they do not. There
@@ -114,7 +114,7 @@ A box is a VM kept up for its lease, which its holder drives with `exec` ([proto
 | `size` | the binding's one size name; `describe.size` is `{name, os, cpu, memory_mb}` |
 | `images` | comma list of OCI references pinned by digest (`ref@sha256:<64 hex>`), the first the default; `acquire`'s `image` picks one, and its answer carries that `image_digest`. Pull them first (`tart pull`). |
 | `cpu`, `memory` | required for a box |
-| `runner_dir` | the GitHub runner's directory in the image (relative to the guest user's home unless absolute). Set, the binding lists `github-jit` and takes `acquire`'s `jit_config`: the box's first command is that runner, its config handed over on stdin only. The authority registers and deregisters the runner. With `vm=oci` it needs an `oci_network` other than `none` (a runner must reach GitHub), which runner boxes get (an acquire with a `jit_config`, guarded or not: `jit_guard` is the caller's own), as does a box acquired with `net` `on` (zm sends it for a trusted host's box: a sandbox or a job reaches the internet through the same filter); a box acquired with `net` `off`, or with `net` unsaid (an older zm), has no network and a host-fetched checkout. `zm host share` sets it from the image's pin or `--runner-dir`. |
+| `runner_dir` | the GitHub runner's directory in the image (relative to the guest user's home unless absolute). Set, the binding lists `github-jit` and takes `acquire`'s `jit_config`: the box's first command is that runner, its config handed over on stdin only. The authority registers and deregisters the runner. With `vm=oci` it needs an `oci_network` other than `none` (a runner must reach GitHub), which runner boxes get (an acquire with a `jit_config`, guarded or not: `jit_guard` is the caller's own), as does a box acquired with `net` `on` (Potluck sends it for a trusted host's box: a sandbox or a job reaches the internet through the same filter); a box acquired with `net` `off`, or with `net` unsaid (an older daemon), has no network and a host-fetched checkout. `potluck host` sets it from the image's pin or `--runner-dir`. |
 
 ### GitHub runner version
 
@@ -187,30 +187,30 @@ FROM buildpack-deps:bookworm-scm
 RUN apt-get update && apt-get install -y --no-install-recommends netcat-openbsd iproute2 iputils-ping \
   && rm -rf /var/lib/apt/lists/*
 ```
-- zm's own such image is [images/linux/Dockerfile](images/linux/Dockerfile) (GitHub's runner image plus those tools),
-  built and pinned by `.github/workflows/box-images.yml`. `zm host share` and `zm pool host` lend the pins in
+- Potluck's own such image is [images/linux/Dockerfile](images/linux/Dockerfile) (GitHub's runner image plus those tools),
+  built and pinned by `.github/workflows/box-images.yml`. `potluck host` lends the pins in
   `imagepins/images.pin` when no `--image` is given (on a Mac, Cirrus Labs' `macos-tahoe-base`).
 - `reclaim_idle_s` is Mac-only (keyboard and pointer idle); on Linux use `window`.
-- On docker with systemd, `zm host doctor` prints the one root line that makes Potluck's own such network, `potluck-box`,
-  with its filter kept across reboots by a systemd unit (`potluck-box-net.service`, or `zm-box-net.service` on a machine set up as zm; [docs/network.md](../../docs/network.md)), and
-  `zm host share` / `zm pool host` use it for boxes that serve GitHub runners. Its drops sit in the raw table's
+- On docker with systemd, `potluck doctor` prints the one root line that makes Potluck's own such network, `potluck-box`,
+  with its filter kept across reboots by a systemd unit (`potluck-box-net.service`, or `zm-box-net.service` on a machine that ran Potluck as zm; [docs/network.md](../../docs/network.md)), and
+  `potluck host` uses it for boxes that serve GitHub runners. Its drops sit in the raw table's
   PREROUTING, where no other daemon's ACCEPT comes first (tailscaled's jumps at the top of FORWARD and INPUT would
   outrun DOCKER-USER rules such as those below). Elsewhere, by hand:
-- A network for jobs that need the internet: make one for zm and drop its traffic to private, CGNAT (tailnet),
+- A network for jobs that need the internet: make one for Potluck and drop its traffic to private, CGNAT (tailnet),
   link-local (metadata) and the host's own addresses, and outbound mail (tcp 25, 465, 587) to anywhere, for example
   with Docker's `DOCKER-USER` chain (the network has no IPv6 unless made with `--ipv6`; if it has, add the same
   rules with `ip6tables` for `fc00::/7`, `fe80::/10` and the mail ports):
 
 ```sh
-docker network create zm-egress --subnet 172.30.0.0/24
+docker network create potluck-egress --subnet 172.30.0.0/24
 for n in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16; do
   sudo iptables -I DOCKER-USER -s 172.30.0.0/24 -d $n -j DROP; done
 sudo iptables -I INPUT -s 172.30.0.0/24 -j DROP   # nothing on the host itself (DNS goes to oci_dns's public resolvers)
 sudo iptables -I DOCKER-USER -s 172.30.0.0/24 -p tcp -m multiport --dports 25,465,587 -j REJECT --reject-with tcp-reset   # no outbound mail
 ```
 
-then `oci_network=zm-egress`. zm cannot read firewall rules: naming the network is the owner's word that it is
-filtered, mail included: `zm host share --oci-network` refuses it without `--net-mail <an outside mail server>`,
+then `oci_network=potluck-egress`. Potluck cannot read firewall rules: naming the network is the owner's word that it is
+filtered, mail included: `potluck host --oci-network` refuses it without `--net-mail <an outside mail server>`,
 which conformance then checks from a box; a size binds only if that check passed (the server must open from this
 machine). `oci_network=none`
 has no network, so nothing leaves at all.
@@ -229,7 +229,7 @@ conformance DNS check fails before anything binds):
 ### Root and Docker (`root=on`, `docker=on`)
 
 [Protocol: Root and Docker](../../docs/protocol.md#root-and-docker). What each layer gives, measured on dev hardware on
-2026-11-09 (runsc release-20261102.0, docker 29, zm's Linux image):
+2026-11-09 (runsc release-20261102.0, docker 29, Potluck's Linux image):
 
 | layer | sudo | docker run | how |
 | --- | --- | --- | --- |
@@ -245,13 +245,12 @@ instead of lending root unannounced. Root in a macOS guest may do anything insid
 it: the VM itself, and Softnet on the host (it enforces the VM's MAC address and filters what leaves). A macOS
 guest has no Linux bounding set, so conformance's root group skips those three checks for it and instead runs the
 net probe under `sudo`: its control must see a port open in the box, and no `--net-forbid` or `--net-mail` address
-that opens from the host may open from root's shell; with no such address the check fails. `potluck host --root`
-(and `zm host share --root` / `zm pool host --root`) binds it.
+that opens from the host may open from root's shell; with no such address the check fails. `potluck host --root` binds it.
 
-`zm host share --docker` sets it up, and a re-run without the flag keeps it (`--docker=false` turns it off). On
+`potluck host --docker` sets it up, and a re-run without the flag keeps it (`--docker=false` turns it off). On
 docker with gVisor it registers `runsc-root` once: it copies `/etc/docker/daemon.json` to
 `daemon.json.zm-bak-<date and time>` first (gVisor's own `daemon.json~` is rewritten by every `runsc install`, so
-after zm installed gVisor it no longer holds your file), runs `<runsc> install --runtime=runsc-root --clobber
+after Potluck installed gVisor it no longer holds your file), runs `<runsc> install --runtime=runsc-root --clobber
 --download-sidecars=NEVER -- --allow-suid`, and reloads docker (`systemctl reload docker`, else SIGHUP to
 `/var/run/docker.pid`). That is one new key; the `runsc` entry, every default box and any container of your own
 are unchanged. It binds each size with `oci_runtime=runsc-root docker=on`, and conformance group `root` must
@@ -275,7 +274,7 @@ act on its neighbours on the shared bridge: `NET_ADMIN` (a rootful dockerd needs
 `--allow-packet-socket-write` (gVisor's documented Docker-in-gVisor bridge setup).
 
 A kept box (`persist`) keeps the root and docker it was made with, since `start` reuses its container: a start
-after the binding's `root` or `docker` changed is refused (`conflict`; the disk stays kept until `zm sandbox rm`
+after the binding's `root` or `docker` changed is refused (`conflict`; the disk stays kept until `potluck sandbox rm`
 or its time). The limits:
 
 - inside a box, `docker run` and `docker build` have no network unless given `--network host` (the internet,
@@ -286,7 +285,7 @@ or its time). The limits:
 
 ## Linux boxes with Incus (`vm=incus`)
 
-Each run is a KVM virtual machine under Incus. zm never uses incus-admin: it reaches Incus with its own client
+Each run is a KVM virtual machine under Incus. Potluck never uses incus-admin: it reaches Incus with its own client
 certificate, restricted to one project, so it cannot see or touch any other project's instances. Before each boot
 it reads the VM's expanded config and refuses a host path, any device but the root disk and NICs, any `raw.*` key,
 and (for an isolated run) a NIC without port isolation and an ACL, or whose ACLs (read through that certificate) drop or
@@ -295,13 +294,13 @@ a VM whose supervisor goes is deleted, retried through such a restart.
 
 What the owner makes once (as root; no Potluck command prints these yet):
 
-- a project for zm with limits for your share (`limits.instances`, `limits.cpu`, `limits.memory`), made
+- a project for Potluck with limits for your share (`limits.instances`, `limits.cpu`, `limits.memory`), made
   `restricted=true` with `restricted.devices.nic=managed` and `restricted.devices.disk=managed`, so Incus itself
-  refuses host paths and unmanaged NICs (zm also checks each VM before and after it starts);
-- a bridge for zm, and an ACL on it whose egress rejects private IPv4 (RFC 1918), CGNAT/tailnet `100.64.0.0/10`,
+  refuses host paths and unmanaged NICs (Potluck also checks each VM before and after it starts);
+- a bridge for Potluck, and an ACL on it whose egress rejects private IPv4 (RFC 1918), CGNAT/tailnet `100.64.0.0/10`,
   link-local and metadata `169.254.0.0/16`, the host's own addresses, IPv6 ULA `fc00::/7`, link-local `fe80::/10` and
   your LAN's global IPv6 prefix, rejects outbound mail (`incus network acl rule add <acl> egress action=reject
-  protocol=tcp destination_port=25,465,587`; zm refuses to boot without it), and allows the rest (DNS included);
+  protocol=tcp destination_port=25,465,587`; Potluck refuses to boot without it), and allows the rest (DNS included);
 - a profile in that project: a root disk, and `eth0` on the bridge with `security.port_isolation=true` and
   `security.acls=<that ACL>`;
 - a client certificate trusted with `incus config trust add-certificate <crt> --restricted --projects <project>`, and
@@ -310,20 +309,20 @@ What the owner makes once (as root; no Potluck command prints these yet):
 
 ## Sharing a host with other work (`admission_url`)
 
-A host that also runs other work (a CI pool, its owner's jobs) can make zm ask before every VM. The run's
-supervisor does every call, so the lease holds while zm is down, as the TTL does. JSON over HTTP:
+A host that also runs other work (a CI pool, its owner's jobs) can make Potluck ask before every VM. The run's
+supervisor does every call, so the lease holds while the daemon is down, as the TTL does. JSON over HTTP:
 
 | call | answer |
 | --- | --- |
 | `POST <url>/leases` `{"vcpu", "memory_mib", "holder", "ttl_s"}` | `201` (`200` for a repeat of the same `holder`) `{"lease", "expires_at"}`; `409` `{"reason", "retry_s"}`: no room now, and the acquire answers `unavailable` with both |
-| `POST <url>/leases/{lease}/renew` `{"ttl_s"}` | `200` `{"expires_at"}`; `404` or `410`: the room is wanted back, and zm ends the VM as `reclaimed` (never billed) |
+| `POST <url>/leases/{lease}/renew` `{"ttl_s"}` | `200` `{"expires_at"}`; `404` or `410`: the room is wanted back, and Potluck ends the VM as `reclaimed` (never billed) |
 | `DELETE <url>/leases/{lease}` | `204`, or `404` when it is gone already |
 
-`holder` is `zm:<target>/<run>`, unique per run. A dead supervisor stops renewing, so its room is free within one
-TTL; a lease whose renewals fail until it lapses ends the VM too, so zm never runs on room the controller may have
+`holder` is `zm:<target>/<run>` (the prefix is kept from before the rename), unique per run. A dead supervisor stops renewing, so its room is free within one
+TTL; a lease whose renewals fail until it lapses ends the VM too, so Potluck never runs on room the controller may have
 handed on.
 
-`zm host share` and `zm pool host` bind these keys on every size: `--admission-url URL`, `--admission-token-file PATH`
+`potluck host` binds these keys on every size: `--admission-url URL`, `--admission-token-file PATH`
 (a 0600 file, bound as an absolute path) and `--admission-ttl-s N` (120..3600, outlasting `boot_timeout_s` by 30 s),
 checked as above before anything runs. Conformance runs with them too: its boxes are real VMs on the same room, so
 they take leases like a renter's, and a controller with no room fails the run (nothing binds; try again later). A
@@ -332,7 +331,7 @@ its own key); `--admission-url URL` takes the flags alone; `--admission-url none
 bindings it replaces, in the scope it binds in; when they cannot be read (the daemon, the list, or a view without their
 config), share refuses unless `--admission-url none`, rather than drop the keys or leave a keyless one live. A run with no room says so (`the admission controller had no room now; try again later`).
 When a run that adds the keys (the first switch-on too) leaves a size unbound, share unbinds that size's earlier
-binding in the same scope when it lacks them, whose boxes the controller would not count (or says it is still live WITHOUT admission when it cannot). `zm host doctor`
+binding in the same scope when it lacks them, whose boxes the controller would not count (or says it is still live WITHOUT admission when it cannot). `potluck doctor`
 prints one `admission:` line per controller, naming the bindings that ask it.
 
 ## A guarded uplink: a download cap and a cache (`vm=oci`)
@@ -392,7 +391,7 @@ settings, both off by default; neither needs anything of the image or the job:
 
 ```sh
 potluck-conformance potluck-driver-tart --remote --ref main --commit <older pushed commit with probe.sh> \
-  --repo <remote> --script probe.sh --config image=zmrt-base-ubuntu --config remote=<remote> \
+  --repo <remote> --script probe.sh --config image=potluck-base-ubuntu --config remote=<remote> \
   --reclaim-config 'window={window}' --reclaim-config drain_deadline_s=0 --reclaim-in 90s
 ```
 

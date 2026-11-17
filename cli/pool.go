@@ -52,12 +52,17 @@ func (a *app) createCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <pool> [--via tunnel]",
 		Short: "Start a pool on this machine, which runs it; then invite friends with potluck invite",
-		Long: `Create makes the pool (a team project with the areas "team" and "hosts"),
-makes this machine the one that runs it and brings its tailnet node up
-(the first time, it prints a login URL and waits). Each friend's machine must
-reach this one: on your tailnet, or with this machine shared into theirs.
-With --via tunnel no tailnet is needed: this machine's tunnel (config.json
-"tunnel") carries the pool. Running it again on an existing pool is safe.`,
+		Long: `Create makes a pool: the group of machines you and your friends lend and
+use. This machine runs it. By default machines reach each other over
+Tailscale (a free Tailscale account, not a Potluck one): the first time,
+create prints a login link and waits for you to sign in. Friends' machines
+must reach this one: on your tailnet, or with this machine shared into theirs.
+With --via tunnel no Tailscale is needed: a tunnel you configure (config.json
+"tunnel") carries the pool to friends. With none configured the pool works on
+this machine alone, which is enough to try Potluck by yourself (potluck host
+--reclaim-idle-s 0, then potluck sandbox create; on a Mac a sandbox otherwise
+waits until you have been idle for five minutes and ends when you touch the
+keyboard). Running create again on an existing pool is safe.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, _, err := a.client()

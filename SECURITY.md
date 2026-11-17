@@ -20,7 +20,7 @@ fixed timeline.
 ## Known limits, not bugs
 
 - The machine that runs a box can read everything in it. Do not put secrets in a box on a machine you do not trust.
-- `zm-run-local` runs jobs unsandboxed as its own user.
+- `potluck-driver-local` runs jobs unsandboxed as its own user.
 - A network on the OCI layer is only as filtered as the firewall the host's owner set up.
 - The conformance suite proves how a driver behaves. It does not prove that the driver's author can be trusted.
 

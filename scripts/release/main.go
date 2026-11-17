@@ -4,14 +4,20 @@
 // format `shasum -a 256 -c` reads. scripts/release-sign signs them; it
 // publishes nothing.
 //
-//	go run ./scripts/release -version main-1eacf23e722f -commit <sha> [-out dist] [-targets darwin/arm64,linux/amd64]
+//	go run ./scripts/release -version main-1eacf23e722f -commit <sha> [-out dist] [-targets darwin/arm64,linux/amd64] [-menubar Potluck-Menu.zip]
+//
+// -menubar names a zip of Potluck Menu.app (macos/PotluckMenu, built on a
+// macOS runner: swiftc is not Go); it goes into each darwin tarball as
+// MenubarZip, so the signed manifest's hash covers it and install.sh
+// --menubar unpacks it from there. No -menubar, no app in the tarballs.
 //
 // Builds are CGO_ENABLED=0 and -trimpath, stamped with -ldflags so
 // `potluck --version` names the release; archive entries are sorted and
 // carry one fixed time (SOURCE_DATE_EPOCH, else the commit's time), so the
 // same commit and Go version give byte-identical tarballs. It refuses to
-// build while internal/upgrade.ReleaseKey is the placeholder, unless -dev
-// (a local or test release, whose key goes in config update_keys).
+// build while internal/upgrade/release_keys.txt is empty or malformed: such
+// a build would refuse every upgrade. A local or test release signed with
+// another key is trusted through config update_keys.
 package main
 
 import (
@@ -19,7 +25,6 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -56,6 +61,10 @@ var TargetCommands = map[string][]string{
 // Docs are copied next to the programs.
 var Docs = []string{"README.md", "LICENSE", "NOTICE"}
 
+// MenubarZip is the name of Potluck Menu.app's zip inside a darwin tarball
+// (docs/menubar.md); install.sh --menubar reads it by this name.
+const MenubarZip = "Potluck-Menu.zip"
+
 const module = "github.com/sengirunners/potluck"
 
 var versionRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
@@ -65,9 +74,9 @@ func main() {
 	commit := flag.String("commit", "unknown", "commit stamped into the programs")
 	out := flag.String("out", "dist", "output directory (its old tarballs, SHA256SUMS, manifest and .build are replaced; nothing else is touched)")
 	targets := flag.String("targets", strings.Join(Targets, ","), "comma list of os/arch")
-	dev := flag.Bool("dev", false, "build although the release key is the placeholder (a local or test release)")
+	menubar := flag.String("menubar", "", "a zip of Potluck Menu.app to put in each darwin tarball as "+MenubarZip)
 	flag.Parse()
-	if err := run(*version, *commit, *out, strings.Split(*targets, ","), *dev); err != nil {
+	if err := run(*version, *commit, *out, strings.Split(*targets, ","), *menubar); err != nil {
 		fmt.Fprintln(os.Stderr, "release:", err)
 		os.Exit(1)
 	}
@@ -78,12 +87,12 @@ func commandsFor(goos, goarch string) []string {
 	return append(append([]string(nil), Commands...), TargetCommands[goos+"/"+goarch]...)
 }
 
-func run(version, commit, out string, targets []string, dev bool) error {
+func run(version, commit, out string, targets []string, menubar string) error {
 	if !versionRE.MatchString(version) {
 		return fmt.Errorf("bad version %q", version)
 	}
-	if upgrade.ReleaseKey == upgrade.KeyPlaceholder && !dev {
-		return errors.New("internal/upgrade.ReleaseKey is the placeholder: set it to the channel's public key (or pass -dev for a local release)")
+	if _, err := upgrade.ReleaseKeys(); err != nil {
+		return err
 	}
 	mtime, err := sourceTime()
 	if err != nil {
@@ -122,6 +131,11 @@ func run(version, commit, out string, targets []string, dev bool) error {
 		for _, d := range Docs {
 			if err := copyFile(d, filepath.Join(dir, d)); err != nil {
 				return err
+			}
+		}
+		if menubar != "" && goos == "darwin" {
+			if err := copyFile(menubar, filepath.Join(dir, MenubarZip)); err != nil {
+				return fmt.Errorf("-menubar: %w", err)
 			}
 		}
 		tarball := filepath.Join(out, name+".tar.gz")

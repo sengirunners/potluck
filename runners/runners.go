@@ -234,6 +234,9 @@ type Service struct {
 
 	checksOnce sync.Once
 	checks     *checks // the checker's memory (check.go)
+
+	dropsMu sync.Mutex
+	drops   map[string]time.Time // why a delivery was dropped -> when that was last logged (accounts.go)
 }
 
 // publicListener is the runners.listen socket being served.
@@ -271,6 +274,7 @@ func (s *Service) conf() config.Runners {
 	s.cfgMu.RLock()
 	c := s.d.Config.File.Runners
 	c.Pool.Sizes = maps.Clone(c.Pool.Sizes)
+	c.Accounts = slices.Clone(c.Accounts)
 	s.cfgMu.RUnlock()
 	if c.Label == "" {
 		c.Label = c.Pool.Project // a pool's jobs ask for it by name: runs-on: <pool>

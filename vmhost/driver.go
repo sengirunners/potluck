@@ -50,6 +50,9 @@ func Main(argv []string) int {
 	if len(argv) > 0 && argv[0] == "host" { // hostset.go: the owner's override
 		return hostCmd(argv[1:], os.Stdin, os.Stdout, os.Stderr)
 	}
+	if code, done := usageOnly(argv, os.Stdin, os.Stdout, os.Stderr); done {
+		return code
+	}
 	in, _ := io.ReadAll(os.Stdin)
 	var req struct {
 		Verb   string            `json:"verb"`

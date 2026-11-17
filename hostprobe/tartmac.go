@@ -56,7 +56,7 @@ func tartDir(f Facts) string {
 func detectSoftnet(ctx context.Context, run Runner, f Facts, l *Layer) {
 	path, ok := f.LookPath("softnet")
 	if !ok {
-		l.Problems = append(l.Problems, "Softnet is not installed (Tart's isolated network needs it): download softnet from github.com/cirruslabs/softnet/releases and put it on your PATH, then run `zm host doctor` for the root step that makes it setuid")
+		l.Problems = append(l.Problems, "Softnet is not installed (Tart's isolated network needs it): download softnet.tar.gz from https://github.com/openai/softnet/releases/latest, unpack it and put softnet on your PATH, then run `zm host doctor` for the root step that makes it setuid")
 		return
 	}
 	res, err := runBounded(ctx, run, "stat", "-L", "-f", "%Sp %Su", path)

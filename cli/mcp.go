@@ -22,7 +22,9 @@ func (a *app) mcpCmd() *cobra.Command {
 			}
 			c.Autostart = nil
 			c.As = as
-			c.Token = os.Getenv("POTLUCK_TOKEN")
+			if os.Getenv(EnvBoxCredential) == "" { // a box's client carries its own token
+				c.Token = os.Getenv("POTLUCK_TOKEN")
+			}
 			return sandboxmcp.Serve(cmd.Context(), func(ctx context.Context) (*client.Client, error) {
 				if c.Project != "" {
 					return c, nil

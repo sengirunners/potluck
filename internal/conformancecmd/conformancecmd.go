@@ -100,7 +100,7 @@ func run(argv []string) int {
 	fs := flag.NewFlagSet("potluck-conformance", flag.ContinueOnError)
 	opt := conformance.Options{Config: map[string]string{}, OutsideConfig: map[string]string{}, ReclaimConfig: map[string]string{}}
 	var asJSON, printProbe bool
-	var dbProbe, only string
+	var dbProbe, only, boxCred, boxClient, boxWant string
 	fs.StringVar(&opt.Kind, "kind", "", "db, run or box (default: what describe answers; a driver serving more than one needs this)")
 	fs.StringVar(&opt.Target, "target", "", "the binding name sent in config (default potluck-conformance)")
 	fs.Var(kv(opt.Config), "config", "driver config key=value, sent with every request (repeatable)")
@@ -128,6 +128,9 @@ func run(argv []string) int {
 	fs.Var((*dirs)(&opt.StateDirs), "state-dir", "a directory the driver keeps its records and logs in, searched for a box secret's value (repeatable; default: config state_dir and ~/.potluck-driver-<name>, where they exist)")
 	fs.BoolVar(&opt.Strict, "strict", false, "fail (exit 1) when a network or expiry check was skipped or did not run, or a run or box lacks --net-forbid or --net-peers")
 	fs.BoolVar(&printProbe, "print-probe", false, "print the probe script to commit, and exit")
+	fs.StringVar(&boxCred, "box-credential", "", "a box credential file (what a potluck-token grant delivers) for an authority the boxes can reach: runs group box-authority (with --box-client and --box-want)")
+	fs.StringVar(&boxClient, "box-client", "", `the command, split on spaces, a box runs with $POTLUCK_BOX_CREDENTIAL naming the credential (e.g. "potluck status --json")`)
+	fs.StringVar(&boxWant, "box-want", "", "what --box-client prints when it reached the authority (e.g. the pool's name)")
 	fs.Usage = func() {
 		fmt.Fprintln(fs.Output(), "usage: potluck-conformance <driver-path-or-name> [--kind db|run|box] [--config k=v]... [--ref r --commit sha --script name] [--json] [--strict]")
 		fs.PrintDefaults()
@@ -157,6 +160,18 @@ func run(argv []string) int {
 	}
 	if only != "" {
 		opt.Only = strings.Split(only, ",")
+	}
+	if boxCred != "" || boxClient != "" || boxWant != "" {
+		if boxCred == "" {
+			fmt.Fprintln(stderr, "potluck-conformance: --box-client and --box-want need --box-credential")
+			return 2
+		}
+		b, err := os.ReadFile(boxCred)
+		if err != nil {
+			fmt.Fprintln(stderr, "potluck-conformance:", err)
+			return 2
+		}
+		opt.BoxAuthority = &conformance.BoxAuthority{Credential: strings.TrimSpace(string(b)), Client: strings.Fields(boxClient), Want: boxWant}
 	}
 	path, err := conformance.Find(target)
 	if err != nil {

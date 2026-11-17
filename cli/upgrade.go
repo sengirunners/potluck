@@ -45,7 +45,7 @@ func (a *app) upgradeCmd() *cobra.Command {
 		Long: `Install the newest signed potluck release: from GitHub (GH_TOKEN or
 GITHUB_TOKEN, if set, goes with each request; a private repository needs
 one), or from a directory holding one release's files (--release). The manifest must be signed by a key this
-build trusts (the channel's, built in, and config update_keys) and the
+build trusts (the channel's keys, built in, and config update_keys) and the
 tarball must match it; a release older than the one installed here is
 refused. Each program replaced is kept beside the new one as <name>.prev.
 A running daemon is restarted on the new build; if it does not come up,
@@ -88,12 +88,22 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 		return err
 	}
 	defer os.RemoveAll(stage)
-	st, err := upgrade.Stage(src, upgrade.Keys(cfg.File.UpdateKeys), runtime.GOOS, runtime.GOARCH, stage)
+	keys, err := upgrade.Keys(cfg.File.UpdateKeys)
+	if err != nil {
+		return fmt.Errorf("refusing to upgrade: %w", err)
+	}
+	st, err := upgrade.Stage(src, keys, runtime.GOOS, runtime.GOARCH, stage)
 	if err != nil {
 		return err
 	}
 	m := st.Manifest
-	a.say("verified potluck %s (%s) from %s: signed, and its %s/%s tarball matches", m.Version, short(m.Commit), src, runtime.GOOS, runtime.GOARCH)
+	// A GitHub source is named, and a --release directory outside the temporary directory; install.sh's release
+	// directory is temporary, so it is not.
+	where := ""
+	if from == "" || !inTempDir(from) {
+		where = " from " + src.String()
+	}
+	a.say("verified potluck %s (%s)%s: its manifest is signed by a key this potluck trusts, and its %s/%s tarball matches", m.Version, short(m.Commit), where, runtime.GOOS, runtime.GOARCH)
 
 	// This build, installed where it runs: nothing to do.
 	if filepath.Dir(self) == dir && m.RunBy(api.Version, api.Commit) {
@@ -484,3 +494,17 @@ func preflightLocal(ctx context.Context, cfg *config.Config, w server.Wiring) (a
 
 // short is a commit's first 12 digits.
 func short(commit string) string { return commit[:min(12, len(commit))] }
+
+// inTempDir reports whether dir is inside the system's temporary directory (symlinks resolved).
+func inTempDir(dir string) bool {
+	d, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return false
+	}
+	t, err := filepath.EvalSymlinks(os.TempDir())
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(t, d)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}

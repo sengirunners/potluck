@@ -122,7 +122,7 @@ func TestDetectLayers(t *testing.T) {
 			facts: fakeFacts{os: "darwin", arch: "arm64", cores: 10, ramMB: 32 << 10, disk: 500, bins: map[string]bool{"tart": true, "softnet": true}},
 			out: map[string]Result{"sysctl -n kern.hv_support": ok("1\n"), "tart --version": ok("2.20.0\n"),
 				"stat -L -f %Sp %Su /fake/softnet": ok("-rwsr-xr-x root\n")}},
-		{name: "macos without tart", layer: "tart", isoln: "vm", problem: "tart is not installed",
+		{name: "macos without tart", layer: "tart", isoln: "vm", problem: "tart is not installed: download tart.tar.gz from https://github.com/openai/tart/releases/latest",
 			facts: fakeFacts{os: "darwin", arch: "arm64", cores: 10, ramMB: 32 << 10, bins: map[string]bool{}},
 			out:   map[string]Result{"sysctl -n kern.hv_support": ok("1\n")}},
 		{name: "nothing installed (linux)", layer: "oci", problem: "no container CLI", step: "apt-get install -y docker", facts: linux()},

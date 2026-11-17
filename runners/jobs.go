@@ -94,9 +94,16 @@ func (s *Service) hook(w http.ResponseWriter, r *http.Request) {
 
 // store puts one of GitHub's deliveries in the inbox for the workers, once
 // per delivery id: a webhook's, or one the checking of GitHub made from what
-// GitHub listed (check.go). A queued job goes to the serve lane, the rest to
-// the ends lane.
+// GitHub listed (check.go). One the broker does not hear (accounts.go) is
+// dropped and logged instead. A queued job goes to the serve lane, the rest
+// to the ends lane.
 func (s *Service) store(ctx context.Context, delivery, event string, body []byte) error {
+	if why, err := s.unheard(ctx, event, body); err != nil || why != "" {
+		if why != "" {
+			s.dropped(event, why)
+		}
+		return err
+	}
 	lane := laneEnds
 	var a struct {
 		Action string `json:"action"`

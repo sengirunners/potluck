@@ -19,6 +19,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == boxClientArg { // the client in a box (group box-authority)
+		os.Exit(boxClientMain())
+	}
 	if code, ok := refdriver.Main(); ok {
 		os.Exit(code)
 	}
@@ -145,6 +148,9 @@ func TestGoodDrivers(t *testing.T) {
 		{name: "box without renew", kind: "box", bug: "no-renew", wantSkip: "the lifetime cap across renewals"},
 		{name: "box without secrets", kind: "box", bug: "box-no-secrets", wantSkip: "exec secrets: a 0600 file"},
 		{name: "box without box secrets", kind: "box", bug: "no-box-secrets", wantSkip: bsVisible},
+		{name: "box reaching its authority", kind: "box", edit: withAuthority, wantRan: baChecks},
+		{name: "box with no authority given", kind: "box", edit: func(o *Options) { o.Only = []string{"box-authority"} }, wantSkip: baReach},
+		{name: "box without box secrets, an authority given", kind: "box", bug: "no-box-secrets", edit: withAuthority, wantSkip: baReach},
 		{name: "box secrets without a state directory", kind: "box", edit: func(o *Options) { o.StateDirs = []string{}; o.Only = []string{"box-secrets"} }, wantSkip: bsNoState},
 		{name: "box without background processes", kind: "box", bug: "box-no-spawn", wantSkip: "background processes"},
 		{name: "box without terminals", kind: "box", bug: "box-no-pty", wantSkip: "terminals"},
@@ -510,6 +516,9 @@ var brokenDrivers = []struct {
 	{"box", "box-secrets-in-state", "box-secrets", "FAIL  " + bsNoState, nil},
 	{"box", "box-secrets-in-answer", "box-secrets", "FAIL  no secret on stderr or in any answer", nil},
 	{"box", "box-secrets-no-unset", "box-secrets-ops", "FAIL  " + bsUnset, nil},
+	// box authority (zm-eakh.12.48.40.24)
+	{"box", "box-secrets-not-visible", "box-authority", "FAIL  " + baReach, withAuthority},
+	{"box", "box-secrets-no-unset", "box-authority", "FAIL  " + baGone, withAuthority},
 	{"box", "box-secrets-exec-clobbers", "box-secrets-ops", "FAIL  " + bsOwn, nil},
 	{"box", "box-secrets-partial-write", "box-secrets-ops", "FAIL  " + bsAtomic, nil},
 	{"box", "box-secrets-any-name", "box-secrets-ops", "FAIL  " + bsRefuse, nil},

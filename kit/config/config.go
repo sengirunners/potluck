@@ -313,6 +313,11 @@ type Runners struct {
 	// at all is the broker's own record (potluck runners allow), not config.
 	AllowForkPRs bool `json:"allow_fork_prs,omitempty"`
 	JobTTLS      int  `json:"job_ttl_s,omitempty"` // a job's box lease, renewed while it runs (default 3600)
+	// Accounts are the GitHub users and organizations whose installations of
+	// the App the broker hears and links. A public App can be installed by
+	// anyone; deliveries from other accounts are dropped unstored. Empty: only
+	// the installations linked here are heard.
+	Accounts []string `json:"accounts,omitempty"`
 	// RetiredAllowPublicRepos is the old global switch for serving public
 	// repositories. It does nothing now (each public repository needs its
 	// owner's own yes). It is read only so the broker can say so while a

@@ -1,0 +1,9 @@
+# The release keys every potluck build trusts: one ed25519:<base64> public key per line; blank lines and lines
+# starting with # are skipped. A release installs when any of them signed its manifest. An empty list, a line that
+# is not a key, or a key named twice refuses every upgrade (TestReleaseKeys fails first).
+#
+# During a rotation this holds the current key and the next one; otherwise just the current one. The private half
+# of the key that signs releases lives only in the potluck-release environment (secret POTLUCK_RELEASE_KEY).
+# install.sh carries the same list as RELEASE_KEYS (TestInstallScriptCarriesTheReleaseKeys holds them equal).
+# How to rotate: docs/release-keys.md.
+ed25519:Z9tq+TU7lP6IwxiY2qzZC+bRNEv1G1fzxlLJYHtvTMc=

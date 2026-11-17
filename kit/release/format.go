@@ -24,7 +24,7 @@ var (
 	// ZM is zm's channel (zm's own release scripts build it, not this module).
 	ZM = Format{Schema: Schema, Name: "zm"}
 	// Potluck is Potluck's channel (scripts/release here), signed with its
-	// own key (internal/upgrade.ReleaseKey).
+	// own keys (internal/upgrade/release_keys.txt).
 	Potluck = Format{Schema: "potluck-release/1", Name: "potluck"}
 )
 

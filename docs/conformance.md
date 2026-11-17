@@ -63,6 +63,7 @@ behind, no url or secret leaked, verb timing, spend) always run. Groups run in t
 | `pty` | box | terminals: size, input, resize, Ctrl-C | capability `pty` and verb `input` |
 | `box-secrets` | box | the `secrets` verb's isolation: modes, a memory filesystem, no swap, the owner, a planted path, no value in env, argv or the driver's state, gone with the box; without the capability, refused | capability `box-secrets`; `--state-dir` (or config `state_dir`) for the state check |
 | `box-secrets-ops` | box | what the verb does: unset, an exec's own secrets beside the box's, atomic replace, refusals, conflict after release | capability `box-secrets` |
+| `box-authority` | box | from inside a box, a command reaches the pool's machine with only the credential a `potluck-token` grant delivers, and reaches nothing once it is unset | capability `box-secrets`; `--box-credential`, `--box-client`, `--box-want` |
 | `persist` | box | kept disks: stop/start keep the disk, the deadline stops rather than wipes | capability `persist`, verbs `stop` and `start` |
 | `ended` | run | a script that exits 7 shows `ended` with that exit; release after the end | run flags |
 | `code` | run, box | the run's HEAD is exactly the commit sent and the tree is clean; a dirty `--worktree` does not leak in | `--repo` (HEAD proof); `--worktree`; for a box, `--ref --commit` |
@@ -190,6 +191,15 @@ after its release; with no state directory that check is a SKIP, which `--strict
 for the final "no secret on stderr or in any answer". With `persist` listed too, group `persist` checks that a kept
 box set a secret before its stop starts with none. The filesystem type and the swap table are what the guest
 reports: a driver that fakes them inside the guest passes, as it could fake any probe.
+
+Group `box-authority` (a driver listing capability `box-secrets`, and `--box-credential <file>`, `--box-client
+<command>` and `--box-want <text>` given together; without them, a SKIP): the file is a box credential, what a
+`potluck-token` grant delivers into a box (`docs/daemon.md` "Calling the authority from a box"), for a pool's
+machine the driver's boxes can reach over its tunnel. One box gets it through the `secrets` verb; an exec then runs
+the command (split on spaces) with `POTLUCK_BOX_CREDENTIAL` naming the landed file, and must exit 0 printing the
+text (`potluck status --json` and the pool's name, with a `potluck` built for the guest on its `PATH`). After the
+name is unset the same command must fail and not print it: nothing else in the box reaches the authority. The file,
+and the token inside it, count for the final "no secret on stderr or in any answer".
 
 Group `persist` (a driver listing it): a file in `HOME` survives stop and start; a file in `/var/tmp` too when
 describe's `disks.root` says `root`; stop of a box without persist is `bad_request`; release of a stopped box; a

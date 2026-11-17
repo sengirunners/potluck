@@ -334,7 +334,7 @@
       </a>
       <a class="btn line" href="#how">How it works</a>
     </div>
-    <p class="fine">Free and open source (Apache-2.0). Releases are signed: the installer checks the signature when it can (it needs OpenSSL 3) and says so when it can't. It's early: see <a href="https://github.com/sengirunners/potluck#what-works-today">what works today</a>.</p>
+    <p class="fine">Free and open source (Apache-2.0). Releases are signed: the installer checks the signature when it can (it needs OpenSSL 3) and says so when it can't. To lend a machine you need an Apple-silicon Mac with Tart and Softnet, or a Linux box with Docker and Kata or gVisor; <code>potluck doctor</code> says what's missing. It's early: see <a href="https://github.com/sengirunners/potluck#what-you-need">what you need</a> and <a href="https://github.com/sengirunners/potluck#what-works-today">what works today</a>.</p>
   </div>
 </section>
 
@@ -389,8 +389,8 @@
       <div>
         <p class="step">Step 1</p>
         <h3>Lay out the blanket</h3>
-        <p>On one machine, start a pool for your team and make invite codes. The first time, it gives you a Tailscale login link so your machines can find each other.</p>
-        <pre class="cmd"><span class="p">$</span> potluck create team
+        <p>On one machine, start a pool for your team and make invite codes. Potluck has no accounts of its own. Your machines find each other over Tailscale, so the first time it gives you a Tailscale login link (a free Tailscale account); <code>--via tunnel</code> skips Tailscale and uses a tunnel you set up to the machine that runs the pool (a public https address). To try it alone on one machine there is nothing to set up: <code>potluck create trial --via tunnel</code>.</p>
+        <pre class="cmd"><span class="p">$</span> potluck create friends
 <span class="p">$</span> potluck invite sam --host   <span class="c"># invite code for Sam</span></pre>
       </div>
     </li>
@@ -876,9 +876,9 @@
       <div>
         <p class="step">Step 3</p>
         <h3>Leo wants his Mac back</h3>
-        <p>Leo can keep browsing while his MacBook works for the team. When he needs all of it, he winds it down: jobs running now finish and no new ones start. Or he stops them now. The menu bar item is on its way; today it's one command.</p>
-        <pre class="cmd"><span class="p">$</span> potluck-driver-tart host set drain    <span class="c"># wind down</span>
-<span class="p">$</span> potluck-driver-tart host set closed   <span class="c"># stop now</span></pre>
+        <p>A Mac works for the team only while its owner is away: when Leo touches the keyboard or trackpad, the job on his MacBook ends, and nothing new starts until it has been idle for five minutes (<code>potluck host --reclaim-idle-s</code> changes that; <code>0</code> shares all the time). When he wants the machine back for good, he winds it down: jobs running now finish (up to 30 minutes by default) and no new ones start. Or he stops them now. <code>potluck host set auto</code> puts it back to normal. The picture shows a Mac set to share all the time (<code>--reclaim-idle-s 0</code>); by default, touching the trackpad would already have ended those jobs. The release carries a menu bar item for this: <code>sh install.sh --menubar</code> installs it (it isn't signed by Apple yet, so a copy downloaded in a browser needs a right-click, Open; <code>docs/menubar.md</code>). Without it, it's one command.</p>
+        <pre class="cmd"><span class="p">$</span> potluck host set drain    <span class="c"># wind down</span>
+<span class="p">$</span> potluck host set closed   <span class="c"># stop now</span></pre>
       </div>
     </li>
   </ol>
@@ -976,7 +976,7 @@
       <div class="head"><h2>Potluck Dish</h2><span class="stamp">Coming soon</span></div>
       <div class="body">
         <div>
-          <p>For a team running a brigade of coding agents: claim and track work, send messages between your agents and your people, and watch it all from one desktop app. It runs on Potluck.</p>
+          <p>For a team running a brigade of coding agents: claim and track work, send messages between your agents and your people, and watch it all from one desktop app. It is a separate product from Potluck, and runs on it.</p>
           <a href="#founders" data-topic="dish">Ask to try it early</a>
         </div>
         <svg viewBox="0 0 80 60" aria-hidden="true">

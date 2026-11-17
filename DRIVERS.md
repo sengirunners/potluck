@@ -1,6 +1,6 @@
 # Drivers
 
-A driver is a separate program, `potluck-driver-<name>` (old name `zm-run-<name>`), that the daemon starts with one
+A driver is a separate program, `potluck-driver-<name>`, that the daemon starts with one
 JSON request on stdin (`docs/protocol.md`). It makes and ends the machines, VMs and jobs that renters use.
 
 ## What a driver can do to you
@@ -14,9 +14,9 @@ JSON request on stdin (`docs/protocol.md`). It makes and ends the machines, VMs 
 Only in these directories, in this order, never on PATH:
 
 1. the directory of the running daemon program (symlinks resolved), where a release installs its drivers;
-2. `$POTLUCK_HOME/drivers` (default `~/.potluck/drivers`; zm's daemon: `$ZM_HOME/drivers`).
+2. `$POTLUCK_HOME/drivers` (default `~/.potluck/drivers`).
 
-In each, `potluck-driver-<name>` is used, else `zm-run-<name>`. A driver name is lowercase letters, digits, `.`, `_`
+In each, `potluck-driver-<name>` is used. (A machine that ran Potluck under its earlier name, zm, keeps its `zm-run-<name>` drivers working: [docs/coming-from-zm.md](docs/coming-from-zm.md).) A driver name is lowercase letters, digits, `.`, `_`
 and `-`, starting with a letter or digit.
 
 The daemon refuses a driver file, its directory or any directory above them whose mode bits make it writable by group
@@ -73,10 +73,10 @@ found hash and the command to re-pin, if the file changed, moved or is missing.
 
 ## Reviewed drivers
 
-| driver | program (old name) | what it does |
+| driver | program | what it does |
 | --- | --- | --- |
-| tart | `potluck-driver-tart` (`zm-run-tart`), `cmd/potluck-driver-tart` | each job or sandbox in a throwaway VM: Tart on a Mac, Incus or an OCI runtime on Linux (`vmhost/`) |
-| local | `potluck-driver-local` (`zm-run-local`), `cmd/potluck-driver-local` | jobs on this machine, as the daemon's user (`internal/localdriver`) |
+| tart | `potluck-driver-tart`, `cmd/potluck-driver-tart` | each job or sandbox in a throwaway VM: Tart on a Mac, Incus or an OCI runtime on Linux (`vmhost/`) |
+| local | `potluck-driver-local`, `cmd/potluck-driver-local` | jobs on this machine, as the daemon's user (`internal/localdriver`) |
 
 An out-of-tree driver is added to this table by pull request, with its report from the conformance suite run with
 `--strict` (see `docs/conformance.md`).

@@ -74,13 +74,7 @@ closed (no new work; running work ends now) or auto (the sizes' own rules).
 			if a.json {
 				return a.printJSON(o)
 			}
-			line := "host " + o.Mode
-			if o.Until != nil {
-				line += " until " + o.Until.Local().Format(time.RFC3339)
-			}
-			if o.DeadlineS != nil {
-				line += fmt.Sprintf(", running work cut after %s", time.Duration(*o.DeadlineS)*time.Second)
-			}
+			line := o.Summary()
 			a.say("%s", line)
 			return nil
 		},

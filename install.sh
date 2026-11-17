@@ -3,14 +3,16 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 #   sh install.sh --from <dir>     # a release directory you already have (air-gapped hosts)
+#   sh install.sh --menubar        # on a Mac, also install Potluck Menu.app (docs/menubar.md), off unless asked
 #
-# It needs no Go and no zm. It gets the release for this machine (from GitHub, or from --from) and never runs a
-# program from it before its signature is checked by something the download does not control:
+# It needs no Go. It gets the release for this machine (from GitHub, or from --from) and, except in the last case
+# below, never runs a program from it before its signature is checked by something the download does not control:
 #
 #   - If potluck is already installed ($POTLUCK_INSTALL_DIR/potluck, else potluck on PATH), that potluck installs
 #     it: `potluck upgrade --release` checks the manifest's Ed25519 signature with the key built into it and the
-#     tarball against the signed manifest. The new programs are never run first.
-#   - Otherwise (a first install) this script checks the signature itself, with the release key below and
+#     tarball against the signed manifest. The new programs are never run first. This is only as good as that
+#     potluck's own first install.
+#   - Otherwise (a first install) this script checks the signature itself, with the release keys below and
 #     `openssl pkeyutl -verify -rawin` (an openssl that can do Ed25519: OpenSSL 3, not macOS's LibreSSL), then the
 #     tarball's SHA-256 against the hash inside the signed manifest. Only then is it unpacked and installed (the
 #     new potluck places the files).
@@ -19,14 +21,16 @@
 #
 # Environment:
 #   POTLUCK_INSTALL_DIR  where the programs go (default ~/.local/bin)
+#   POTLUCK_MENUBAR_DIR  where --menubar puts Potluck Menu.app (default ~/Applications)
 #   GH_TOKEN, GITHUB_TOKEN  a token sent with every GitHub request: needed if the repository is private; also lifts the rate limit
 #   POTLUCK_UPDATE_KEY   another trusted release key (ed25519:<base64>), as config update_keys adds to potluck's
 #   POTLUCK_GITHUB_API   GitHub's API (default https://api.github.com; tests)
 set -eu
 
-# RELEASE_KEY is the release channel's public key: internal/upgrade.ReleaseKey (a test holds them equal).
-RELEASE_KEY="ed25519:Z9tq+TU7lP6IwxiY2qzZC+bRNEv1G1fzxlLJYHtvTMc="
-KEY_PLACEHOLDER="ed25519:PLACEHOLDER-run-go-run-./scripts/release-keygen"
+# RELEASE_KEYS are the release keys this script trusts, separated by spaces: the list in
+# internal/upgrade/release_keys.txt (a test holds them equal). During a key rotation it holds two
+# (docs/release-keys.md).
+RELEASE_KEYS="ed25519:Z9tq+TU7lP6IwxiY2qzZC+bRNEv1G1fzxlLJYHtvTMc="
 REPO="sengirunners/potluck"
 
 # A known Ed25519 signature: an openssl that verifies it can check releases.
@@ -41,8 +45,9 @@ die() {
 }
 
 usage() {
-	say "usage: install.sh [--from <release dir> [--trust-dir]]"
+	say "usage: install.sh [--from <release dir> [--trust-dir]] [--menubar]"
 	say "Installs potluck into \$POTLUCK_INSTALL_DIR (default ~/.local/bin)."
+	say "--menubar also installs Potluck Menu.app into \$POTLUCK_MENUBAR_DIR (default ~/Applications); macOS only."
 	say "--trust-dir installs from --from without a signature check when none can be made here."
 }
 
@@ -139,16 +144,18 @@ can_verify() {
 	! ed25519_verify "$PROBE_KEY" "$tmp/probe-bad.txt" "$PROBE_SIG"
 }
 
-# check_signature DIR: 0 when manifest.json verifies with a trusted key; 2 when no check can be made here (why in
-# $why); any other result ends the script.
+# check_signature DIR: 0 when manifest.json verifies with a trusted key; 2 when this machine's openssl cannot check
+# it (why in $why); any other result ends the script: an empty or malformed key list, or no key that verifies.
 check_signature() {
-	keys=""
-	[ "$RELEASE_KEY" = "$KEY_PLACEHOLDER" ] || keys="$RELEASE_KEY"
-	[ -z "${POTLUCK_UPDATE_KEY:-}" ] || keys="$keys $POTLUCK_UPDATE_KEY"
-	if [ -z "$keys" ]; then
-		why="this install.sh carries no release key (a development copy)"
-		return 2
-	fi
+	keys="$RELEASE_KEYS ${POTLUCK_UPDATE_KEY:-}"
+	[ -n "$(printf '%s' "$RELEASE_KEYS" | tr -d ' ')" ] || die "this install.sh trusts no release key (RELEASE_KEYS is empty): not installing"
+	for k in $keys; do
+		case "$k" in
+		ed25519:*[!A-Za-z0-9+/=]* | ed25519:) die "release key \"$k\" is not ed25519:<base64>: not installing" ;;
+		ed25519:*) ;;
+		*) die "release key \"$k\" is not ed25519:<base64>: not installing" ;;
+		esac
+	done
 	if ! can_verify; then
 		why="no openssl here can check Ed25519 signatures"
 		return 2
@@ -156,15 +163,11 @@ check_signature() {
 	[ -f "$1/manifest.json.sig" ] || die "the release has no signature (manifest.json.sig): not installing"
 	sig=$(cat "$1/manifest.json.sig")
 	for k in $keys; do
-		case "$k" in
-		ed25519:*) ;;
-		*) die "release key \"$k\" is not ed25519:<base64>" ;;
-		esac
 		if ed25519_verify "${k#ed25519:}" "$1/manifest.json" "$sig"; then
 			return 0
 		fi
 	done
-	die "the release's manifest does not verify with the release key: not installing"
+	die "the release's manifest does not verify with any release key: not installing"
 }
 
 # installed_potluck: the potluck already installed that can install a release (it has upgrade), else nothing.
@@ -193,17 +196,111 @@ installed_potluck() {
 	fi
 }
 
+# menu_running APP: whether this user runs the Potluck Menu at APP.
+menu_running() {
+	# The command must start with the path, so this pipeline's own awk never matches.
+	ps -u "$(id -u)" -o command= 2>/dev/null | awk -v p="$1/Contents/MacOS/PotluckMenu" 'index($0, p) == 1 { f = 1 } END { exit !f }'
+}
+
+# install_menubar DIR: put Potluck Menu.app from the release's darwin tarball (already checked, but its hash is
+# compared with the manifest's again here) into $POTLUCK_MENUBAR_DIR (default ~/Applications). The app's build is not Developer ID signed yet, and
+# the script says so when that is the case.
+install_menubar() {
+	[ "$os" = darwin ] || die "--menubar is for macOS: Potluck Menu.app is a Mac menu bar item"
+	command -v ditto >/dev/null 2>&1 || die "--menubar needs ditto (macOS)"
+	mv_version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([A-Za-z0-9._-]*\)".*/\1/p' "$1/manifest.json" | head -n 1)
+	mv_tarball="potluck_${mv_version}_${os}_${arch}.tar.gz"
+	mv_want=$(awk -v f="\"$mv_tarball\":" '$1 == f { v = $2; gsub(/[",]/, "", v); print v; exit }' "$1/manifest.json")
+	[ -n "$mv_want" ] && [ "$(sha256 "$1/$mv_tarball")" = "$mv_want" ] || die "$mv_tarball does not match the manifest: not installing the menu bar item"
+	mv_entry="potluck_${mv_version}_${os}_${arch}/Potluck-Menu.zip"
+	tar -tzf "$1/$mv_tarball" 2>/dev/null | grep -qx "$mv_entry" || die "release $mv_version has no Potluck Menu.app (potluck itself is installed)"
+	mkdir "$tmp/menubar"
+	tar -xzf "$1/$mv_tarball" -C "$tmp/menubar" "$mv_entry" || die "could not unpack $mv_entry from $mv_tarball"
+	mkdir "$tmp/menubar/app"
+	ditto -x -k "$tmp/menubar/$mv_entry" "$tmp/menubar/app" || die "could not unpack Potluck Menu.app"
+	[ -d "$tmp/menubar/app/Potluck Menu.app" ] || die "the release's Potluck-Menu.zip holds no Potluck Menu.app"
+	mv_dir="${POTLUCK_MENUBAR_DIR:-${HOME:?HOME is not set}/Applications}"
+	mkdir -p "$mv_dir" || die "could not create $mv_dir"
+	mv_dir=$(cd "$mv_dir" && pwd -P) || die "could not enter $mv_dir" # ps shows the real path
+	mv_dest="$mv_dir/Potluck Menu.app"
+	# Replacing an installed copy: ask this copy (not another one on the Mac) to quit first, and do not swap it
+	# while it still runs.
+	if [ -d "$mv_dest" ] && menu_running "$mv_dest"; then
+		say "quitting the running Potluck Menu to replace it; open it again afterwards"
+		osascript -e "tell application \"$mv_dest\" to quit" >/dev/null 2>&1 || true
+		for _ in 1 2 3 4 5 6 7 8 9 10; do
+			menu_running "$mv_dest" || break
+			sleep 1
+		done
+		! menu_running "$mv_dest" || die "Potluck Menu is still running: quit it from its menu and run this again (potluck itself is installed)"
+	fi
+	# Copy beside the old one, then swap, so a failed copy leaves the old app in place.
+	rm -rf "$mv_dir/.Potluck Menu.app.new"
+	ditto "$tmp/menubar/app/Potluck Menu.app" "$mv_dir/.Potluck Menu.app.new" || die "could not place the app in $mv_dir"
+	rm -rf "$mv_dest"
+	mv "$mv_dir/.Potluck Menu.app.new" "$mv_dest" || die "could not place $mv_dest"
+	say "installed $mv_dest"
+	if codesign -dv --verbose=2 "$mv_dest" 2>&1 | grep -q '^Authority=Developer ID Application'; then
+		say "it is signed with a Developer ID"
+	else
+		say "note: this build is not Developer ID signed (ad hoc only). It runs when installed this way; if macOS blocks it, right-click it in Finder and choose Open."
+	fi
+	say "  open it:       open \"$mv_dest\""
+	say "  at every login: System Settings > General > Login Items > add Potluck Menu"
+}
+
+# path_hint: how to put INSTALL_DIR on PATH for the shell this person runs (macOS's zsh does not read ~/.profile).
+path_hint() {
+	case "$INSTALL_DIR" in
+	"${HOME:-/nonexistent}"/*)
+		rest="${INSTALL_DIR#"${HOME:-}"/}"
+		dir="\$HOME/$rest"
+		;;
+	*)
+		rest="$INSTALL_DIR"
+		dir="$INSTALL_DIR"
+		;;
+	esac
+	case "$rest" in
+	*[\'\"\`\$\\]*)
+		say "  (this directory's name has characters a shell treats specially: add $INSTALL_DIR to PATH yourself)"
+		return
+		;;
+	esac
+	case "${SHELL:-}" in
+	*/zsh) rc='~/.zshrc' ;;
+	*/bash)
+		if [ "$(uname -s)" != Darwin ]; then
+			rc='~/.bashrc'
+		elif [ -e "${HOME:-/nonexistent}/.bash_profile" ] || { [ ! -e "${HOME:-/nonexistent}/.bash_login" ] && [ ! -e "${HOME:-/nonexistent}/.profile" ]; }; then
+			rc='~/.bash_profile'
+		elif [ -e "${HOME:-/nonexistent}/.bash_login" ]; then
+			rc='~/.bash_login' # bash reads only the first of .bash_profile, .bash_login and .profile that exists
+		else
+			rc='~/.profile'
+		fi
+		;;
+	*/fish)
+		say "  fish_add_path \"$dir\""
+		return
+		;;
+	*) rc='~/.profile' ;;
+	esac
+	say "  echo 'export PATH=\"$dir:\$PATH\"' >> $rc && . $rc"
+}
+
 next_steps() {
 	case ":${PATH:-}:" in
 	*":$INSTALL_DIR:"*) ;;
 	*)
 		say ""
-		say "$INSTALL_DIR is not on your PATH. Add it, for example:"
-		say "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.profile && . ~/.profile"
+		say "$INSTALL_DIR is not on your PATH, so a new terminal will not find potluck. Add it with:"
+		path_hint
 		;;
 	esac
 	say ""
 	say "Next:"
+	say "  see what this machine can share:  potluck doctor"
 	say "  start a pool:  potluck create <pool>      (then: potluck invite <name>)"
 	say "  join a pool:   potluck join '<invite code>'"
 }
@@ -214,6 +311,7 @@ main() {
 	TOKEN="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 	FROM=""
 	TRUST_DIR=0
+	MENUBAR=0
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--from)
@@ -227,6 +325,10 @@ main() {
 			;;
 		--trust-dir)
 			TRUST_DIR=1
+			shift
+			;;
+		--menubar)
+			MENUBAR=1
 			shift
 			;;
 		-h | --help)
@@ -256,7 +358,9 @@ main() {
 		arch=arm64
 	fi
 
-	tmp=$(mktemp -d 2>/dev/null || mktemp -d -t potluck)
+	[ "$MENUBAR" != 1 ] || [ "$os" = darwin ] || die "--menubar is for macOS: Potluck Menu.app is a Mac menu bar item"
+
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/potluck.XXXXXX" 2>/dev/null || mktemp -d -t potluck)
 	trap 'rm -rf "$tmp"' EXIT
 	trap 'exit 1' HUP INT TERM
 
@@ -300,6 +404,7 @@ main() {
 		if ! POTLUCK_NO_AUTOSTART=1 "$installed" upgrade --release "$dl" --dir "$INSTALL_DIR"; then
 			die "potluck did not install (see above); nothing was changed"
 		fi
+		[ "$MENUBAR" != 1 ] || install_menubar "$dl"
 		next_steps
 		return 0
 	fi
@@ -307,15 +412,26 @@ main() {
 	# A first install: this script checks the signature before anything from the release runs.
 	why=""
 	if check_signature "$dl"; then
-		say "signature verified with the release key"
+		say "signature verified with a release key"
 	else
 		if [ -n "$FROM" ] && [ "$TRUST_DIR" != 1 ]; then
-			die "cannot check the release's signature here ($why), so not installing from $FROM. Pass --trust-dir to install it unchecked, or install openssl 3."
+			die "cannot check the release's signature here ($why), so not installing from $FROM. Pass --trust-dir to install it unchecked, or put an OpenSSL 3 or newer first on PATH (Homebrew's openssl@3 is keg-only)."
 		fi
 		if [ -n "$FROM" ]; then
-			say "note: the signature was NOT checked ($why); installing from $FROM because of --trust-dir"
+			say "note: the signature was NOT checked ($why); installing from the --from directory because of --trust-dir."
+			say "      The new potluck will say its manifest is signed by a key it trusts: that key came in the same directory, so it adds no independent proof."
 		else
-			say "note: the signature was NOT checked ($why); trusting the download over HTTPS from github.com"
+			say "note: the signature was NOT checked by this script ($why); trusting the download over HTTPS from github.com."
+			say "      It still checks the tarball against the release's manifest, and the new potluck then checks the manifest's"
+			say "      signature against the key built into it, but that key came in the same download, so this adds no independent proof."
+			case "$why" in
+			*openssl*)
+				say "      Once that potluck has run, running this script again as it is adds nothing. To check the signature"
+				say "      before anything from the release runs: install OpenSSL 3 or newer and put its bin directory first on PATH"
+				say "      (Homebrew's openssl@3 is keg-only: its bin directory is under brew --prefix openssl@3), delete $INSTALL_DIR/potluck,"
+				say "      and run this script again."
+				;;
+			esac
 		fi
 	fi
 
@@ -341,6 +457,7 @@ main() {
 	if ! POTLUCK_NO_AUTOSTART=1 "$new" upgrade --release "$dl" --dir "$INSTALL_DIR"; then
 		die "potluck did not install (see above); nothing was changed"
 	fi
+	[ "$MENUBAR" != 1 ] || install_menubar "$dl"
 	next_steps
 }
 

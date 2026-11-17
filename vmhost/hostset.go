@@ -15,20 +15,27 @@ import (
 // hostUsage is `potluck-driver-tart host`'s usage.
 const hostUsage = `usage: potluck-driver-tart host set <open|drain|closed|auto> [--for <duration> | --until <HH:MM or RFC 3339>] [--deadline <duration>]
 
-Sets this host's override (hostmode.go) for every binding on it: open (run work whatever the
+Sets this host's override for every binding on it: open (run work whatever the
 schedule says), drain (no new work; running work finishes, and is cut at the deadline), closed
-(no new work; running work ends now) or auto (the bindings' schedules). --for and --until return
+(no new work; running work ends now) or auto (the sizes' own rules). --for and --until return
 the host to auto then. --deadline is a drain's: how long running work has (else each binding's
 drain_deadline_s), counted from when the drain began: drain set again keeps that start. The
-host's state is read through the daemon (describe), not here.
+host's state is read with potluck host status, not here.
 
-       potluck-driver-tart host shelf fill --npm-lock FILE... < request (shelf_fill.go)
+       potluck-driver-tart host shelf fill --npm-lock FILE... < request
 `
 
 // hostCmd is `potluck-driver-tart host ...`.
 func hostCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "shelf" { // shelf_fill.go
 		return shelfHostCmd(args[1:], stdin, stdout, stderr)
+	}
+	if len(args) > 0 {
+		switch args[0] {
+		case "-h", "--help", "help", "-help":
+			fmt.Fprint(stdout, hostUsage)
+			return 0
+		}
 	}
 	if len(args) == 0 || args[0] != "set" {
 		fmt.Fprint(stderr, hostUsage)
@@ -43,15 +50,47 @@ func hostCmd(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "potluck-driver-tart host set:", err)
 		return 1
 	}
-	line := "host " + o.Mode
-	if o.Until != nil {
-		line += " until " + o.Until.Local().Format(time.RFC3339)
-	}
-	if o.DeadlineS != nil {
-		line += fmt.Sprintf(", running work cut after %s", time.Duration(*o.DeadlineS)*time.Second)
-	}
-	fmt.Fprintln(stdout, line)
+	fmt.Fprintln(stdout, o.Summary())
 	return 0
+}
+
+// Summary says in a line what the host switch now does: its mode in plain
+// words, until when if it returns to auto, and a drain's deadline.
+func (o HostOverride) Summary() string {
+	what := map[string]string{
+		modeOpen:   "taking work whatever the schedule says",
+		modeDrain:  "no new work; running work finishes",
+		modeClosed: "no new work; running work ends now",
+		modeAuto:   "following the sizes' own rules (schedule, idle time)",
+	}[o.Mode]
+	line := "host " + o.Mode
+	if what != "" {
+		line += ": " + what
+	}
+	if o.Mode == modeDrain {
+		// The cut is counted from when the drain began (a drain set again keeps that start); a
+		// drain that returns to auto first is never cut.
+		deadline := drainDeadlineDefault
+		if o.DeadlineS != nil {
+			deadline = *o.DeadlineS
+		}
+		cut := o.Since.Add(time.Duration(deadline) * time.Second)
+		switch {
+		case o.DeadlineS != nil && o.Until != nil && !cut.Before(*o.Until):
+		case o.DeadlineS != nil:
+			line += ", and is cut at " + cut.Local().Format("Mon Jan 2 15:04:05")
+		default: // each size's own drain_deadline_s applies, which may be sooner than the default
+			verb := "is"
+			if o.Until != nil {
+				verb = "may be" // it returns to auto first unless a size's deadline is shorter
+			}
+			line += fmt.Sprintf(", and %s cut at each size's drain deadline (%d minutes after the drain began unless a size sets another)", verb, drainDeadlineDefault/60)
+		}
+	}
+	if o.Until != nil {
+		line += "; back to auto at " + o.Until.Local().Format(time.RFC3339)
+	}
+	return line
 }
 
 // HostOverride is the host override as written: the mode, when it was set,

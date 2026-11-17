@@ -19,49 +19,103 @@ import (
 	"github.com/sengirunners/potluck/kit/release"
 )
 
-// A release build must carry the channel's real key. The release workflow
-// runs this with POTLUCK_RELEASE_BUILD=1 before it builds; everywhere else
-// it only checks the key parses once it is set.
-func TestReleaseKeyIsSet(t *testing.T) {
-	if ReleaseKey == KeyPlaceholder {
-		if os.Getenv("POTLUCK_RELEASE_BUILD") == "1" {
-			t.Fatal("ReleaseKey is still the placeholder: set it to the public key of POTLUCK_RELEASE_KEY (internal/upgrade/upgrade.go and install.sh's RELEASE_KEY)")
-		}
-		t.Skip("ReleaseKey is the placeholder (a release build fails here)")
-	}
-	if _, err := release.ParseKey(ReleaseKey); err != nil {
+// The list every build carries must parse: a malformed or empty one would
+// make that build refuse every upgrade. The release workflow runs this on
+// the commit it releases, before it builds.
+func TestReleaseKeys(t *testing.T) {
+	if _, err := ReleaseKeys(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // install.sh checks a first install's signature with its own copy of the
-// release key and the placeholder: both must be this package's, so the
-// placeholder check above covers the script too.
-func TestInstallScriptCarriesTheReleaseKey(t *testing.T) {
+// list: it must be release_keys.txt's.
+func TestInstallScriptCarriesTheReleaseKeys(t *testing.T) {
 	b, err := os.ReadFile("../../install.sh")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"RELEASE_KEY": ReleaseKey, "KEY_PLACEHOLDER": KeyPlaceholder} {
-		m := regexp.MustCompile(`(?m)^` + name + `="([^"]*)"$`).FindSubmatch(b)
-		if m == nil {
-			t.Fatalf("install.sh sets no %s", name)
-		}
-		if string(m[1]) != want {
-			t.Errorf("install.sh %s = %q, internal/upgrade has %q", name, m[1], want)
-		}
+	m := regexp.MustCompile(`(?m)^RELEASE_KEYS="([^"]*)"$`).FindSubmatch(b)
+	if m == nil {
+		t.Fatal("install.sh sets no RELEASE_KEYS")
+	}
+	want, err := ReleaseKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Fields(string(m[1])); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("install.sh RELEASE_KEYS = %q, internal/upgrade/release_keys.txt has %q", got, want)
 	}
 }
 
+// withReleaseKeys makes the built-in list text for one test.
+func withReleaseKeys(t *testing.T, text string) {
+	t.Helper()
+	old := releaseKeysFile
+	releaseKeysFile = text
+	t.Cleanup(func() { releaseKeysFile = old })
+}
+
 func TestKeys(t *testing.T) {
-	_, k, _ := release.NewKey()
-	got := Keys([]string{"", k, " "})
-	want := []string{k}
-	if ReleaseKey != KeyPlaceholder {
-		want = []string{ReleaseKey, k}
+	_, a, _ := release.NewKey()
+	_, b, _ := release.NewKey()
+	withReleaseKeys(t, "# the channel\n"+a+"\n\n")
+	got, err := Keys([]string{"", b, " ", a, " " + b})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("Keys = %v, want %v", got, want)
+	if strings.Join(got, ",") != a+","+b {
+		t.Fatalf("Keys = %v, want [%s %s]", got, a, b)
+	}
+}
+
+// A list that is empty, malformed or repeats a key refuses: no upgrade
+// trusts part of a list. So does a malformed config update_keys entry, even
+// after a good key.
+func TestKeysRefuseABadList(t *testing.T) {
+	_, a, _ := release.NewKey()
+	for name, text := range map[string]string{
+		"empty":         "",
+		"comments only": "# nothing here\n\n",
+		"not a key":     a + "\nssh-ed25519 AAAA\n",
+		"short key":     "ed25519:AAAA\n",
+		"repeated":      a + "\n" + a + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			withReleaseKeys(t, text)
+			if keys, err := Keys(nil); err == nil || !strings.Contains(err.Error(), "release_keys.txt") {
+				t.Fatalf("Keys = %v, %v; want a refusal naming release_keys.txt", keys, err)
+			}
+		})
+	}
+	withReleaseKeys(t, a+"\n")
+	if keys, err := Keys([]string{a, "ed25519:not-base64!"}); err == nil || !strings.Contains(err.Error(), "update_keys") {
+		t.Fatalf("Keys = %v, %v; want a refusal naming update_keys", keys, err)
+	}
+}
+
+// During a rotation a build trusts the current key and the next: a release
+// signed by either installs, and one signed by any other key is refused.
+func TestRotationTrustsBothKeys(t *testing.T) {
+	oldSeed, oldPub, _ := release.NewKey()
+	newSeed, newPub, _ := release.NewKey()
+	otherSeed, _, _ := release.NewKey()
+	withReleaseKeys(t, oldPub+"\n"+newPub+"\n")
+	keys, err := Keys(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, seed := range map[string]string{"current key": oldSeed, "next key": newSeed} {
+		dir := t.TempDir()
+		writeRelease(t, dir, "main-1eacf23e722f", time.Now(), seed)
+		if _, err := Stage(Dir(dir), keys, "linux", "amd64", t.TempDir()); err != nil {
+			t.Errorf("a release signed with the %s: %v", name, err)
+		}
+	}
+	dir := t.TempDir()
+	writeRelease(t, dir, "main-1eacf23e722f", time.Now(), otherSeed)
+	if _, err := Stage(Dir(dir), keys, "linux", "amd64", t.TempDir()); err == nil || !strings.Contains(err.Error(), "refusing the release") {
+		t.Fatalf("a release signed with a third key: %v, want a refusal", err)
 	}
 }
 
@@ -109,7 +163,7 @@ func TestStageFromDir(t *testing.T) {
 	dir := t.TempDir()
 	writeRelease(t, dir, "main-1eacf23e722f", time.Now(), seed)
 
-	if _, err := Stage(Dir(dir), nil, "linux", "amd64", t.TempDir()); err == nil || !strings.Contains(err.Error(), "trusts no release key") {
+	if _, err := Stage(Dir(dir), nil, "linux", "amd64", t.TempDir()); err == nil || !strings.Contains(err.Error(), "no trusted release key") {
 		t.Fatalf("staged with no keys: %v", err)
 	}
 	st, err := Stage(Dir(dir), []string{pub}, "linux", "amd64", t.TempDir())

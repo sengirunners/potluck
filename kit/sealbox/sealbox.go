@@ -88,7 +88,15 @@ func Fingerprint(pub ed25519.PublicKey) string {
 
 // KeyID is an identity key's id, the name a sealed blob's info uses for
 // either end: "zmkey:" and its fingerprint.
-func KeyID(pub ed25519.PublicKey) string { return "zmkey:" + Fingerprint(pub) }
+func KeyID(pub ed25519.PublicKey) string { return keyIDPrefix + Fingerprint(pub) }
+
+const keyIDPrefix = "zmkey:"
+
+// IsKeyID reports whether s has the shape KeyID makes.
+func IsKeyID(s string) bool {
+	fp, ok := strings.CutPrefix(s, keyIDPrefix)
+	return ok && len(fp) == 26 && strings.Trim(fp, "abcdefghijklmnopqrstuvwxyz234567") == ""
+}
 
 func certString(keyID string, pub []byte) []byte {
 	return []byte("zm-seal-key/1\n" + keyID + "\n" + Suite + "\n" + base64.RawURLEncoding.EncodeToString(pub))

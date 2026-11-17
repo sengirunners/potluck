@@ -7,49 +7,139 @@ its owner returns. Pools will let people you invite lend machines too.
 ## Status
 
 Early. There is a `potluck` program (the daemon and the commands below), signed releases for macOS and Linux, and
-an install script. Potluck grew out of an internal tool, zm, and its names: what is sent and made now uses the Potluck
-names (`potluck/1`, `Potluck-*` headers, `potluck_` tokens, drivers named `potluck-driver-*`, new tailnet nodes
-`potluck-<machine>`), and the zm ones are still read, so machines that already ran it keep working; see
-[docs/protocol.md](docs/protocol.md#names).
+an install script. Interfaces will change. Did you run it before as zm? See [docs/coming-from-zm.md](docs/coming-from-zm.md).
+
+## What you need
+
+- **A machine that can run sandboxes.** On an Apple-silicon Mac: [Tart](https://tart.run/quick-start/) and
+  [Softnet](https://github.com/openai/softnet/releases/latest) (setuid root; `potluck doctor` prints the one sudo line). On Linux: Docker with Kata or gVisor
+  ([cmd/potluck-driver-tart/README.md](cmd/potluck-driver-tart/README.md) has the setup). `potluck doctor` tells you what is missing and
+  where to get it.
+- **To try it alone: nothing else.** No account, no second machine. The pool and the machine that shares are the
+  same computer. A Mac needs about 60 GB free for the macOS image it pulls the first time.
+- **For friends' machines: a way for machines to reach each other.** By default that is [Tailscale](https://tailscale.com/)
+  (a free Tailscale account; Potluck has no accounts of its own). Instead of it, `--via tunnel` uses a tunnel you set up yourself (see "A tunnel instead of Tailscale" below).
+- A second machine is optional, and is the point once you invite friends.
+
+## How it works
+
+- A **pool** is a group of machines you and your friends lend and use. One machine runs it (`potluck create`); friends join with
+  a one-time code (`potluck invite`, `potluck join`).
+- A **host** is a machine that shares some of itself with a pool (`potluck host`). Potluck checks it first, and it
+  keeps what it shares to a fraction of its cores and RAM (half by default; `--share`).
+- A **size** is the shape of one sandbox, such as `c1m2`: 1 core, 2 GB of RAM.
+- A **sandbox** is a fresh VM or container on a host (`potluck sandbox create`). You run commands in it and then remove it.
+- A **layer** is what makes the sandbox: Tart VMs on a Mac, Docker with Kata or gVisor on Linux. Potluck drives it through a
+  small program called a driver, which you do not have to run yourself.
 
 ## Quick start
 
-Install it (macOS or Linux; no Go needed). The script puts `potluck`, the drivers and `potluck-conformance` in
-`~/.local/bin` (`POTLUCK_INSTALL_DIR` overrides it; the daemon runs drivers only from its own directory, see
-[DRIVERS.md](DRIVERS.md)):
+### Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
-potluck daemon --detach      # its home is $POTLUCK_HOME, default ~/.potluck; most commands start it on their own
 ```
 
-If `GH_TOKEN` (or `GITHUB_TOKEN`) is set, the script and `potluck upgrade` send it with each GitHub request. A
-private repository needs one that can read it (then fetch the script with
-`curl -fsSL -H "Authorization: Bearer $GH_TOKEN" …`); otherwise it lifts GitHub's rate limit (a token GitHub refuses fails the download; it is not ignored). You can also
-download a release's files by hand and run `sh install.sh --from <dir>`. Nothing from a release runs before its signature is checked: a potluck already
-installed checks it; on a first install the script checks it with the release key it carries and an openssl that
-can verify Ed25519 (OpenSSL 3; macOS's own LibreSSL cannot). Without one, a GitHub download is trusted over HTTPS
-and the script says so, and `--from` needs `--trust-dir`.
-`potluck upgrade` checks the newest release with the key built into it and installs it (`--release <dir>` from a
-directory, `--dry-run` to only check): the new build's preflight must accept this home first, each replaced program
-is kept as `<name>.prev`, the drivers it replaced are re-pinned, and a running daemon is restarted on it (or, if the
-new one does not come up, the old programs and the old daemon come back).
+macOS and Linux, no Go needed. The script puts `potluck`, its drivers, `potluck-conformance` and `potluck-e2b` in `~/.local/bin`. If it says that is not on
+your PATH, run the line it prints (for zsh, the default on macOS: `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && . ~/.zshrc`).
+Other ways to install, and what the script checks:
 
-To build from source instead, put the program, the VM driver and the conformance suite on your `PATH`:
+| You want | Do this |
+| --- | --- |
+| The newest release | the line above |
+| A release you downloaded | `sh install.sh --from <dir>` ([docs/install.md](docs/install.md)) |
+| To check the signature before anything runs | an OpenSSL 3 first on `PATH` ([docs/install.md](docs/install.md#what-is-checked)) |
+| The Mac menu bar item (not Developer ID signed yet) | `sh install.sh --menubar` on a Mac ([docs/menubar.md](docs/menubar.md)) |
+| Later releases | `potluck upgrade` |
+| To build from source | `go build -o ~/bin/ ./cmd/potluck ./cmd/potluck-driver-tart ./cmd/potluck-conformance` |
+
+### Try it on one machine
 
 ```sh
-go build -o ~/bin/ ./cmd/potluck ./cmd/potluck-driver-tart ./cmd/potluck-conformance  # in this git checkout: potluck --version names the commit
+potluck doctor                          # what this machine can share, and what is missing
+potluck create trial --via tunnel       # a pool on this machine alone: no Tailscale, and no tunnel to set up
+potluck host --reclaim-idle-s 0         # share this machine with that pool
+potluck sandbox create                  # prints the sandbox's id
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
 ```
 
-On the machine that runs the pool:
+`--reclaim-idle-s 0` matters on a Mac you are sitting at: by default a Mac's sandbox ends when you touch the keyboard or
+pointer, and starts only after the Mac has been idle for five minutes.
+
+A session on a Mac looks like this. It is an illustration, not a recording: it follows what the commands print, with some lines left out (the image, the `GitHub Actions:` line, the `ran:` lines for each command Potluck runs, and notes), and the machine name, id and `uname` line are examples. The first `potluck host` on a Mac pulls a macOS image of about 27 GB and wants about 60 GB free:
+
+```text
+$ potluck create trial --via tunnel
+potluck: started the daemon (~/.potluck)
+pool trial is ready; this machine runs it
+sealing: required (a new pool starts there: a machine too old to seal gets no secrets; potluck sealing lists them)
+next: potluck invite <name> for a friend who runs sandboxes, potluck invite <name> --host for one who shares a machine
+share this machine too: potluck host
+
+$ potluck host --reclaim-idle-s 0
+layer tart
+quick check: the security checks once, a boot check per size (--full for the whole suite)
+  shared mini-potluck-c2m4
+shared with pool trial: mini-potluck-c2m4
+members: potluck sandbox create
+
+$ potluck sandbox create
+mini-potluck-c2m4/a1b2c3 ready expires=2026-11-16T01:20:47Z net=on
+
+$ potluck sandbox exec mini-potluck-c2m4/a1b2c3 -- uname -a
+Darwin box 25.1.0 Darwin Kernel Version 25.1.0 arm64
+$ potluck sandbox rm mini-potluck-c2m4/a1b2c3
+removed mini-potluck-c2m4/a1b2c3
+```
+
+This path is tested in CI with a stand-in for the VM layer (`cli/one_machine_test.go`). It has not yet been run
+end to end on a real Mac with Tart.
+
+### With friends
+
+On the machine that runs the pool. If you already made the `trial` pool above, this machine is in two pools once you
+make `friends`: add `--pool friends` to the commands that pick a pool (`invite`, `host`, `sandbox create`).
 
 ```sh
-potluck create friends       # the first time, prints a Tailscale login URL and waits
-potluck invite ana           # a code for a friend who runs sandboxes
-potluck invite carl --host   # a code for a friend who shares a machine (--trust public for a stranger)
+potluck create friends       # the first time, prints a Tailscale login link and waits for you to sign in
+potluck invite ana           # a code for a friend who runs sandboxes (add --pool friends if you made `trial`)
+potluck invite carl --host   # a code for a friend who shares a machine (--trust public for a stranger; same --pool note)
 ```
 
-On a friend's machine, with a sandbox code: `potluck join '<code>'`.
+On a friend's machine, with a sandbox code: `potluck join '<code>'`. Then, from any member's machine, the same
+`potluck sandbox create`, `exec` and `rm` as above. Machines reach each other over Tailscale, or with `--via tunnel`
+over a tunnel you set up (below). Potluck names a machine after its host name plus `-potluck` (`POTLUCK_MACHINE` overrides
+it), so its tailnet node (`potluck-<machine>`) does not take the name of another daemon's node on the same machine.
+
+### A tunnel instead of Tailscale
+
+`--via tunnel` needs a public https address that forwards to a loopback port on the machine that runs the pool. Any
+tunnel will do; this one uses Cloudflare's free quick tunnel (`cloudflared`):
+
+```sh
+cloudflared tunnel --url http://127.0.0.1:7435      # prints https://<random>.trycloudflare.com; leave it running, use a second terminal
+```
+
+Install `cloudflared` first (for example `brew install cloudflared`). Then add the `tunnel` key to `~/.potluck/config.json`
+(`$POTLUCK_HOME/config.json` if you set it). The daemon has probably written that file already, so edit it rather than
+replacing it, and keep its other keys:
+
+```json
+{"tunnel": {"listen": "127.0.0.1:7435", "url": "https://<random>.trycloudflare.com"}}
+```
+
+The daemon reads the file only when it starts, so restart it, then make the pool and an invite:
+
+```sh
+potluck daemon stop                   # skip if no daemon is running
+potluck daemon --detach
+potluck create friends --via tunnel
+potluck invite ana --via tunnel --pool friends   # an https code, for a friend's `potluck join`
+```
+
+A quick tunnel's address changes each time it starts, so this suits a trial. This path is run by hand in CI on a
+Linux VM (`scripts/clean-machine-proof.sh`).
 
 ### Share compute
 
@@ -73,31 +163,28 @@ Afterwards:
 
 ```sh
 potluck isolation test <size> # prove its boxes cannot reach this machine, its LAN or tailnet (docs/isolation.md)
+potluck host set drain        # wind down: nothing new starts, running work finishes (cut after 30 minutes by default)
+potluck host set closed       # stop now (set auto to go back to your own rules)
 potluck host stop             # stop sharing: remove every size potluck host shared from this machine
 ```
 
 `--share` (default 0.5) sets the fraction of cores and RAM shared; on a Mac a sandbox ends when you touch the
-keyboard or pointer (`--reclaim-idle-s`). Run again with no code, `potluck host` shares with the only pool this
+keyboard or pointer (`--reclaim-idle-s`, default 300; 0 shares all the time). Run again with no code, `potluck host` shares with the only pool this
 machine is in. `potluck host --help` lists the rest.
 
-Then, from any member's machine:
-
-```sh
-potluck sandbox create       # prints the sandbox's id
-potluck sandbox exec <id> -- uname -a
-potluck sandbox exec <id> --detach -- make test   # prints a pid; potluck sandbox logs <id> <pid> -f
-potluck sandbox rm <id>
-```
+### More
 
 `potluck --help` lists the rest: `leave`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal`, `usage`,
 `run`, `agent-runner` (a coding agent vendor's self-hosted runners in fresh sandboxes:
-[docs/agent-runners.md](docs/agent-runners.md)) and `runners`. Machines reach each other over Tailscale, or with `--via tunnel` over a tunnel you configure.
-Potluck names this machine after its host name plus `-potluck` (`POTLUCK_MACHINE` overrides it), so its tailnet node
-(`potluck-<machine>`) does not take the name of another daemon's node on the same machine.
-Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux
-([cmd/potluck-driver-tart/README.md](cmd/potluck-driver-tart/README.md)). This flow is tested in CI with the reference driver
-standing in for the VM layer (`cli/cli_test.go`), and run by hand on a fresh GitHub-hosted Linux VM
-with gVisor (`scripts/clean-machine-proof.sh`, the `clean-machine-proof` workflow); not yet on Tart or across two machines.
+[docs/agent-runners.md](docs/agent-runners.md)) and `runners`.
+
+- **Move a CI job onto a lent Mac:** `potluck ci pr <owner/repo>` changes one job's `runs-on` and prepares the pull
+  request ([docs/ci-pr.md](docs/ci-pr.md)).
+- **E2B's SDKs on your sandboxes:** `potluck-e2b` ([docs/daemon.md](docs/daemon.md#e2b-gateway)); skip it if you do not use E2B.
+
+This flow is tested in CI with the reference driver standing in for the VM layer (`cli/cli_test.go`), and run by hand
+on a fresh GitHub-hosted Linux VM with gVisor (`scripts/clean-machine-proof.sh`, the `clean-machine-proof`
+workflow); not yet on Tart or across two machines.
 
 ## MCP for agents
 
@@ -121,7 +208,7 @@ All standard output is MCP protocol traffic.
 | --- | --- |
 | `go build`, `go vet`, `go test` in CI on Linux; signed releases and `install.sh` | Automatic upgrades (`potluck upgrade` is run by hand) |
 | OCI and Incus layers tested against stand-in CLIs; Tart through a fake layer | Tests on real VMs in CI (a manual run) |
-| The quick start on a fresh GitHub-hosted Linux VM with no zm, run by hand (the `clean-machine-proof` workflow): install, a pool over a Cloudflare quick tunnel, the VM shared through gVisor, a sandbox and `potluck run` | The quick start across two real machines in CI |
+| The quick start on a fresh GitHub-hosted Linux VM with no earlier Potluck or zm on it, run by hand (the `clean-machine-proof` workflow): install, a pool over a Cloudflare quick tunnel, the VM shared through gVisor, a sandbox and `potluck run` | The quick start across two real machines in CI |
 | The VM driver passes the full suite over a fake layer (isolation is not exercised there) | |
 | Every check the reference driver passes is also shown to fail on a driver broken on purpose | |
 | A real GitHub Actions job run through the broker, by hand: on a Mac (Tart, the same machine as the broker) and on a Linux box on another machine (OCI with gVisor) | Actions jobs on pool machines in our own CI, every day |
@@ -162,40 +249,7 @@ bundle it.
 - Not a sandbox runtime of its own. It drives Tart, Kata, gVisor and Incus.
 - Not a scheduler for clusters.
 
-## Layout
-
-| path | what |
-| --- | --- |
-| `cmd/potluck/` | the `potluck` program: daemon and commands |
-| `cli/` | its commands |
-| `docs/protocol.md` | the driver protocol (potluck/1) |
-| `docs/hosts.md` | sharing a machine: doctor, host, sizes, images, the root step, the VM driver |
-| `docs/network.md` | box networking and its filter |
-| `docs/isolation.md` | the isolation claim, refusals, and the block test (`potluck isolation test`) |
-| `docs/daemon.md` | what the daemon does around a driver: bindings, leases, relays, the runner broker, clients |
-| `docs/conformance.md` | the driver conformance suite |
-| `docs/vm-layers.md` | how to add a VM layer (a new hypervisor) to `vmhost/` |
-| `protocol/` | its wire types |
-| `vmhost/` | the VM driver: Tart, OCI and Incus layers, supervisors, hand-back, Actions runners |
-| `boxproc/` | the host side of a box's background processes and terminals (used by the VM and reference drivers) |
-| `cmd/potluck-driver-tart/` | the VM driver's command, its setup guide, and the box image Dockerfiles |
-| `cmd/potluck-driver-local/` | the local driver: jobs on this machine, as the daemon's user (`internal/localdriver`) |
-| `conformance/` | the conformance suite, and `refdriver/`, the reference driver its tests use |
-| `cmd/potluck-conformance/` | runs the suite against any driver executable (`internal/conformancecmd`) |
-| `cmd/zm-run-tart/`, `cmd/zm-run-local/`, `cmd/zm-run-conformance/`, `cmd/zm-e2b/` | the same programs under their old names, for build lists and updaters that still name them |
-| `ghapp/` | GitHub App client for a runner broker |
-| `install.sh`, `scripts/release*/`, `internal/upgrade/` | installs and upgrades: the install script, release build, signing and keygen, and `potluck upgrade`'s fetch and verify |
-| `site/` | the landing page |
-
-Moved from zm, one Go module, two layers:
-
-- `kit/...`: KIT, the shared base: ids, config, secrets, store, events, authz, netguard, sqlbackup, release, swap,
-  tailnet, tunnel, owners, project, core, api, client, server (the daemon shell) and teamlink (join, remotes,
-  machine ops, heartbeat, proxy).
-- COMPUTE, at the top level: `runtarget/` (boxes and sandboxes, `rt/`), `runners/` (GitHub runner broker),
-  `usage/`, `hostprobe/` (host checks, share, `images.pin`), `computeapi/`, `computeclient/`, `boxcp/`, `boxpush/`,
-  `wiring/` (daemon wirings `Kit` and `Compute`), `cmd/potluck-e2b/` (`internal/e2bgateway`), plus the packages above.
-- Rule (`internal/layers`): KIT's non-test code imports no COMPUTE package, and nothing here depends on zm.
+Where things are in the source: [docs/layout.md](docs/layout.md).
 
 ## Build and test
 

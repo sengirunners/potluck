@@ -27,6 +27,7 @@ import (
 	"github.com/sengirunners/potluck/kit/api/textclean"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
+	"github.com/sengirunners/potluck/kit/tunnel"
 )
 
 // Potluck's home: POTLUCK_HOME, else ~/.potluck, with its socket
@@ -50,8 +51,16 @@ const (
 )
 
 // Potluck's other variables: who the human is, and none of zm's remote
-// client (ZM_HOST): potluck commands talk to this machine's daemon only.
+// client (ZM_HOST): potluck commands talk to this machine's daemon, or,
+// inside a box, to the authority its credential names.
 const EnvHuman = "POTLUCK_HUMAN"
+
+// EnvBoxCredential is the path of a box credential file (what the
+// potluck-token kind delivers into a box, in $POTLUCK_SECRETS). When it is
+// set, every command talks to the authority that file names, over its
+// tunnel, with no daemon (docs/daemon.md "Calling the authority from a
+// box").
+const EnvBoxCredential = "POTLUCK_BOX_CREDENTIAL"
 
 // UseHome points kit/config at Potluck's home, machine name, variables and
 // words. Main calls it first; a test that starts daemons in this package
@@ -251,15 +260,28 @@ func (e exitWith) Error() string {
 // --pool applied. It starts the daemon when none answers, unless the
 // running command never does (autostartAllowed). It reads none of zm's
 // client variables (ZM_HOST, ZM_TOKEN, ZM_AS, ZM_PROJECT, ZM_SESSION).
+// With POTLUCK_BOX_CREDENTIAL set it is instead a client for the authority
+// that credential names, and starts nothing.
 func (a *app) client() (*client.Client, *config.Config, error) {
 	cfg, err := config.LoadClient()
 	if err != nil {
 		return nil, nil, err
 	}
-	c := client.NewUnix(cfg.SocketPath())
-	c.Cwd, _ = os.Getwd()
-	if autostartAllowed(a.running, os.Getenv) {
-		c.Autostart = func(ctx context.Context) error { return a.autostart(ctx, cfg) }
+	var c *client.Client
+	if path := os.Getenv(EnvBoxCredential); path != "" {
+		cred, err := tunnel.ReadBoxCredential(path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", EnvBoxCredential, err)
+		}
+		if c, err = tunnel.BoxClient(cred); err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", EnvBoxCredential, err)
+		}
+	} else {
+		c = client.NewUnix(cfg.SocketPath())
+		c.Cwd, _ = os.Getwd()
+		if autostartAllowed(a.running, os.Getenv) {
+			c.Autostart = func(ctx context.Context) error { return a.autostart(ctx, cfg) }
+		}
 	}
 	if a.project != "" {
 		c.Project, c.ProjectFrom = a.project, "flag"

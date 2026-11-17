@@ -97,8 +97,12 @@ func (s *Service) linkStart(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := cl.Installation(ctx, req.Installation); err != nil {
+	in, err := cl.Installation(ctx, req.Installation)
+	if err != nil {
 		return nil, api.Errorf(api.CodeNotFound, "installation %d is not one of this App's", req.Installation)
+	}
+	if why := s.accountRefused(in.Account); why != "" {
+		return nil, api.Errorf(api.CodeForbidden, "%s", why).WithHint("add it to runners.accounts in config.json; the broker reads it at its next start")
 	}
 	// Re-linking into another area takes admin of the area that has it now.
 	var replaces any
@@ -284,6 +288,9 @@ func (s *Service) doLink(ctx context.Context, p pending) (link, error) {
 	in, err := cl.Installation(ctx, p.installation)
 	if err != nil {
 		return link{}, err
+	}
+	if why := s.accountRefused(in.Account); why != "" {
+		return link{}, errors.New(why)
 	}
 	s.linkMu.Lock() // one link change at a time: the check, grant, insert and revoke below
 	defer s.linkMu.Unlock()

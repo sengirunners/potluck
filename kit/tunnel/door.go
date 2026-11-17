@@ -75,6 +75,11 @@ func (d *door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !issuedRecovery {
 			api.DelHeader(bw.h, HeaderRecovery)
 		}
+		if api.GetHeader(bw.h, api.HeaderProtocol) == "" {
+			// The door's own refusals are this daemon's answers too: a
+			// client reads them as errors, never as another protocol.
+			api.SetHeader(bw.h, api.HeaderProtocol, api.WireProtocol)
+		}
 		bw.finish(w, key, nonce, d.s.SealCert())
 	}()
 	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBody+1))

@@ -51,9 +51,11 @@ func (d *Deps) Authenticate(r *http.Request) context.Context {
 			node, tunnel = rm.NodeID, rm.Via == ViaTunnel
 		}
 		sub, err = d.Projects.FromTokenAt(ctx, tok, !local, node)
-		if err == nil && tunnel && sub.Node == "" {
+		if err == nil && tunnel && sub.Node == "" && sub.BoxKey == "" {
 			// The tunnel takes only a key-bound token of the signing key
-			// (SPEC 17.11): a minted token is not an internet credential.
+			// (SPEC 17.11): a replica's, or a box's bound to its per-box key
+			// (FromTokenAt checked the key). A bearer token alone is not an
+			// internet credential.
 			sub, err = nil, api.Errorf(api.CodeUnauthenticated, "invalid or expired token")
 		}
 		if err == nil && sub.Node != "" {

@@ -3,6 +3,7 @@ package issuers
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/project"
+	"github.com/sengirunners/potluck/kit/tunnel"
 )
 
 // poolIssuer is a potluck issuer whose jobs' tokens act as ci, at most
@@ -138,7 +140,7 @@ func TestPotluckTokenIssuedCappedAndRevokedAtEnd(t *testing.T) {
 	if secret == "" {
 		t.Fatal("nothing delivered")
 	}
-	sub, err := d.Projects.FromToken(ctx, secret, true)
+	sub, err := boxAuth(d.Projects, secret)
 	if err != nil {
 		t.Fatalf("the delivered token does not authenticate: %v", err)
 	}
@@ -151,7 +153,7 @@ func TestPotluckTokenIssuedCappedAndRevokedAtEnd(t *testing.T) {
 	}
 
 	rts.onEnd[0](ctx, proj, computeapi.RunTargetHandle{Handle: jr.Box.ID, State: "released"})
-	if _, err := d.Projects.FromToken(ctx, secret, true); err == nil {
+	if _, err := boxAuth(d.Projects, secret); err == nil {
 		t.Fatal("the token still authenticates after its box ended")
 	}
 	db := d.Store.Registry()
@@ -165,7 +167,7 @@ func TestPotluckTokenIssuedCappedAndRevokedAtEnd(t *testing.T) {
 		var ev, kind, hash, why, subject, name, perms string
 		_ = rows.Scan(&ev, &kind, &hash, &why, &subject, &name, &perms)
 		all := strings.Join([]string{ev, kind, hash, why, subject, name, perms}, " ")
-		if strings.Contains(all, secret) {
+		if strings.Contains(all, secret) || strings.Contains(all, mustCred(t, secret).Token) {
 			t.Fatalf("the ledger holds the token: %s", all)
 		}
 		if kind != KindPotluckToken || hash == "" || name != "POTLUCK_TOKEN" || perms != "role=member" {
@@ -238,6 +240,7 @@ func newPotluckEnvWith(t *testing.T, is config.SecretsIssuer) *potluckEnv {
 	e.cfg = config.File{Secrets: config.Secrets{Issuers: map[string]config.SecretsIssuer{"gh": is}}}
 	e.opt.Ledger = SQLLedger{e.db}
 	e.opt.Tokens = registryTokens{d}
+	e.opt.Home = func() (string, string, error) { return testTunnelURL, testHomeFP, nil }
 	p := &potluckEnv{d: d, proj: proj}
 	e.opt.BoxExpires = func(context.Context, Box) (time.Time, error) {
 		p.mu.Lock()
@@ -258,8 +261,113 @@ func (p *potluckEnv) req(box Box) Request {
 }
 
 func (p *potluckEnv) works(secret string) bool {
-	_, err := p.d.Projects.FromToken(context.Background(), secret, true)
+	_, err := boxAuth(p.d.Projects, secret)
 	return err == nil
+}
+
+// What lands in the box is one credential file: the token, a key made for
+// it, and the authority's tunnel URL and key fingerprint. The token works
+// only on a request its own key signed over the tunnel: not as a bearer
+// token (the socket, the tailnet), not with another key. A renewal brings a
+// new token with a new key. With no tunnel URL nothing is minted.
+func TestPotluckTokenBoundToItsBoxKey(t *testing.T) {
+	ctx := context.Background()
+	p := newPotluckEnv(t)
+	req := p.req(trustedBox)
+	p.mustIssue(req)
+	first := mustCred(t, p.bx.get(req.Box, "POTLUCK_TOKEN"))
+	if first.URL != testTunnelURL || first.Home != testHomeFP {
+		t.Fatalf("the credential names %s %s, want the authority's tunnel", first.URL, first.Home)
+	}
+	reg := p.d.Projects
+	if _, err := reg.FromTokenAt(ctx, first.Token, true, tunnel.BoxKeyID(first.Key)); err != nil {
+		t.Fatalf("with its own key: %v", err)
+	}
+	other, _ := tunnel.NewBoxKey()
+	for name, node := range map[string]string{"another key": tunnel.BoxKeyID(other), "a tailnet node": "nTAILNET1CNTRL", "no node": ""} {
+		if _, err := reg.FromTokenAt(ctx, first.Token, true, node); codeOf(err) != api.CodeUnauthenticated {
+			t.Errorf("%s: %v, want unauthenticated", name, err)
+		}
+	}
+	if _, err := reg.FromTokenAt(ctx, first.Token, false, tunnel.BoxKeyID(first.Key)); codeOf(err) != api.CodeUnauthenticated {
+		t.Errorf("on the socket: %v, want unauthenticated", err)
+	}
+	toks, _ := reg.Tokens(ctx)
+	if len(toks) != 1 || toks[0].Node != "" {
+		t.Fatalf("token rows %+v: a box's token is never node-bound (a replica's)", toks)
+	}
+	p.clk.add(41 * time.Minute)
+	p.iss.Tick(ctx)
+	second := mustCred(t, p.bx.get(req.Box, "POTLUCK_TOKEN"))
+	if second.Token == first.Token || tunnel.BoxKeyID(second.Key) == tunnel.BoxKeyID(first.Key) {
+		t.Fatal("a renewal kept the token or the key")
+	}
+	if _, err := reg.FromTokenAt(ctx, second.Token, true, tunnel.BoxKeyID(first.Key)); err == nil {
+		t.Fatal("the renewed token works with the old key")
+	}
+
+	q := newPotluckEnv(t)
+	q.opt.Home = func() (string, string, error) {
+		return "", "", api.Errorf(api.CodeUnavailable, "this daemon has no tunnel url (tunnel.url)")
+	}
+	q.iss = q.load()
+	if _, err := q.issue(q.req(trustedBox)); codeOf(err) != api.CodeForbidden || !strings.Contains(err.Error(), "could not reach this authority") {
+		t.Fatalf("no tunnel url: %v, want forbidden", err)
+	}
+	if toks, _ := q.d.Projects.Tokens(ctx); len(toks) != 0 {
+		t.Fatalf("minted %d tokens with no tunnel url", len(toks))
+	}
+}
+
+// A delivery error quoting the credential's token or key alone, not the
+// whole file, is scrubbed of both before it reaches the caller or the
+// ledger.
+func TestPotluckTokenPartsScrubbed(t *testing.T) {
+	p := newPotluckEnv(t)
+	var parts []string
+	p.bx.set(func(b *boxes) {
+		b.fail = errors.New("box busy")
+		b.quote = func(v string) string {
+			c, err := tunnel.ParseBoxCredential(v)
+			if err != nil {
+				return "unparsed"
+			}
+			parts = []string{c.Token, hex.EncodeToString(c.Key.Seed())}
+			return "token " + parts[0] + " key " + parts[1]
+		}
+	})
+	_, err := p.issue(p.req(trustedBox))
+	if err == nil || len(parts) != 2 {
+		t.Fatalf("issue: %v (quoted %d parts)", err, len(parts))
+	}
+	rows, qerr := p.db.Query(`SELECT why FROM issuers_ledger`)
+	if qerr != nil {
+		t.Fatal(qerr)
+	}
+	defer rows.Close()
+	all := err.Error()
+	for rows.Next() {
+		var why string
+		_ = rows.Scan(&why)
+		all += "\n" + why
+	}
+	for _, v := range parts {
+		if strings.Contains(all, v) {
+			t.Fatalf("a part of the credential leaked:\n%s", all)
+		}
+	}
+	if !strings.Contains(all, "[secret]") {
+		t.Fatalf("nothing scrubbed:\n%s", all)
+	}
+}
+
+func mustCred(t *testing.T, delivered string) tunnel.BoxCredential {
+	t.Helper()
+	c, err := tunnel.ParseBoxCredential(delivered)
+	if err != nil {
+		t.Fatalf("the delivered value: %v", err)
+	}
+	return c
 }
 
 // A potluck-token is renewed at two thirds of its hour: the new one is
@@ -397,7 +505,7 @@ func TestPotluckTokenForAPerson(t *testing.T) {
 	if out.ExpiresAt.After(*callerTok.Token.Expires) {
 		t.Fatalf("issued until %v, past the caller's token (%v)", out.ExpiresAt, *callerTok.Token.Expires)
 	}
-	sub, err := reg.FromToken(ctx, p.bx.get(box, "POTLUCK_TOKEN"), true)
+	sub, err := boxAuth(reg, p.bx.get(box, "POTLUCK_TOKEN"))
 	if err != nil || sub.Identity.Name != "ci" || sub.Cap.Role != authz.Member || sub.Cap.Project != p.proj {
 		t.Fatalf("the person's token: %+v %v", sub, err)
 	}
@@ -496,7 +604,7 @@ func TestModuleRunsBothKinds(t *testing.T) {
 		t.Fatalf("delivered: %v", rts.writes)
 	}
 	rts.onEnd[0](ctx, proj, computeapi.RunTargetHandle{Handle: box.ID, State: "released"})
-	if _, err := d.Projects.FromToken(ctx, secret, true); err == nil || e.gh.liveCount() != 0 {
+	if _, err := boxAuth(d.Projects, secret); err == nil || e.gh.liveCount() != 0 {
 		t.Fatalf("after the box's end: potluck-token works %v, %d GitHub tokens live", err == nil, e.gh.liveCount())
 	}
 }
@@ -564,4 +672,21 @@ func TestPotluckTokenRenewalRetriesARegistryError(t *testing.T) {
 	if second := p.bx.get(req.Box, "POTLUCK_TOKEN"); second == first || !p.works(second) {
 		t.Fatal("the renewal was not tried again once the registry answered")
 	}
+}
+
+// testTunnelURL and testHomeFP are the authority a test box's credential
+// names.
+const (
+	testTunnelURL = "https://authority.example"
+	testHomeFP    = "abcdefghijklmnopqrstuvwxyz"
+)
+
+// boxAuth authenticates a delivered box credential as the tunnel would: its
+// token, on a request its own key signed.
+func boxAuth(reg *project.Registry, delivered string) (*authz.Subject, error) {
+	c, err := tunnel.ParseBoxCredential(delivered)
+	if err != nil {
+		return nil, err
+	}
+	return reg.FromTokenAt(context.Background(), c.Token, true, tunnel.BoxKeyID(c.Key))
 }

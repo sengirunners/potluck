@@ -1005,6 +1005,13 @@ sizes are config.
   editing `config.json`; the broker serves the edit from its next start or its next settings save (`potluck runners
   set`, which reads `config.json` as it is on disk). Switching it off then retires the runners that served forks (see
   Serving one).
+- `accounts` (default none): the GitHub users and organizations whose installations of the App the broker hears,
+  compared without case. GitHub offers an App to other accounts only once it is public, and then anyone can install
+  it and GitHub sends that installation's deliveries here signed with the App's own `webhook_secret`. A delivery from
+  an account not listed is answered 202 and dropped before it is stored (no inbox row, no job row, so no doctor
+  probe or owner notice), logged at most once an hour per reason; linking such an installation is refused. A linked
+  installation's own `installation` events are still heard (they can only unlink it). With none listed, only the
+  installations linked here are heard. Read from `config.json` at start and at each settings save.
 - `job_ttl_s` (default 3600; never under three sweeps, 900 s): a job's time limit. Its box is leased this long and the
   lease is renewed by that much while the job runs (the sweep), up to the lending machine's own `ttl_max_s` and
   never past it; a box whose limit is below `job_ttl_s` is not given the job. A job keeps the limit it was served
@@ -1091,7 +1098,7 @@ Deliveries:
 
 - `POST /v0/runners/hook` (public) takes the App's deliveries. `X-Hub-Signature-256` is checked against
   `webhook_secret` before anything else (401); at most 5 MiB; de-duplicated by `X-GitHub-Delivery`; answered 202 once
-  durable.
+  durable, or once dropped when `accounts` does not hear it (the check's deliveries are dropped the same way).
 - Workers apply them in two lanes, oldest first: `queued` (a serve waits for a box to boot) on 3 workers, never two on
   one job; and `in_progress`, `completed` and `installation`, which end boxes and so never wait behind a serve, on
   one, in arrival order.
@@ -1569,8 +1576,34 @@ against), for a box to call its authority back: to comment on a work item, say, 
   `revoked`), rather than leaving it to lapse.
 - The ledger names it by `hashed_token`: the SHA-256 (hex) the tokens table looks a secret up by. The value is
   never stored or logged.
-- The box gets the token under the grant's name. Reaching the authority from inside a box with it is the
-  daemon-less tunnel client's part, not this kind's.
+- The box gets one file under the grant's name: a box credential (below), holding the token and a key made for that
+  token alone (the per-box key), never written anywhere by the authority. The token is bound to the key's id
+  (`tokens.box_key`) and works only on a request that key signed over the tunnel: not as a bearer token on the
+  socket or the tailnet, not with any other key. Each renewal mints a new token with a new key and replaces the file
+  whole. A box token is never a team replica's (`tokens.node` stays empty): it cannot link or unlink a GitHub login
+  or leave a team as the member, and it holds no subscription (pushes, runner links, previews read later).
+- With no tunnel URL (`tunnel.url`) a box could not reach the authority, so nothing is minted: the request is
+  refused naming it.
+
+### Calling the authority from a box
+
+A program in a box reaches the pool's machine with the credential file alone: no daemon in the box, no other file,
+nothing long-lived. The file (`kit/tunnel` `BoxCredential`) is one JSON object:
+
+```json
+{"kind": "potluck-box/1", "token": "potluck_…", "key": "<hex ed25519 seed>",
+ "url": "https://pool.example", "home": "<the authority's key fingerprint>"}
+```
+
+- `potluck` reads it when `POTLUCK_BOX_CREDENTIAL` names it, `$POTLUCK_SECRETS/<the grant's name>` in a box: every
+  command then talks to that authority, as the token's identity, capped to the box's project, area and role. It
+  starts no daemon.
+- Each request is signed with the box's key for the pinned authority, as a member's daemon signs its own (the
+  tunnel's signed exchange); only answers the authority's key signed are read. A box has no seal key, so a call
+  carrying a secret is refused before it leaves.
+- Code that is not `potluck` uses `tunnel.ReadBoxCredential` and `tunnel.BoxClient`, which answers a
+  `kit/client` client.
+- The conformance suite's group `box-authority` checks it from inside a real box (`docs/conformance.md`).
 
 ### Renewal and revocation
 

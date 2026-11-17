@@ -14,6 +14,7 @@ import (
 	"github.com/sengirunners/potluck/kit/events"
 	"github.com/sengirunners/potluck/kit/secrets"
 	"github.com/sengirunners/potluck/kit/teamlink"
+	"github.com/sengirunners/potluck/kit/tunnel"
 	"github.com/sengirunners/potluck/runtarget/rt"
 )
 
@@ -110,6 +111,7 @@ func NewModule(d *core.Deps) *Module {
 			Events:          eventsOf{d},
 			Tokens:          registryTokens{d},
 			BoxExpires:      m.boxExpires,
+			Home:            m.home,
 			Log:             d.Log,
 		})
 		if err != nil {
@@ -135,6 +137,15 @@ func NewModule(d *core.Deps) *Module {
 		})
 	}
 	return m
+}
+
+// home is this daemon's tunnel, as a box's credential names it.
+func (m *Module) home() (string, string, error) {
+	s := tunnel.From(m.d)
+	if s == nil {
+		return "", "", api.Errorf(api.CodeUnavailable, "this daemon runs no tunnel")
+	}
+	return s.Home()
 }
 
 // mints is the credential kind each issuer kind mints.
