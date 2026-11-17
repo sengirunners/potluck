@@ -11,6 +11,10 @@ export const OG_IMAGE = `${ORIGIN}/og.png`;
 // IndexNow's key. It is public on purpose: the protocol has the site serve it at /<key>.txt to prove it owns the host.
 export const INDEXNOW_KEY = "7b1a88c94e3d01e8f2150746ddb8a872";
 
+// Google Search Console's ownership proof for the property https://potluck.sh/ (the shared growth service account
+// verified it with the Site Verification API's META method). Public on purpose; removing it un-verifies the site.
+export const GOOGLE_SITE_VERIFICATION = "VtxYvTdYwVWYZa_DXm-MVSC0k4lRAy65l4ujzYZXrcI";
+
 export const HOME = {
   path: "/",
   lastmod: "2026-11-16",

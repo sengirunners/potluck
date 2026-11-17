@@ -1,13 +1,35 @@
-# Potluck
+<h1 align="center">
+  <a href="https://potluck.sh"><img src="docs/img/readme-hero.webp" width="100%" alt="Potluck: run your coding agents and builds on the computers you already own. Six lent machines sit on a picnic blanket: a gaming PC, a cloud VM, a mini PC, a Mac mini, a MacBook Pro and a rented server."></a>
+</h1>
+
+<p align="center">
+  <a href="https://potluck.sh">Website</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/">Docs</a> ·
+  <a href="https://potluck.sh/blog">Blog</a> ·
+  <a href="https://github.com/sengirunners/potluck/discussions">Discussions</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/sengirunners/potluck/actions/workflows/ci.yml"><img src="https://github.com/sengirunners/potluck/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/sengirunners/potluck/releases/latest"><img src="https://img.shields.io/github/release-date/sengirunners/potluck?label=latest%20release&color=2F6B34" alt="Latest release"></a>
+  <a href="https://pkg.go.dev/github.com/sengirunners/potluck"><img src="https://pkg.go.dev/badge/github.com/sengirunners/potluck.svg" alt="Go reference"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2F6B34" alt="Licence: Apache-2.0"></a>
+</p>
 
 Potluck aims to put your team's idle machines to work. It will run your GitHub Actions jobs and your coding
 agents in fresh VMs or sandboxed containers on Macs and Linux boxes you already own, and hand a machine back when
 its owner returns. Pools will let people you invite lend machines too.
 
+| Coding agents | GitHub Actions | Still your machine |
+| --- | --- | --- |
+| An agent's commands run in a throwaway sandbox on a pool machine, not on your laptop: `potluck sandbox create`, or the sandbox tools over [MCP](#mcp-for-agents). | `potluck ci pr <owner/repo>` prepares a pull request that changes one job's `runs-on`, so that job can run on a Mac you lend. Pull requests from forks keep GitHub's runner ([docs/ci-pr.md](docs/ci-pr.md)). | By default a Mac works for the pool only while its owner is away: touch the keyboard or trackpad and its job ends. `potluck host set drain` winds any machine down. |
+
 ## Status
 
-Early. There is a `potluck` program (the daemon and the commands below), signed releases for macOS and Linux, and
-an install script. Interfaces will change. Did you run it before as zm? See [docs/coming-from-zm.md](docs/coming-from-zm.md).
+> [!NOTE]
+> Early. There is a `potluck` program (the daemon and the commands below), signed releases for macOS and Linux, and
+> an install script. Interfaces will change. Did you run it before as zm? See [docs/coming-from-zm.md](docs/coming-from-zm.md).
 
 ## What you need
 

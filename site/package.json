@@ -9,6 +9,7 @@
     "build": "node build/build.mjs",
     "build:check": "node build/build.mjs --check",
     "notify": "node build/notify.mjs",
+    "readme-hero": "node build/readme-hero.mjs",
     "deploy": "node build/deploy.mjs"
   }
 }

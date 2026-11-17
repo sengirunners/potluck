@@ -301,7 +301,7 @@ pre.cmd .p{color:var(--green);font-weight:700}
 .rules .fn{text-decoration:none;font-weight:700;padding:0 2px}
 .quilt .note{margin-top:22px;padding-top:12px;border-top:1px dashed #D9C9A6;font-size:14.5px;color:var(--soft)}
 
-/* Talk to us and Potluck Dish: two different things, drawn differently. */
+/* Talk to us and Mezze: two different things, drawn differently. */
 .pair{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:32px;align-items:start}
 .founders{background:#FFE9C7;border-radius:22px;padding:28px 30px;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cpath d='M0 20L20 0L40 20L20 40Z' fill='none' stroke='%23F2D3A2' stroke-width='1.2' stroke-dasharray='3 3'/%3E%3C/svg%3E")}
@@ -384,6 +384,10 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
   .recipe{padding:22px 18px 20px 20px}
   .recipe .body{grid-template-columns:minmax(0,1fr) 80px}
   .use{padding:20px 14px;border-width:12px;--gs:12px}
+  /* A blanket is too narrow on a phone for its longest commands: they wrap at spaces rather than scroll out of
+     sight; a comment, or a word marked .nw, stays whole. */
+  .use pre.cmd,.use .diff div{white-space:pre-wrap;overflow-wrap:anywhere}
+  .use pre.cmd .c,.use pre.cmd .nw{white-space:nowrap}
   .use::after{inset:-4px}
   section.block{padding-top:64px}
   .band{margin-top:64px}
@@ -393,20 +397,20 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
   .ring{transition:none}
 }
 
-/* How it works, step 1: the blanket that unfolds as you scroll (bk-). */
-/* Step 1 figure: a gingham blanket that unfolds as the figure scrolls into view.
+/* How it works, step 1 (bk-): a gingham blanket that unfolds as the figure scrolls into view.
    Without JS, or with reduced motion, the open blanket (.bk-open) shows and the cells stay hidden. */
-.bk-fig{--bk-p:1}
 .bk-svg{display:block;width:100%;height:auto;overflow:visible}
 .bk-cells{display:none}
 .bk-shade{fill:#000;fill-opacity:0;stroke:#5A1F14;stroke-opacity:0;stroke-width:1}
 .bk-fig.bk-live .bk-open{display:none}
 .bk-fig.bk-live .bk-cells{display:inline}
 .bk-card-body,.bk-card-shadow{transform-box:view-box}
-@media (prefers-reduced-motion:reduce){
-  .bk-fig.bk-live .bk-open{display:inline}
-  .bk-fig.bk-live .bk-cells{display:none}
-}
+/* More invites, dealt one click at a time (hidden until then, and without JS); each drops in as it appears. */
+.bk-later{display:none}
+.bk-extra{transform-box:view-box;animation:bk-deal .55s cubic-bezier(.2,.8,.3,1.15)}
+@keyframes bk-deal{from{transform:translateY(-30px);opacity:0}}
+/* It takes repeated clicks and taps: no text selection, and no double-tap zoom. */
+.bk-fig.bk-live{cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:manipulation}
 
 /* How it works, step 2: the machines side by side, and the pools they are in (sk-). */
 /* Skyline: every kind of computer that can join a pool, lined up like a tallest-buildings chart. */

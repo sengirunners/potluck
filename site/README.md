@@ -11,7 +11,7 @@ food and cloud are inline SVG cut-outs that keep facing the reader; there are no
 `site.js`, runs the scene (pick a machine, drag the lawn or press the arrows to turn it, all the way round), places the machines' labels in a flat layer
 from where each machine lands on screen (front to back, each at the cheapest spot: never over another label, the card
 or the arrows, and, where there is room, off every machine and with a leader line that runs over no other machine,
-label or leader), the three How it works figures (a blanket that unfolds with scroll, machines that drop into a
+label or leader), the three How it works figures (a blanket that unfolds with scroll, then, at each click on it, deals Emily's and Leo's invites, folds up and lays out again, machines that drop into a
 row and spring to life when pointed at, focused or tapped, over brackets that show their pools, a MacBook whose Potluck menu works: the reader picks Keep lending, Wind down or Stop now, the jobs answer and the matching command lights up, and if nobody picks, the pointer winds it down; their classes start `bk-`, `sk-` and `mb-`), the cost slider, the copy button
 and the form. Without JavaScript the page still reads in full; the labels, turn arrows and copy button stay hidden,
 the figures show their finished state, and the form posts as a plain form. With `prefers-reduced-motion`, nothing
@@ -68,8 +68,13 @@ What the build writes:
 | `public/llms.txt`, `public/llms-full.txt` | `content/llms-intro.md` plus the page list; and the intro plus every page's Markdown (`content/home.md` for the home page; keep it in step with `index.html`) |
 | `public/index.html` (between its markers) | title, description, canonical, Open Graph, Twitter tags and JSON-LD (SoftwareApplication, Organization, WebSite), and the footer's Blog link |
 
-`public/og.png` (1200x630, the share image) and `public/blog.css` are hand-made. `public/7b1a88c94e3d01e8f2150746ddb8a872.txt`
+`public/og.png` (1200x630, the share image) and `public/blog.css` are hand-made. `docs/img/readme-hero.webp`, the
+picture at the top of the repository's README, is drawn from the home page's headline and picnic by `npm run readme-hero`
+(`build/readme-hero.mjs` and `build/readme-hero.css`; it needs Chrome and `cwebp`). Run it after the home page's hero
+changes and commit the picture. `public/7b1a88c94e3d01e8f2150746ddb8a872.txt`
 is the IndexNow key: public on purpose (the protocol serves it from the site to prove ownership), and a test checks it.
+`public/BingSiteAuth.xml` proves to Bing Webmaster Tools that we own the site (the Bing account that also holds sengi.run);
+it is public on purpose too. Removing it un-verifies the site in Bing.
 
 `thanks.html` is `noindex`, and is not in the sitemap.
 

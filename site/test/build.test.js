@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, sta
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BOTS, build, drift, loadPosts, SITE_DIR, sitemapEntries, write } from "../build/build.mjs";
-import { INDEXNOW_KEY, ORIGIN } from "../build/pages.mjs";
+import { GOOGLE_SITE_VERIFICATION, INDEXNOW_KEY, ORIGIN } from "../build/pages.mjs";
 import { isDay } from "../build/frontmatter.mjs";
 
 const PUBLIC = join(SITE_DIR, "public");
@@ -191,4 +191,10 @@ test("sitemap and canonical addresses use the form Workers assets answer with 20
     if (f === "thanks.html") continue;
     assert.equal(canon, f === "index.html" ? `${ORIGIN}/` : `${ORIGIN}/${f.slice(0, -5)}`, f);
   }
+});
+
+test("the home page carries Google's site-verification meta tag, once", () => {
+  const home = readFileSync(join(PUBLIC, "index.html"), "utf8");
+  const tags = home.match(/<meta name="google-site-verification" content="([^"]+)">/g) ?? [];
+  assert.deepEqual(tags, [`<meta name="google-site-verification" content="${GOOGLE_SITE_VERIFICATION}">`]);
 });

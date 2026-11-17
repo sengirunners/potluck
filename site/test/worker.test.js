@@ -127,14 +127,17 @@ test("the page makes no third-party requests and loads its fonts from /fonts", (
   assert.doesNotMatch(INDEX, /—/, "no em dashes");
 });
 
-test("the page offers the install line, the founders' form and address, Potluck Dish and Sengi, and no waitlist", () => {
+test("the page offers the install line, the founders' form and address, Mezze and Sengi, and no waitlist", () => {
   assert.match(INDEX, /<code id="install-cmd">curl -fsSL https:\/\/raw\.githubusercontent\.com\/sengirunners\/potluck\/main\/install\.sh \| sh<\/code>/);
   assert.match(INDEX, /href="https:\/\/github\.com\/sengirunners\/potluck"/);
   assert.match(HTML, /<form class="talk" id="talk" method="post" action="\/api\/contact"/);
   assert.equal((HTML.match(/<form/g) ?? []).length, 1, "one form: the founders'");
   assert.match(HTML, /ops@sengi\.run/);
   assert.doesNotMatch(HTML, /mailto:/, "mailto links fail for people with no mail app set up");
-  assert.match(INDEX, /Potluck Dish/);
+  assert.match(INDEX, /Mezze, coming soon/);
+  assert.match(INDEX, /<h2>Mezze<\/h2>/);
+  assert.match(INDEX, /Mezze is the agent and team layer that runs on Potluck/);
+  assert.doesNotMatch(INDEX, /Potluck Dish/);
   assert.match(HTML, /href="https:\/\/sengi\.run"/);
   assert.doesNotMatch(INDEX, /\/api\/waitlist|waitlist/i);
   assert.doesNotMatch(INDEX, /\(soon\)|stet|not ready/i);

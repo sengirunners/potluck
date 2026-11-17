@@ -169,3 +169,15 @@ jobs:
           echo "images.pin line: oci linux $PIN"
           echo "images.pin line: oci linux $AGENT_PIN template=agent"
           echo "open the PR: $url"
+      - name: tag the checked main images latest
+        if: inputs.source_commit == ''
+        env:
+          PIN: ${{ steps.push.outputs.pin }}
+          AGENT_PIN: ${{ steps.agent.outputs.pin }}
+          BROWSER_PIN: ${{ steps.browser.outputs.pin }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pin in "$PIN" "$AGENT_PIN" "$BROWSER_PIN"; do
+            docker buildx imagetools create -t "${pin%@*}:latest" "$pin"
+          done

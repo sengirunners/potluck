@@ -14,6 +14,11 @@ driver protocol, the VM host layer and the conformance suite.
 
 For anything bigger than a small fix, open an issue first so we can agree on the shape before you write it.
 
+New here? Issues labelled [good first issue](https://github.com/sengirunners/potluck/labels/good%20first%20issue) are small and
+need no VMs: the repository's fakes and the conformance suite cover them. Say in the issue that you are taking one
+before you start. For questions, ideas and show-and-tell, use
+[Discussions](https://github.com/sengirunners/potluck/discussions); use issues for bugs and tasks.
+
 Drivers for other runtimes can live in their own repositories. A driver only has to speak the protocol in
 `docs/protocol.md` and pass the conformance suite.
 
@@ -55,7 +60,10 @@ CLA.
 
 ## Review
 
-Maintainers merge. First response within 7 days.
+Maintainers review here. First response within 7 days. An accepted change is not merged on this page: a maintainer
+applies it to the project's main repository, crediting you as co-author there. This repository's `main` is one commit
+per release, so your change reaches it inside the next release's commit, not as a commit of yours. We then close your
+pull request with a link to that release, so a closed pull request is not a rejection.
 
 ## Security
 

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { articlePage, BLOG_LINK, FEED_LINK, homeGraph, indexPage, seoTags, url } from "./layout.mjs";
 import { dropTitleHeading, escapeHtml as esc, inline, MarkdownError, toHtml } from "./markdown.mjs";
 import { parsePost } from "./frontmatter.mjs";
-import { BLOG, HOME, ORIGIN, PAGES } from "./pages.mjs";
+import { BLOG, GOOGLE_SITE_VERIFICATION, HOME, ORIGIN, PAGES } from "./pages.mjs";
 
 export const SITE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -134,7 +134,7 @@ export function homePage(source, posts) {
     description: HOME.description,
     path: HOME.path,
     graph: homeGraph(),
-    extra: posts.length ? [FEED_LINK] : [],
+    extra: [`<meta name="google-site-verification" content="${GOOGLE_SITE_VERIFICATION}">`, ...(posts.length ? [FEED_LINK] : [])],
   });
   region("seo:start", "seo:end", `\n${tags}\n`);
   region("blog-link:start", "blog-link:end", posts.length ? BLOG_LINK : "");

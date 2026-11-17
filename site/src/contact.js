@@ -25,7 +25,7 @@ export const TOPICS = {
   run: "I want to run it",
   broke: "Something broke",
   build: "I want to help build it",
-  dish: "Try Potluck Dish early",
+  dish: "Try Mezze early",
   other: "Something else",
 };
 const LIMITS = { name: 100, email: 200, team: 120, message: 4000 };

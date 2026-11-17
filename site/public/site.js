@@ -350,7 +350,7 @@
   }
 
   // The talk-to-us form: sent in place, so the reader stays on the page. Without script it posts as a plain form and
-  // the server answers with a page. "Ask to try it early" picks the Potluck Dish topic.
+  // the server answers with a page. "Ask to try it early" picks the Mezze topic.
   const talk = $("talk"), said = $("talk-said");
   const WORDS = {
     missing: "Please add your name and a message.",
@@ -393,8 +393,9 @@
   bill();
 })();
 
-/* Step 1 figure: unfold the blanket as the figure scrolls through the viewport.
-   Progress --bk-p runs 0 (figure top at the viewport bottom) to 1 (figure centred).
+/* Step 1 figure: unfold the blanket as the figure scrolls through the viewport; then the reader's presses
+   deal more invites and fold it back up (advance, below).
+   Progress p runs 0 (figure top at the viewport bottom) to 1 (figure centred).
    The blanket is 288 x 160 units, cut into 4 x 2 cells of 72 x 80. Folded, it is three folds:
    right half over left (crease x=144), then the new right half over (x=72), then front over back (y=80).
    Each cell's 3D pose is those folds composed; a parallel projection makes each cell an affine
@@ -411,8 +412,8 @@
   var svg = fig.querySelector(".bk-svg");
   var shadow = fig.querySelector(".bk-shadow");
   var group = fig.querySelector(".bk-cells");
-  var cardBody = fig.querySelector(".bk-card-body");
-  var cardShadow = fig.querySelector(".bk-card-shadow");
+  var cards = [].slice.call(fig.querySelectorAll(".bk-card"));
+  var cmds = document.querySelectorAll("[data-bk-cmd]");
   var cells = [].slice.call(fig.querySelectorAll(".bk-cell")).map(function (el) {
     var c = +el.getAttribute("data-c"), r = +el.getAttribute("data-r");
     return { el: el, shade: el.querySelector(".bk-shade"), c: c, r: r, x0: c * 72, y0: r * 80 };
@@ -445,7 +446,6 @@
   function f(n) { return Math.round(n * 1000) / 1000; }
 
   function draw(p) {
-    fig.style.setProperty("--bk-p", p.toFixed(4));
     var a3 = Math.PI * (1 - span(p, 0.03, 0.34));
     var a2 = Math.PI * (1 - span(p, 0.32, 0.62));
     var a1 = Math.PI * (1 - span(p, 0.6, 0.9));
@@ -480,21 +480,43 @@
     });
     shadow.setAttribute("d", shadowPath);
     cells.slice().sort(function (m, n) { return m.depth - n.depth; }).forEach(function (cell) { group.appendChild(cell.el); });
+    // The invite cards land last as the blanket opens, and lift off first as it folds.
     var k = span(p, 0.86, 1);
-    cardBody.style.transform = "translateY(" + f(-34 * (1 - k)) + "px)";
-    cardBody.style.opacity = f(clamp(k * 1.6));
-    cardShadow.style.opacity = f(0.22 * k);
+    cards.forEach(function (card) {
+      var body = card.querySelector(".bk-card-body");
+      body.style.transform = "translateY(" + f(-34 * (1 - k)) + "px)";
+      body.style.opacity = f(clamp(k * 1.6));
+      card.querySelector(".bk-card-shadow").style.opacity = f(0.22 * k);
+    });
+  }
+
+  // Once the reader clicks the picture (or presses Enter or Space on it), it follows the clicks, not the scroll:
+  // invite Emily, invite Leo, fold it up, lay it out again (with Sam's invite only). held is the progress the
+  // reader set, or -1 while scroll leads.
+  var stage = 0, held = -1;
+  var LABELS = ["Invite Emily", "Invite Leo", "Fold the blanket up", "Lay the blanket out again"];
+  function deal(n) {
+    cards.forEach(function (card, i) { card.classList.toggle("bk-later", i >= n); });
+    for (var i = 0; i < cmds.length; i++) cmds[i].classList.toggle("bk-later", +cmds[i].getAttribute("data-bk-cmd") >= n);
+  }
+  function advance() {
+    stage = (stage + 1) % LABELS.length;
+    if (stage === 1 || stage === 2) { held = 1; deal(stage + 1); }
+    if (stage === 3) held = 0;
+    if (stage === 0) { held = 1; deal(1); }
+    fig.setAttribute("aria-label", LABELS[stage]);
+    request();
   }
 
   var target = 0, shown = -1, ticking = false;
   function measure() {
     var r = fig.getBoundingClientRect(), vh = window.innerHeight || document.documentElement.clientHeight;
-    target = clamp((vh - r.top) / (vh / 2 + r.height / 2));
+    target = held >= 0 ? held : clamp((vh - r.top) / (vh / 2 + r.height / 2));
   }
   function frame() {
     ticking = false;
     measure();
-    var next = shown < 0 ? target : shown + (target - shown) * 0.2;
+    var next = shown < 0 ? target : shown + (target - shown) * (held >= 0 ? 0.06 : 0.2);
     if (Math.abs(target - next) < 0.0015) next = target;
     if (next !== shown) { shown = next; draw(shown); }
     if (shown !== target) request();
@@ -502,6 +524,15 @@
   function request() { if (!ticking) { ticking = true; requestAnimationFrame(frame); } }
 
   fig.classList.add("bk-live");
+  fig.removeAttribute("aria-hidden");
+  svg.setAttribute("aria-hidden", "true");
+  fig.setAttribute("role", "button");
+  fig.setAttribute("tabindex", "0");
+  fig.setAttribute("aria-label", LABELS[0]);
+  fig.addEventListener("click", advance);
+  fig.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (!e.repeat) advance(); }
+  });
   measure(); shown = target; draw(shown);
   window.addEventListener("scroll", request, { passive: true });
   window.addEventListener("resize", request, { passive: true });
