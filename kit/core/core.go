@@ -142,6 +142,15 @@ type NetPeer struct {
 	Host    string // its own host name (self-reported: not unique)
 	DNSName string // its full MagicDNS name, without the trailing dot (unique)
 	NodeID  string // its stable node ID
+	NodeKey string // its node public key ("nodekey:..."), as WhoIs reports it
+	Login   string // its owner's login ("" for a tagged node)
+	OS      string // its self-reported OS
+	Tagged  bool   // a tagged node (server, CI)
+	// Relays is true when the node may carry other hosts' traffic: it
+	// serves subnet routes or is an exit node.
+	Relays bool
+	// Shared is true for a node shared in from another tailnet.
+	Shared bool
 }
 
 // HedgeReporter is the team module's hedged-read counters (SPEC 17.3), for

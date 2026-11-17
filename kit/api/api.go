@@ -329,6 +329,8 @@ type Whoami struct {
 	// Via is how the caller was authenticated: local (Unix socket), token, tailnet.
 	Via     string `json:"via"`
 	Session string `json:"session,omitempty"`
+	// Limit is the route limit of the caller's token, if it has one.
+	Limit   string `json:"limit,omitempty"`
 	Machine string `json:"machine"`
 	// Protocol and Commit let a client check it talks to the daemon it expects.
 	Protocol string `json:"protocol"`

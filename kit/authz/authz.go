@@ -139,11 +139,14 @@ func ParseObject(s string) (project, area string, err error) {
 }
 
 // Cap restricts what a token may do: at most Role, only inside Project
-// (and Area). Zero fields do not restrict.
+// (and Area). Zero fields do not restrict, except Limit: a token with a
+// route limit reaches only the routes that admit that limit by name
+// (core.Router.Admit), whatever its role; every other route refuses it.
 type Cap struct {
 	Project string
 	Area    string
 	Role    Relation
+	Limit   string
 }
 
 // Scope is everything a subject may see and do. Build it with All, FromTuples
@@ -459,6 +462,15 @@ type Subject struct {
 	BoxKey string
 	// Cap is the token's cap (nil for the socket and tailnet logins).
 	Cap *Cap
+}
+
+// Limit is the route limit of the token the subject authenticated with,
+// or "" (no limit: the socket, a login, a plain token).
+func (s *Subject) Limit() string {
+	if s == nil || s.Cap == nil {
+		return ""
+	}
+	return s.Cap.Limit
 }
 
 // Via values.

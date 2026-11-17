@@ -54,10 +54,13 @@ var (
 	sealNow = time.Now
 )
 
-// sealAuth authenticates a request's token at the home before anything
-// sealed is read, opened or recorded (tests replace it): the machine the
-// token is for, or the refusal.
-var sealAuth = func(s *Service, r *http.Request, rm core.Remote) (string, error) {
+// sealAuth is how the home authenticates a sealed call (tests replace it).
+var sealAuth = authSealed
+
+// authSealed authenticates a request's token at the home before anything
+// sealed is read, opened or recorded: the machine the token is for, or the
+// refusal.
+func authSealed(s *Service, r *http.Request, rm core.Remote) (string, error) {
 	unauth := api.Errorf(api.CodeUnauthenticated, "authentication required").WithHint("a sealed call needs a member's token")
 	if s.d == nil || s.d.Projects == nil || r.Header.Get(api.HeaderAuthorization) == "" {
 		return "", unauth
@@ -69,6 +72,11 @@ var sealAuth = func(s *Service, r *http.Request, rm core.Remote) (string, error)
 	sub := core.SubjectOf(ctx)
 	if sub == nil {
 		return "", unauth
+	}
+	if sub.Limit() != "" {
+		// A limited token reaches only the routes that admit it, and the
+		// router has not yet said which this is: nothing sealed is opened.
+		return "", core.ErrTokenLimit()
 	}
 	if sub.Machine != "" {
 		return sub.Machine, nil

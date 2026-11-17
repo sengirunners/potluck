@@ -77,7 +77,8 @@ func (s *Service) Self(ctx context.Context) (core.NetSelf, error) {
 	}
 	for _, p := range st.Peers {
 		out.Peers = append(out.Peers, p.Host)
-		out.PeerList = append(out.PeerList, core.NetPeer{Host: p.Host, DNSName: strings.TrimSuffix(p.DNSName, "."), NodeID: p.ID})
+		out.PeerList = append(out.PeerList, core.NetPeer{Host: p.Host, DNSName: strings.TrimSuffix(p.DNSName, "."), NodeID: p.ID,
+			NodeKey: p.Key, Login: p.Login, OS: p.OS, Tagged: p.Tagged, Relays: p.Relays, Shared: p.Shared})
 	}
 	return out, nil
 }

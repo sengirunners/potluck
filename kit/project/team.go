@@ -840,10 +840,11 @@ func RepoFileProject(cwd string) (slug, area string, ok bool) {
 }
 
 // TokenLive reports whether token id is neither revoked nor expired (a
-// waiting sync call ends when its replica's token stops being one).
+// waiting sync call ends when its replica's token stops being one). A
+// limited token is never live here: no sync call is its.
 func (r *Registry) TokenLive(ctx context.Context, id string) bool {
 	var revoked, expires sql.NullInt64
-	if err := r.st.Registry().QueryRowContext(ctx, `SELECT revoked, expires FROM tokens WHERE id = ?`, id).Scan(&revoked, &expires); err != nil {
+	if err := r.st.Registry().QueryRowContext(ctx, `SELECT revoked, expires FROM tokens WHERE id = ? AND route_limit = ''`, id).Scan(&revoked, &expires); err != nil {
 		return false
 	}
 	return !revoked.Valid && (!expires.Valid || expires.Int64 > store.Millis(time.Now()))
@@ -851,11 +852,12 @@ func (r *Registry) TokenLive(ctx context.Context, id string) bool {
 
 // TokenScope is what token id reads now (its identity's grants, narrowed to
 // the token's cap), or false once it is revoked, expired or gone: a scope
-// recorded at a heartbeat must not outlive a downgrade.
+// recorded at a heartbeat must not outlive a downgrade. A limited token has
+// no scope here (false): this is read with no route to check its limit.
 func (r *Registry) TokenScope(ctx context.Context, id string) (authz.Scope, bool) {
 	var identityID, pid, area, role string
 	var revoked, expires sql.NullInt64
-	if err := r.st.Registry().QueryRowContext(ctx, `SELECT identity, project, area, role, revoked, expires FROM tokens WHERE id = ?`, id).
+	if err := r.st.Registry().QueryRowContext(ctx, `SELECT identity, project, area, role, revoked, expires FROM tokens WHERE id = ? AND route_limit = ''`, id).
 		Scan(&identityID, &pid, &area, &role, &revoked, &expires); err != nil {
 		return authz.Scope{}, false
 	}

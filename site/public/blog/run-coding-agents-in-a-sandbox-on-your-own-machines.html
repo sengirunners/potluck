@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run coding agents in a sandbox on your own machines | Potluck</title>
+<meta name="description" content="Give Claude Code, Codex or another coding agent a throwaway sandbox on a Mac or Linux box you own. What a sandbox must isolate, and how Potluck sets it up.">
+<link rel="canonical" href="https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Run coding agents in a sandbox on your own machines | Potluck">
+<meta property="og:description" content="Give Claude Code, Codex or another coding agent a throwaway sandbox on a Mac or Linux box you own. What a sandbox must isolate, and how Potluck sets it up.">
+<meta property="og:url" content="https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">
+<meta property="og:image" content="https://potluck.sh/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Potluck: run coding agents and builds on the computers you already own">
+<meta property="article:published_time" content="2026-11-16">
+<meta property="article:modified_time" content="2026-11-16">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Run coding agents in a sandbox on your own machines | Potluck">
+<meta name="twitter:description" content="Give Claude Code, Codex or another coding agent a throwaway sandbox on a Mac or Linux box you own. What a sandbox must isolate, and how Potluck sets it up.">
+<meta name="twitter:image" content="https://potluck.sh/og.png">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines#post","mainEntityOfPage":"https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines","url":"https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines","headline":"How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service","description":"Give Claude Code, Codex or another coding agent a throwaway sandbox on a Mac or Linux box you own. What a sandbox must isolate, and how Potluck sets it up.","datePublished":"2026-11-16","dateModified":"2026-11-16","inLanguage":"en","keywords":"run claude code in a sandbox, sandbox for coding agents self-hosted, self-hosted alternative to hosted agent sandboxes","image":"https://potluck.sh/og.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service","item":"https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service</h1>
+  <p class="meta"><time datetime="2026-11-16">November 16, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
+<p>Potluck gives a coding agent a fresh sandbox, a throwaway VM or container, on a Mac or Linux box you own. The agent's commands run there, not on your laptop, and the sandbox is deleted when you are done.</p>
+  </aside>
+  <div class="prose">
+<p>You can run a coding agent such as Claude Code or Codex in a sandbox on machines you own, with no hosted sandbox service. Potluck starts a fresh VM or container on a Mac or Linux box in your pool (the ready-made agent image needs a Linux box), runs the agent's commands inside it, and deletes it afterward. The sandbox cannot reach the machine that hosts it, that machine's network, or other sandboxes.</p>
+<h2 id="what-does-a-sandbox-for-a-coding-agent-have-to-isolate">What does a sandbox for a coding agent have to isolate?</h2>
+<p>An agent runs shell commands, installs packages, edits files and fetches web pages. Some of what it does is wrong, and some of it may come from text it read, such as a web page or an issue, that tells it to do something harmful. A sandbox limits the damage. It should do six things:</p>
+<ul>
+<li><strong>Keep the agent off the host.</strong> It cannot reach the machine running it, on any port, including the ports your own programs listen on (on Tart, apart from Softnet's DNS forwarder on the host).</li>
+<li><strong>Keep it off the local network.</strong> No router, NAS, printer or other computers.</li>
+<li><strong>Keep sandboxes apart.</strong> One agent cannot reach another agent's sandbox.</li>
+<li><strong>Hold none of your credentials.</strong> The sandbox starts with no keys of yours, and a key goes in only when you send it.</li>
+<li><strong>Start clean and end for good.</strong> Each sandbox starts from the same image and is deleted at its time limit or when you remove it.</li>
+<li><strong>Block mail.</strong> Outbound mail ports are closed.</li>
+</ul>
+<p>These are the claims in Potluck's isolation document. <code>potluck isolation test &lt;machine&gt;-c2m4</code> checks the host, local network, Tailscale network and peer-sandbox ones by sample on your own machine; <code>potluck host</code> checks mail. The repository lists the first recorded test on a real Mac as owed.</p>
+<h2 id="why-run-it-on-machines-you-own">Why run it on machines you own?</h2>
+<p>A hosted sandbox service runs your code on someone else's machines, which can be the right choice. A sandbox on your own machines is a different tradeoff, set against running the agent directly on your laptop:</p>
+<div class="table-wrap"><table>
+<thead><tr><th></th><th>Agent on your laptop</th><th>Potluck sandbox on your machines</th></tr></thead>
+<tbody>
+<tr><td>Where commands run</td><td>Your laptop, as you</td><td>A VM or container on a machine you own</td></tr>
+<tr><td>Can the agent reach your files</td><td>Yes</td><td>No</td></tr>
+<tr><td>Who can read the code, output and secrets</td><td>You</td><td>You and the owner of the machine running the sandbox</td></tr>
+<tr><td>Who runs the hardware</td><td>You</td><td>You and your team</td></tr>
+</tbody>
+</table></div>
+<p>The machine that runs a sandbox can read everything in it, including your code, your commands, their output and any secrets. The machine that runs the pool can read the commands, output and secrets passing through it, until commands are sealed to the host's key, and over <code>--via tunnel</code> so can the tunnel's provider. Potluck's README says to join only a pool whose owner you would trust with that. On your own machines, that owner is you.</p>
+<h2 id="how-does-potluck-give-an-agent-a-fresh-box">How does Potluck give an agent a fresh box?</h2>
+<p>A pool is a group of machines you and your friends lend and use. A host is a machine that shares some of itself with a pool, half of its cores and memory by default. A sandbox is a fresh VM or container on a host. Potluck drives the layer underneath: Tart VMs on an Apple-silicon Mac, and Docker with Kata or gVisor on Linux. It does not run its own sandbox technology.</p>
+<p>When you ask for a sandbox, Potluck picks the smallest shared machine size that fits (sizes look like <code>c2m4</code>: 2 cores, 4 GB of RAM), starts a box there, and prints its id.</p>
+<h2 id="how-do-you-set-it-up-step-by-step">How do you set it up, step by step?</h2>
+<h3 id="step-1-install-and-check-the-machine">Step 1: Install and check the machine</h3>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck doctor
+</code></pre>
+<p>On a Mac you need Tart and Softnet. On Linux you need Docker with Kata or gVisor. <code>potluck doctor</code> says what is missing. The <code>agent</code> template in Step 3 and <code>potluck agent-runner</code> need a Linux box with Docker and Kata or gVisor in the pool; a Mac-only pool can run plain sandboxes but not those.</p>
+<h3 id="step-2-start-a-pool-and-share-the-machine">Step 2: Start a pool and share the machine</h3>
+<pre><code class="language-sh">potluck create team --via tunnel
+potluck host
+</code></pre>
+<p>On a Mac you sit at, add <code>--reclaim-idle-s 0</code>. By default a Mac's sandbox ends when you touch the keyboard or pointer, which would cut an agent off mid-task.</p>
+<h3 id="step-3-create-a-sandbox-with-the-agent-image">Step 3: Create a sandbox with the agent image</h3>
+<pre><code class="language-sh">potluck sandbox create --template agent --ref HEAD
+</code></pre>
+<p>The <code>agent</code> template is Potluck's Linux image plus git, gh, Node 22, Python 3, ripgrep, jq, build-essential, and the Claude Code and Codex command-line tools. It needs a Linux box in the pool, since the template is built from Potluck's Linux image. <code>--ref HEAD</code> sends the current commit of your checkout in as a git bundle. Add <code>--dirty</code> to include uncommitted changes.</p>
+<h3 id="step-4-run-commands-in-it">Step 4: Run commands in it</h3>
+<pre><code class="language-sh">potluck sandbox exec &lt;id&gt; --timeout 600 -- npm test
+potluck sandbox shell &lt;id&gt;
+</code></pre>
+<p><code>exec</code> takes a literal argument list and exits with the command's exit code. It kills the command after 30 seconds unless you pass <code>--timeout</code> (at most 600); <code>--detach</code> with <code>potluck sandbox logs -f</code> suits longer commands. <code>shell</code> opens a terminal in the sandbox, so you can start an agent there. <code>potluck sandbox cp</code> copies files in and out.</p>
+<h3 id="step-5-remove-it">Step 5: Remove it</h3>
+<pre><code class="language-sh">potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>For a single command, <code>potluck run -- make test</code> does all five steps: it creates a sandbox, sends the commit, runs the command, streams the output and removes the sandbox.</p>
+<h2 id="how-do-you-let-an-agent-create-its-own-sandboxes">How do you let an agent create its own sandboxes?</h2>
+<p>Potluck can serve sandbox tools to an agent over MCP. Add it to an MCP client's configuration:</p>
+<pre><code class="language-json">{&quot;mcpServers&quot;:{&quot;potluck&quot;:{&quot;command&quot;:&quot;potluck&quot;,&quot;args&quot;:[&quot;--pool&quot;,&quot;team&quot;,&quot;mcp&quot;]}}}
+</code></pre>
+<p>The server exposes only sandbox tools: create, execute, list, extend, stop, restart, delete, background processes, and file reads and writes. With one pool, <code>--pool</code> is optional. Output from a sandbox is treated as data, never as instructions.</p>
+<h2 id="how-do-you-run-claude-codes-self-hosted-runner-in-sandboxes">How do you run Claude Code's self-hosted runner in sandboxes?</h2>
+<p>Claude Code has a self-hosted runner mode, <code>claude self-hosted-runner</code>, described in Anthropic's Claude Code documentation under &quot;Self-hosted environments&quot;. Potluck's agent-runner document describes the key it needs as an environment secret, which you save to a file. This path needs a Linux box with Docker and Kata or gVisor in the pool: Potluck's agent image is pinned only for Linux, and macOS guests take no secrets yet, so a Mac-only pool cannot run it. Then:</p>
+<pre><code class="language-sh">potluck agent-runner claude --secret-file ~/.config/claude/environment-secret --image ghcr.io/sengirunners/potluck-box-agent
+</code></pre>
+<p>Potluck starts one fresh sandbox per runner and keeps a fresh one going as each ends. <code>--count</code> runs several at once, <code>--timeout</code> sets a time limit (default one hour), <code>--allow-tool</code> pre-approves a tool for sessions, and <code>--deny-tool</code> blocks one. The default image, the first one a machine lends, does not ship <code>claude</code>, so pass <code>--image</code> with the <code>agent</code> image, which ships <code>claude</code>, git and Python 3. Check that its <code>claude</code> has the runner mode before relying on it: <code>potluck sandbox create --template agent</code>, then <code>potluck sandbox exec &lt;id&gt; -- claude self-hosted-runner --help</code>. Potluck installs nothing itself.</p>
+<h2 id="what-are-the-limits-you-should-know-about">What are the limits you should know about?</h2>
+<p>Potluck's documents are plain about them. Isolation on a real Mac is also not yet recorded, and on Linux a sandbox that has a network relies on a firewall its owner sets up.</p>
+<ul>
+<li>The vendor key is readable by the machine that runs the sandbox, and by the agent's session in it. A prompt that steers the agent can read it too.</li>
+<li>Potluck does not yet limit a sandbox's network to the vendor's hosts. By default a sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Linux, once the root step <code>potluck doctor</code> prints has set up Potluck's filtered network). <code>--net off</code> gives no network at all.</li>
+<li>The Claude Code runner is tested with stand-in adapters; the repository records no run of a real Claude Code environment through it yet.</li>
+<li>Agent runners do not yet run on macOS boxes, because macOS guests take no secrets yet.</li>
+<li>The quick start has run in CI with a stand-in VM layer and by hand on a Linux VM with gVisor. It has not yet been run end to end on a real Mac with Tart. Interfaces will change.</li>
+</ul>
+<h2 id="faq">FAQ</h2>
+<h3 id="can-i-run-claude-code-in-a-potluck-sandbox">Can I run Claude Code in a Potluck sandbox?</h3>
+<p>Yes. Create a sandbox with <code>--template agent</code>, open it with <code>potluck sandbox shell</code>, and start Claude Code there. For sessions started from claude.ai on your own machines, use <code>potluck agent-runner claude</code>.</p>
+<h3 id="does-it-work-with-codex-and-other-agents">Does it work with Codex and other agents?</h3>
+<p>The <code>agent</code> image includes the Codex command-line tool, so you can start it in a sandbox the same way. The built-in runner adapter exists only for Claude Code today. Adapters for other vendors are listed as not built.</p>
+<h3 id="do-i-need-a-second-machine">Do I need a second machine?</h3>
+<p>No. The pool and the host can be the same computer, with no account. A second machine is the point once you invite friends.</p>
+<h3 id="what-happens-if-the-sandbox-runs-too-long">What happens if the sandbox runs too long?</h3>
+<p>It ends at its time limit. Use <code>--ttl</code> when you create it, and <code>potluck sandbox extend &lt;id&gt;</code> to add time within the machine's cap.</p>
+<h3 id="how-is-this-different-from-a-container-on-my-laptop">How is this different from a container on my laptop?</h3>
+<p>A container on your laptop shares your laptop's network and often your files. A Potluck sandbox runs on a host, in a VM or an isolated container, and is walled off from the host, its network and other sandboxes.</p>
+<h3 id="does-it-cost-anything">Does it cost anything?</h3>
+<p>Potluck is open source under Apache-2.0 and has no price. You pay for your own machines and power.</p>
+<p>Code and docs: <a href="https://github.com/sengirunners/potluck">github.com/sengirunners/potluck</a></p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+  <p class="alt"><a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

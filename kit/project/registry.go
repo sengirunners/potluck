@@ -941,6 +941,10 @@ func (r *Registry) Grants(ctx context.Context, sub *authz.Subject, project strin
 // project/area). Unless NoGrant, the matching grant is added first. Local
 // callers only. The secret is returned once; only its sha256 is stored.
 func (r *Registry) Mint(ctx context.Context, sub *authz.Subject, req api.MintTokenRequest) (api.MintTokenResponse, error) {
+	if req.Limit != "" || req.Node != "" {
+		// Only MintLimited, with its device resolved, mints a limited token.
+		return api.MintTokenResponse{}, api.Errorf(api.CodeBadRequest, "a limited token needs both a limit and a device")
+	}
 	rel, err := authz.ParseRelation(req.Role)
 	if err != nil {
 		return api.MintTokenResponse{}, err
@@ -993,14 +997,14 @@ func (r *Registry) slugOrEmpty(id string) string {
 	return r.Slug(id)
 }
 
-const tokenCols = `t.id, i.name, t.project, t.area, t.role, t.note, t.created, t.expires, t.revoked, t.last_used, t.node, t.machine`
+const tokenCols = `t.id, i.name, t.project, t.area, t.role, t.note, t.created, t.expires, t.revoked, t.last_used, t.node, t.machine, t.route_limit, t.pin_name`
 
 func (r *Registry) scanToken(sc interface{ Scan(...any) error }) (api.Token, error) {
 	var t api.Token
 	var pid string
 	var created int64
 	var exp, rev, used sql.NullInt64
-	if err := sc.Scan(&t.ID, &t.Identity, &pid, &t.Area, &t.Role, &t.Note, &created, &exp, &rev, &used, &t.Node, &t.Machine); err != nil {
+	if err := sc.Scan(&t.ID, &t.Identity, &pid, &t.Area, &t.Role, &t.Note, &created, &exp, &rev, &used, &t.Node, &t.Machine, &t.Limit, &t.Device); err != nil {
 		return t, err
 	}
 	t.Project, t.Created = r.slugOrEmpty(pid), store.FromMillis(created)
@@ -1043,11 +1047,11 @@ func (r *Registry) RevokeToken(ctx context.Context, id string) (api.Token, error
 }
 
 // TokenExpiry is when token id expires (zero: never). A token that is
-// revoked, expired or unknown is an unauthenticated error. Local callers
-// only.
+// revoked, expired, unknown or limited is an unauthenticated error. Local
+// callers only.
 func (r *Registry) TokenExpiry(ctx context.Context, id string) (time.Time, error) {
 	var exp, rev sql.NullInt64
-	err := r.st.Registry().QueryRowContext(ctx, `SELECT expires, revoked FROM tokens WHERE id = ?`, strings.ToUpper(strings.TrimSpace(id))).Scan(&exp, &rev)
+	err := r.st.Registry().QueryRowContext(ctx, `SELECT expires, revoked FROM tokens WHERE id = ? AND route_limit = ''`, strings.ToUpper(strings.TrimSpace(id))).Scan(&exp, &rev)
 	gone := api.Errorf(api.CodeUnauthenticated, "token %s is revoked, expired or unknown", id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, gone
@@ -1105,21 +1109,39 @@ func (r *Registry) FromToken(ctx context.Context, secret string, remote bool) (*
 }
 
 // FromTokenAt is FromToken for a caller WhoIs identified as tailnet node
-// node (core.Authenticate passes the WhoIs stable node ID).
+// node (the WhoIs stable node ID). It knows no node key, so a limited token
+// fails here: FromTokenCaller is the full form.
 func (r *Registry) FromTokenAt(ctx context.Context, secret string, remote bool, node string) (*authz.Subject, error) {
+	return r.FromTokenCaller(ctx, secret, Caller{Remote: remote, NodeID: node})
+}
+
+// FromTokenCaller authenticates a bearer secret for caller c (core.Authenticate
+// fills c from the request). A limited token (its own secret shape and hash)
+// is accepted only where limitedAdmits says, checked before anything is
+// written; every refusal is the unknown token's.
+func (r *Registry) FromTokenCaller(ctx context.Context, secret string, c Caller) (*authz.Subject, error) {
+	remote, node := c.Remote, c.NodeID
 	bad := api.Errorf(api.CodeUnauthenticated, "invalid or expired token")
 	if !authz.LooksLikeToken(secret) {
 		return nil, bad
 	}
-	var tid, identityID, pid, area, role, boundNode, machine, boxKey string
+	limit, limited := authz.TokenLimit(secret)
+	hash := authz.HashToken(secret)
+	if limited {
+		hash = authz.HashLimited(limit, secret)
+	}
+	var tid, identityID, pid, area, role, boundNode, machine, boxKey, rowLimit, pinNode, pinKey string
 	var exp, rev, used sql.NullInt64
-	err := r.st.Registry().QueryRowContext(ctx, `SELECT id, identity, project, area, role, expires, revoked, last_used, node, machine, box_key FROM tokens WHERE hash = ?`,
-		authz.HashToken(secret)).Scan(&tid, &identityID, &pid, &area, &role, &exp, &rev, &used, &boundNode, &machine, &boxKey)
+	err := r.st.Registry().QueryRowContext(ctx, `SELECT id, identity, project, area, role, expires, revoked, last_used, node, machine, box_key, route_limit, pin_node, pin_key FROM tokens WHERE hash = ?`,
+		hash).Scan(&tid, &identityID, &pid, &area, &role, &exp, &rev, &used, &boundNode, &machine, &boxKey, &rowLimit, &pinNode, &pinKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, bad
 		}
 		return nil, err
+	}
+	if rowLimit != limit {
+		return nil, bad // the secret's shape and its row disagree
 	}
 	now := time.Now()
 	if rev.Valid || (exp.Valid && exp.Int64 <= store.Millis(now)) {
@@ -1130,6 +1152,16 @@ func (r *Registry) FromTokenAt(ctx context.Context, secret string, remote bool, 
 	}
 	if boxKey != "" && (!remote || node != boxKey) {
 		return nil, bad
+	}
+	if limited {
+		ok, err := r.limitedAdmits(ctx, limitedRow{expires: exp.Valid, identity: identityID, project: pid, area: area, role: role, node: boundNode, boxKey: boxKey,
+			pinNode: pinNode, pinKey: pinKey}, c)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, bad
+		}
 	}
 	if !used.Valid || store.Millis(now)-used.Int64 > 60_000 {
 		_, _ = r.st.Registry().ExecContext(ctx, `UPDATE tokens SET last_used = ? WHERE id = ?`, store.Millis(now), tid)
@@ -1147,7 +1179,7 @@ func (r *Registry) FromTokenAt(ctx context.Context, secret string, remote bool, 
 	if err != nil {
 		return nil, err
 	}
-	cp := &authz.Cap{Project: pid, Area: area, Role: authz.Relation(role)}
+	cp := &authz.Cap{Project: pid, Area: area, Role: authz.Relation(role), Limit: rowLimit}
 	sc := authz.FromTuples(tuples, cp)
 	return &authz.Subject{Identity: who, Address: identityAddress(who), Via: authz.ViaToken, Remote: remote, TokenID: tid, Scope: sc,
 		Node: boundNode, Machine: machine, BoxKey: boxKey, ScopeVersion: sv, Cap: cp}, nil

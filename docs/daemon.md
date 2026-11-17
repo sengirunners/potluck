@@ -229,6 +229,42 @@ Sandboxes and GitHub runner jobs pick a box binding by one rule (package `placem
   binding, the daemon refuses with `conflict` and `{"used_on": "<binding>"}` in `data`, and the walk asks that one,
   whatever `--on`, size or OS the retry names. Only an ended box of a binding since removed frees the id.
 
+## Limited tokens
+
+A token may carry a route limit: a name, such as `answer`. A limited token reaches only the routes that admit its
+limit by name, and nothing else.
+
+- **Admitting.** A module admits a limit on its routes with `Router.Admit(limit, patterns...)`. `GET /v0/whoami`
+  admits every limit, and its answer names the limit (`limit`). A GET pattern also answers HEAD. At start the daemon
+  refuses an admitted pattern that is not a registered authed route, or a malformed limit name.
+- **The choke point.** Right after authentication, before the request gates, the team proxy and the router, the
+  daemon refuses a limited token on any route that does not admit its limit: 403 `forbidden` with data
+  `{"reason":"token-limit"}`. This covers routes, unmatched paths and the fallback. A public route runs with no
+  subject and no `Authorization` header. The router's guard checks the limit again. A sealed body is never opened
+  for a limited token: a sealed call with one is refused with the same 403.
+- **One device.** A limited token works only over the tailnet, from the one device named at mint. The device is
+  matched by its stable node ID and its node key. Any other caller gets the same 401 as an unknown token: the socket,
+  the tunnel, a listener without WhoIs, another node, a re-keyed node, and this host. So does a revoked or expired
+  token, and one whose identity no longer holds a whole-project grant of at least the token's role.
+- **Minting.** `POST /v0/tokens` with `limit`, `project`, `node` and `ttl_seconds`, on the socket only, and not by a
+  session acting through `Zm-As`. The token is for the caller's own identity (`as` must be empty). That identity must already own the whole project by its own
+  grant. The token is stored with role owner, and no grant or identity is added. The limit must be one some route
+  admits. The TTL is required and at most `limited_token_max_ttl_seconds` in config.json (default 30 days).
+  The daemon resolves `node` among its tailnet peers by the name the tailnet gave it (the full MagicDNS name or its
+  first label), never by the host name a device reports for itself. It refuses
+  this daemon's own node, a tagged node, a node named as a daemon's (`zm-*`, `potluck-*`), a node that serves subnet
+  routes or is an exit node, a node shared in from another tailnet, and a name two peers answer to. The answer
+  shows the device's name, login and OS for the minter to check. These are checked at mint only; a device that
+  changes later keeps its token until it is revoked or expires.
+- **Older code.** The secret is `potluck_<limit>_` plus 52 base32 characters, which the older 52-character check
+  refuses. Its stored hash is domain-separated (`authz.HashLimited`), so no lookup by the plain hash finds the row.
+  A build without limits, or a backup it restores, never treats a limited token as a full one. For the same
+  reason a limited token is revoked by its id (`DELETE /v0/tokens/<id>`, listed by `GET /v0/tokens`), not by a
+  hash of its secret.
+- **Other readers.** Every other reader of the tokens table refuses a limited row (subscriptions, token scope,
+  liveness and expiry) or only ever reads node-bound rows, which a limited row never is. `TestTokenReaders` lists
+  them, so a new reader must decide.
+
 ## Secrets (the daemon's side)
 
 The driver's side is in `docs/protocol.md`, "Secrets".

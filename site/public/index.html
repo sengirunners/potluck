@@ -3,8 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- seo:start (written by build/build.mjs from build/pages.mjs: title, description, canonical, Open Graph, JSON-LD; edit those, not this) -->
 <title>Potluck: run coding agents and builds on the computers you already own</title>
 <meta name="description" content="Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.">
+<link rel="canonical" href="https://potluck.sh/">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Potluck: run coding agents and builds on the computers you already own">
+<meta property="og:description" content="Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.">
+<meta property="og:url" content="https://potluck.sh/">
+<meta property="og:image" content="https://potluck.sh/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Potluck: run coding agents and builds on the computers you already own">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Potluck: run coding agents and builds on the computers you already own">
+<meta name="twitter:description" content="Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.">
+<meta name="twitter:image" content="https://potluck.sh/og.png">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":["SoftwareApplication","SoftwareSourceCode"],"@id":"https://potluck.sh/#software","name":"Potluck","url":"https://potluck.sh/","description":"Potluck pools your team's spare Macs and Linux boxes and runs coding agents and builds on them, each in a fresh VM or sandbox. Free and open source. Made by Sengi.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://www.apache.org/licenses/LICENSE-2.0","codeRepository":"https://github.com/sengirunners/potluck","programmingLanguage":"Go","downloadUrl":"https://github.com/sengirunners/potluck/releases","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@id":"https://sengi.run/#organization"}},{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},{"@type":"WebSite","@id":"https://potluck.sh/#website","url":"https://potluck.sh/","name":"Potluck","publisher":{"@id":"https://sengi.run/#organization"}}]}</script>
+<!-- seo:end -->
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
 <link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
@@ -872,13 +890,13 @@
         <div class="mb-item" data-mb="stop"><span class="mb-ck"></span><span><span class="mb-l">Stop now</span><span class="mb-sub">end jobs now</span></span></div>
       </div>
       </div></div>
+      <p class="mb-try" hidden>Try the menu: pick one and watch the jobs.</p>
       </figure>
       <div>
         <p class="step">Step 3</p>
         <h3>Leo wants his Mac back</h3>
         <p>A Mac works for the team only while its owner is away: when Leo touches the keyboard or trackpad, the job on his MacBook ends, and nothing new starts until it has been idle for five minutes (<code>potluck host --reclaim-idle-s</code> changes that; <code>0</code> shares all the time). When he wants the machine back for good, he winds it down: jobs running now finish (up to 30 minutes by default) and no new ones start. Or he stops them now. <code>potluck host set auto</code> puts it back to normal. The picture shows a Mac set to share all the time (<code>--reclaim-idle-s 0</code>); by default, touching the trackpad would already have ended those jobs. The release carries a menu bar item for this: <code>sh install.sh --menubar</code> installs it (it isn't signed by Apple yet, so a copy downloaded in a browser needs a right-click, Open; <code>docs/menubar.md</code>). Without it, it's one command.</p>
-        <pre class="cmd"><span class="p">$</span> potluck host set drain    <span class="c"># wind down</span>
-<span class="p">$</span> potluck host set closed   <span class="c"># stop now</span></pre>
+        <pre class="cmd"><span class="ln" data-mb-cmd="wind"><span class="p">$</span> potluck host set drain    <span class="c"># wind down</span></span><span class="ln" data-mb-cmd="stop"><span class="p">$</span> potluck host set closed   <span class="c"># stop now</span></span><span class="ln" data-mb-cmd="keep"><span class="p">$</span> potluck host set auto     <span class="c"># keep lending</span></span></pre>
       </div>
     </li>
   </ol>
@@ -1002,6 +1020,7 @@
   <nav aria-label="Footer">
     <a href="https://github.com/sengirunners/potluck">GitHub</a>
     <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <!-- blog-link:start --><a href="/blog">Blog</a><!-- blog-link:end -->
     <a href="#founders">Contact</a>
     <a href="https://sengi.run">Sengi</a>
   </nav>

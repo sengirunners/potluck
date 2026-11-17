@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"tailscale.com/client/local"
+	"tailscale.com/ipn/ipnstate"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tsnet"
 )
@@ -97,6 +98,11 @@ type NodePeer struct {
 	Online  bool
 	Login   string // owner's login name ("" for tagged nodes)
 	ID      string // its stable node ID (two peers may report one Host)
+	Key     string // its node public key, as Who.NodeKey reports it
+	OS      string // self-reported (Hostinfo)
+	Tagged  bool
+	Relays  bool // serves subnet routes or is an exit node
+	Shared  bool // shared in from another tailnet
 }
 
 // Who is the tailnet identity behind a connection.
@@ -206,7 +212,12 @@ func (n *tsNode) Status(ctx context.Context) (NodeStatus, error) {
 		}
 	}
 	for _, p := range st.Peer {
-		np := NodePeer{Host: p.HostName, DNSName: strings.TrimSuffix(p.DNSName, "."), Online: p.Online, ID: string(p.ID)}
+		np := NodePeer{Host: p.HostName, DNSName: strings.TrimSuffix(p.DNSName, "."), Online: p.Online, ID: string(p.ID), OS: p.OS,
+			Tagged: p.Tags != nil && p.Tags.Len() > 0, Relays: relays(p),
+			Shared: p.AltSharerUserID != 0 || p.ShareeNode || (out.Suffix != "" && !strings.HasSuffix(strings.TrimSuffix(p.DNSName, "."), "."+out.Suffix))}
+		if !p.PublicKey.IsZero() {
+			np.Key = p.PublicKey.String()
+		}
 		for _, ip := range p.TailscaleIPs {
 			if ip.Is4() || np.IP == "" {
 				np.IP = ip.String()
@@ -220,6 +231,22 @@ func (n *tsNode) Status(ctx context.Context) (NodeStatus, error) {
 		out.Peers = append(out.Peers, np)
 	}
 	return out, nil
+}
+
+// relays reports whether a peer may carry other hosts' traffic: an exit
+// node, a primary subnet router, or any allowed prefix wider than one host.
+func relays(p *ipnstate.PeerStatus) bool {
+	if p.ExitNodeOption || (p.PrimaryRoutes != nil && p.PrimaryRoutes.Len() > 0) {
+		return true
+	}
+	if p.AllowedIPs != nil {
+		for _, pfx := range p.AllowedIPs.All() {
+			if !pfx.IsSingleIP() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (n *tsNode) WhoIs(ctx context.Context, remoteAddr string) (Who, error) {

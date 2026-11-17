@@ -1,6 +1,6 @@
 # potluck.sh
 
-One static page (`public/index.html`, with its stylesheet `public/site.css` and script `public/site.js`) served by a Cloudflare Worker (`src/worker.js`) with static assets. The Worker
+One static page (`public/index.html`, with its stylesheet `public/site.css` and script `public/site.js`) and a Markdown blog (`content/blog/`, built into `public/blog/`; see "The blog and indexing") served by a Cloudflare Worker (`src/worker.js`) with static assets. The Worker
 answers the founders form (`src/contact.js`) and the two routes of the closed waitlist (`src/waitlist.js`), kept
 apart from `src/worker.js` because a Worker's entry module may export only handlers; every other path is a static
 file. No framework, no dependencies, no tracking scripts, and no
@@ -12,11 +12,78 @@ food and cloud are inline SVG cut-outs that keep facing the reader; there are no
 from where each machine lands on screen (front to back, each at the cheapest spot: never over another label, the card
 or the arrows, and, where there is room, off every machine and with a leader line that runs over no other machine,
 label or leader), the three How it works figures (a blanket that unfolds with scroll, machines that drop into a
-row and spring to life when pointed at, focused or tapped, over brackets that show their pools, a MacBook whose menu winds down; their classes start `bk-`, `sk-` and `mb-`), the cost slider, the copy button
+row and spring to life when pointed at, focused or tapped, over brackets that show their pools, a MacBook whose Potluck menu works: the reader picks Keep lending, Wind down or Stop now, the jobs answer and the matching command lights up, and if nobody picks, the pointer winds it down; their classes start `bk-`, `sk-` and `mb-`), the cost slider, the copy button
 and the form. Without JavaScript the page still reads in full; the labels, turn arrows and copy button stay hidden,
 the figures show their finished state, and the form posts as a plain form. With `prefers-reduced-motion`, nothing
 moves on its own. The card's numbers are half of each machine's cores and memory,
 because `potluck host` shares half unless told otherwise (`--share`).
+
+## The blog and indexing
+
+Posts are Markdown files, `content/blog/<slug>.md`, built into static pages by `npm run build` (`build/build.mjs`, Node's
+standard library only). The built files are committed under `public/`, so a deploy stays `npx wrangler deploy`;
+`npm test` fails when the committed files differ from a fresh build, so run `npm run build` after any change to
+`content/`, `build/` or `index.html`'s seo block, and commit the result. There is no post yet, and no placeholder: with
+none, the blog page, the feed and the home page's Blog link are not built.
+
+A post starts with front matter in the fields the growth content job writes (`farm/sengi-content-job` in agent-hub), plus
+`date` and `updated`:
+
+```yaml
+---
+slug: run-a-coding-agent-in-a-sandbox      # the file name, without .md
+kind: new                                   # new | refresh
+engine: claude                              # claude | chatgpt
+title: "The page's h1"
+page_title: "The <title> | Potluck"
+page_description: "The meta description (one line)."
+target_searches:
+  - "a search this post answers" # 320/month
+data_sources:
+  - "where the numbers came from"
+model: claude-opus-5-5
+date: 2026-11-12                            # first published
+updated: 2026-11-15                         # last changed: sitemap <lastmod>, feed <updated>; committed, never from git
+summary: "Optional. The short answer shown above the post."
+---
+```
+
+`drafted:` and `path:` (a refresh's `/blog/<slug>`) are accepted too. A missing or malformed field, an unknown field, or
+a slug that is not the file name fails the build. The body is the Markdown subset `build/markdown.mjs` reads: `##` to
+`######` headings (not `#`: the title is the page's h1; a first line that repeats the title is dropped), paragraphs,
+bullet and numbered lists, fenced code, blockquotes, pipe tables, and inline code, bold, italic and links. Anything
+else (raw HTML, images, nested lists, rules, indented code, strikethrough) fails the build with the line number rather
+than rendering wrong. Put the answer first: the first paragraph, or `summary`, is what a search result or an assistant
+quotes.
+
+What the build writes:
+
+| file | what |
+| --- | --- |
+| `public/blog/<slug>.html`, `public/blog.html` | the post and the index, served at `/blog/<slug>` and `/blog` (no trailing slash: Workers assets redirect the `.html` and slash forms, so the canonical address is the 200 one) |
+| `public/blog/<slug>.md` | the post as Markdown, for assistants |
+| `public/sitemap.xml` | every public page with `<lastmod>`: the home page's comes from `HOME.lastmod` in `build/pages.mjs` (bump it when the home page's content changes), posts' from `updated`; `/blog` only when a post exists |
+| `public/feed.xml` | Atom, posts newest updated first |
+| `public/robots.txt` | allow all; the search and AI crawlers named (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, PerplexityBot, Google-Extended, Bingbot); `/api/` closed; the sitemap |
+| `public/llms.txt`, `public/llms-full.txt` | `content/llms-intro.md` plus the page list; and the intro plus every page's Markdown (`content/home.md` for the home page; keep it in step with `index.html`) |
+| `public/index.html` (between its markers) | title, description, canonical, Open Graph, Twitter tags and JSON-LD (SoftwareApplication, Organization, WebSite), and the footer's Blog link |
+
+`public/og.png` (1200x630, the share image) and `public/blog.css` are hand-made. `public/7b1a88c94e3d01e8f2150746ddb8a872.txt`
+is the IndexNow key: public on purpose (the protocol serves it from the site to prove ownership), and a test checks it.
+
+`thanks.html` is `noindex`, and is not in the sitemap.
+
+After adding a post, run `npx wrangler dev --local` and check that its canonical address answers 200 and not a redirect:
+`curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8787/blog/<slug>` (no `-L`), likewise for `/blog` and `/blog/<slug>.md`.
+
+`npm run notify` tells IndexNow (api.indexnow.org, which shares with Bing and others) which pages are new or changed:
+it waits, for up to about two minutes, until the live `sitemap.xml` equals the committed one (an edge can serve the
+previous build for a while), checks the key and that each page to send answers 200 with no redirect, then posts the
+addresses whose `<lastmod>` is new or different from the sitemap IndexNow was last told about. That sitemap is kept in
+`.wrangler/indexnow-sent.xml` (not committed) and rewritten after each successful send; `npm run deploy` creates it from
+the live sitemap when it is missing, so if a notify fails after a deploy, `npm run notify` sends the right pages. With
+no such file every page is sent. `--previous <file>` names a different "before"; `--dry-run` posts nothing. A deleted
+post is not announced (IndexNow checks live pages here); a deleted page just drops out of the sitemap.
 
 ## The founders form
 
@@ -94,6 +161,7 @@ Removal: people email ops@sengi.run. Delete their key with
 
 ```sh
 npm test                        # node --test, no install needed
+npm run build                   # rebuild the blog, sitemap, feed, robots.txt and llms files
 cp .dev.vars.example .dev.vars  # sets a local WAITLIST_ADMIN_TOKEN
 npx wrangler dev --local        # http://localhost:8787 with a local KV store
 ```
@@ -123,8 +191,13 @@ each step check that:
 Account `246355770c9ff4630b40496b282a7b46` (set in `wrangler.jsonc`). Deploys are by hand, from this directory,
 only: no git-triggered build (Workers Builds, or a Pages project on this repo) deploys this Worker.
 
+`npm run deploy` does all of this: it fails if the build output is out of date or anything under `public/`, `content/`,
+`build/` or `src/` is uncommitted, makes sure the notifier has a "before" sitemap, runs `wrangler deploy`, makes the checks below (the two admin reads only when `WAITLIST_ADMIN_TOKEN` and
+`CONTACT_ADMIN_TOKEN` are set), then runs the IndexNow notifier. By hand:
+
 ```sh
 npx wrangler secret put CONTACT_ADMIN_TOKEN   # once
+npm run build:check                           # the committed build is current
 npx wrangler deploy
 for h in potluck.sh www.potluck.sh; do
   curl -s -o /dev/null -w "$h page %{http_code}\n" "https://$h/"
@@ -132,6 +205,7 @@ for h in potluck.sh www.potluck.sh; do
 done
 curl -s -H "authorization: Bearer $WAITLIST_ADMIN_TOKEN" https://potluck.sh/api/waitlist/count; echo
 curl -s -o /dev/null -w "contact read %{http_code}\n" -H "authorization: Bearer $CONTACT_ADMIN_TOKEN" https://potluck.sh/api/contact
+npm run notify
 ```
 
 Expect 200 for the page, 410 for the post, the counts, and 200 for the contact read. After a change to the form or the email, send one

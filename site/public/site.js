@@ -616,51 +616,119 @@
   pools.forEach(function (p, j) { wire(p.el, { kind: 'p', i: j }, true); });
 })();
 
-/* Step 3 figure: once it scrolls into view, the pointer moves to "Wind down", clicks it, and the jobs finish:
-   the in-use count ticks from 6 to 0, then holds. Reduced motion (or no script): the menu stays as drawn, with
-   "Wind down" highlighted. */
+/* Step 3 figure: the Potluck menu works. Keep lending takes jobs again (the six lent cores fill one by one),
+   Wind down lets the running jobs finish one by one and then stops lending, Stop now ends them at once. The
+   command beside the figure that does the same lights up. Once the figure scrolls into view, the pointer picks
+   Wind down by itself, unless the reader has already picked. Reduced motion: no pointer, and every change is
+   immediate. No script: the menu stays as drawn, with "Wind down" highlighted, and the figure stays hidden from
+   screen readers (the text beside it says the same). */
 (function () {
   var fig = document.querySelector('.mb-fig');
   if (!fig) return;
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (reduce || !('IntersectionObserver' in window)) return;
 
   function q(name) { return fig.querySelector('[data-mb="' + name + '"]'); }
-  var title = q('title'), use = q('use'), keep = q('keep'), wind = q('wind');
+  var menu = fig.querySelector('.mb-menu'), title = q('title'), use = q('use');
   var cores = fig.querySelectorAll('.mb-cores i');
+  var items = { keep: q('keep'), wind: q('wind'), stop: q('stop') };
+  var cmds = document.querySelectorAll('[data-mb-cmd]');
+  var LENT = 6;
 
-  // The starting state: still lending, nothing highlighted, the pointer off on the desktop.
-  wind.classList.remove('mb-hi');
-  fig.classList.add('mb-start');
+  // What the machine is doing: the item last picked, and how many of the lent cores have a job on them.
+  var mode = 'keep', busy = LENT, timer = 0, auto = [], took = false;
 
-  function useLine(n) {
-    if (n === 0) return 'No jobs left';
-    var jobs = n > 3 ? 2 : 1;
-    return n + (n === 1 ? ' core' : ' cores') + ' in use by ' + jobs + (jobs === 1 ? ' job' : ' jobs');
+  function useLine() {
+    if (busy === 0) return mode === 'keep' ? 'Waiting for jobs' : 'No jobs left';
+    var jobs = busy > 3 ? 2 : 1;
+    return busy + (busy === 1 ? ' core' : ' cores') + ' in use by ' + jobs + (jobs === 1 ? ' job' : ' jobs');
   }
 
-  function play() {
-    setTimeout(function () { fig.classList.remove('mb-start'); }, 250);
-    setTimeout(function () { wind.classList.add('mb-hi'); }, 950);
-    setTimeout(function () { wind.classList.add('mb-press'); }, 1450);
-    setTimeout(function () {
-      wind.classList.remove('mb-press');
-      keep.querySelector('.mb-ck').textContent = '';
-      wind.querySelector('.mb-ck').textContent = '✓';
-      title.textContent = 'Winding down';
-    }, 1600);
-    var n = 6;
-    function tick() {
-      n -= 1;
-      cores[n].className = 'mb-lent';
-      use.textContent = useLine(n);
-      if (n > 0) { setTimeout(tick, 360); return; }
-      setTimeout(function () {
-        title.textContent = 'Not lending';
-        for (var i = 0; i < 6; i++) cores[i].className = '';
-      }, 500);
+  function render() {
+    var lending = mode === 'keep' || (mode === 'wind' && busy > 0);
+    var t = mode === 'keep' ? 'Lending ' + LENT + ' of ' + cores.length + ' cores' : lending ? 'Winding down' : 'Not lending';
+    if (title.textContent !== t) title.textContent = t;
+    use.textContent = useLine();
+    for (var i = 0; i < cores.length; i++) cores[i].className = i < busy ? 'mb-on' : lending && i < LENT ? 'mb-lent' : '';
+    Object.keys(items).forEach(function (k) {
+      items[k].querySelector('.mb-ck').textContent = k === mode ? '✓' : '';
+      items[k].setAttribute('aria-pressed', k === mode ? 'true' : 'false');
+    });
+    for (var j = 0; j < cmds.length; j++) cmds[j].classList.toggle('mb-cmd-on', cmds[j].getAttribute('data-mb-cmd') === mode);
+  }
+
+  // Step busy toward the goal the mode sets, one core at a time (all at once under reduced motion).
+  function settle() {
+    clearTimeout(timer);
+    var goal = mode === 'keep' ? LENT : 0;
+    if (mode === 'stop' || reduce) busy = goal;
+    if (busy !== goal) {
+      busy += busy < goal ? 1 : -1;
+      timer = setTimeout(settle, mode === 'keep' ? 300 : 360);
     }
-    setTimeout(tick, 2000);
+    render();
+  }
+
+  function choose(k) {
+    if (k === mode) return;
+    mode = k;
+    settle();
+  }
+
+  function highlight(el) {
+    Object.keys(items).forEach(function (k) { items[k].classList.toggle('mb-hi', items[k] === el); });
+  }
+
+  // The reader takes over: the pointer goes, and so does anything it still meant to do.
+  function takeOver() {
+    if (took) return;
+    took = true;
+    auto.forEach(clearTimeout);
+    items.wind.classList.remove('mb-press');
+    title.setAttribute('aria-live', 'polite');
+    fig.classList.remove('mb-start');
+    fig.classList.add('mb-user');
+  }
+
+  fig.removeAttribute('aria-hidden');
+  if (fig.parentNode.getAttribute('aria-hidden')) fig.parentNode.removeAttribute('aria-hidden');
+  fig.querySelector('.mb-art').setAttribute('aria-hidden', 'true');
+  menu.removeAttribute('aria-hidden');
+  menu.setAttribute('role', 'group');
+  menu.setAttribute('aria-label', "Potluck menu on Leo's MacBook");
+  fig.querySelector('.mb-cores').setAttribute('aria-hidden', 'true');
+  menu.addEventListener('pointerleave', function (e) { if (e.pointerType !== 'touch' && took) highlight(null); });
+
+  Object.keys(items).forEach(function (k) {
+    var el = items[k];
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.addEventListener('pointerenter', function (e) { if (e.pointerType !== 'touch') { takeOver(); highlight(el); } });
+    el.addEventListener('focus', function () { takeOver(); highlight(el); });
+    el.addEventListener('blur', function () { el.classList.remove('mb-hi'); });
+    el.addEventListener('click', function () {
+      takeOver();
+      highlight(el);
+      choose(k);
+    });
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); takeOver(); choose(k); }
+    });
+  });
+  var hint = document.querySelector('.mb-try');
+  if (hint) hint.hidden = false;
+  render();
+
+  // The starting state: still lending, nothing highlighted. The pointer waits off on the desktop to play, or goes.
+  highlight(null);
+  if (reduce || !('IntersectionObserver' in window)) { fig.classList.add('mb-user'); return; }
+  fig.classList.add('mb-start');
+
+  function play() {
+    if (took) return;
+    auto.push(setTimeout(function () { fig.classList.remove('mb-start'); }, 250));
+    auto.push(setTimeout(function () { highlight(items.wind); }, 950));
+    auto.push(setTimeout(function () { items.wind.classList.add('mb-press'); }, 1450));
+    auto.push(setTimeout(function () { items.wind.classList.remove('mb-press'); choose('wind'); }, 1600));
   }
 
   var io = new IntersectionObserver(function (entries) {

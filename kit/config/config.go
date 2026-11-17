@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"os/user"
@@ -125,6 +126,9 @@ type File struct {
 	// managed session is running, so an idle or needs_human holder expires
 	// like any TTL lease.
 	BoundLeaseTTLSeconds int `json:"bound_lease_ttl_seconds,omitempty"`
+	// LimitedTokenMaxTTLSeconds is the longest a limited token may live
+	// (POST /v0/tokens with a limit; default 30 days).
+	LimitedTokenMaxTTLSeconds int64 `json:"limited_token_max_ttl_seconds,omitempty"`
 	// IdleAfterSeconds: a managed session with no PTY output for this long is
 	// set idle by the session module (default 300), so a hung agent stops
 	// renewing its bound lease.
@@ -587,6 +591,14 @@ func (c *Config) BoundLeaseTTL() time.Duration {
 		return time.Duration(c.File.BoundLeaseTTLSeconds) * time.Second
 	}
 	return time.Hour
+}
+
+// LimitedTokenMaxTTL is the longest a limited token may live.
+func (c *Config) LimitedTokenMaxTTL() time.Duration {
+	if s := c.File.LimitedTokenMaxTTLSeconds; s > 0 {
+		return time.Duration(min(s, int64(math.MaxInt64/time.Second))) * time.Second
+	}
+	return 30 * 24 * time.Hour
 }
 
 // IdleAfter is how long a managed session may print nothing before it is idle.

@@ -299,6 +299,11 @@ type Token struct {
 	// zm join): it works only from that tailnet node.
 	Node    string `json:"node,omitempty"`
 	Machine string `json:"machine,omitempty"`
+	// Limit is a limited token's route limit: it reaches only the routes
+	// that admit it. Device is the tailnet name of the one device it is
+	// pinned to (as named at mint).
+	Limit  string `json:"limit,omitempty"`
+	Device string `json:"device,omitempty"`
 }
 
 // MintTokenRequest is POST /v0/tokens.
@@ -315,12 +320,29 @@ type MintTokenRequest struct {
 	// it then works only over the tunnel, on requests that key signed. Set
 	// by the potluck-token kind in process; never read from the wire.
 	BoxKey string `json:"-"`
+	// Limit mints a limited token: only routes that admit this limit
+	// answer it, for the caller's own identity (As must be empty), with no
+	// grant added; it needs Project, Node and TTLSeconds. Node names the
+	// tailnet device it will work from, and only from.
+	Limit string `json:"limit,omitempty"`
+	Node  string `json:"node,omitempty"`
 }
 
 // MintTokenResponse carries the secret, once.
 type MintTokenResponse struct {
 	Token  Token  `json:"token"`
 	Secret string `json:"secret"`
+	// Device is the device a limited token is pinned to, for the minter
+	// to check before handing the secret over.
+	Device *TokenDevice `json:"device,omitempty"`
+}
+
+// TokenDevice is a tailnet device as the daemon resolved it at mint.
+type TokenDevice struct {
+	Name   string `json:"name"`    // its MagicDNS name
+	NodeID string `json:"node_id"` // its stable node ID
+	Login  string `json:"login,omitempty"`
+	OS     string `json:"os,omitempty"`
 }
 
 // TokenList is GET /v0/tokens.

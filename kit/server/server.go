@@ -179,13 +179,17 @@ func (dm *Daemon) wire(ctx context.Context, w Wiring) error {
 	r.Fallback(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, api.Errorf(api.CodeNotFound, "no route %s %s", r.Method, r.URL.Path).WithHint("see API.md"))
 	}))
+	if err := r.CheckAdmits(); err != nil {
+		return err
+	}
 	dm.Router = r
 	dm.Handler = dm.middleware(r)
 	d.Handler = dm.Handler
 	return nil
 }
 
-// middleware recovers panics, checks the protocol, authenticates and logs.
+// middleware recovers panics, checks the protocol, authenticates, keeps a
+// limited token to the routes that admit it, and logs.
 func (dm *Daemon) middleware(next http.Handler) http.Handler {
 	d := dm.Deps
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -206,6 +210,14 @@ func (dm *Daemon) middleware(next http.Handler) http.Handler {
 			return
 		}
 		r = r.WithContext(d.Authenticate(r))
+		if l := core.SubjectOf(r.Context()).Limit(); l != "" {
+			// The one choke point for a limited token: before the gates,
+			// the team proxy and the router (limitGate).
+			var ok bool
+			if r, ok = dm.limitGate(w, r, l); !ok {
+				return
+			}
+		}
 		if ts := core.TeamSubjectOf(r.Context()); ts != nil {
 			// A team replica's call (SPEC 17.3): every answer carries the
 			// project header it caches and its identity's scope_version.

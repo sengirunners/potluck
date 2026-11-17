@@ -5,6 +5,10 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "node --test test/",
-    "dev": "wrangler dev --local"
+    "dev": "wrangler dev --local",
+    "build": "node build/build.mjs",
+    "build:check": "node build/build.mjs --check",
+    "notify": "node build/notify.mjs",
+    "deploy": "node build/deploy.mjs"
   }
 }

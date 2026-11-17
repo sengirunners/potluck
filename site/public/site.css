@@ -242,11 +242,23 @@ pre.cmd .p{color:var(--green);font-weight:700}
 .beat figure svg{display:block;width:100%;height:auto}
 .beat p{font-size:18px;color:var(--soft);max-width:30em}
 
-/* Uses: one wide, one narrow; the Actions one is drawn in pencil because it has not run live yet. */
-.uses{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:24px;align-items:start}
-.use{border-radius:18px;padding:26px}
-.use.agents{background:var(--card);border:1.5px solid var(--ink);box-shadow:6px 6px 0 #DCEBCB}
-.use.actions{background:var(--card);border:1.5px solid var(--ink);box-shadow:6px 6px 0 #F3DDB0;margin-top:40px}
+/* Uses: two picnic blankets, one wide, one narrow, in the gingham of the blanket at the top of the page. The
+   border is the cloth with a stitched hem; the middle is the same cloth faded under the text so it reads. Each lies
+   at a slight angle and straightens when the pointer is on it. */
+.uses{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:32px;align-items:start}
+.use{--gc:200,64,47;--gs:24px;position:relative;padding:22px;border:24px solid transparent;border-radius:6px;
+  background:
+    linear-gradient(rgba(255,252,246,.93),rgba(255,252,246,.93)) padding-box,
+    linear-gradient(90deg,rgba(var(--gc),.5) 50%,transparent 50%) 0 0/var(--gs) var(--gs) border-box,
+    linear-gradient(rgba(var(--gc),.5) 50%,transparent 50%) 0 0/var(--gs) var(--gs) border-box,
+    #FFF3E2 border-box;
+  box-shadow:0 0 0 5px #FFF3E2,0 0 0 6px rgba(var(--gc),.35),0 22px 34px -20px rgba(40,60,20,.55),0 3px 6px rgba(40,60,20,.12);
+  transform:rotate(var(--tilt,0deg));transition:transform .35s cubic-bezier(.3,.7,.3,1)}
+/* The stitched hem: a running stitch through the cloth, halfway across the border. */
+.use::after{content:"";position:absolute;inset:-6px;border:1.5px dashed rgba(255,251,240,.95);border-radius:4px;pointer-events:none}
+.use.agents{--tilt:-.7deg}
+.use.actions{--gc:47,107,52;--tilt:.9deg;margin-top:40px}
+.use:hover{--tilt:0deg}
 .use p{font-size:17px;color:var(--soft);line-height:1.5}
 .use p + p{margin-top:10px}
 .use .kind{font-size:14px;font-weight:600;color:var(--green);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -344,6 +356,7 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
   .dish{width:auto;max-width:520px;margin:10px auto 0}
   .uses,.pair,.band .in{grid-template-columns:minmax(0,1fr)}
   .use.actions{margin-top:0}
+  .use.agents,.use.actions{--tilt:0deg}
 }
 @media (max-width:700px){
   body{font-size:18px}
@@ -370,7 +383,8 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
   .sengi{flex-direction:column;align-items:flex-start}
   .recipe{padding:22px 18px 20px 20px}
   .recipe .body{grid-template-columns:minmax(0,1fr) 80px}
-  .use{padding:22px 18px}
+  .use{padding:20px 14px;border-width:12px;--gs:12px}
+  .use::after{inset:-4px}
   section.block{padding-top:64px}
   .band{margin-top:64px}
 }
@@ -571,7 +585,6 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
   .sk-m.sk-on .sk-body{filter:drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 3px rgba(47,107,52,.85))}
 }
 
-/* How it works, step 3: Leo's MacBook with the Potluck menu open (mb-). */
 /* Step 3 figure: Leo's MacBook, close up, with the Potluck menu open. Everything is prefixed mb-. */
 .mb-fig{position:relative;aspect-ratio:440/280;width:100%;--mb-accent:#2F6B34;--mb-grey:#6B6F76}
 /* The drawing and its menu, as one picture that scales together (cqw is this box's width). */
@@ -610,9 +623,17 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
 .mb-item.mb-hi .mb-sub{color:rgba(255,255,255,.86)}
 .mb-item.mb-press{background:#24552A}
 .mb-fig .mb-cursor{position:absolute;width:.85em;height:auto;left:0;top:0;pointer-events:none;
-  transform:translate(var(--mb-cx,7.2em),var(--mb-cy,.2em));transition:transform .8s cubic-bezier(.45,.05,.25,1);
+  transform:translate(var(--mb-cx,7.2em),var(--mb-cy,.2em));transition:transform .8s cubic-bezier(.45,.05,.25,1),opacity .2s;
   filter:drop-shadow(0 1px 1px rgba(0,0,0,.3))}
 .mb-fig.mb-start .mb-cursor{--mb-cx:11.4em;--mb-cy:6.6em}
+/* The reader has the menu: the drawn pointer goes, and the items take clicks. */
+.mb-fig.mb-user .mb-cursor{opacity:0}
+.mb-item[role="button"]{cursor:pointer}
+.mb-item[role="button"]:focus-visible{outline-offset:1px}
+.beat .mb-try{margin-top:12px;font-size:16px;font-style:italic;text-align:center;margin-inline:auto}
+/* The command that does what the menu last did. */
+pre.cmd .ln{display:block;margin:0 -6px;padding:0 6px;border-radius:5px;transition:background-color .25s}
+pre.cmd .ln.mb-cmd-on{background:#E1EDD2}
 .mb-fig.mb-start .mb-pill{opacity:.16}
 
 /* Phones: zoom in on the menu corner, so the menu keeps its share of the picture instead of covering the laptop. */
@@ -622,5 +643,5 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
 }
 
 @media (prefers-reduced-motion:reduce){
-  .mb-item,.mb-sub,.mb-cursor{transition:none}
+  .mb-item,.mb-sub,.mb-cursor,pre.cmd .ln,.use{transition:none}
 }

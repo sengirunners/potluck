@@ -35,6 +35,9 @@ type Identity struct {
 	// Host groups nodes on one "machine": a caller from a node with the same
 	// Host is this machine (core.Remote.Self). "" = its own machine.
 	Host string
+	OS   string // self-reported OS
+	// Relays makes the node serve subnet routes (or be an exit node).
+	Relays bool
 }
 
 // Net is one fake tailnet.
@@ -189,7 +192,7 @@ func (x *Node) Status(context.Context) (tailnet.NodeStatus, error) {
 			continue
 		}
 		st.Peers = append(st.Peers, tailnet.NodePeer{Host: o.cfg.Hostname, DNSName: name + "." + Suffix, IP: "127.0.0.1", Online: true, Login: o.id.Login,
-			ID: o.id.NodeID})
+			ID: o.id.NodeID, Key: o.id.NodeKey, OS: o.id.OS, Tagged: o.id.Tagged, Relays: o.id.Relays, Shared: n.fullOnly[name]})
 	}
 	// In node ID order: deterministic, so a test can put a node first.
 	slices.SortFunc(st.Peers, func(a, b tailnet.NodePeer) int { return strings.Compare(a.ID, b.ID) })
@@ -219,7 +222,7 @@ func (x *Node) WhoIs(_ context.Context, remoteAddr string) (tailnet.Who, error) 
 	x.net.mu.Lock()
 	defer x.net.mu.Unlock()
 	return tailnet.Who{Login: o.id.Login, Node: o.name + "." + Suffix, Host: o.cfg.Hostname, NodeID: o.id.NodeID,
-		NodeKey: o.id.NodeKey, Tagged: o.id.Tagged}, nil
+		NodeKey: o.id.NodeKey, Tagged: o.id.Tagged, OS: o.id.OS}, nil
 }
 
 // FromThisHost: the caller's node is on this node's machine (same Host, or

@@ -20,6 +20,9 @@ import (
 //     machine's human or machine (reply address only; it grants nothing).
 //   - Any transport with "Authorization: Bearer <token>": the token's identity,
 //     capped by the token. On the socket this is a guard rail, not security.
+//     A limited token (authz.Cap.Limit) authenticates only over the tailnet
+//     from the device it is pinned to, never from this host; the server then
+//     lets it reach only the routes that admit its limit.
 //   - Anything else is network, fail closed: without a token, the WhoIs
 //     login's identity (from WithRemote) if mapped, else unauthenticated. A
 //     listener that forgets WithRemote gets 401s, never the owner. Zm-As
@@ -46,11 +49,15 @@ func (d *Deps) Authenticate(r *http.Request) context.Context {
 	as := strings.TrimSpace(api.GetHeader(r.Header, api.HeaderAs))
 	switch tok := authz.BearerToken(r.Header.Get(api.HeaderAuthorization)); {
 	case tok != "":
-		node, tunnel := "", false
+		// The caller as the listener identified it: a limited token's
+		// device check (FromTokenCaller) runs before anything is written,
+		// for every caller of Authenticate.
+		c, tunnel := project.Caller{Remote: !local}, false
 		if rm := RemoteOf(ctx); rm != nil {
-			node, tunnel = rm.NodeID, rm.Via == ViaTunnel
+			c.NodeID, c.NodeKey, c.Via, c.Self = rm.NodeID, rm.NodeKey, rm.Via, rm.Self
+			tunnel = rm.Via == ViaTunnel
 		}
-		sub, err = d.Projects.FromTokenAt(ctx, tok, !local, node)
+		sub, err = d.Projects.FromTokenCaller(ctx, tok, c)
 		if err == nil && tunnel && sub.Node == "" && sub.BoxKey == "" {
 			// The tunnel takes only a key-bound token of the signing key
 			// (SPEC 17.11): a replica's, or a box's bound to its per-box key

@@ -1,0 +1,356 @@
+DELETE /v0/grants [owner-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/grants [guest-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/grants [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/grants [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/grants [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/grants [socket-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/grants/github [owner-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/grants/github [guest-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/grants/github [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/grants/github [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/grants/github [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/grants/github [socket-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+DELETE /v0/identities/x/github [owner-token] 404 {"error":{"code":"not_found","message":"no identity \"x\""}}
+DELETE /v0/identities/x/github [guest-token] 404 {"error":{"code":"not_found","message":"no identity \"x\""}}
+DELETE /v0/identities/x/github [token-no-whois] 404 {"error":{"code":"not_found","message":"no identity \"x\""}}
+DELETE /v0/identities/x/github [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/identities/x/github [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/identities/x/github [socket-token] 404 {"error":{"code":"not_found","message":"no identity \"x\""}}
+DELETE /v0/invites/x [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/invites/x [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/invites/x [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/invites/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/invites/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/invites/x [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/team/remotes/x [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/team/remotes/x [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/team/remotes/x [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/team/remotes/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/team/remotes/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/team/remotes/x [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/tokens/x [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/tokens/x [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/tokens/x [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/tokens/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/tokens/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/tokens/x [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/daemon/manifest [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/daemon/manifest [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/daemon/manifest [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/daemon/manifest [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/daemon/manifest [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/daemon/manifest [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/events [owner-token] 200 : potluck/1 events
+
+: cursor <id>
+GET /v0/events [guest-token] 200 : potluck/1 events
+
+: cursor <id>
+GET /v0/events [token-no-whois] 200 : potluck/1 events
+
+: cursor <id>
+GET /v0/events [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/events [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/events [socket-token] 200 : potluck/1 events
+
+: cursor <id>
+GET /v0/grants [owner-token] 200 {"grants":[{"identity":"helper","role":"owner","project":"proj","object":"project:<id>","created":"<time>"},{"identity":"owner","role":"owner","project":"proj","object":"project:<id>","created":"<time>"},{"identity":"visitor","role":"guest","project":"proj","object":"project:<id>","created":"<time>"}],"ceilings":[]}
+GET /v0/grants [guest-token] 200 {"grants":[],"ceilings":[]}
+GET /v0/grants [token-no-whois] 200 {"grants":[{"identity":"helper","role":"owner","project":"proj","object":"project:<id>","created":"<time>"},{"identity":"owner","role":"owner","project":"proj","object":"project:<id>","created":"<time>"},{"identity":"visitor","role":"guest","project":"proj","object":"project:<id>","created":"<time>"}],"ceilings":[]}
+GET /v0/grants [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/grants [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/grants [socket-token] 200 {"grants":[{"identity":"helper","role":"owner","project":"proj","object":"project:<id>","created":"<time>"},{"identity":"owner","role":"owner","project":"proj","object":"project:<id>","created":"<time>"},{"identity":"visitor","role":"guest","project":"proj","object":"project:<id>","created":"<time>"}],"ceilings":[]}
+GET /v0/grants/github [owner-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+GET /v0/grants/github [guest-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+GET /v0/grants/github [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+GET /v0/grants/github [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/grants/github [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/grants/github [socket-token] 404 {"error":{"code":"not_found","message":"no project \"\""}}
+GET /v0/health [owner-token] 200 {"ok":true,"protocol":"potluck/1","version":<n>,"commit":<n>,"machine":"host"}
+GET /v0/health [guest-token] 200 {"ok":true,"protocol":"potluck/1","version":<n>,"commit":<n>,"machine":"host"}
+GET /v0/health [token-no-whois] 200 {"ok":true,"protocol":"potluck/1","version":<n>,"commit":<n>,"machine":"host"}
+GET /v0/health [token-tunnel] 200 {"ok":true,"protocol":"potluck/1","version":<n>,"commit":<n>,"machine":"host"}
+GET /v0/health [bad-token] 200 {"ok":true,"protocol":"potluck/1","version":<n>,"commit":<n>,"machine":"host"}
+GET /v0/health [socket-token] 200 {"ok":true,"protocol":"potluck/1","version":<n>,"commit":<n>,"machine":"host"}
+GET /v0/identities [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/identities [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/identities [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/identities [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/identities [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/identities [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/invites [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/invites [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/invites [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/invites [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/invites [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/invites [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/machines [owner-token] 200 {"machines":[]}
+GET /v0/machines [guest-token] 200 {"machines":[]}
+GET /v0/machines [token-no-whois] 200 {"machines":[]}
+GET /v0/machines [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/machines [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/machines [socket-token] 200 {"machines":[]}
+GET /v0/names/x/x [owner-token] 404 {"error":{"code":"not_found","message":"no name \"@x/x\""}}
+GET /v0/names/x/x [guest-token] 404 {"error":{"code":"not_found","message":"no name \"@x/x\""}}
+GET /v0/names/x/x [token-no-whois] 404 {"error":{"code":"not_found","message":"no name \"@x/x\""}}
+GET /v0/names/x/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/names/x/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/names/x/x [socket-token] 404 {"error":{"code":"not_found","message":"no name \"@x/x\""}}
+GET /v0/owner [owner-token] 400 {"error":{"code":"bad_request","message":"?project= is required"}}
+GET /v0/owner [guest-token] 400 {"error":{"code":"bad_request","message":"?project= is required"}}
+GET /v0/owner [token-no-whois] 400 {"error":{"code":"bad_request","message":"?project= is required"}}
+GET /v0/owner [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/owner [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/owner [socket-token] 400 {"error":{"code":"bad_request","message":"?project= is required"}}
+GET /v0/peers [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/peers [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/peers [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/peers [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/peers [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/peers [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/people [owner-token] 200 {"people":[{"id":"<id>","name":"helper","kind":"human","names":["helper"],"you":true,"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"helper","answers":true}]},{"id":"<id>","name":"owner","kind":"human","names":["owner"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"owner","answers":true}]},{"id":"<id>","name":"visitor","kind":"human","names":["visitor"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"visitor"}]}]}
+GET /v0/people [guest-token] 200 {"people":[{"id":"<id>","name":"helper","kind":"human","names":["helper"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"helper","answers":true}]},{"id":"<id>","name":"owner","kind":"human","names":["owner"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"owner","answers":true}]},{"id":"<id>","name":"visitor","kind":"human","names":["visitor"],"you":true,"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"visitor"}]}]}
+GET /v0/people [token-no-whois] 200 {"people":[{"id":"<id>","name":"helper","kind":"human","names":["helper"],"you":true,"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"helper","answers":true}]},{"id":"<id>","name":"owner","kind":"human","names":["owner"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"owner","answers":true}]},{"id":"<id>","name":"visitor","kind":"human","names":["visitor"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"visitor"}]}]}
+GET /v0/people [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/people [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/people [socket-token] 200 {"people":[{"id":"<id>","name":"helper","kind":"human","names":["helper"],"you":true,"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"helper","answers":true}]},{"id":"<id>","name":"owner","kind":"human","names":["owner"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"owner","answers":true}]},{"id":"<id>","name":"visitor","kind":"human","names":["visitor"],"projects":[{"project":"<id>","slug":"proj","identity":"<id>","name":"visitor"}]}]}
+GET /v0/projects [owner-token] 200 {"projects":[{"id":"<id>","slug":"proj","name":"proj","role":"owner","created":"<time>"}]}
+GET /v0/projects [guest-token] 200 {"projects":[{"id":"<id>","slug":"proj","name":"proj","role":"guest","created":"<time>"}]}
+GET /v0/projects [token-no-whois] 200 {"projects":[{"id":"<id>","slug":"proj","name":"proj","role":"owner","created":"<time>"}]}
+GET /v0/projects [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects [socket-token] 200 {"projects":[{"id":"<id>","slug":"proj","name":"proj","role":"owner","created":"<time>"}]}
+GET /v0/projects/resolve [owner-token] 200 {"steps":[{"rule":"session","result":"caller is not a session in a project"},{"rule":"default_project","result":"not set"}]}
+GET /v0/projects/resolve [guest-token] 200 {"steps":[{"rule":"session","result":"caller is not a session in a project"},{"rule":"default_project","result":"not set"}]}
+GET /v0/projects/resolve [token-no-whois] 200 {"steps":[{"rule":"session","result":"caller is not a session in a project"},{"rule":"default_project","result":"not set"}]}
+GET /v0/projects/resolve [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/resolve [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/resolve [socket-token] 200 {"steps":[{"rule":"session","result":"caller is not a session in a project"},{"rule":"default_project","result":"not set"}]}
+GET /v0/projects/x [owner-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x [guest-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas [owner-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas [guest-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x/areas [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x/areas [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas/x [owner-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas/x [guest-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas/x [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/areas/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x/areas/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x/areas/x [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/names [owner-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/names [guest-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/names [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/projects/x/names [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x/names [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/projects/x/names [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+GET /v0/tailnet [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tailnet [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tailnet [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tailnet [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/tailnet [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/tailnet [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/machines/class [owner-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+GET /v0/team/machines/class [guest-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+GET /v0/team/machines/class [token-no-whois] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+GET /v0/team/machines/class [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/machines/class [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/machines/class [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+GET /v0/team/ops [owner-token] 403 {"error":{"code":"forbidden","message":"machine ops go to a team replica's daemon (its node-bound token)"}}
+GET /v0/team/ops [guest-token] 403 {"error":{"code":"forbidden","message":"machine ops go to a team replica's daemon (its node-bound token)"}}
+GET /v0/team/ops [token-no-whois] 403 {"error":{"code":"forbidden","message":"machine ops go to a team replica's daemon (its node-bound token)"}}
+GET /v0/team/ops [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/ops [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/ops [socket-token] 403 {"error":{"code":"forbidden","message":"machine ops go to a team replica's daemon (its node-bound token)"}}
+GET /v0/team/project-keys/x [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/project-keys/x [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/project-keys/x [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/project-keys/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/project-keys/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/project-keys/x [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/remotes [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/remotes [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/remotes [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/team/remotes [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/remotes [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/team/remotes [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tokens [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tokens [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tokens [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tokens [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/tokens [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/tokens [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tunnel [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tunnel [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tunnel [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/tunnel [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/tunnel [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/tunnel [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/whoami [owner-token] 200 {"as":"human:helper","kind":"human","identity":{"id":"<id>","name":"helper","kind":"human","created":"<time>"},"via":"token","machine":"host","protocol":"potluck/1","version":<n>,"commit":<n>}
+GET /v0/whoami [guest-token] 200 {"as":"human:visitor","kind":"human","identity":{"id":"<id>","name":"visitor","kind":"human","created":"<time>"},"via":"token","machine":"host","protocol":"potluck/1","version":<n>,"commit":<n>}
+GET /v0/whoami [token-no-whois] 200 {"as":"human:helper","kind":"human","identity":{"id":"<id>","name":"helper","kind":"human","created":"<time>"},"via":"token","machine":"host","protocol":"potluck/1","version":<n>,"commit":<n>}
+GET /v0/whoami [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/whoami [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/whoami [socket-token] 200 {"as":"human:helper","kind":"human","identity":{"id":"<id>","name":"helper","kind":"human","created":"<time>"},"via":"token","machine":"host","protocol":"potluck/1","version":<n>,"commit":<n>,"home":"<home>","socket":"<home>/daemon.sock"}
+PATCH /v0/projects/x [owner-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+PATCH /v0/projects/x [guest-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+PATCH /v0/projects/x [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+PATCH /v0/projects/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+PATCH /v0/projects/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+PATCH /v0/projects/x [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+PATCH /v0/projects/x/areas/x [owner-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+PATCH /v0/projects/x/areas/x [guest-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+PATCH /v0/projects/x/areas/x [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+PATCH /v0/projects/x/areas/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+PATCH /v0/projects/x/areas/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+PATCH /v0/projects/x/areas/x [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+POST /v0/daemon/swaps [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/daemon/swaps [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/daemon/swaps [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/daemon/swaps [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/daemon/swaps [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/daemon/swaps [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/grants [owner-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants [guest-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants [token-no-whois] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/grants [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/grants [socket-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants/github [owner-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants/github [guest-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants/github [token-no-whois] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants/github [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/grants/github [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/grants/github [socket-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/identities [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/identities [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/identities [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/identities [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/identities [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/identities [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/invites [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/invites [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/invites [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/invites [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/invites [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/invites [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/invites/redeem [owner-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [guest-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [token-no-whois] 401 {"error":{"code":"unauthenticated","message":"unknown caller","hint":"redeem with zm join \u003ccode\u003e"}}
+POST /v0/invites/redeem [token-tunnel] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [bad-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [socket-token] 403 {"error":{"code":"forbidden","message":"a join code is redeemed from the member's machine","hint":"run zm join \u003ccode\u003e on the member's machine"}}
+POST /v0/login/github/start [owner-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/login/github/start [guest-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/login/github/start [token-no-whois] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/login/github/start [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/login/github/start [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/login/github/start [socket-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/login/github/x [owner-token] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
+POST /v0/login/github/x [guest-token] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
+POST /v0/login/github/x [token-no-whois] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
+POST /v0/login/github/x [token-tunnel] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
+POST /v0/login/github/x [bad-token] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
+POST /v0/login/github/x [socket-token] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
+POST /v0/projects [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/areas [owner-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+POST /v0/projects/x/areas [guest-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+POST /v0/projects/x/areas [token-no-whois] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+POST /v0/projects/x/areas [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/areas [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/areas [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+POST /v0/projects/x/export [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/export [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/export [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/export [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/export [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/export [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/solo [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/solo [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/solo [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/solo [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/solo [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/solo [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/team [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/team [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/team [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/projects/x/team [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/team [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/projects/x/team [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/team/leave [owner-token] 403 {"error":{"code":"forbidden","message":"only a replica's node-bound token can leave this way"}}
+POST /v0/team/leave [guest-token] 403 {"error":{"code":"forbidden","message":"only a replica's node-bound token can leave this way"}}
+POST /v0/team/leave [token-no-whois] 403 {"error":{"code":"forbidden","message":"only a replica's node-bound token can leave this way"}}
+POST /v0/team/leave [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/leave [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/leave [socket-token] 403 {"error":{"code":"forbidden","message":"only a replica's node-bound token can leave this way"}}
+POST /v0/team/machine [owner-token] 403 {"error":{"code":"forbidden","message":"machine numbers come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/machine [guest-token] 403 {"error":{"code":"forbidden","message":"machine numbers come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/machine [token-no-whois] 403 {"error":{"code":"forbidden","message":"machine numbers come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/machine [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/machine [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/machine [socket-token] 403 {"error":{"code":"forbidden","message":"machine numbers come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/machines/x/class [owner-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+POST /v0/team/machines/x/class [guest-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+POST /v0/team/machines/x/class [token-no-whois] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+POST /v0/team/machines/x/class [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/machines/x/class [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/machines/x/class [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+POST /v0/team/ops/report [owner-token] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/ops/report [guest-token] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/ops/report [token-no-whois] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/ops/report [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/ops/report [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/ops/report [socket-token] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
+POST /v0/team/presence [owner-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
+POST /v0/team/presence [guest-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
+POST /v0/team/presence [token-no-whois] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
+POST /v0/team/presence [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/presence [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/presence [socket-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
+POST /v0/team/project-keys/x/forget [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/team/project-keys/x/forget [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/team/project-keys/x/forget [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/team/project-keys/x/forget [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/project-keys/x/forget [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/team/project-keys/x/forget [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tokens [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tokens [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tokens [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tokens [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tokens [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tokens [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/down [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/down [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/down [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/down [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/down [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/down [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/key [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/key [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/key [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/key [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/key [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/key [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/preview-domain [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/preview-domain [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/preview-domain [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/preview-domain [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/preview-domain [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/preview-domain [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/up [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/up [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/up [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/tunnel/up [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/up [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/tunnel/up [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}

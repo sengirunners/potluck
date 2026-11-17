@@ -16,6 +16,7 @@ func (dm *Daemon) coreRoutes(r *core.Router) {
 	d := dm.Deps
 	r.HandleFunc("GET /v0/health", core.Public, "none; machine for everyone, pid/started/hedges/holders only for local callers", dm.health)
 	r.HandleFunc("GET /v0/whoami", core.Authed, "none: describes the caller", dm.whoami)
+	r.Admit(core.AnyLimit, "GET /v0/whoami")
 	r.HandleFunc("POST /v0/daemon/stop", core.Local, "local; refuses while sessions that would end run (none with holders) unless force, and during another caller's swap", dm.daemonStop)
 	r.HandleFunc("GET /v0/daemon/manifest", core.Local, "local", dm.manifest)
 	r.HandleFunc("POST /v0/daemon/swaps", core.Local, "local; the caller is recorded as who swapped", dm.recordSwap)
@@ -184,7 +185,13 @@ func (dm *Daemon) coreRoutes(r *core.Router) {
 		if err := api.DecodeJSON(r, &req); err != nil {
 			return nil, err
 		}
-		t, err := d.Projects.Mint(r.Context(), core.SubjectOf(r.Context()), req)
+		var t api.MintTokenResponse
+		var err error
+		if req.Limit != "" || req.Node != "" {
+			t, err = dm.mintLimited(r.Context(), req)
+		} else {
+			t, err = d.Projects.Mint(r.Context(), core.SubjectOf(r.Context()), req)
+		}
 		if err == nil {
 			dm.publish(r.Context(), api.EventTokenMinted, t.Token.ID, "", "", t.Token)
 		}
@@ -236,7 +243,7 @@ func (dm *Daemon) whoami(w http.ResponseWriter, r *http.Request) {
 	cfg := dm.Deps.Config
 	sub := core.SubjectOf(r.Context())
 	a, _ := api.ParseAddress(sub.Address)
-	out := api.Whoami{As: sub.Address, Kind: a.Kind, Identity: sub.Identity, Via: sub.Via, Session: sub.Session,
+	out := api.Whoami{As: sub.Address, Kind: a.Kind, Identity: sub.Identity, Via: sub.Via, Session: sub.Session, Limit: sub.Limit(),
 		Machine: cfg.Machine, Protocol: api.WireProtocol, Version: api.Version, Commit: api.Commit}
 	if !sub.Remote {
 		out.Home, out.Socket = cfg.Home, cfg.ListenSocketPath()

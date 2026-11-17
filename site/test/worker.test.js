@@ -116,7 +116,9 @@ test("the page loads its own stylesheet and script, and keeps no inline ones", (
 });
 
 test("the page makes no third-party requests and loads its fonts from /fonts", () => {
-  for (const pattern of THIRD_PARTY) assert.doesNotMatch(INDEX, pattern);
+  // The canonical link names the page's own address; it is not a request.
+  const requests = INDEX.replace(/<link rel="canonical" href="https:\/\/potluck\.sh\/">/, "");
+  for (const pattern of THIRD_PARTY) assert.doesNotMatch(requests, pattern);
   assert.doesNotMatch(INDEX, /googleapis|gstatic/);
   const fonts = [...INDEX.matchAll(/url\(\s*['"]?(\/fonts\/[^)'"\s]+)['"]?\s*\)/g)].map((m) => m[1]);
   assert.ok(fonts.length > 0, "the page loads its fonts from /fonts/");
