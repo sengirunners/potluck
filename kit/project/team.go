@@ -225,9 +225,13 @@ func LooksLikeJoinCode(s string) bool {
 	return len(s) == 9 && s[4] == '-' && NormalizeJoinSecret(s) != ""
 }
 
-// ParseJoinCode reads a join code.
+// ParseJoinCode reads a join code, or the code in an invite link
+// (JoinCodeOf).
 func ParseJoinCode(s string) (JoinCode, error) {
-	s = strings.TrimSpace(s)
+	s, err := JoinCodeOf(s)
+	if err != nil {
+		return JoinCode{}, err
+	}
 	if strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "http://") {
 		return parseTunnelCode(s)
 	}
@@ -589,6 +593,41 @@ func (r *Registry) Invites(ctx context.Context) ([]api.Invite, error) {
 			return nil, err
 		}
 		out = append(out, inv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ended, err := r.endedInvites(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if out[i].State == api.InviteRedeemed && ended[out[i].ID] {
+			out[i].Revoked, out[i].Used = true, false
+		}
+	}
+	return out, nil
+}
+
+// endedInvites are the ids of redeemed invites whose machine (node) holds
+// no live token in the invite's project now: it left, or its token was
+// revoked or expired. A machine that joined again since keeps its invite in
+// use.
+func (r *Registry) endedInvites(ctx context.Context, now time.Time) (map[string]bool, error) {
+	rows, err := r.st.Registry().QueryContext(ctx, `SELECT i.id FROM invites i WHERE i.node != '' AND NOT EXISTS (
+		SELECT 1 FROM tokens t WHERE t.node = i.node AND t.project = i.project AND t.revoked IS NULL AND (t.expires IS NULL OR t.expires > ?))`,
+		store.Millis(now))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
 	}
 	return out, rows.Err()
 }

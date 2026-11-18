@@ -151,3 +151,47 @@ func tartImagePresent(ctx context.Context, run Runner, image string) bool {
 	cached, err := tartCachedImages(ctx, run)
 	return err == nil && cached[image]
 }
+
+// SmallLinux is the name of a layer's small Linux image in images.pin (on
+// tart: the image a first try lends a Mac instead of macOS's 27 GB).
+const SmallLinux = "small-linux"
+
+// FirstImage is what a first try (`potluck try`) lends with o.
+type FirstImage struct {
+	// With is the named image to lend ("" for the layer's default).
+	With string
+	// Lent is the pin of the image lent; Default the layer's default, which
+	// is Lent unless With is set.
+	Lent, Default DefaultPin
+	// Unpublished: the layer's default is a macOS guest and images.pin has a
+	// small Linux line for the layer whose image is not published yet, so
+	// the default is lent.
+	Unpublished bool
+}
+
+// ChooseFirstImage is the image a first try lends with o, which names no
+// image of its own: on the layer Check would choose (SelectedPin), the
+// layer's published small Linux image when its default is a macOS guest,
+// else the default. ok is false when SelectedPin has no answer (o names
+// images or --with, no layer is ready, or the layer has no default): the
+// host run then says why.
+func ChooseFirstImage(o ShareOptions) (FirstImage, bool) {
+	if o.With != "" {
+		return FirstImage{}, false
+	}
+	def, layer, ok := SelectedPin(o)
+	if !ok {
+		return FirstImage{}, false
+	}
+	f := FirstImage{Lent: def, Default: def}
+	if def.OS != "darwin" {
+		return f, true
+	}
+	switch p, ok := imagepins.NamedLine(pinTable(), layer, SmallLinux); {
+	case ok && p.Image != "":
+		f.With, f.Lent = SmallLinux, p
+	case ok:
+		f.Unpublished = true
+	}
+	return f, true
+}

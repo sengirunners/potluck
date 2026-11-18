@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { drift, SITE_DIR } from "./build.mjs";
 import { notify, readSent, saveSent, SITEMAP_URL, TIMEOUT_MS } from "./notify.mjs";
+import { MEZZE_URL } from "../src/mezze-redirect.js";
 
 const fail = (msg) => {
   console.error(`deploy: ${msg}`);
@@ -18,6 +19,15 @@ if (problems.length) fail(`the committed build output is out of date (${problems
 const dirty = spawnSync("git", ["status", "--porcelain", "--", "public", "content", "build", "src", "wrangler.jsonc"], { cwd: SITE_DIR, encoding: "utf8" });
 if (dirty.status !== 0) fail("could not run git status");
 if (dirty.stdout.trim()) fail(`uncommitted changes would go live:\n${dirty.stdout}Commit them first.`);
+
+// This deploy sends potluck.sh/mezze to mezze.sh for good (a 301 browsers and search engines remember), so mezze.sh
+// must be up first (`npm run deploy:mezze`).
+try {
+  const res = await fetch(MEZZE_URL, { redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (res.status !== 200) fail(`${MEZZE_URL} answered ${res.status}; deploy it first (npm run deploy:mezze), since /mezze redirects there`);
+} catch (e) {
+  fail(`${MEZZE_URL} could not be reached (${e.message}); deploy it first (npm run deploy:mezze), since /mezze redirects there`);
+}
 
 // "Changed" is measured against what IndexNow was last told (.wrangler/indexnow-sent.xml). With no such file, the
 // sitemap live now stands in for it, and is saved, so a notify that fails below can be retried with `npm run notify`.
@@ -54,6 +64,12 @@ for (const h of ["potluck.sh", "www.potluck.sh"]) {
 }
 ok = (await check("favicon", 200, "https://potluck.sh/favicon.ico")) && ok;
 ok = (await check("install.sh redirect", 302, "https://potluck.sh/install.sh")) && ok;
+{
+  const res = await fetch("https://potluck.sh/mezze", { redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const good = res.status === 301 && res.headers.get("location") === MEZZE_URL;
+  console.log(`${good ? "ok  " : "FAIL"} /mezze redirect ${res.status} ${res.headers.get("location") ?? ""}${good ? "" : ` (want 301 ${MEZZE_URL})`}`);
+  ok = good && ok;
+}
 const auth = (token) => ({ headers: { authorization: `Bearer ${token}` } });
 if (process.env.WAITLIST_ADMIN_TOKEN) ok = (await check("waitlist count", 200, "https://potluck.sh/api/waitlist/count", auth(process.env.WAITLIST_ADMIN_TOKEN))) && ok;
 else console.log("skip waitlist count (WAITLIST_ADMIN_TOKEN not set)");

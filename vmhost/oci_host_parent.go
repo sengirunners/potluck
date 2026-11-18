@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,9 +62,60 @@ func boundedHostCommandEnv(wait time.Duration, env []string, name string, args .
 	return b, nil
 }
 
+// The native parent's root calls (here, in stop and in ociHostDeadman) run
+// sudo -n -k: a ticket cached at the owner's terminal is ignored, so share's
+// conformance run, which starts from that terminal, gets what the daemon's
+// driver gets (no ticket), not a pass the daemon cannot repeat.
 func nativeManager(method string, args ...string) ([]byte, error) {
-	a := []string{"-n", "busctl", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", method}
+	a := []string{"-n", "-k", "busctl", "call", "org.freedesktop.systemd1", "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager", method}
 	return boundedHostCommand(2*time.Second, "sudo", append(a, args...)...)
+}
+
+// ErrOCIHostNeedsSudo is a native parent root call (or, on a Docker that hides
+// its runtime options, the journal read in oci_engine_active.go) that sudo -n
+// -k refused: the lending user has no passwordless sudo for it. Potluck's root
+// step does not grant it (sh as root is all of root), so no root step fixes it.
+var ErrOCIHostNeedsSudo = errors.New("Kata boxes need passwordless sudo for busctl and sh (and journalctl where Docker hides its runtime options)")
+
+// hostRootChecks are harmless forms of the native parent's root calls: each
+// runs the program its call runs, as root, and changes nothing.
+var hostRootChecks = [][]string{{"busctl", "--version"}, {"sh", "-c", ":"}}
+
+// verifyHostRoot runs hostRootChecks as the native parent runs its calls
+// (sudo -n -k): an error wrapping ErrOCIHostNeedsSudo when sudo refused one,
+// so doctor and the driver say so before a box, not at its start.
+func verifyHostRoot() error {
+	for _, c := range hostRootChecks {
+		if _, err := sudoNK(c...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sudoNK runs a command with sudo -n -k, sudo's words read in C, and returns
+// its output. Only sudo's refusal is ever in the error: the journal read's
+// output is Docker's configuration.
+func sudoNK(args ...string) ([]byte, error) {
+	b, err := boundedHostCommandEnv(2*time.Second, append(os.Environ(), "LC_ALL=C"), "sudo", append([]string{"-n", "-k"}, args...)...)
+	if err == nil {
+		return b, nil
+	}
+	var ec exitCoder
+	if words := sudoRefusal(b); errors.As(err, &ec) && ec.ExitCode() == 1 && words != "" {
+		return nil, fmt.Errorf("%w: sudo -n -k %s: %s", ErrOCIHostNeedsSudo, args[0], words)
+	}
+	return nil, fmt.Errorf("sudo -n -k %s failed; its output withheld", args[0])
+}
+
+// sudoRefusal is sudo's own refusal when it is the first line of a command's
+// output (sudo refused before the command ran), else "".
+func sudoRefusal(b []byte) string {
+	l, _, _ := strings.Cut(strings.TrimSpace(string(b)), "\n")
+	if strings.HasPrefix(l, "sudo: ") || strings.HasPrefix(l, "sudo-rs: ") || strings.Contains(l, " is not allowed to execute ") {
+		return strings.TrimSpace(l)
+	}
+	return ""
 }
 
 func makeHostParent(name string, budget hostBudget) (*ownedHostParent, error) {
@@ -136,7 +188,7 @@ func (p *ownedHostParent) empty() bool {
 
 func (p *ownedHostParent) stop() error {
 	// cgroup.kill covers descendants even if Docker's attach/remove API hangs.
-	_, _ = boundedHostCommand(2*time.Second, "sudo", "-n", "sh", "-c", `test ! -e "$1" || printf 1 > "$1/cgroup.kill"`, "sh", p.path)
+	_, _ = boundedHostCommand(2*time.Second, "sudo", "-n", "-k", "sh", "-c", `test ! -e "$1" || printf 1 > "$1/cgroup.kill"`, "sh", p.path)
 	_, err := nativeManager("StopUnit", "ss", p.name, "replace")
 	// A failed Docker command cannot hold this native stop behind it.
 	for until := time.Now().Add(hostCleanupTimeout); time.Now().Before(until); time.Sleep(25 * time.Millisecond) {

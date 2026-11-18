@@ -419,7 +419,7 @@ func detectOCI(ctx context.Context, run Runner, f Facts, r Report, pm string) La
 		l.RootSteps = append(l.RootSteps, steps...)
 	}
 	if l.Runtime != "" {
-		ociEngine(f, &l)
+		ociEngine(f, &l, pm, r.Arch)
 	}
 	l.Available = len(l.Problems) == 0 && l.Runtime != ""
 	detectBoxNet(ctx, run, f, &l)
@@ -432,17 +432,47 @@ func detectOCI(ctx context.Context, run Runner, f Facts, r Report, pm string) La
 }
 
 // ociEngine asks the driver's engine check what lending would: a check that
-// sudo -n could not run is the root step that installs its helper; any other
-// refusal is a problem no root step fixes.
-func ociEngine(f Facts, l *Layer) {
+// sudo -n could not run is the root step that installs its helper; Kata's
+// root calls that sudo -n -k refused are a problem that names its two fixes
+// (no root step: Potluck asks for no root beyond its read-only helper); any
+// other refusal is a problem no root step fixes. One check can fail more than
+// one way (vmhost.VerifyOCIEngine joins them): each is said.
+func ociEngine(f Facts, l *Layer, pm, arch string) {
 	err := f.OCIEngine(l.CLI, l.Runtime)
-	switch {
-	case errors.Is(err, vmhost.ErrOCIOwnerNeedsRoot):
-		l.Problems = append(l.Problems, "oci needs a root step: lending reads which process owns the Docker socket as root on every connection, and sudo -n could not ("+err.Error()+"); the root line installs that read-only check at "+vmhost.DockerOwnerHelper+" and a sudoers rule allowing you only it")
-		l.RootSteps = append(l.RootSteps, vmhost.OCIOwnerRootSteps()...)
-	case err != nil:
-		l.Problems = append(l.Problems, "the local Docker engine fails the driver's check: "+err.Error())
+	errs := []error{err}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = j.Unwrap()
 	}
+	sudoSaid := false
+	for _, err := range errs {
+		switch {
+		case err == nil:
+		case errors.Is(err, vmhost.ErrOCIOwnerNeedsRoot):
+			l.Problems = append(l.Problems, "oci needs a root step: lending reads which process owns the Docker socket as root on every connection, and sudo -n could not ("+err.Error()+"); the root line installs that read-only check at "+vmhost.DockerOwnerHelper+" and a sudoers rule allowing you only it")
+			l.RootSteps = append(l.RootSteps, vmhost.OCIOwnerRootSteps()...)
+		case errors.Is(err, vmhost.ErrOCIHostNeedsSudo):
+			if !sudoSaid {
+				sudoSaid = true
+				l.Problems = append(l.Problems, kataSudoProblem(f, err, pm, arch, l.CLI))
+			}
+		default:
+			l.Problems = append(l.Problems, "the local Docker engine fails the driver's check: "+err.Error())
+		}
+	}
+}
+
+// kataSudoProblem says why Kata boxes cannot start here (err wraps
+// vmhost.ErrOCIHostNeedsSudo) and the two ways on: passwordless sudo, which
+// the owner gives, or gVisor, which needs none and which the layer prefers
+// over Kata once docker lists it (runtimePreference).
+func kataSudoProblem(f Facts, err error, pm, arch, cli string) string {
+	s := err.Error() + ". The driver runs them as root with sudo -n -k for every Kata box, with no terminal to type a password at, so a password typed here does not count. " +
+		"Potluck's root line does not grant that (sh as root is all of root): give this user passwordless sudo yourself, or lend with gVisor instead, which needs none"
+	steps, problem := gvisorSteps(f, pm, arch, cli)
+	if problem != "" {
+		return s + " (" + problem + ")"
+	}
+	return s + ": run as root once, then this again:\n  " + RootCommand(steps)
 }
 
 func runtimeNames(jsonOut string) []string {

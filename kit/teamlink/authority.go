@@ -3,6 +3,7 @@ package teamlink
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -21,7 +22,7 @@ func (s *Service) Routes(r *core.Router) {
 	// The authority's side.
 	r.HandleFunc("POST /v0/projects/{project}/team", core.Local, "local; admin on the project; refused while a bound lease is live", jsonH(s.handleTeam))
 	r.HandleFunc("POST /v0/projects/{project}/solo", core.Local, "local; admin on the project; refused while a replica is joined", jsonH(s.handleSolo))
-	r.HandleFunc("POST /v0/invites", core.Local, "local; admin on the project/area; the project must be team; a class only from the project's owner or admin", jsonH(s.handleInvite))
+	r.HandleFunc("POST /v0/invites", core.Authed, "the socket: admin on the project/area; a member's daemon (a replica's node-bound token, forwarded): its identity owns or administers the whole project by its own grants here, never a minted token or a tailnet login; the project must be team; a class only from the project's owner or admin; add_area: an owner or admin of the whole project gets the area made first", jsonH(s.handleInvite))
 	r.HandleFunc("GET /v0/invites", core.Local, "local", jsonH(func(r *http.Request) (any, error) {
 		ls, err := s.d.Projects.Invites(r.Context())
 		return api.InviteList{Invites: ls}, err
@@ -148,11 +149,20 @@ func (s *Service) handleInvite(r *http.Request) (any, error) {
 	if p, a, ok := strings.Cut(req.Project, "/"); ok && req.Area == "" {
 		req.Project, req.Area = p, a
 	}
+	sub, err := s.inviter(r.Context(), req.Project)
+	if err != nil {
+		return nil, err
+	}
+	if req.AddArea && strings.TrimSpace(req.Area) != "" {
+		if err := s.ensureArea(r.Context(), sub, req.Project, req.Area); err != nil {
+			return nil, err
+		}
+	}
 	if strings.TrimSpace(req.Class) != "" {
 		// An operator class is the whole project's owner's or admin's to give
 		// (as POST /v0/team/machines/{machine}/class): an area's admin may
 		// invite into it, not trust a machine with the project's secrets.
-		if err := s.classInviter(r.Context(), core.SubjectOf(r.Context()), req.Project); err != nil {
+		if err := s.classInviter(r.Context(), sub, req.Project); err != nil {
 			return nil, err
 		}
 	}
@@ -177,7 +187,7 @@ func (s *Service) handleInvite(r *http.Request) (any, error) {
 		it, err := t.Invite(r.Context())
 		if err == nil {
 			in.Authority, in.Host, in.Node, in.Fingerprint, in.URL = it.Authority, it.Host, it.Node, it.Fingerprint, it.URL
-			return s.d.Projects.CreateInvite(r.Context(), core.SubjectOf(r.Context()), in)
+			return s.d.Projects.CreateInvite(r.Context(), sub, in)
 		}
 		if first == nil {
 			first = err
@@ -188,13 +198,83 @@ func (s *Service) handleInvite(r *http.Request) (any, error) {
 	}
 	// None serves here: the project's own refusals (solo, a bad role) come
 	// first, then the first transport's reason.
-	if _, err := s.d.Projects.CreateInvite(r.Context(), core.SubjectOf(r.Context()), in); err != nil && !api.IsCode(err, api.CodeUnavailable) {
+	if _, err := s.d.Projects.CreateInvite(r.Context(), sub, in); err != nil && !api.IsCode(err, api.CodeUnavailable) {
 		return nil, err
 	}
 	if first == nil {
 		first = api.Errorf(api.CodeUnavailable, "this daemon has no team transport")
 	}
 	return nil, first
+}
+
+// inviter is who makes an invite into project ref. On this machine's
+// socket only its owner, as a local route admits (no token: a token always
+// narrows), held to CreateInvite's own checks. From the network only a
+// member machine's node-bound token (whatever area it joined) whose
+// identity owns or administers the whole project by its own grants here
+// (as core.Deps.ProjectAdmin judges): that token is capped at member, so
+// the invite is judged by those grants, uncapped. A minted token, a box's
+// token and a tailnet login never make one.
+func (s *Service) inviter(ctx context.Context, ref string) (*authz.Subject, error) {
+	sub := core.SubjectOf(ctx)
+	refuse := api.Errorf(api.CodeForbidden, "only the project's owner (or an admin of the whole project) makes an invite").
+		WithHint("run it on the machine that runs the project, or on an owner's own machine that joined it")
+	if sub == nil {
+		return nil, refuse
+	}
+	if core.IsLocal(ctx) {
+		if sub.Remote || sub.Via != authz.ViaLocal || sub.TokenID != "" {
+			return nil, refuse
+		}
+		return sub, nil
+	}
+	if sub.Via != authz.ViaToken || sub.Node == "" || sub.Machine == "" || sub.Identity.ID == "" {
+		return nil, refuse
+	}
+	p, err := s.d.Projects.Get(sub.Scope, ref)
+	if err != nil {
+		return nil, err
+	}
+	tuples, err := s.d.Projects.Tuples(ctx, sub.Identity.ID)
+	if err != nil {
+		return nil, err
+	}
+	own := authz.FromTuples(tuples, nil)
+	if !own.Can(authz.Admin, authz.Object{Project: p.ID}) {
+		return nil, refuse
+	}
+	x := *sub
+	x.Scope, x.Cap = own, nil
+	return &x, nil
+}
+
+// ensureArea makes area in team project ref when it has none by that name,
+// for an owner or admin of the whole project; anyone else, and a solo
+// project, are left to CreateInvite's own refusals. The area may stay when
+// the invite is refused after it (a bad name, the live-invite cap): it is
+// one the project's program always gives it.
+func (s *Service) ensureArea(ctx context.Context, sub *authz.Subject, ref, area string) error {
+	p, err := s.d.Projects.Get(sub.Scope, ref)
+	if err != nil {
+		return nil // CreateInvite answers a project the caller cannot see
+	}
+	area = strings.ToLower(strings.TrimSpace(area))
+	has := func(p api.Project) bool {
+		return slices.ContainsFunc(p.Areas, func(a api.Area) bool { return a.Name == area })
+	}
+	if !s.d.Projects.IsTeam(p.ID) || has(p) || !sub.Can(authz.Admin, authz.Object{Project: p.ID}) {
+		return nil
+	}
+	added, err := s.d.Projects.AddArea(ctx, sub, ref, api.Area{Name: area})
+	if err != nil {
+		// Another invite added it meanwhile: done.
+		if now, gerr := s.d.Projects.Get(sub.Scope, ref); gerr == nil && has(now) {
+			return nil
+		}
+		return err
+	}
+	s.Publish(ctx, added)
+	return nil
 }
 
 // classInviter refuses sub an invite carrying an operator class unless it

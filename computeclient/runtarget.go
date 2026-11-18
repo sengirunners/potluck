@@ -75,12 +75,30 @@ func AcquireRunTarget(ctx context.Context, c *client.Client, target string, req 
 	return h, c.Do(ctx, http.MethodPost, runTargetPath(target)+"/acquire", req, &h)
 }
 
+// HandleFilter narrows a list of handles: Live keeps those not yet ended,
+// Mine those the caller made.
+type HandleFilter struct {
+	Live, Mine bool
+}
+
 // RunTargetHandles is GET /v0/run_targets/{target}/handles.
 func RunTargetHandles(ctx context.Context, c *client.Client, target string, live bool) ([]computeapi.RunTargetHandle, error) {
+	return ListHandles(ctx, c, target, HandleFilter{Live: live})
+}
+
+// ListHandles is GET /v0/run_targets/{target}/handles with filter f.
+func ListHandles(ctx context.Context, c *client.Client, target string, f HandleFilter) ([]computeapi.RunTargetHandle, error) {
 	var l computeapi.RunTargetHandles
+	q := url.Values{}
+	if f.Live {
+		q.Set("live", "1")
+	}
+	if f.Mine {
+		q.Set("mine", "1")
+	}
 	p := runTargetPath(target) + "/handles"
-	if live {
-		p += "?live=1"
+	if len(q) > 0 {
+		p += "?" + q.Encode()
 	}
 	return l.Handles, c.Do(ctx, http.MethodGet, p, nil, &l)
 }

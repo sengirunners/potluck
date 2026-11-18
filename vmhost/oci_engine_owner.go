@@ -237,8 +237,14 @@ func dockerOwnerHolds(out string, pid int, socket string) bool {
 
 // VerifyOCIEngine runs the driver's check of the local Docker engine and the
 // runtime it would use, as allocation does: doctor calls it so that "ready"
-// means the driver will accept this engine.
+// means the driver will accept this engine. For Kata it also runs the native
+// parent's root check (verifyHostRoot), as the driver does before every Kata
+// box, even when the engine check failed, so doctor names every fix at once
+// (errors.Join: errors.Is finds each).
 func VerifyOCIEngine(cli, runtime string) error {
-	_, err := inspectDockerRuntime(cli, runtime)
+	id, err := inspectDockerRuntime(cli, runtime)
+	if id.kata || strings.Contains(runtime, "kata") {
+		err = errors.Join(err, verifyHostRoot())
+	}
 	return err
 }

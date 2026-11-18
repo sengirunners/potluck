@@ -16,7 +16,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="A sandbox for AI coding agents on machines you own">
 <meta property="article:published_time" content="2026-11-17">
-<meta property="article:modified_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-18">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AI agent sandbox on your own machines: MCP, Claude Code, E2B SDK | Potluck">
 <meta name="twitter:description" content="Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.">
@@ -25,7 +25,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="generator" content="potluck.sh build from content/pages/agent-sandbox.md">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://potluck.sh/agent-sandbox#article","mainEntityOfPage":"https://potluck.sh/agent-sandbox","url":"https://potluck.sh/agent-sandbox","headline":"A sandbox for AI coding agents on machines you own","description":"Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.","datePublished":"2026-11-17","dateModified":"2026-11-17","inLanguage":"en","keywords":"ai agent sandbox, sandbox for ai agents, coding agent sandbox, run claude code in sandbox, e2b alternative","image":"https://potluck.sh/og/agent-sandbox.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"about":{"@id":"https://potluck.sh/#software"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"A sandbox for AI coding agents on machines you own","item":"https://potluck.sh/agent-sandbox"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://potluck.sh/agent-sandbox#article","mainEntityOfPage":"https://potluck.sh/agent-sandbox","url":"https://potluck.sh/agent-sandbox","headline":"A sandbox for AI coding agents on machines you own","description":"Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.","datePublished":"2026-11-17","dateModified":"2026-11-18","inLanguage":"en","keywords":"ai agent sandbox, sandbox for ai agents, coding agent sandbox, run claude code in sandbox, e2b alternative","image":"https://potluck.sh/og/agent-sandbox.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"about":{"@id":"https://potluck.sh/#software"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"A sandbox for AI coding agents on machines you own","item":"https://potluck.sh/agent-sandbox"}]}]}</script>
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
 <link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
@@ -40,6 +40,7 @@
   </a>
   <nav aria-label="Main">
     <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
     <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
     <a class="btn line" href="/#install">Install</a>
   </nav>
@@ -48,7 +49,7 @@
 <article class="post">
   <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a></nav>
   <h1>A sandbox for AI coding agents on machines you own</h1>
-  <p class="meta">Updated <time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <p class="meta">Updated <time datetime="2026-11-18">November 18, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
   <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
 <p>Potluck gives a coding agent its own throwaway machine on one of your team's idle computers, deleted when the agent is done. Use it from the terminal, over MCP, as Claude Code's self-hosted runner, or through the E2B SDK.</p>
   </aside>
@@ -99,6 +100,8 @@ potluck sandbox rm &lt;id&gt;
 </ul>
 <h2 id="on-a-mac">On a Mac</h2>
 <p>macOS sandboxes run in Tart VMs, two at a time at most, as Apple's licence allows (<a href="/tart">what Tart is, its licence, and what Potluck adds</a>). On a Mac, <code>potluck sandbox create</code> and the MCP tools give an agent a macOS VM to work in; <code>--template agent</code> and <code>potluck agent-runner</code> use Linux machines.</p>
+<h2 id="running-more-than-one-agent">Running more than one agent</h2>
+<p>To run several agents and keep track of them, <a href="https://mezze.sh/">Mezze for teams of coding agents</a>, a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.</p>
   </div>
 <aside class="cta" aria-labelledby="cta-h">
   <h2 id="cta-h">Try Potluck on your own machines</h2>
@@ -110,7 +113,6 @@ potluck sandbox rm &lt;id&gt;
   <h2 id="related-h">More from Potluck</h2>
   <ul>
     <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
-    <li><a href="/mezze">Run a brigade of coding agents without losing track of them</a></li>
     <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
     <li><a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">Give your AI agent a sandbox over MCP, on a machine you own</a></li>
     <li><a href="/blog/use-the-e2b-sdk-on-your-own-machines">Use the E2B SDK on your own machines</a></li>
@@ -128,6 +130,7 @@ potluck sandbox rm &lt;id&gt;
     <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
     <a href="/blog">Blog</a>
     <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
     <a href="https://sengi.run">Sengi</a>
   </nav>
 </footer>

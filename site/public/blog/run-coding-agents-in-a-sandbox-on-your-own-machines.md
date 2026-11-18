@@ -1,6 +1,6 @@
 # How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service
 
-Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
+Published 2026-11-16, updated 2026-11-18. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
 
 You can run a coding agent such as Claude Code or Codex in a sandbox on machines you own, with no hosted sandbox service. Potluck starts a fresh VM or container on a Mac or Linux box in your pool (the ready-made agent image needs a Linux box), runs the agent's commands inside it, and deletes it afterward. The sandbox cannot reach the machine that hosts it, that machine's network, or other sandboxes.
 
@@ -105,6 +105,10 @@ Potluck starts one fresh sandbox per runner and keeps a fresh one going as each 
 
 - The machine that runs the sandbox, and the agent's session in it, can read the key. Lend runners only to machines you would give the key to, and rotate it after any session you suspect.
 - A sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Tart, apart from Softnet's DNS forwarder on the host). On Linux it reaches the internet only once the root line from `potluck doctor` has made the filtered network. `--net off` gives it no network at all.
+
+## How do you keep track of several agents?
+
+To run several agents and keep track of them, [Mezze for teams of coding agents](https://mezze.sh/), a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.
 
 ## FAQ
 

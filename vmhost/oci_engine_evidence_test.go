@@ -2,6 +2,7 @@ package vmhost
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -123,6 +124,11 @@ func TestNativeProfileUsesCurrentSuccessfulDockerJournal(t *testing.T) {
 			if mode != "valid" && mode != "old-gap-recovered" && mode != "indexed-audit-noise" {
 				if err == nil {
 					t.Fatal("unverifiable active generation accepted")
+				}
+				// sudo's refusal names the fix (doctor reads it), and only
+				// it: never the journal's output.
+				if refused := errors.Is(err, ErrOCIHostNeedsSudo); refused != (mode == "cached-ticket-only") || refused && strings.Contains(err.Error(), "Reloaded") {
+					t.Fatalf("journal read refusal: %v", err)
 				}
 				return
 			}
@@ -255,4 +261,45 @@ func fakeNativeJournal(args []string) int {
 		}
 	}
 	return 0
+}
+
+// Doctor's engine check on Kata (VerifyOCIEngine) also asks whether the
+// native parent's root calls run with sudo -n -k, as the driver does before
+// every Kata box: a password typed at this terminal (a cached ticket) or a
+// sudoers rule covering only the ownership helper does not make it pass, so
+// doctor does not call the machine ready for a box the daemon cannot start.
+// General passwordless sudo passes; gVisor does not ask.
+func TestVerifyOCIEngineKataNeedsPasswordlessSudo(t *testing.T) {
+	for _, c := range []struct {
+		runtime, policy string
+		needsSudo       bool
+	}{
+		{"kata-qemu", "nopasswd", false},
+		{"kata-qemu", "password", true},
+		{"kata-qemu", "helper", true},
+		{"runsc", "password", false},
+	} {
+		t.Run(c.runtime+"/"+c.policy, func(t *testing.T) {
+			o, _ := newFakeOCI(t, "none")
+			owner, _, _ := fakeEngineEvidence(t)
+			old := verifyDockerPeer
+			verifyDockerPeer = func(_ net.Conn) (dockerEngineOwner, error) { return owner, nil }
+			t.Cleanup(func() { verifyDockerPeer = old })
+			bin := filepath.Dir(o.bin)
+			if err := os.WriteFile(filepath.Join(bin, "busctl"), []byte("#!/bin/sh\necho 'systemd 257'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			t.Setenv("SUDO_POLICY", c.policy)
+			t.Setenv("SUDO_TICKET", "1") // as after sudo -v at this terminal
+			t.Setenv("FAKE_HELPER", "/nonexistent/docker-owner")
+			err := VerifyOCIEngine(o.bin, c.runtime)
+			if got := errors.Is(err, ErrOCIHostNeedsSudo); got != c.needsSudo {
+				t.Fatalf("needs passwordless sudo = %v, want %v: %v", got, c.needsSudo, err)
+			}
+			if !c.needsSudo && err != nil {
+				t.Fatalf("engine check failed: %v", err)
+			}
+		})
+	}
 }

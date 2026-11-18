@@ -3,6 +3,7 @@ package vmhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +23,7 @@ func TestHostBudgetAdmissionParentAndCleanup(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux Kata producer")
 	}
-	for _, mode := range []string{"normal", "invalid-parent", "boot-fails", "cleanup-fails", "docker-hangs"} {
+	for _, mode := range []string{"normal", "invalid-parent", "boot-fails", "cleanup-fails", "docker-hangs", "password-sudo"} {
 		t.Run(mode, func(t *testing.T) {
 			profile, profileValue := testHostProfile(t)
 			root := t.TempDir()
@@ -44,6 +45,8 @@ func TestHostBudgetAdmissionParentAndCleanup(t *testing.T) {
 				t.Fatal(err)
 			}
 			native := `#!/bin/sh
+if [ "$2" = -k ]; then shift; fi
+case "$2 $3 $4" in "busctl --version "|"sh -c :") [ "$HOST_TEST_MODE" != password-sudo ] || { echo 'sudo: a password is required' >&2; exit 1; }; exit 0;; esac # verifyHostRoot
 case "$2" in
 busctl)
  case "$7" in
@@ -94,6 +97,12 @@ esac
 			rec := record{VM: "owned-vm", ID: "r000000000001", Target: "bounded", HostBudget: &hostBudget{2, 2560}}
 			t.Setenv("HOST_TEST_CG", filepath.Join(root, "potluck.slice", hostParentName(root, rec.VM, rec.Starts)))
 			err := s.takeRoom(rec)
+			if mode == "password-sudo" { // the native parent's calls would fail: refused before any lease, naming why
+				if !errors.Is(err, ErrOCIHostNeedsSudo) || len(chargedC) > 0 {
+					t.Fatalf("password-only sudo: %v (lease requests %d)", err, len(chargedC))
+				}
+				return
+			}
 			var charged hostBudget
 			select {
 			case charged = <-chargedC:

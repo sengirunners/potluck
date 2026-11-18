@@ -53,4 +53,4 @@ At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of Nov
 
 ## Who makes it
 
-Jackson and Clay at Sengi make Potluck. Write to ops@sengi.run, or use the form on the page. Mezze, the agent and team layer that runs on Potluck, is coming soon. It is for a team running a brigade of coding agents, and is a separate product. Sengi also runs hosted GitHub Actions runners for $1 per 1,000 minutes, with 3,000 free minutes a month: https://sengi.run
+Jackson and Clay at Sengi make Potluck. Write to ops@sengi.run, or use the form on the page. Mezze, the agent and team layer that runs on Potluck, has its own site: https://mezze.sh. It is for a team running a brigade of coding agents, and is a separate product. Sengi also runs hosted GitHub Actions runners for $1 per 1,000 minutes, with 3,000 free minutes a month: https://sengi.run

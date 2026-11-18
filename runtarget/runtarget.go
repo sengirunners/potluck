@@ -1172,8 +1172,15 @@ func (s *Service) handles(r *http.Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// mine=1 keeps the caller's own (core.Deps.OwnAddress: any of their sessions): a pool member sees only the
+	// sandboxes they made, not every friend's.
+	mine := r.URL.Query().Get("mine") == "1"
+	sub := core.SubjectOf(r.Context())
 	out := computeapi.RunTargetHandles{Handles: []computeapi.RunTargetHandle{}}
 	for _, rw := range rows {
+		if mine && !s.d.OwnAddress(sub, rw.Actor) {
+			continue
+		}
 		out.Handles = append(out.Handles, rw.RunTargetHandle) // an acquiring row has no handle yet
 	}
 	return out, nil

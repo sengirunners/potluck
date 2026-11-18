@@ -1515,7 +1515,10 @@ func (s *Service) boxEnded(ctx context.Context, l link, sub *authz.Subject, svc 
 //
 // failed: the box failed on its own (its runner never started, it ended by
 // itself, expired, was lost or is gone), which points at the host: the job is
-// then taken, and counts against maxServes like a taken runner. A box its
+// then taken, and counts against maxServes like a taken runner, and its
+// binding cools like one that refused a box (refusedBy), so the job is served
+// again on the next box that fits rather than on the binding that just failed
+// it. A box its
 // host took back (reclaimed) or stopped serving (a drain, a close, its owner
 // back) leaves the job waiting, served
 // again each time: GitHub cancelling the queued job (queueMax) and maxMints
@@ -1568,8 +1571,13 @@ func (s *Service) boxGone(ctx context.Context, l link, sub *authz.Subject, svc r
 		if rows, _ := res.RowsAffected(); rows == 0 {
 			return
 		}
-	} else if ok, err := s.unserve(ctx, j, state, note); err != nil || !ok {
-		return
+	} else {
+		if state == jobTaken {
+			s.refusedBy(j.target, why) // before unserve, whose requeue serves it at once
+		}
+		if ok, err := s.unserve(ctx, j, state, note); err != nil || !ok {
+			return
+		}
 	}
 	s.logf("runners: job %d: %s", j.id, note)
 	s.forget(ctx, l, sub, svc, j)

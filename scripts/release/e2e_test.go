@@ -487,20 +487,23 @@ exec %s "$@"
 			t.Fatalf("no token (%v):\n%s", err, out)
 		}
 		out, err := gh("GH_TOKEN=tok", "SHELL=/bin/zsh")
-		if err != nil || !strings.Contains(out, "installed potluck "+verB) || !strings.Contains(out, "is not on your PATH") {
+		if err != nil || !strings.Contains(out, "installed potluck "+verB) || !strings.Contains(out, "added "+bin2+" to PATH in ~/.zshrc") {
 			t.Fatalf("with a token (%v):\n%s", err, out)
 		}
-		// zsh does not read ~/.profile: the hint names ~/.zshrc, and the
+		// zsh does not read ~/.profile: the PATH line goes in ~/.zshrc, and the
 		// verified line names no temporary directory.
-		if !strings.Contains(out, ">> ~/.zshrc") || strings.Contains(out, ".profile") || strings.Contains(out, "/release:") {
-			t.Fatalf("the PATH hint or the verified line:\n%s", out)
+		if rc, _ := os.ReadFile(filepath.Join(tmp, "home", ".zshrc")); !strings.Contains(string(rc), `export PATH="`+bin2+`:$PATH"`) ||
+			strings.Contains(out, ".profile") || strings.Contains(out, "/release:") {
+			t.Fatalf("the PATH line or the verified line:\n%s\n.zshrc:\n%s", out, rc)
 		}
 		if !strings.Contains(out, "signature verified") {
 			t.Fatalf("the download's signature was not checked:\n%s", out)
 		}
-		// Another shell, another hint (fish quotes the directory).
-		if fo, ferr := gh("GH_TOKEN=tok", "SHELL=/usr/bin/fish"); ferr != nil || !strings.Contains(fo, `fish_add_path "`) {
-			t.Fatalf("fish hint (%v):\n%s", ferr, fo)
+		// Another shell, another startup file (fish quotes the directory).
+		fo, ferr := gh("GH_TOKEN=tok", "SHELL=/usr/bin/fish")
+		if fish, _ := os.ReadFile(filepath.Join(tmp, "home", ".config", "fish", "conf.d", "potluck.fish")); ferr != nil ||
+			!strings.Contains(string(fish), `fish_add_path "`+bin2+`"`) {
+			t.Fatalf("fish (%v):\n%s\npotluck.fish:\n%s", ferr, fo, fish)
 		}
 		// With no openssl that checks Ed25519 (a stock Mac), ssh-keygen checks
 		// the download's SSHSIG signature.

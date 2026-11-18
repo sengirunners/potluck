@@ -67,6 +67,7 @@ type sandboxSignalIn struct {
 
 type sandboxListIn struct {
 	Live bool `json:"live,omitempty" jsonschema:"only sandboxes not yet ended"`
+	All  bool `json:"all,omitempty" jsonschema:"every sandbox you can see in the pool, not only your own"`
 }
 
 // sandboxList is sandbox_list's answer: Skipped names bindings that did not answer.
@@ -147,7 +148,7 @@ func SandboxTools(tb *Toolbox) {
 		return computeclient.ExecRunTarget(ctx, c, t, id, computeapi.ExecRunTargetRequest{Argv: in.Argv, Stdin: in.Stdin, TimeoutS: in.TimeoutS, Cwd: in.Cwd})
 	})
 	add(tb, "sandbox_list", readOnly, true, func(ctx context.Context, c *client.Client, in sandboxListIn) (any, error) {
-		hs, skipped, err := computeclient.Sandboxes(ctx, c, in.Live)
+		hs, skipped, err := computeclient.Sandboxes(ctx, c, computeclient.HandleFilter{Live: in.Live, Mine: !in.All})
 		return sandboxList{Handles: nonNil(hs), Skipped: skipped}, err
 	})
 	add(tb, "sandbox_renew", idempotent, true, func(ctx context.Context, c *client.Client, in sandboxHandleIn) (any, error) {

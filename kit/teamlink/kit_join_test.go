@@ -92,11 +92,19 @@ func TestKitJoinLeave(t *testing.T) {
 	if _, err := m.Join(ctx, api.JoinRequest{Code: inv.Code}); err == nil {
 		t.Fatal("a used code joined again")
 	}
+	if ls, err := a.Invites(ctx); err != nil || len(ls) != 1 || ls[0].Revoked {
+		t.Fatalf("invites while joined: %+v %v", ls, err)
+	}
 	l, err := m.Leave(ctx, "orchid")
 	if err != nil || !l.Revoked || l.Project.ID != p.ID {
 		t.Fatalf("leave: %+v %v", l, err)
 	}
 	if rs, err := m.Remotes(ctx); err != nil || len(rs) != 0 {
 		t.Fatalf("remotes after leave: %+v %v", rs, err)
+	}
+	// The authority's invite list says its token is revoked, not in use.
+	ls, err := a.Invites(ctx)
+	if err != nil || len(ls) != 1 || ls[0].State != api.InviteRedeemed || !ls[0].Revoked || ls[0].Used {
+		t.Fatalf("invites after leave: %+v %v", ls, err)
 	}
 }

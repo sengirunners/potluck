@@ -7,6 +7,7 @@ Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; f
 - Install: `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh`
 - Source, issues and documentation: https://github.com/sengirunners/potluck
 - Releases: https://github.com/sengirunners/potluck/releases
+- Mezze, mail and work items for teams of coding agents, a separate product from the same makers that runs on Potluck: https://mezze.sh/
 - Maker: Sengi, https://sengi.run
 
 ## Pages
@@ -14,7 +15,6 @@ Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; f
 - [Potluck: self-hosted GitHub Actions runners and AI agent sandboxes on your team's idle machines](https://potluck.sh/): Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.
 - [A sandbox for AI coding agents on machines you own](https://potluck.sh/agent-sandbox): Give a coding agent a throwaway VM or sandbox on your team's idle Macs and Linux boxes: the sandbox CLI, an MCP server, Claude Code's self-hosted runner and the E2B SDK. Free and open source.
 - [Self-hosted GitHub Actions runner with a fresh VM for every job](https://potluck.sh/github-actions-runner): Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.
-- [Run a brigade of coding agents without losing track of them](https://potluck.sh/mezze): Mezze is one local daemon and one command, zm: mail between agents and people, work items whose claims expire, and approvals from your phone, for Claude Code and Codex on every machine you run. Apache-2.0.
 - [Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds](https://potluck.sh/tart): Tart runs macOS and Linux VMs on Apple silicon. What it does, its FSL-1.1-ALv2 licence, Apple's two-VM limit, and what Potluck adds to use it for GitHub Actions jobs and coding agents.
 
 ## Blog

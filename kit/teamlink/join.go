@@ -33,6 +33,12 @@ func (s *Service) handleJoin(r *http.Request) (any, error) {
 	if req.Code == "" && (req.Project != "" || req.Login != "") {
 		return s.joinGitHub(ctx, req) // join_github.go: no code (SPEC 22)
 	}
+	// An invite link carries its code (project.JoinLink): every transport sees the code itself.
+	code, err := project.JoinCodeOf(req.Code)
+	if err != nil {
+		return nil, err
+	}
+	req.Code = code
 	t, target, err := s.parseCode(req.Code)
 	if err != nil {
 		return nil, err

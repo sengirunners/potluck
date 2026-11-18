@@ -56,6 +56,9 @@ func hostLeaseFor(c config) (*ociHostLease, error) {
 	if _, err := boundedHostCommand(2*time.Second, "bash", "-c", `(( BASH_VERSINFO[0] >= 4 ))`); err != nil {
 		return nil, fmt.Errorf("bounded OCI host guard requires Bash 4 or newer for fractional read deadlines")
 	}
+	if err := verifyHostRoot(); err != nil { // the native parent's calls would fail after admission
+		return nil, err
+	}
 	return &ociHostLease{profile: p, budget: b}, nil
 }
 

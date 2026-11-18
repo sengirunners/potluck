@@ -245,6 +245,38 @@ func TestBoxEndedBeforeStartIsServedAgain(t *testing.T) {
 	}
 }
 
+// A box that fails on its own before its job started (here it ended by
+// itself; on a host whose box network lost its egress, the runner never
+// starts) points at its binding: the job is served again on the next box
+// that fits, not on the failed binding, which ranks first again.
+func TestJobIsServedAgainOffTheBindingThatFailedIt(t *testing.T) {
+	f := newPoolFixture(t, func(*config.Runners) {}, box("a", "c1m2", "linux", "1"), box("b", "c1m2", "linux", "1"))
+	if w := f.link(t, inst, "good"); w.Code != http.StatusOK {
+		t.Fatalf("link: %d %s", w.Code, w.Body)
+	}
+	f.svc.RefuseCool = time.Hour // the fixture's 300 ms would end before the serve again
+	ctx := context.Background()
+	f.gh.mu.Lock()
+	f.gh.status[8311] = "queued"
+	f.gh.mu.Unlock()
+	f.deliver(t, "workflow_job", jobEvent("queued", 8311, 165, "acme/app", true, "pool"))
+	eventually(t, "8311 on a (first by name)", func() bool { return f.liveOn(t, "a") == 1 && f.svc.Undone(ctx) == 0 })
+	f.svc.AnswerStatus(func(target string, h computeapi.RunTargetHandle, err error) (computeapi.RunTargetHandle, error) {
+		if err == nil && target == "a" {
+			h.State = "ended"
+		}
+		return h, err
+	})
+	eventuallyBox(t, "8311 served again on b, or given up", func() bool {
+		f.svc.Watch(ctx)
+		j := f.jobs(t)[8311]
+		return j.State == "failed" || j.State == "serving" && j.Target == "b" && f.svc.Undone(ctx) == 0
+	})
+	if j := f.jobs(t)[8311]; j.State != "serving" || j.Runner != "potluck-8311-2" {
+		t.Errorf("job 8311 after a failed it: %+v; want served again once, on b", j)
+	}
+}
+
 // Serves run side by side: one stuck at its run check holds no other.
 func TestServesRunSideBySide(t *testing.T) {
 	f := newPoolFixture(t, func(*config.Runners) {}, box("a", "c1m2", "linux", "1"))

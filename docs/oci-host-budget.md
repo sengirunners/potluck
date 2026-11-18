@@ -33,8 +33,11 @@ hash must match. The supported native configuration uses static sandbox sizing,
 sandbox-only cgroups and no vCPU pinning. Its configured CPU/memory overhead must
 fit inside the profile allowance, with additional memory for host processes.
 Configuration drift refuses clone/boot. This initial native parent path requires
-Docker's systemd cgroup-v2 driver, Bash 4 or newer, and the operator's existing `sudo -n` access;
-it does not install privileges or change host runtime configuration.
+Docker's systemd cgroup-v2 driver, Bash 4 or newer, and the operator's existing passwordless sudo
+for `busctl` and `sh` (run as `sudo -n -k`, so a ticket cached at the owner's terminal is ignored and share's
+conformance run gets what the daemon's driver gets); it does not install privileges or change host runtime
+configuration. Doctor and the driver check that sudo first, with harmless forms of those calls, and say what is
+missing before a box (`docs/hosts.md`, "Kata and passwordless sudo").
 
 One immutable total allocation is stored with each run. Descriptor availability,
 local CPU/RAM lending caps, the existing admission request and finite native

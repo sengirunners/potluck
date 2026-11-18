@@ -32,6 +32,10 @@ type Invite struct {
 	Node      string     `json:"node,omitempty"`    // redeemed: the replica's stable node ID
 	Redeemed  *time.Time `json:"redeemed,omitempty"`
 	Used      bool       `json:"used,omitempty"` // redeemed and the token has made its first call
+	// Revoked: redeemed, and the machine that redeemed it holds no live
+	// token in the project now (it left, or its token was revoked or
+	// expired): no longer in use.
+	Revoked bool `json:"revoked,omitempty"`
 }
 
 // Invite states.
@@ -57,6 +61,11 @@ type InviteRequest struct {
 	// that redeems the code gets: trusted or public; "" leaves the default
 	// of its role. Only an owner or admin of the whole project sets it.
 	Class string `json:"class,omitempty"`
+	// AddArea makes Area in the project first when it has none by that
+	// name (admin on the whole project): an invite into an area its program
+	// always has, such as a pool's, completes a project made before the
+	// area was.
+	AddArea bool `json:"add_area,omitempty"`
 }
 
 // Transports a team remote uses (SPEC 17.11).

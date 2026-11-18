@@ -18,7 +18,12 @@
 // The bundle is git's v2 format (v3 for SHA-256 repositories) holding only
 // the commit and its tree (a shallow, single-commit bundle) unless Full: the
 // box marks the commit shallow before fetching, as a clone with --depth 1
-// would. Uncommitted changes to tracked files (Dirty; untracked files only
+// would. Given the commits the box already holds (Have: an earlier push's,
+// a base git directory's), the bundle carries the same commits less every
+// object those of them that are its ancestors here hold in their trees, as
+// a thin pack (a changed file as its delta from the base's copy), and names
+// them as its prerequisites: a repeat push of a big checkout sends what
+// changed since, not the whole tree. It never carries the history between. Uncommitted changes to tracked files (Dirty; untracked files only
 // with Untracked, each listed) go as a second commit on top, written
 // with a temporary index: the renter's refs, index and working tree are
 // never touched (its object store gains the unreachable objects, which git
@@ -30,6 +35,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -63,6 +69,10 @@ type MakeOptions struct {
 	Untracked bool
 	Full      bool  // the whole history, not one commit
 	Max       int64 // bundle size limit in bytes (default DefaultMax)
+	// Have are commits the box holds (Have answers them). Those that are
+	// here and ancestors of the commit sent become the bundle's base: it
+	// carries only what the commit adds to them. Not with Full.
+	Have []string
 }
 
 // Bundle is a bundle made on the renter's machine, in a temporary file.
@@ -75,6 +85,9 @@ type Bundle struct {
 	Shallow string // the commits the box marks shallow, space-separated: Commit, or a full bundle's from a shallow checkout
 	Repo    string // the checkout's top-level directory
 	Objects int    // git objects in it
+	// Base are the commits the bundle builds on (its prerequisites): the box
+	// must hold them, or the push is refused before anything is checked out.
+	Base []string
 	// Untracked are the untracked files the dirty commit carries (Untracked).
 	Untracked []string
 }
@@ -154,9 +167,32 @@ func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
 	} else {
 		b.Shallow = b.Commit
 	}
+	if !o.Full {
+		if b.Base, err = usable(ctx, b.Repo, b.Head, o.Have); err != nil {
+			return nil, err
+		}
+	}
 	objs, err := git(ctx, b.Repo, nil, nil, walk...)
 	if err != nil {
 		return nil, err
+	}
+	// On a base: a thin pack of the same commits and trees, its walk cut at
+	// Commit as git serves a shallow client, so its deltas may lean on the
+	// base's objects but it never holds the history between: what the box
+	// names as its base cannot draw out commits (or files deleted since)
+	// that the push itself would not send.
+	pack, in := []string{"pack-objects", "--stdout", "-q"}, objs
+	if len(b.Base) > 0 {
+		held, err := git(ctx, b.Repo, nil, nil, append([]string{"rev-list", "--objects", "--no-walk"}, b.Base...)...)
+		if err != nil {
+			return nil, err
+		}
+		objs = without(objs, held)
+		pack = append(pack, "--revs", "--thin", "--shallow")
+		in = []byte("--shallow " + b.Commit + "\n" + b.Head + "\n")
+		for _, c := range b.Base {
+			in = append(in, "^"+c+"\n"...)
+		}
 	}
 	tmp, err := os.MkdirTemp("", "zm-push")
 	if err != nil {
@@ -180,9 +216,12 @@ func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
 	if format != "sha1" {
 		head = "# v3 git bundle\n@object-format=" + format + "\n"
 	}
+	for _, c := range b.Base {
+		head += "-" + c + "\n"
+	}
 	fmt.Fprintf(w, "%s%s %s\n\n", head, b.Head, PushRef)
-	cmd := exec.CommandContext(ctx, "git", "pack-objects", "--stdout", "-q")
-	cmd.Dir, cmd.Stdin, cmd.Stdout = b.Repo, bytes.NewReader(objs), w
+	cmd := exec.CommandContext(ctx, "git", pack...)
+	cmd.Dir, cmd.Stdin, cmd.Stdout = b.Repo, bytes.NewReader(in), w
 	var errb bytes.Buffer
 	cmd.Stderr = &errb
 	err = cmd.Run()
@@ -201,6 +240,73 @@ func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
 	b.Size, b.Sum, b.Objects = w.n, hex.EncodeToString(h.Sum(nil)), bytes.Count(objs, []byte("\n"))
 	ok = true
 	return b, nil
+}
+
+// without is the lines of list (rev-list --objects: "<id>[ <path>]") whose
+// id no line of held has: what a bundle on a base holds, for its count.
+func without(list, held []byte) []byte {
+	have := map[string]bool{}
+	for _, l := range strings.Split(string(held), "\n") {
+		if f := strings.Fields(l); len(f) > 0 {
+			have[f[0]] = true
+		}
+	}
+	var out []byte
+	for _, l := range strings.SplitAfter(string(list), "\n") {
+		if f := strings.Fields(l); len(f) > 0 && !have[f[0]] {
+			out = append(out, l...)
+		}
+	}
+	return out
+}
+
+// Bounds on a box's answer: the ids looked at (each costs git a lookup
+// here), and the commits kept as a base.
+const (
+	HaveMax = 256
+	baseMax = 64
+)
+
+// usable are the commits that the ids of have (as the box answered them: a
+// tag is peeled to its commit) name in this checkout and that are ancestors
+// of head: a bundle built on them carries only head's history since. An id
+// the checkout lacks, or that is not head's ancestor, is dropped; a git
+// failure other than "no" is an error. Only the first HaveMax ids are read.
+func usable(ctx context.Context, repo, head string, have []string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range have[:min(len(have), HaveMax)] {
+		if len(out) == baseMax {
+			break
+		}
+		if !isID(id) {
+			continue
+		}
+		p, err := git(ctx, repo, nil, nil, "rev-parse", "-q", "--verify", "--end-of-options", id+"^{commit}")
+		c := line(p)
+		if err != nil || seen[c] {
+			continue // not here (a shallow checkout, another repository), or a commit already kept
+		}
+		seen[c] = true
+		cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", c, head)
+		cmd.Dir = repo
+		err = cmd.Run()
+		var ee *exec.ExitError
+		switch {
+		case err == nil:
+			out = append(out, c)
+		case errors.As(err, &ee) && ee.ExitCode() == 1: // not an ancestor
+		default:
+			return nil, fmt.Errorf("git merge-base: %v", err)
+		}
+	}
+	return out, nil
+}
+
+// isID says whether s is a full object id: 40 (SHA-1) or 64 (SHA-256)
+// lowercase hex digits.
+func isID(s string) bool {
+	return (len(s) == 40 || len(s) == 64) && strings.Trim(s, "0123456789abcdef") == ""
 }
 
 // dirtyCommit writes the working tree's changes to tracked files (and

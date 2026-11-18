@@ -38,6 +38,12 @@ const (
 	acquireLimit = 120 * time.Second
 	waitDelay    = 2 * time.Second // as the daemon's adapter runner
 	maxOutput    = 16 << 20        // what the suite keeps of a driver's stderr and of all its answers together
+
+	// timingCheck is the check that fails when any verb ran past its limit,
+	// and noAnswer the words of a verb the suite stopped waiting for; Late
+	// reads both.
+	timingCheck = "every verb answers in 30 s, acquire in 120 s"
+	noAnswer    = "no answer within"
 	// execTimeoutMax is the longest timeout_s the suite sends an exec.
 	execTimeoutMax = 30
 	// execCap is SPEC 20's cap on each of a box exec's stdout and stderr.
@@ -175,7 +181,7 @@ func (r *run) exchange(verb string, in []byte, env []string) (stdout []byte, exi
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	if late {
-		return nil, nil, fmt.Errorf("%s: no answer within %s", verb, limit)
+		return nil, nil, fmt.Errorf("%s: %s %s", verb, noAnswer, limit)
 	}
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())

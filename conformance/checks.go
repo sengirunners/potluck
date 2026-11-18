@@ -1164,7 +1164,7 @@ func (r *run) finish() {
 	if len(late) > 0 {
 		slow = fmt.Errorf("%s", strings.Join(slices.Compact(late), ", "))
 	}
-	r.add("every verb answers in 30 s, acquire in 120 s", slow)
+	r.add(timingCheck, slow)
 	switch {
 	case len(r.spendBad) > 0:
 		r.add("spend in cost.unit, never falling, readable after the end", fmt.Errorf("%s", strings.Join(r.spendBad, "; ")))

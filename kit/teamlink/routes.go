@@ -285,6 +285,10 @@ func (s *Service) kitRows() []RouteRule {
 				return sk
 			}}}},
 		{Pattern: "GET /v0/owner", Kind: KindWrite, Hedge: Hedged}, // the owner right is judged where choose is
+		// An invite into a joined project is made at its authority, by an
+		// owner's identity (authority.go inviter); a second copy would mint
+		// a second code.
+		{Pattern: "POST /v0/invites", Kind: KindWrite, Hedge: Once, Why: "it mints a one-time code: a second copy would mint a second"}, // the owner right is judged where choose is
 		// A GitHub login runs at the project's authority, by the cwd or -P;
 		// the poll collects (acts) once: never twice.
 		{Pattern: "POST /v0/login/github/start", Kind: KindWrite, Hedge: Write},

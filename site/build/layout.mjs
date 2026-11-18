@@ -1,6 +1,6 @@
 // HTML for the pages the build writes: the shared <head> tags (also written into the home page between its seo
 // markers), the article (a blog post or a page from content/pages/), the blog index, and the JSON-LD.
-import { BLOG, HOME, INSTALL, ORIGIN, REPO, SENGI } from "./pages.mjs";
+import { BLOG, HOME, INSTALL, MEZZE_FOOTER_TEXT, MEZZE_NAV_TEXT, MEZZE_URL, ORIGIN, REPO, SENGI } from "./pages.mjs";
 import { escapeHtml as esc } from "./markdown.mjs";
 
 export const url = (path) => `${ORIGIN}${path}`;
@@ -8,7 +8,7 @@ export const url = (path) => `${ORIGIN}${path}`;
 /** JSON for a <script type="application/ld+json">: "<" is escaped so the data can never close the tag. */
 export const ldScript = (data) => `<script type="application/ld+json">${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
 
-const SENGI_ORG = { "@type": "Organization", "@id": `${SENGI}/#organization`, name: "Sengi", url: SENGI };
+export const SENGI_ORG = { "@type": "Organization", "@id": `${SENGI}/#organization`, name: "Sengi", url: SENGI };
 
 /** Where a page's share image is published: og/home.png, og/blog.png, og/blog/<slug>.png, og/<slug>.png. */
 export function shareImagePath(path) {
@@ -46,7 +46,16 @@ export function homeGraph() {
         publisher: { "@id": SENGI_ORG["@id"] },
       },
       SENGI_ORG,
-      { "@type": "WebSite", "@id": `${ORIGIN}/#website`, url: `${ORIGIN}/`, name: "Potluck", publisher: { "@id": SENGI_ORG["@id"] } },
+      {
+        "@type": "WebSite",
+        "@id": `${ORIGIN}/#website`,
+        url: `${ORIGIN}/`,
+        name: "Potluck",
+        publisher: { "@id": SENGI_ORG["@id"] },
+        // Mezze is a separate product, not another profile of Potluck, so it is mentioned (a CreativeWork property),
+        // never listed in sameAs. Its @id is the one mezze.sh gives its own software node.
+        mentions: { "@type": "SoftwareApplication", "@id": `${MEZZE_URL}#software`, name: "Mezze", url: MEZZE_URL },
+      },
     ],
   };
 }
@@ -138,22 +147,24 @@ export const ICON_LINKS = [
 
 /**
  * Title, description, canonical, Open Graph, Twitter, icons and JSON-LD for one page. `image` is the share image's
- * alt text (the words drawn on it); `extra` is more <head> lines.
+ * alt text (the words drawn on it); `extra` is more <head> lines. `origin`, `siteName` and `imageSize` name the
+ * site the page is on (potluck.sh unless given; build/mezze.mjs passes mezze.sh's).
  */
-export function seoTags({ title, description, path, image, type = "website", graph, extra = [], article }) {
-  const img = url(`/${shareImagePath(path)}`);
+export function seoTags({ title, description, path, image, type = "website", graph, extra = [], article, origin = ORIGIN, siteName = "Potluck", imageSize = [1200, 630] }) {
+  const at = (p) => `${origin}${p}`;
+  const img = at(`/${shareImagePath(path)}`);
   return [
     `<title>${esc(title)}</title>`,
     `<meta name="description" content="${esc(description)}">`,
-    `<link rel="canonical" href="${esc(url(path))}">`,
-    `<meta property="og:site_name" content="Potluck">`,
+    `<link rel="canonical" href="${esc(at(path))}">`,
+    `<meta property="og:site_name" content="${esc(siteName)}">`,
     `<meta property="og:type" content="${type}">`,
     `<meta property="og:title" content="${esc(title)}">`,
     `<meta property="og:description" content="${esc(description)}">`,
-    `<meta property="og:url" content="${esc(url(path))}">`,
+    `<meta property="og:url" content="${esc(at(path))}">`,
     `<meta property="og:image" content="${esc(img)}">`,
-    `<meta property="og:image:width" content="1200">`,
-    `<meta property="og:image:height" content="630">`,
+    `<meta property="og:image:width" content="${imageSize[0]}">`,
+    `<meta property="og:image:height" content="${imageSize[1]}">`,
     `<meta property="og:image:alt" content="${esc(image)}">`,
     ...(article ? [`<meta property="article:published_time" content="${article.date}">`, `<meta property="article:modified_time" content="${article.updated}">`] : []),
     `<meta name="twitter:card" content="summary_large_image">`,
@@ -171,6 +182,9 @@ export const FEED_LINK = `<link rel="alternate" type="application/atom+xml" titl
 const longDay = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
 export const BLOG_LINK = `<a href="${BLOG.path}">Blog</a>`;
+/** The links to mezze.sh in every page's header and footer; the home page's are written between its `mezze-nav` and `mezze-footer` markers. */
+export const MEZZE_NAV_LINK = `<a class="sec mezze" href="${MEZZE_URL}">${MEZZE_NAV_TEXT}</a>`;
+export const MEZZE_FOOTER_LINK = `<a href="${MEZZE_URL}">${MEZZE_FOOTER_TEXT}</a>`;
 
 function footer(hasPosts) {
   return `<footer class="wrap">
@@ -179,6 +193,7 @@ function footer(hasPosts) {
     <a href="${REPO}">GitHub</a>
     <a href="${REPO}/releases">Releases</a>
     ${hasPosts ? `${BLOG_LINK}\n    ` : ""}<a href="/#founders">Contact</a>
+    ${MEZZE_FOOTER_LINK}
     <a href="${SENGI}">Sengi</a>
   </nav>
 </footer>`;
@@ -208,6 +223,7 @@ ${icon}
   ${LOGO}
   <nav aria-label="Main">
     <a href="${BLOG.path}">Blog</a>
+    ${MEZZE_NAV_LINK}
     <a class="sec" href="${REPO}">GitHub</a>
     <a class="btn line" href="/#install">Install</a>
   </nav>

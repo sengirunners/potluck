@@ -35,6 +35,11 @@ import (
 // config.Program.
 const programName = "potluck"
 
+// joinPage is the potluck program's invite page (Host.JoinLink): it shows a
+// friend the one line that installs Potluck and joins. It reads the code from
+// the link's fragment, which the site never receives.
+const joinPage = "https://potluck.sh/join"
+
 // Potluck's home: POTLUCK_HOME, else ~/.potluck, with its socket
 // potluck.sock. Never zm's: a zm home holds migrations this build does not
 // know, and its daemon already serves everything potluck's does.

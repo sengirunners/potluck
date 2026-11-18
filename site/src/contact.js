@@ -1,4 +1,4 @@
-// The page's "Talk to the founders" form. Messages are kept in KV for the founders to read, and each kept message
+// The founders form on potluck.sh and mezze.sh. Messages are kept in KV for the founders to read, and each kept message
 // is emailed to them (src/notify.js) after it is stored.
 //
 //   POST /api/contact   form fields name, email, topic, team (optional), message, and leave_empty (a field people
@@ -12,9 +12,10 @@
 //                       newest first, ?limit= of them (default and most 40: each is one KV read, and a Worker gets 50
 //                       subrequests on the free plan), from ?cursor= (the last answer's next).
 //
-// Bindings: CONTACT (KV), NOTIFY (send_email; src/notify.js). Var: NOTIFY_FROM. Secret: CONTACT_ADMIN_TOKEN (the
+// Binding: CONTACT (KV). Vars: NOTIFY_FROM, NOTIFY_TO. Secrets: RESEND_API_KEY (src/notify.js), CONTACT_ADMIN_TOKEN (the
 // read route refuses everyone without it).
-// KV: `msg:<inverted time>:<random>` -> {name, email, topic, team, message, at, country, agent}; the inverted time
+// KV: `msg:<inverted time>:<random>` -> {name, email, topic, team, message, at, country, agent, site}, where site is the
+// host the form was posted to (potluck.sh or mezze.sh: both Workers share this route and the namespace); the inverted time
 // makes a plain list newest first. `rate:<ip>:<hour>` counts one address's posts in an hour (expires after two).
 
 import { authorized, json } from "./http.js";
@@ -25,7 +26,7 @@ export const TOPICS = {
   run: "I want to run it",
   broke: "Something broke",
   build: "I want to help build it",
-  dish: "Try Mezze early",
+  dish: "Try Mezze",
   other: "Something else",
 };
 const LIMITS = { name: 100, email: 200, team: 120, message: 4000 };
@@ -43,7 +44,7 @@ export async function handleContact(request, env, ctx) {
   const answer = (error) => {
     if (wantsJSON) return json(error ? { ok: false, error } : { ok: true }, error ? STATUS[error] : 200);
     if (!error) return new Response(null, { status: 303, headers: { location: "/thanks" } });
-    return page(STATUS[error], WORDS[error]);
+    return page(STATUS[error], WORDS[error], new URL(request.url).host);
   };
 
   const origin = request.headers.get("origin");
@@ -76,6 +77,7 @@ export async function handleContact(request, env, ctx) {
     await env.CONTACT.put(rateKey, String(seen + 1), { expirationTtl: 7200 });
     record = {
       ...msg,
+      site: new URL(request.url).host,
       at: now.toISOString(),
       country: request.cf?.country ?? null,
       agent: (request.headers.get("user-agent") ?? "").slice(0, 200),
@@ -128,10 +130,13 @@ async function list(request, env) {
   }
 }
 
-// The answer to a plain form post that could not be kept: what to fix, and a way back.
-function page(status, words) {
+// Where each site's form is, for the way back.
+const FORM_ANCHOR = { "mezze.sh": "/#talk", "www.mezze.sh": "/#talk" };
+
+// The answer to a plain form post that could not be kept: what to fix, and a way back to the form on the same site.
+function page(status, words, host) {
   const body = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Potluck: message not sent</title><link rel="stylesheet" href="/site.css">
-<main class="wrap sent"><h1>Not sent yet</h1><p>${words}</p><p><a href="/#founders">Back to the form</a></p></main>`;
+<title>Message not sent</title><link rel="stylesheet" href="/site.css">
+<main class="wrap sent"><h1>Not sent yet</h1><p>${words}</p><p><a href="${FORM_ANCHOR[host] ?? "/#founders"}">Back to the form</a></p></main>`;
   return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }

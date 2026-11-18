@@ -40,11 +40,12 @@ type DefaultPin struct {
 	Name                string // selected with --with; never lent beside the default
 	MinFreeGB           int    // disk budget for pull and boxes
 	PullMinutes         int    // pull budget; 0 uses the caller's default
+	PullGB              int    // about how many GB a first pull downloads, for the words that warn of it; 0 unknown
 	Root                bool   // keep passwordless sudo inside the VM by default
 }
 
 // ParsePins reads images.pin: "layer os image [min_cpu=N] [min_memory_mb=N]
-// [runner_dir=PATH] [template=NAME|name=NAME] [root=on] [min_free_gb=N] [pull_minutes=N]" per line, image pinned by digest or "-",
+// [runner_dir=PATH] [template=NAME|name=NAME] [root=on] [min_free_gb=N] [pull_minutes=N] [pull_gb=N]" per line, image pinned by digest or "-",
 // with # comments and blank lines. One plain line per layer and OS, and one
 // per template name beside it.
 func ParsePins(s string) ([]DefaultPin, error) {
@@ -93,8 +94,8 @@ func ParsePins(s string) ([]DefaultPin, error) {
 				continue
 			}
 			m, err := strconv.Atoi(v)
-			if err != nil || m <= 0 || (k != "min_cpu" && k != "min_memory_mb" && k != "min_free_gb" && k != "pull_minutes") {
-				return nil, fmt.Errorf("images.pin line %d: %q: want min_cpu=N, min_memory_mb=N, min_free_gb=N, pull_minutes=N, runner_dir=PATH, template=NAME, name=NAME or root=on", n+1, kv)
+			if err != nil || m <= 0 || (k != "min_cpu" && k != "min_memory_mb" && k != "min_free_gb" && k != "pull_minutes" && k != "pull_gb") {
+				return nil, fmt.Errorf("images.pin line %d: %q: want min_cpu=N, min_memory_mb=N, min_free_gb=N, pull_minutes=N, pull_gb=N, runner_dir=PATH, template=NAME, name=NAME or root=on", n+1, kv)
 			}
 			switch k {
 			case "min_cpu":
@@ -105,6 +106,8 @@ func ParsePins(s string) ([]DefaultPin, error) {
 				p.MinFreeGB = m
 			case "pull_minutes":
 				p.PullMinutes = m
+			case "pull_gb":
+				p.PullGB = m
 			}
 		}
 		if p.Layer != "tart" && p.Layer != "oci" && p.Layer != "incus" {
@@ -187,6 +190,16 @@ func PinForRepository(image string) (DefaultPin, bool) {
 func NamedPin(pins []DefaultPin, layer, name string) (DefaultPin, bool) {
 	for _, p := range pins {
 		if name != "" && p.Name == name && p.Image != "" && (layer == "" || p.Layer == layer) {
+			return p, true
+		}
+	}
+	return DefaultPin{}, false
+}
+
+// NamedLine finds a named line, published or not ("-": Image ""), on a layer.
+func NamedLine(pins []DefaultPin, layer, name string) (DefaultPin, bool) {
+	for _, p := range pins {
+		if name != "" && p.Name == name && p.Layer == layer {
 			return p, true
 		}
 	}

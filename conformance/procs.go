@@ -71,6 +71,36 @@ func (r *run) output(h, pid string, kv ...any) (outputResult, error) {
 	return o, nil
 }
 
+// waitStdout pages pid's stdout from offset from until what it read holds
+// want, answering what it read and the offset after it. It fails when the
+// process ends first (with its exit and the end of its stderr) or when
+// within passes.
+func (r *run) waitStdout(h, pid string, from int64, want string, within time.Duration) (string, int64, error) {
+	var stdout, stderr strings.Builder
+	errFrom := int64(0)
+	for deadline := time.Now().Add(within); ; {
+		o, err := r.output(h, pid, "stdout_from", from, "stderr_from", errFrom, "wait_s", 1)
+		if err != nil {
+			return stdout.String(), from, err
+		}
+		stdout.WriteString(*o.Stdout)
+		stderr.WriteString(*o.Stderr)
+		from, errFrom = *o.StdoutNext, *o.StderrNext
+		switch {
+		case strings.Contains(stdout.String(), want):
+			return stdout.String(), from, nil
+		case !*o.Running:
+			tail := strings.TrimSpace(stderr.String())
+			if len(tail) > 200 {
+				tail = "..." + tail[len(tail)-200:]
+			}
+			return stdout.String(), from, fmt.Errorf("ended (exit %d) before printing %q; stderr: %q", *o.Exit, want, tail)
+		case !time.Now().Before(deadline):
+			return stdout.String(), from, fmt.Errorf("did not print %q within %s", want, within)
+		}
+	}
+}
+
 // waitEnd polls (without reading) until pid is no longer running.
 func (r *run) waitEnd(h, pid string, within time.Duration) (outputResult, error) {
 	deadline := time.Now().Add(within)

@@ -55,6 +55,10 @@ type Host struct {
 	// required.
 	Stdin          io.Reader
 	Stdout, Stderr io.Writer
+	// JoinLink is the host's invite page (https://example.com/join): invite
+	// prints a link to it carrying the code (project.JoinLink), first, so a
+	// friend opens one link. "" prints the code alone.
+	JoinLink string
 	// AfterLend, when set, is the host program's own step once this
 	// machine is lent: host runs it once a run shared at least one size
 	// (never in a dry run), such as installing the program's daily update.
@@ -125,7 +129,7 @@ func newApp(h Host) *app {
 // mountable are Potluck's commands but ProgramCommands: what Commands
 // gives a host, and what the potluck program's root holds beside its own.
 func (a *app) mountable() []*cobra.Command {
-	return []*cobra.Command{a.createCmd(), a.inviteCmd(), a.joinCmd(), a.leaveCmd(), a.forgetCmd(), a.remotesCmd(),
+	return []*cobra.Command{a.tryCmd(), a.createCmd(), a.inviteCmd(), a.joinCmd(), a.leaveCmd(), a.forgetCmd(), a.remotesCmd(),
 		a.doctorCmd(), a.isolationCmd(), a.hostCmd(), a.ciCmd(), a.sandboxCmd(), a.usageCmd(), a.sealingCmd(),
 		a.runCmd(), a.agentTaskCmd(), a.agentRunnerCmd(), a.runnersCmd(), a.secretsCmd(), a.driverCmd()}
 }

@@ -1,0 +1,13 @@
+{
+  "name": "Mezze",
+  "short_name": "Mezze",
+  "description": "Mail, work items with leases and phone approvals for teams of coding agents.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#FBF7EE",
+  "theme_color": "#FBF7EE",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

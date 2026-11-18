@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func toolDir(t *testing.T, dir string, progs map[string]string) string {
 		t.Fatal(err)
 	}
 	for _, c := range []string{"sed", "awk", "tr", "head", "cat", "cp", "mkdir", "mktemp", "rm", "wc", "grep", "tar",
-		"gzip", "sha256sum", "shasum", "uname", "sysctl", "dirname", "base64", "curl"} {
+		"gzip", "sha256sum", "shasum", "uname", "sysctl", "dirname", "base64", "sleep", "curl"} {
 		if _, set := progs[c]; set {
 			continue
 		}
@@ -145,7 +146,8 @@ func TestInstallScriptChecksSignatures(t *testing.T) {
 	commit := strings.Repeat("0123456789", 4)
 	stand := func(tag string) map[string]string {
 		return map[string]string{"potluck": "#!/bin/sh\ncase \"$1\" in\n--version) echo \"potluck version " + version + " " + tag + "\" ;;\n" +
-			"upgrade) [ \"$2\" = --help ] && exit 0; mkdir -p \"$5\" && cp \"$0\" \"$5/potluck\" && echo \"installed potluck " + version + "\" ;;\nesac\n"}
+			"upgrade) [ \"$2\" = --help ] && exit 0; mkdir -p \"$5\" && cp \"$0\" \"$5/potluck\" && echo \"installed potluck " + version + "\" ;;\n" +
+			"join) [ \"$2\" = bad-code ] && { echo 'invalid, used or expired join code' >&2; exit 1; }; echo \"joined with [$2]\" ;;\nesac\n"}
 	}
 	rel := writeRelease(t, filepath.Join(tmp, "rel"), version, commit, time.Now(), stand("good"), key)
 	variant := func(name string, edit func(dir string)) string {
@@ -299,6 +301,57 @@ func TestInstallScriptChecksSignatures(t *testing.T) {
 				osslWget := toolDir(t, filepath.Join(tmp, "path-wget-ossl"), map[string]string{"curl": "-", "wget": stand, "ssh-keygen": realKeygen, "openssl": openssl3})
 				ok(t, wg(t, osslWget, noSSHSIG, "--version", "potluck-"+version), "Ed25519, checked with OpenSSL")
 			})
+			t.Run("PATH and --join", func(t *testing.T) {
+				home := filepath.Join(tmp, "home-"+filepath.Base(sh))
+				bin := filepath.Join(home, ".local", "bin")
+				zsh := []string{"HOME=" + home, "SHELL=/bin/zsh", "POTLUCK_INSTALL_DIR=" + bin}
+				line := `export PATH="$HOME/.local/bin:$PATH"`
+				r := install(t, sh, sysPath, zsh, "--from", rel, "--join", "https://x.example#fp:AAAA-BBBB")
+				if _, err := os.Stat(filepath.Join(bin, "potluck")); r.err != nil || err != nil ||
+					!strings.Contains(r.out, "joined with [https://x.example#fp:AAAA-BBBB]") ||
+					!strings.Contains(r.out, "added "+bin+" to PATH in ~/.zshrc") {
+					t.Fatalf("want an install that joins and adds the PATH line (%v):\n%s", r.err, r.out)
+				}
+				rc, _ := os.ReadFile(filepath.Join(home, ".zshrc"))
+				if strings.Count(string(rc), line+"\n") != 1 {
+					t.Fatalf(".zshrc:\n%s", rc)
+				}
+				// A second install adds nothing (the stand-in potluck cannot upgrade itself in place).
+				_ = os.Remove(filepath.Join(bin, "potluck"))
+				r2 := install(t, sh, sysPath, zsh, "--from", rel)
+				rc2, _ := os.ReadFile(filepath.Join(home, ".zshrc"))
+				if r2.err != nil || !strings.Contains(r2.out, "~/.zshrc already puts") || string(rc2) != string(rc) {
+					t.Fatalf("second install (%v):\n%s\n.zshrc:\n%s", r2.err, r2.out, rc2)
+				}
+				// --no-modify-path writes no startup file and says the line instead.
+				bare := filepath.Join(tmp, "home-bare-"+filepath.Base(sh))
+				r3 := install(t, sh, sysPath, []string{"HOME=" + bare}, "--from", rel, "--no-modify-path")
+				ok(t, r3, "echo 'export PATH=")
+				if _, err := os.Stat(filepath.Join(bare, ".profile")); err == nil {
+					t.Fatalf("--no-modify-path wrote ~/.profile:\n%s", r3.out)
+				}
+				// A join that fails says potluck is installed and how to join again, and the run fails.
+				r4 := install(t, sh, sysPath, []string{"HOME=" + bare}, "--from", rel, "--join", "bad-code")
+				if r4.err == nil || !installed(r4) || !strings.Contains(r4.out, "potluck is installed, but joining the pool failed") ||
+					!strings.Contains(r4.out, r4.bin+"/potluck\" join") || strings.Contains(r4.out, "bad-code]") {
+					t.Fatalf("failed join (%v):\n%s", r4.err, r4.out)
+				}
+				// The directory already on PATH, or a relative one: no startup file is written.
+				onPath := filepath.Join(tmp, "home-onpath-"+filepath.Base(sh))
+				r5 := install(t, sh, sysPath+":"+filepath.Join(onPath, "bin"), []string{"HOME=" + onPath, "POTLUCK_INSTALL_DIR=" + filepath.Join(onPath, "bin")}, "--from", rel)
+				if ents, _ := os.ReadDir(onPath); r5.err != nil || len(ents) != 1 {
+					t.Fatalf("on PATH already (%v): %d entries in HOME:\n%s", r5.err, len(ents), r5.out)
+				}
+				// No HOME at all (CI, containers) with an install directory given: the install still succeeds.
+				noHome := exec.Command(sh, filepath.Join(root, "install.sh"), "--from", rel)
+				noHome.Env = []string{"POTLUCK_HOME=" + filepath.Join(tmp, "nohome-"+filepath.Base(sh)), "POTLUCK_INSTALL_DIR=" + filepath.Join(tmp, "nohome-bin-"+filepath.Base(sh)),
+					"POTLUCK_UPDATE_KEY=" + pub, "POTLUCK_NO_AUTOSTART=1", "PATH=" + sysPath, "TMPDIR=" + tmp}
+				if out, err := noHome.CombinedOutput(); err != nil || !strings.Contains(string(out), "add it to PATH yourself") {
+					t.Fatalf("no HOME (%v):\n%s", err, out)
+				}
+				refused(t, from(t, sysPath, rel, "--join"), "--join needs the invite code")
+				refused(t, from(t, sysPath, rel, "--join="), "--join needs the invite code")
+			})
 			t.Run("empty --version", func(t *testing.T) {
 				refused(t, from(t, sysPath, rel, "--version", ""), "--version needs a release")
 				refused(t, from(t, sysPath, rel, "--version", "potluck-"), "--version needs a release")
@@ -315,7 +368,11 @@ func TestInstallScriptChecksSignatures(t *testing.T) {
 				// No token, every anonymous API call refused: the release links alone.
 				ok(t, gh(t, sysPath), "SSHSIG, checked with ssh-keygen")
 				ok(t, gh(t, sysPath, "--version", "potluck-"+version), "SSHSIG, checked with ssh-keygen")
-				refused(t, gh(t, sysPath, "--version", "main-ffffffffffff"), "has no release potluck-main-ffffffffffff")
+				r404 := gh(t, sysPath, "--version", "main-ffffffffffff")
+				refused(t, r404, "has no release potluck-main-ffffffffffff")
+				if strings.Contains(r404.out, "trying again") {
+					t.Fatalf("tried a 404 again:\n%s", r404.out)
+				}
 				r := gh(t, neither)
 				refused(t, r, "cannot check the release's signature", "--unsafe-skip-signature-check")
 				ok(t, gh(t, neither, "--unsafe-skip-signature-check"), "WARNING: THE RELEASE SIGNATURE WAS NOT CHECKED")
@@ -323,6 +380,38 @@ func TestInstallScriptChecksSignatures(t *testing.T) {
 				bad, badCA := fakeGitHub(t, tampered, "potluck-"+version, "tok", true)
 				refused(t, install(t, sh, sysPath, []string{"POTLUCK_GITHUB_API=" + bad.URL, "POTLUCK_GITHUB=" + bad.URL, "CURL_CA_BUNDLE=" + badCA},
 					"--unsafe-skip-signature-check"), "does not verify")
+				// A dropped connection is tried again; one that never comes back names the URL and the try count, and
+				// does not guess at the network.
+				dropping := func(name string, drops int, fail string) string {
+					// A curl whose first `drops` calls run `fail` (a reset, a 503) and later ones the real curl.
+					count := filepath.Join(tmp, name+".count")
+					body := "#!/bin/sh\nn=$(cat " + count + " 2>/dev/null || echo 0); n=$((n + 1)); echo $n >" + count + "\n" +
+						"if [ $n -le " + strconv.Itoa(drops) + " ]; then " + fail + "; fi\n" +
+						"exec " + find("curl") + " \"$@\"\n"
+					return toolDir(t, filepath.Join(tmp, "path-"+name), map[string]string{"curl": body, "ssh-keygen": realKeygen})
+				}
+				retry := []string{"POTLUCK_GITHUB_API=" + srv.URL, "POTLUCK_GITHUB=" + srv.URL, "CURL_CA_BUNDLE=" + ca, "POTLUCK_RETRY_DELAY=0"}
+				reset := "echo 'curl: (56) Recv failure: Connection reset by peer' >&2; echo 000; exit 56"
+				r = install(t, sh, dropping(fmt.Sprintf("drop2-%s", filepath.Base(sh)), 2, reset), retry)
+				ok(t, r, "SSHSIG, checked with ssh-keygen")
+				if !strings.Contains(r.out, "(try 2 of 4); trying again") {
+					t.Fatalf("want the retries said:\n%s", r.out)
+				}
+				r = install(t, sh, dropping(fmt.Sprintf("dropall-%s", filepath.Base(sh)), 99, reset), retry)
+				refused(t, r, "manifest.json after 4 tries", "Run install.sh again")
+				if strings.Contains(r.out, "no network") {
+					t.Fatalf("blamed the network:\n%s", r.out)
+				}
+				busy := "printf 503; exit 0"
+				ok(t, install(t, sh, dropping(fmt.Sprintf("busy1-%s", filepath.Base(sh)), 1, busy), retry), "SSHSIG, checked with ssh-keygen")
+				refused(t, install(t, sh, dropping(fmt.Sprintf("busyall-%s", filepath.Base(sh)), 99, busy), retry), "answered 503", "after 4 tries")
+				// A certificate curl refuses fails the same way on every try: no retries.
+				badcert := "echo 'curl: (60) SSL certificate problem' >&2; echo 000; exit 60"
+				r = install(t, sh, dropping(fmt.Sprintf("cert-%s", filepath.Base(sh)), 99, badcert), retry)
+				refused(t, r, "could not download")
+				if strings.Contains(r.out, "trying again") {
+					t.Fatalf("tried a certificate error again:\n%s", r.out)
+				}
 				// A tag whose files are another release's.
 				odd, oddCA := fakeGitHub(t, rel, "potluck-main-ffffffffffff", "tok", true)
 				refused(t, install(t, sh, sysPath, []string{"POTLUCK_GITHUB_API=" + odd.URL, "POTLUCK_GITHUB=" + odd.URL, "CURL_CA_BUNDLE=" + oddCA},

@@ -5,6 +5,11 @@
 #   sh install.sh --version potluck-main-<12 hex>   # a given release, not the newest
 #   sh install.sh --from <dir>     # a release directory you already have (air-gapped hosts)
 #   sh install.sh --menubar        # on a Mac, also install Potluck Menu.app (docs/menubar.md), off unless asked
+#   curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '<invite link or code>'   # install, then join that pool
+#
+# When the install directory is not on PATH, it adds one line to the shell's startup file (~/.zshrc, ~/.bashrc,
+# ~/.bash_profile, ~/.profile, or fish's conf.d/potluck.fish), so a new terminal finds potluck; --no-modify-path
+# leaves every startup file alone and says what to add instead.
 #
 # It needs no Go. It gets the release for this machine (from GitHub, or from --from) and checks it before any
 # program from it runs. Every release has a manifest naming each tarball's SHA-256, signed with the release key
@@ -35,6 +40,7 @@
 #   POTLUCK_UPDATE_KEY   another trusted release key (ed25519:<base64>), as config update_keys adds to potluck's
 #   POTLUCK_GITHUB_API   GitHub's API (default https://api.github.com; tests)
 #   POTLUCK_GITHUB       GitHub's web host, for the release links (default https://github.com; tests)
+#   POTLUCK_RETRY_DELAY  whole seconds before the first retry of a dropped download, doubling after each (default 2; tests)
 set -eu
 
 # RELEASE_KEYS are the release keys this script trusts, separated by spaces: the list in
@@ -67,8 +73,10 @@ die() {
 }
 
 usage() {
-	say "usage: install.sh [--version <release>] [--from <release dir>] [--menubar] [--unsafe-skip-signature-check]"
+	say "usage: install.sh [--join <invite code>] [--version <release>] [--from <release dir>] [--menubar] [--no-modify-path] [--unsafe-skip-signature-check]"
 	say "Installs potluck into \$POTLUCK_INSTALL_DIR (default ~/.local/bin), checking the release's signature first."
+	say "--join joins the pool of that invite link or code once potluck is installed (potluck join)."
+	say "--no-modify-path leaves shell startup files alone (by default a line putting the install directory on PATH is added)."
 	say "--version takes a release (potluck-main-<12 hex>) instead of the newest."
 	say "--from installs from a directory holding a release's files (its manifest, signatures and tarball)."
 	say "--menubar also installs Potluck Menu.app into \$POTLUCK_MENUBAR_DIR (default ~/Applications); macOS only."
@@ -77,15 +85,46 @@ usage() {
 }
 
 # fetch URL OUT ACCEPT [NOT_FOUND]: download URL into OUT over HTTPS, redirects included; a refusal says why, and a
-# 404 says NOT_FOUND when it is given, or returns 1 when NOT_FOUND is "optional". The token goes to curl on stdin,
-# never on its command line.
+# 404 says NOT_FOUND when it is given, or returns 1 when NOT_FOUND is "optional". A 5xx answer, or a curl error that
+# a second try can cure (DNS, connect, reset, timeout), is tried again, FETCH_TRIES times in all, waiting longer each
+# time; so is any wget failure but an optional file's (wget cannot say which kind it was). The token goes to curl on
+# stdin, never on its command line.
+FETCH_TRIES=4
 fetch() {
+	tries=0
+	delay=${POTLUCK_RETRY_DELAY:-2}
+	case $delay in "" | *[!0-9]*) delay=2 ;; esac
+	while :; do
+		tries=$((tries + 1))
+		fetch_once "$@" || return 1
+		case "$code" in 000 | 5??) ;; *) break ;; esac
+		[ "$transient" = yes ] || [ "$code" != 000 ] || break
+		[ "$tries" -lt "$FETCH_TRIES" ] || break
+		say "install.sh: downloading $1 failed (try $tries of $FETCH_TRIES); trying again in ${delay}s" >&2
+		sleep "$delay"
+		delay=$((delay * 2))
+	done
+	fetch_answer "$@"
+}
+
+# fetch_once URL OUT ACCEPT [NOT_FOUND]: one try; sets code to the HTTP status, 000 when no answer came, and
+# transient to yes when another try may get one. It returns 1 only for an optional file wget could not get (wget
+# cannot tell a missing file from a network error).
+fetch_once() {
+	transient=yes
 	if command -v curl >/dev/null 2>&1; then
+		rc=0
 		if [ -n "$TOKEN" ]; then
 			code=$(printf 'Authorization: Bearer %s\n' "$TOKEN" |
-				curl -sSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" -H @- "$1") || code=000
+				curl -sSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" -H @- "$1") || rc=$?
 		else
-			code=$(curl -sSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" "$1") || code=000
+			code=$(curl -sSL --proto '=https' --proto-redir '=https' --tlsv1.2 -o "$2" -w '%{http_code}' -H "Accept: $3" "$1") || rc=$?
+		fi
+		if [ "$rc" != 0 ]; then
+			code=000
+			# curl's exits for DNS, connect, partial transfer, timeout, TLS handshake, empty reply, send, receive and
+			# HTTP/2 stream errors; any other (a bad certificate, an option this curl lacks) fails the same way again.
+			case $rc in 6 | 7 | 18 | 28 | 35 | 52 | 55 | 56 | 92) ;; *) transient=no ;; esac
 		fi
 	elif command -v wget >/dev/null 2>&1; then
 		# wget would put the token on its command line, and send it on to the storage host GitHub redirects
@@ -95,14 +134,16 @@ fetch() {
 		if wget -q $WGET_HTTPS -O "$2" --header="Accept: $3" "$1"; then code=200; fi
 		if [ "$code" = 000 ] && [ "${4:-}" = optional ]; then
 			rm -f "$2"
-			# wget does not say why it failed: a missing optional file and a network error look the same.
 			WGET_MISSED="$WGET_MISSED ${2##*/}"
 			return 1
 		fi
-		[ "$code" = 200 ] || die "could not download $1 with wget (not found, refused, or no network; curl would say which)"
 	else
 		die "need curl or wget to download potluck"
 	fi
+}
+
+# fetch_answer URL OUT ACCEPT [NOT_FOUND]: what the last try's code means.
+fetch_answer() {
 	case "$code" in
 	200) return 0 ;;
 	404)
@@ -124,11 +165,14 @@ fetch() {
 		die "github.com answered $code for $1: rate limited or refused. Try again later."
 		;;
 	000)
-		if [ -z "$TOKEN" ]; then
-			die "could not download $1 (no network?)"
+		# curl has printed why above; wget says nothing, and cannot tell a missing file from a dropped connection.
+		if command -v curl >/dev/null 2>&1; then
+			[ "$transient" = yes ] || die "could not download $1 (curl's error is above)"
+			die "could not download $1 after $tries tries (curl's error is above). Run install.sh again, or download the release's files and use --from <dir>."
 		fi
-		die "could not download $1"
+		die "could not download $1 with wget after $tries tries (not found, refused, or the connection dropped; curl would say which)"
 		;;
+	5??) die "github.com answered $code for $1 after $tries tries: a fault on GitHub's side. Run install.sh again later." ;;
 	*) die "github.com/$REPO answered $code for $1" ;;
 	esac
 }
@@ -380,8 +424,16 @@ install_menubar() {
 	say "  at every login: System Settings > General > Login Items > add Potluck Menu"
 }
 
-# path_hint: how to put INSTALL_DIR on PATH for the shell this person runs (macOS's zsh does not read ~/.profile).
-path_hint() {
+# path_setup: the startup file of the shell this person runs (macOS's zsh does not read ~/.profile) and the line that
+# puts INSTALL_DIR on PATH there. It sets PATH_RC (an absolute path), PATH_RC_SHOWN (as a person writes it) and
+# PATH_LINE; it returns 1 when there is no HOME, or the directory is relative or has characters a shell treats
+# specially.
+path_setup() {
+	[ -n "${HOME:-}" ] || return 1
+	case "$INSTALL_DIR" in
+	/*) ;;
+	*) return 1 ;;
+	esac
 	case "$INSTALL_DIR" in
 	"${HOME:-/nonexistent}"/*)
 		rest="${INSTALL_DIR#"${HOME:-}"/}"
@@ -393,48 +445,96 @@ path_hint() {
 		;;
 	esac
 	case "$rest" in
-	*[\'\"\`\$\\]*)
-		say "  (this directory's name has characters a shell treats specially: add $INSTALL_DIR to PATH yourself)"
-		return
-		;;
+	*[\'\"\`\$\\]*) return 1 ;;
 	esac
+	PATH_LINE="export PATH=\"$dir:\$PATH\""
 	case "${SHELL:-}" in
-	*/zsh) rc='~/.zshrc' ;;
+	*/zsh)
+		rc=.zshrc
+		case "${ZDOTDIR:-}" in
+		"$HOME"/*) rc="${ZDOTDIR#"$HOME"/}/.zshrc" ;;
+		?*) return 1 ;; # a ZDOTDIR outside HOME: say the line instead
+		esac
+		;;
 	*/bash)
 		if [ "$(uname -s)" != Darwin ]; then
-			rc='~/.bashrc'
+			rc=.bashrc
 		elif [ -e "${HOME:-/nonexistent}/.bash_profile" ] || { [ ! -e "${HOME:-/nonexistent}/.bash_login" ] && [ ! -e "${HOME:-/nonexistent}/.profile" ]; }; then
-			rc='~/.bash_profile'
+			rc=.bash_profile
 		elif [ -e "${HOME:-/nonexistent}/.bash_login" ]; then
-			rc='~/.bash_login' # bash reads only the first of .bash_profile, .bash_login and .profile that exists
+			rc=.bash_login # bash reads only the first of .bash_profile, .bash_login and .profile that exists
 		else
-			rc='~/.profile'
+			rc=.profile
 		fi
 		;;
 	*/fish)
-		say "  fish_add_path \"$dir\""
-		return
+		rc=.config/fish/conf.d/potluck.fish
+		PATH_LINE="fish_add_path \"$dir\""
 		;;
-	*) rc='~/.profile' ;;
+	*) rc=.profile ;;
 	esac
-	say "  echo 'export PATH=\"$dir:\$PATH\"' >> $rc && . $rc"
+	case "$rc" in
+	*[\'\"\`\$\\]*) return 1 ;;
+	esac
+	PATH_RC="$HOME/$rc"
+	PATH_RC_SHOWN="~/$rc"
+	return 0
+}
+
+# put_on_path: unless INSTALL_DIR is on PATH already, add PATH_LINE to PATH_RC once (or, with --no-modify-path, as
+# root, or a file it cannot write, say the line to add). A failure here never fails the install.
+put_on_path() {
+	case ":${PATH:-}:" in
+	*":$INSTALL_DIR:"*) return 0 ;;
+	esac
+	say ""
+	if ! path_setup; then
+		say "$INSTALL_DIR is not on your PATH: add it to PATH yourself, so a new terminal finds potluck."
+		return 0
+	fi
+	# As root (sudo keeps HOME on some systems) a startup file would become root's: say the line instead.
+	if [ "$MODIFY_PATH" = 1 ] && [ "$(id -u 2>/dev/null || echo 1)" != 0 ]; then
+		if [ -f "$PATH_RC" ] && grep -qxF "$PATH_LINE" "$PATH_RC" 2>/dev/null; then
+			say "$PATH_RC_SHOWN already puts $INSTALL_DIR on PATH; a new terminal finds potluck."
+			PATH_ADDED=1
+			return 0
+		fi
+		if { mkdir -p "$(dirname "$PATH_RC")" &&
+			printf '\n# Potluck (install.sh): put potluck on PATH\n%s\n' "$PATH_LINE" >>"$PATH_RC"; } 2>/dev/null; then
+			say "added $INSTALL_DIR to PATH in $PATH_RC_SHOWN; a new terminal finds potluck."
+			PATH_ADDED=1
+			return 0
+		fi
+		say "could not write $PATH_RC_SHOWN. $INSTALL_DIR is not on your PATH; add it with:"
+	else
+		say "$INSTALL_DIR is not on your PATH, so a new terminal will not find potluck. Add it with:"
+	fi
+	say "  echo '$PATH_LINE' >> $PATH_RC_SHOWN"
 }
 
 next_steps() {
-	case ":${PATH:-}:" in
-	*":$INSTALL_DIR:"*) ;;
-	*)
+	put_on_path
+	if [ -n "$JOIN" ]; then
 		say ""
-		say "$INSTALL_DIR is not on your PATH, so a new terminal will not find potluck. Add it with:"
-		path_hint
-		;;
-	esac
+		say "joining the pool of your invite code"
+		# stdin is the script itself under curl | sh: join must not read it.
+		if ! "$INSTALL_DIR/potluck" join "$JOIN" </dev/null; then
+			die "potluck is installed, but joining the pool failed (see above). Fix that, then run: \"$INSTALL_DIR/potluck\" join '<your invite code>'"
+		fi
+		if [ "$PATH_ADDED" = 1 ]; then
+			say "(in this terminal, first run: export PATH=\"$INSTALL_DIR:\$PATH\"; a new terminal has it already)"
+		fi
+		return 0
+	fi
 	say ""
 	say "Next:"
 	say "  see what this machine can share:  potluck doctor"
 	say "  start a pool:  potluck create <pool>      (then: potluck invite <name>)"
 	say "  join a pool:   potluck join '<invite code>'"
 	say "  keep potluck current, once a day:  potluck upgrade enable"
+	if [ "$PATH_ADDED" = 1 ]; then
+		say "  (in this terminal, first run: export PATH=\"$INSTALL_DIR:\$PATH\"; a new terminal has it already)"
+	fi
 }
 
 main() {
@@ -448,6 +548,9 @@ main() {
 	WGET_MISSED=""
 	MENUBAR=0
 	UNSAFE=0
+	JOIN=""
+	MODIFY_PATH=1
+	PATH_ADDED=0
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--from)
@@ -472,6 +575,20 @@ main() {
 			;;
 		--menubar)
 			MENUBAR=1
+			shift
+			;;
+		--join)
+			[ $# -ge 2 ] && [ -n "$2" ] || die "--join needs the invite code the pool's owner sent you"
+			JOIN="$2"
+			shift 2
+			;;
+		--join=*)
+			JOIN="${1#--join=}"
+			[ -n "$JOIN" ] || die "--join needs the invite code the pool's owner sent you"
+			shift
+			;;
+		--no-modify-path)
+			MODIFY_PATH=0
 			shift
 			;;
 		--unsafe-skip-signature-check)

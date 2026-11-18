@@ -47,16 +47,12 @@ func SelfMisfit(target string, dirty, deps bool) error {
 	return nil
 }
 
-// Into bundles mo and pushes it into box handle (box:<target>/<id>).
+// Into bundles mo against what box handle (box:<target>/<id>) holds and
+// pushes it there (MakeAndPush).
 func Into(ctx context.Context, c *client.Client, handle string, mo MakeOptions, po PushOptions) (Result, error) {
 	target, id, err := computeclient.BoxHandle(ctx, c, handle)
 	if err != nil {
 		return Result{}, err
 	}
-	b, err := Make(ctx, mo)
-	if err != nil {
-		return Result{}, err
-	}
-	defer b.Close()
-	return Push(ctx, Exec(c, target, id), b, po)
+	return MakeAndPush(ctx, Exec(c, target, id), mo, po, nil)
 }

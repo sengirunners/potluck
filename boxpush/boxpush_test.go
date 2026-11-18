@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -319,7 +320,7 @@ func TestPushFinishAnswerLost(t *testing.T) {
 	var finishes atomic.Int32
 	lose := func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
 		x, err := computeclient.ExecRunTarget(ctx, c, target, id, req)
-		if len(req.Argv) == 10 && finishes.Add(1) == 1 { // finish: key n sum dest shallow head
+		if len(req.Argv) == 12 && finishes.Add(1) == 1 { // finish: key n sum dest shallow head base prerequisites
 			return computeapi.RunTargetExec{}, api.Errorf(api.CodeUnavailable, "the relay dropped the answer")
 		}
 		return x, err
@@ -535,7 +536,7 @@ func TestPushRunsTheShelfLinkStep(t *testing.T) {
 	}
 	withShelf := func(dir string) boxpush.ExecFunc {
 		return func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
-			if len(req.Argv) == 10 { // finish: sh -c script sh key n sum dest shallow head
+			if len(req.Argv) == 12 { // finish: sh -c script sh key n sum dest shallow head base prerequisites
 				req.Argv = append([]string{"env", "POTLUCK_SHELF=" + dir}, req.Argv...)
 			}
 			return computeclient.ExecRunTarget(ctx, c, target, id, req)
@@ -565,5 +566,307 @@ func TestPushRunsTheShelfLinkStep(t *testing.T) {
 	}
 	if x := boxSh(t, c, target, id, `wc -l < linked`); strings.TrimSpace(x.Stdout) != "1" {
 		t.Errorf("the link step ran without a helper: %q", x.Stdout)
+	}
+}
+
+// commit adds a commit changing v.txt to v in the checkout at dir.
+func commit(t *testing.T, dir, v string) string {
+	t.Helper()
+	write(t, filepath.Join(dir, "v.txt"), v)
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", v}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@x", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@x", "GIT_CONFIG_GLOBAL=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return gitOut(t, dir, "rev-parse", "HEAD")
+}
+
+// A second push into the same checkout builds on the commit the first left
+// there: only the new commit's objects go, not the big file both share. The
+// same commit again sends next to nothing.
+func TestPushBuildsOnTheLastPush(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 256<<10)
+	first := gitOut(t, dir, "rev-parse", "HEAD")
+	ex := boxpush.Exec(c, target, id)
+	res, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil)
+	if err != nil || len(res.Base) != 0 || res.Bytes < 256<<10 {
+		t.Fatalf("the first push: %+v, %v (want the whole commit, no base)", res, err)
+	}
+	head := commit(t, dir, "four")
+	res, err = boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Base) != 1 || res.Base[0] != first || res.Bytes > 16<<10 {
+		t.Fatalf("the second push: %+v, want built on %s and a small bundle", res, first)
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD && cat v.txt && echo && wc -c < data/blob.bin | tr -d ' ' && git status --porcelain`); x.Exit != 0 || x.Stdout != head+"\nfour\n262144\n" {
+		t.Fatalf("the checkout after an incremental push: %+v", x)
+	}
+	res, err = boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil)
+	if err != nil || len(res.Base) != 1 || res.Base[0] != head {
+		t.Fatalf("the same commit again: %+v, %v", res, err)
+	}
+	// Uncommitted changes ride on top of a base as well.
+	write(t, filepath.Join(dir, "v.txt"), "five")
+	res, err = boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir, Dirty: true}, boxpush.PushOptions{}, nil)
+	if err != nil || len(res.Base) != 1 {
+		t.Fatalf("a dirty push on a base: %+v, %v", res, err)
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD^ && cat v.txt`); x.Exit != 0 || x.Stdout != head+"\nfive" {
+		t.Fatalf("the checkout after a dirty incremental push: %+v", x)
+	}
+}
+
+// A base git directory in the box (a volume holding the repository) lets the
+// first push into a fresh checkout send only what the base lacks; the
+// checkout borrows the base's objects, and the base's config is never read
+// (git refuses a malformed one).
+func TestPushBuildsOnABase(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 256<<10)
+	based := gitOut(t, dir, "rev-parse", "HEAD")
+	if x := boxSh(t, c, target, id, `git clone -q --bare "`+dir+`" base.git && printf '[[[ not config\n' > base.git/config`); x.Exit != 0 {
+		t.Fatalf("making a base in the box: %+v", x)
+	}
+	head := commit(t, dir, "four")
+	var made []*boxpush.Bundle
+	res, err := boxpush.MakeAndPush(ctx, boxpush.Exec(c, target, id), boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{Base: "base.git"}, func(b *boxpush.Bundle) { made = append(made, b) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Base) != 1 || res.Base[0] != based || res.Bytes > 16<<10 || len(made) != 1 {
+		t.Fatalf("a push on a base: %+v (%d bundles), want built on %s and a small bundle", res, len(made), based)
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD && cat v.txt && echo && wc -c < data/blob.bin | tr -d ' ' && git status --porcelain`); x.Exit != 0 || x.Stdout != head+"\nfour\n262144\n" {
+		t.Fatalf("the checkout on a base: %+v", x)
+	}
+}
+
+// A base that names a commit it does not hold (a ref without its objects)
+// costs a second bundle, not the push: the same commit goes in whole.
+func TestPushOnABaseThatLacksItsCommitGoesWhole(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 4<<10)
+	named := gitOut(t, dir, "rev-parse", "HEAD")
+	if x := boxSh(t, c, target, id, `git init -q --bare base.git && echo `+named+` > base.git/refs/heads/main`); x.Exit != 0 {
+		t.Fatalf("making a hollow base in the box: %+v", x)
+	}
+	head := commit(t, dir, "four")
+	var made []*boxpush.Bundle
+	res, err := boxpush.MakeAndPush(ctx, boxpush.Exec(c, target, id), boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{Base: "base.git"}, func(b *boxpush.Bundle) { made = append(made, b) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(made) != 2 || len(made[0].Base) != 1 || len(made[1].Base) != 0 || len(res.Base) != 0 {
+		t.Fatalf("a hollow base: %+v, bundles %d, want one on the base and then a whole one", res, len(made))
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD && cat v.txt`); x.Exit != 0 || x.Stdout != head+"\nfour" {
+		t.Fatalf("the checkout after the whole push: %+v", x)
+	}
+}
+
+// A base's annotated tag names a tag object: the push builds on the commit
+// it peels to. A base later gone from the box (no longer mounted) does not
+// break the next push into the same checkout.
+func TestPushOnATaggedBaseAndAfterTheBaseIsGone(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 64<<10)
+	based := gitOut(t, dir, "rev-parse", "HEAD")
+	gitOut(t, dir, "-c", "user.name=t", "-c", "user.email=t@x", "tag", "-a", "v1", "-m", "v1")
+	// Only the tag names the base's commit: no branch, HEAD a symbolic ref.
+	mk := `git clone -q --bare "` + dir + `" base.git && for r in $(git -C base.git for-each-ref --format='%(refname)' refs/heads); do git -C base.git update-ref -d "$r"; done; git -C base.git symbolic-ref HEAD refs/tags/v1`
+	if x := boxSh(t, c, target, id, mk); x.Exit != 0 {
+		t.Fatalf("making a tagged base: %+v", x)
+	}
+	ex := boxpush.Exec(c, target, id)
+	head := commit(t, dir, "four")
+	res, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{Base: "base.git"}, nil)
+	if err != nil || len(res.Base) != 1 || res.Base[0] != based || res.Bytes > 16<<10 {
+		t.Fatalf("a push on a tagged base: %+v, %v, want built on %s", res, err, based)
+	}
+	if x := boxSh(t, c, target, id, `mv base.git gone.git`); x.Exit != 0 {
+		t.Fatalf("taking the base away: %+v", x)
+	}
+	head = commit(t, dir, "five")
+	res, err = boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil)
+	if err != nil {
+		t.Fatalf("a push after the base is gone: %v", err)
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD && cat v.txt`); x.Exit != 0 || x.Stdout != head+"\nfive" {
+		t.Fatalf("the checkout after the base is gone: %+v", x)
+	}
+}
+
+// A base that holds the commits but not their files (a partial clone) is
+// refused at the fetch, and the whole commit goes in instead.
+func TestPushOnABaseWithoutItsBlobsGoesWhole(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 4<<10)
+	gitOut(t, dir, "config", "uploadpack.allowFilter", "true")
+	if x := boxSh(t, c, target, id, `git clone -q --bare --filter=blob:none "file://`+dir+`" base.git`); x.Exit != 0 {
+		t.Fatalf("making a partial base: %+v", x)
+	}
+	head := commit(t, dir, "four")
+	var made []*boxpush.Bundle
+	res, err := boxpush.MakeAndPush(ctx, boxpush.Exec(c, target, id), boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{Base: "base.git"}, func(b *boxpush.Bundle) { made = append(made, b) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(made) != 2 || len(made[0].Base) != 1 || len(res.Base) != 0 {
+		t.Fatalf("a partial base: %+v, %d bundles, want one on the base then a whole one", res, len(made))
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD && cat v.txt && echo && wc -c < data/blob.bin | tr -d ' '`); x.Exit != 0 || x.Stdout != head+"\nfour\n4096\n" {
+		t.Fatalf("the checkout after the whole push: %+v", x)
+	}
+}
+
+// bundleObjects lists the ids in the pack of the bundle at path, indexed in
+// a repository that borrows repo's objects (a thin pack's delta bases come
+// from there, and index-pack --fix-thin adds the ones it used).
+func bundleObjects(t *testing.T, path, repo string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := strings.Index(string(b), "\n\n")
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "init", "-q", "--bare", dir).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	write(t, filepath.Join(dir, "objects", "info", "alternates"), filepath.Join(repo, ".git", "objects")+"\n")
+	ip := exec.Command("git", "--git-dir", dir, "index-pack", "--stdin", "--fix-thin")
+	ip.Stdin = strings.NewReader(string(b[i+2:]))
+	out, err := ip.Output()
+	if err != nil {
+		t.Fatalf("index-pack: %v", err)
+	}
+	h := strings.Fields(string(out))
+	f, err := os.Open(filepath.Join(dir, "objects", "pack", "pack-"+h[len(h)-1]+".idx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	show := exec.Command("git", "show-index")
+	show.Stdin = f
+	ids, err := show.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(ids)
+}
+
+// A bundle on a base carries the pushed commit's tree less the base's, never
+// the history between them: a file added and deleted since the base, and the
+// commits in between, stay on the renter's machine whatever base the box names.
+func TestPushOnABaseSendsNoHistoryBetween(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 1<<10)
+	ex := boxpush.Exec(c, target, id)
+	if _, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "secret.txt"), "hunter2")
+	between := commit(t, dir, "with a secret")
+	secret := gitOut(t, dir, "rev-parse", "HEAD:secret.txt")
+	if err := os.Remove(filepath.Join(dir, "secret.txt")); err != nil {
+		t.Fatal(err)
+	}
+	head := commit(t, dir, "secret gone")
+	var objs string
+	res, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, func(b *boxpush.Bundle) { objs = bundleObjects(t, b.Path, dir) })
+	if err != nil || len(res.Base) != 1 {
+		t.Fatalf("a push on the last one: %+v, %v", res, err)
+	}
+	if strings.Contains(objs, secret) || strings.Contains(objs, between) || !strings.Contains(objs, head) {
+		t.Fatalf("the bundle on a base holds history between them (or lacks the head):\n%s", objs)
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD && cat v.txt && ls`); x.Exit != 0 || x.Stdout != head+"\nsecret gonedata\nv.txt\n" {
+		t.Fatalf("the checkout: %+v", x)
+	}
+}
+
+// The answer to a refusal for lack of a base is lost: the finish sent again
+// refuses again, and the whole commit goes in.
+func TestPushRefusalAnswerLost(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 4<<10)
+	named := gitOut(t, dir, "rev-parse", "HEAD")
+	if x := boxSh(t, c, target, id, `git init -q --bare base.git && echo `+named+` > base.git/refs/heads/main`); x.Exit != 0 {
+		t.Fatalf("making a hollow base in the box: %+v", x)
+	}
+	head := commit(t, dir, "four")
+	var lost atomic.Int32
+	lose := func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
+		x, err := computeclient.ExecRunTarget(ctx, c, target, id, req)
+		if err == nil && x.Exit == 67 && lost.Add(1) == 1 {
+			return computeapi.RunTargetExec{}, api.Errorf(api.CodeUnavailable, "the relay dropped the answer")
+		}
+		return x, err
+	}
+	res, err := boxpush.MakeAndPush(ctx, lose, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{Base: "base.git"}, nil)
+	if err != nil || len(res.Base) != 0 || lost.Load() != 2 {
+		t.Fatalf("a lost refusal: %+v, %v (refusals %d, want 2: the resend refused again)", res, err, lost.Load())
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD`); strings.TrimSpace(x.Stdout) != head {
+		t.Fatalf("checkout: %+v", x)
+	}
+}
+
+// A small change to a big file sends the change, not the file: the bundle on
+// a base is a thin pack whose delta leans on the base's copy.
+func TestPushOnABaseSendsAChangeAsADelta(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 1<<10)
+	var big strings.Builder
+	for i := range 40000 {
+		fmt.Fprintf(&big, "line %d of a big generated file\n", i)
+	}
+	write(t, filepath.Join(dir, "big.txt"), big.String())
+	commit(t, dir, "big")
+	ex := boxpush.Exec(c, target, id)
+	if _, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "big.txt"), strings.Replace(big.String(), "line 20000 of", "LINE 20000 OF", 1))
+	head := commit(t, dir, "one line")
+	res, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil)
+	if err != nil || len(res.Base) != 1 || res.Bytes > 4<<10 {
+		t.Fatalf("one line of a %d-byte file: %+v, %v, want a bundle under 4 KiB on the last push", big.Len(), res, err)
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD && grep -c "LINE 20000 OF" big.txt && git status --porcelain`); x.Exit != 0 || x.Stdout != head+"\n1\n" {
+		t.Fatalf("the checkout: %+v", x)
+	}
+}
+
+// A refusal mark an abandoned push left for some bytes does not refuse a new
+// send of the same bytes.
+func TestPushPastAStaleRefusal(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	b, err := boxpush.Make(ctx, boxpush.MakeOptions{Dir: repo(t, 4<<10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	key := b.Sum[:32] + "-" + fmt.Sprint(boxpush.ChunkSize)
+	if x := boxSh(t, c, target, id, `mkdir -p "`+boxpush.ChunkDir+`" && : > "`+boxpush.ChunkDir+"/"+key+`.refused"`); x.Exit != 0 {
+		t.Fatalf("leaving a mark: %+v", x)
+	}
+	if _, err := boxpush.Push(ctx, boxpush.Exec(c, target, id), b, boxpush.PushOptions{}); err != nil {
+		t.Fatalf("a push past a stale refusal mark: %v", err)
 	}
 }

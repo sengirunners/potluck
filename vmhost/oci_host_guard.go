@@ -64,8 +64,8 @@ empty_parent() {
 cleanup() {
   (( cleaned )) && return 0
   cleaned=1; trap - EXIT CHLD TERM INT HUP
-  timeout -s KILL 2 sudo -n sh -c 'test ! -e "$1" || printf 1 > "$1/cgroup.kill"' sh "$cg" >/dev/null 2>&1
-  timeout -s KILL 2 sudo -n busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager StopUnit ss "$parent" replace >/dev/null 2>&1
+  timeout -s KILL 2 sudo -n -k sh -c 'test ! -e "$1" || printf 1 > "$1/cgroup.kill"' sh "$cg" >/dev/null 2>&1
+  timeout -s KILL 2 sudo -n -k busctl call org.freedesktop.systemd1 /org/freedesktop/systemd1 org.freedesktop.systemd1.Manager StopUnit ss "$parent" replace >/dev/null 2>&1
   timeout -s KILL 2 "$bin" rm -f "$vm" >/dev/null 2>&1
   [[ -z $p ]] || kill -KILL "$p" 2>/dev/null
   for ((i=0;i<20;i++)); do empty_parent && return 0; sleep .05; done

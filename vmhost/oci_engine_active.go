@@ -22,8 +22,9 @@ func activeDockerRuntime(owner dockerEngineOwner, runtime string) (dockerRuntime
 		return zero, fmt.Errorf("live Docker shim options are hidden and active configuration evidence is unavailable")
 	}
 	// sudo -n -k: as the ownership read (oci_engine_owner.go), a ticket
-	// cached at this terminal is ignored, as the daemon's driver has none.
-	b, err := boundedDockerEvidence(2*time.Second, "sudo", "-n", "-k", "journalctl", "--boot", "--reverse", "--lines=128", "--no-pager", "--output=json", "--output-fields=_PID,_BOOT_ID,_SYSTEMD_INVOCATION_ID,MESSAGE,__MONOTONIC_TIMESTAMP",
+	// cached at this terminal is ignored, as the daemon's driver has none. A
+	// refusal wraps ErrOCIHostNeedsSudo; the journal's output is never shown.
+	b, err := sudoNK("journalctl", "--boot", "--reverse", "--lines=128", "--no-pager", "--output=json", "--output-fields=_PID,_BOOT_ID,_SYSTEMD_INVOCATION_ID,MESSAGE,__MONOTONIC_TIMESTAMP",
 		"--grep=Reloaded configuration|Got signal to reload configuration|Error reloading configuration|Error when marshaling configuration for printing|Suppressed .*docker.service|Missed .*docker.service",
 		"_BOOT_ID="+owner.boot, "_SYSTEMD_UNIT=docker.service", "_SYSTEMD_INVOCATION_ID="+owner.invocation, "_PID="+strconv.Itoa(owner.pid), "+",
 		"_BOOT_ID="+owner.boot, "_TRANSPORT=driver", "SYSLOG_IDENTIFIER=systemd-journald")
@@ -149,12 +150,4 @@ func systemdProperties(s string) map[string]string {
 		}
 	}
 	return p
-}
-
-func boundedDockerEvidence(wait time.Duration, name string, args ...string) ([]byte, error) {
-	b, err := boundedHostCommand(wait, name, args...)
-	if err != nil {
-		return nil, fmt.Errorf("native Docker evidence command %s failed; configuration output withheld", name)
-	}
-	return b, nil
 }

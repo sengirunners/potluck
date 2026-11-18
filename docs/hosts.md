@@ -108,6 +108,20 @@ host ask the same read, so a password typed for sudo a minute ago does not make 
   sudoers drop-in `/etc/sudoers.d/potluck-docker-owner-<uid>` allowing that user exactly that path with no arguments.
   The step removes the rule again unless `sudo -n -k` now runs the helper as that user.
 
+### Kata and passwordless sudo
+
+A Kata box runs inside a systemd slice of its own that bounds its VM on the host (`docs/oci-host-budget.md`). The
+driver makes and removes that slice with `busctl` and `sh` as root, with `sudo -n -k`, for every box, and reads
+Docker's journal with `journalctl` the same way where Docker hides its runtime options. So Kata needs the lending
+user's own passwordless sudo, which the root line does not grant (`sh` as root is all of root).
+
+- Doctor and the driver both run a harmless form of those calls (`busctl --version`, `sh -c :`) with
+  `sudo -n -k` (`vmhost/oci_host_parent.go`): a password typed at this terminal does not count.
+- Without passwordless sudo, oci is not ready on Kata. Doctor and host say so once and name two ways on: give the
+  user passwordless sudo yourself, or lend with gVisor instead, with the exact root line that installs it (the layer
+  takes gVisor before Kata once docker lists it).
+- The driver refuses a Kata box before its admission lease with the same reason.
+
 ### Installing gVisor
 
 On Linux with a container CLI but no isolating runtime, the root line installs gVisor from its own release channel.
@@ -261,6 +275,9 @@ runs, so a pass means blocked rather than closed.
 
 It binds `<prefix>-<size>` (kind box, ephemeral, credential-free, the images pinned; the prefix defaults to this
 machine's name) only if it passed. A failed size stays unbound and is reported.
+A size that failed because a driver call ran past its time limit (the suite's `every verb answers in 30 s, acquire
+in 120 s`, or a verb with `no answer within` its limit) says so and to run this again once the machine is quiet:
+another share, an image pull or other heavy work on the machine fails it this way though the driver is sound.
 
 By default the check is quick:
 
@@ -290,6 +307,11 @@ When the driver cannot read a binding's image (it is gone, after a disk swap, or
 the box without its size, and the daemon does not advertise or place that size. The binding's error (in doctor, and
 in the bindings list) gives the driver's reason and says to run `potluck host` on that machine: it checks the machine
 again, pulls its image if that is missing and rebinds the size in place.
+
+A size that no box fits on this machine any more (more cores or memory than it has, after a hardware or disk swap)
+is never rebound. `potluck host` unbinds such an earlier `<prefix>-<size>` on the layer it lends, and says so; if
+the unbind fails it names the command that does it. A size that still fits stays bound, also when this run does not
+lend it (it came from an earlier `--share` or `--size`).
 
 ### Hand-back on a Mac
 
@@ -359,6 +381,9 @@ the image. Jobs without `xcode` prefer base Macs, then may use an Xcode Mac.
 The host persists the selected pin name on the binding and stamps it into describe and the pool heartbeat, so the
 same rule applies across machines. Older hosts without that fact cannot take
 an Xcode job.
+
+`potluck host --with small-linux` lends Potluck's small Linux image on a Mac (about 1 GB, no
+root, no GitHub runner), what `potluck try` lends there first ([docs/try.md](try.md)).
 
 Running host again without `--with` refuses to replace an earlier named image;
 repeat `--with xcode` to keep it, or use an explicit `--image` to replace it.

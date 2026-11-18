@@ -246,6 +246,41 @@ func TestShareBindsOnlyWhatPassed(t *testing.T) {
 	}
 }
 
+// A conformance run that failed because a driver call ran past its limit
+// (two shares at once on one Linux host, 2026-11-17: "release over 30s", "describe:
+// no answer within 30s") says the machine may have been busy and to run
+// share again; any other failure does not.
+func TestShareSaysATimingFailureIsABusyMachine(t *testing.T) {
+	for _, c := range []struct {
+		name, stdout string
+		busy         bool
+	}{
+		{"timing check", "PASS  describe\nFAIL  every verb answers in 30 s, acquire in 120 s: release over 30s\n", true},
+		{"no answer", "FAIL  describe: describe: no answer within 30s\nFAIL  handles\n", true},
+		{"a fault", "PASS  describe\nFAIL  the target is available: sudo -n refused\n", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := &fakeRunner{on: func(line string) (Result, bool) {
+				if strings.HasPrefix(line, "zm-run-conformance ") {
+					return Result{Exit: 1, Stdout: c.stdout}, true
+				}
+				return Result{}, true
+			}}
+			o := ShareOptions{Report: bigReport(), Images: []string{pinA}, Sizes: []string{"c2m4"}, NamePrefix: "mini", Driver: "ref"}
+			res, err := checkOn(context.Background(), run, o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Sizes) != 1 || res.Sizes[0].Passed || !strings.HasPrefix(res.Sizes[0].Error, "conformance failed at ") {
+				t.Fatalf("sizes: %+v", res.Sizes)
+			}
+			if got := strings.Contains(res.Sizes[0].Error, "run this again once the machine is quiet"); got != c.busy {
+				t.Fatalf("busy hint %v, want %v: %s", got, c.busy, res.Sizes[0].Error)
+			}
+		})
+	}
+}
+
 func TestMain(m *testing.M) {
 	if code, ok := refdriver.Main(); ok {
 		os.Exit(code)

@@ -79,7 +79,7 @@ What the build writes:
 | `public/feed.xml` | Atom, posts newest updated first |
 | `public/robots.txt` | allow all; the search and AI crawlers named (GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-SearchBot, PerplexityBot, Google-Extended, Bingbot); `/api/` closed; the sitemap |
 | `public/llms.txt`, `public/llms-full.txt` | `content/llms-intro.md` plus the page list; and the intro plus every page's Markdown (`content/home.md` for the home page; keep it in step with `index.html`) |
-| `public/index.html` (between its markers) | title, description, canonical, Open Graph, Twitter tags, the icon links and JSON-LD (SoftwareApplication with `sameAs` the repository, Organization, WebSite), and the footer's Blog link |
+| `public/index.html` (between its markers) | title, description, canonical, Open Graph, Twitter tags, the icon links and JSON-LD (SoftwareApplication with `sameAs` the repository, Organization, WebSite that mentions Mezze), the footer's Blog link, and the header's and footer's links to mezze.sh (`MEZZE_NAV_LINK`, `MEZZE_FOOTER_LINK` in `build/layout.mjs`, the same ones the built pages use; `public/thanks.html` carries its own footer link) |
 
 The share images are drawn by the build itself (`build/share.mjs`, standard library only): the page's title (the h1;
 for the home page `HOME.headline`, which must match `index.html`'s h1, and a test checks it) in the site's font on
@@ -116,6 +116,32 @@ the live sitemap when it is missing, so if a notify fails after a deploy, `npm r
 no such file every page is sent. `--previous <file>` names a different "before"; `--dry-run` posts nothing. A deleted
 post is not announced (IndexNow checks live pages here); a deleted page just drops out of the sitemap.
 
+## mezze.sh
+
+Mezze's own site is a second content root in this directory, built by the same `npm run build` and served by its
+own Worker, `mezze-site` (`mezze/wrangler.jsonc`, entry `src/mezze.js`), on mezze.sh and www.mezze.sh. potluck.sh/mezze
+answers a 301 to https://mezze.sh/ (`src/mezze-redirect.js`; `wrangler.jsonc` runs the Worker first for that path).
+
+| file | what |
+| --- | --- |
+| `mezze/public/index.html` | the page, hand-written; the build writes its `<head>` tags between the seo markers from `HOME` in `build/mezze.mjs` |
+| `mezze/content/home.md`, `mezze/content/llms-intro.md` | the page as Markdown for `llms-full.txt` (keep it in step with `index.html`), and the llms files' intro |
+| `mezze/public/site.css`, `thanks.html`, `site.webmanifest` | hand-written |
+| `mezze/public/og/home.png`, `mezze/public/img/robot.webp` | the share image Jackson picked and the robot from it without words (Mezze's private design source, its `social-preview` assets: `mezze-social-preview.png` and `-render.png` at 880 px wide) |
+| `mezze/public/robot.js`, `mezze/public/3d/robot.bin` | the live robot: the picture's robot as a model (`robot.bin`, written by `blender -b --python build/mezze-robot.py` from the same construction as the design source's scene script, fewer segments) drawn with plain WebGL by `robot.js` (no library). It sways at rest; the pointer pushes whatever part it touches (an arm, a plate, the head) the way it moves, harder the faster, and every joint springs back. Angles and plate slides are clamped, so a plate never comes off its stick (`npm test` checks the limits). It starts after the load event when the browser is idle, draws over the picture in the same pose, and does nothing for reduced motion or without WebGL, where the picture stays |
+| `mezze/public/scenes.js`, `mezze/public/img/props/` | the lower page's scenes, one per beat: props built from the robot's own shapes (`build/mezze_shapes.py`, shared with `build/mezze-robot.py`, including the triangle walk and colour encoding both files use) by `build/mezze-props.py`, drawn with `robot.js`'s shader and the robot's lights by `node build/mezze-props.mjs` (needs Blender 5.2, cwebp and Google Chrome; run by hand and commit what it writes). Each plate has a small still picture, which the page shows first, and a sheet of turns (`plate-<food>-turns.webp`; `TURNS`, `COLS` and `SPIN` in `mezze/public/plates.js`, shared with `robot.js`) that `scenes.js` loads when its scene comes near and steps through at the robot's spin. The plates sway, the pointer pushes them, and each beat plays one short loop while it is on screen; with no scene on screen nothing runs. `index.html` loads `scenes.js` with `robot.js`, only when motion is welcome; if the reader turns reduced motion on, the scenes go back to as drawn |
+| `mezze/public/favicon.ico`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png` | drawn by `npm run og-assets` from the olive (`OLIVE_SVG` in `build/mezze.mjs`) |
+| `mezze/public/robots.txt`, `sitemap.xml`, `llms.txt`, `llms-full.txt`, `fonts/` | generated (the font is copied from `public/fonts`, so there is one copy to change) |
+
+Every claim on the page comes from Mezze's own README and code, as for potluck.sh. The page says the source is not
+public yet and promises no date. The founders form posts to mezze.sh's own `/api/contact`, the same handler and the
+same `CONTACT` store and email as potluck.sh's; each kept message records its `site`, and the email's subject names it.
+
+Deploy with `npm run deploy:mezze` (`build/deploy-mezze.mjs`): the same checks as `npm run deploy`, then
+`wrangler deploy -c mezze/wrangler.jsonc`, the live checks on both hosts, and IndexNow for mezze.sh (it remembers what it
+sent in `.wrangler/indexnow-sent-mezze.xml`). Deploy mezze.sh before a potluck.sh deploy that carries the redirect, so
+/mezze never points at a site that is not up.
+
 ## The founders form
 
 The "Talk to Jackson and Clay" form posts to `/api/contact`. Messages are kept in KV, and each kept message is
@@ -137,24 +163,20 @@ emailed to the founders.
 curl -s -H "authorization: Bearer $CONTACT_ADMIN_TOKEN" "https://potluck.sh/api/contact?limit=20"
 ```
 
-- Email (`src/notify.js`): after a message is stored, the Worker sends one plain-text email through the `NOTIFY`
-  binding (Cloudflare `send_email`) to ops@sengi.run, the binding's `destination_address`, from `NOTIFY_FROM`
-  (`vars` in `wrangler.jsonc`). Subject `potluck.sh: <name> (<topic>)`; the body has the name and email, topic,
-  team, time and country, and the message; Reply-To is the sender, so replying answers them (an address of an
-  unusual shape is left out of Reply-To but stays in the body). Visitor text is plain text with control
-  characters removed, never HTML. It is sent in `ctx.waitUntil` after the answer: a failed send is logged (read
-  with `npx wrangler tail`) and the visitor still gets ok; the message is in KV either way. The bot trap,
-  refused posts and rate-limited posts send nothing, so the only brake on how many arrive is the per-address limit
-  above. Under `wrangler dev` the binding is simulated and nothing leaves the machine; with the `send_email` entry
-  removed, nothing is sent and each message logs a warning.
-- Changing where it goes: set `destination_address` in `wrangler.jsonc` (the address must be a verified
-  destination in Cloudflare Email Routing for this account: `npx wrangler email routing addresses list`), and
-  `NOTIFY_FROM` to an address on a domain or subdomain with Email Routing (or Email Sending) turned on in this account, then
-  deploy. The sender is `form@notify.potluck.sh`: Email Routing is on for the subdomain `notify.potluck.sh`
-  only (its own MX and SPF records, added by Cloudflare), so potluck.sh's own mail records are not involved. Check
-  it with the Email Routing API (`GET /zones/<potluck.sh zone>/email/routing/dns?subdomain=notify.potluck.sh`);
-  `wrangler email routing settings` and `dns get` take only a domain. To stop the emails, remove the `send_email`
-  entry and deploy; messages are still kept.
+- Email (`src/notify.js`): after a message is stored, the Worker sends one plain-text email through Resend's API to
+  `NOTIFY_TO` (ops@sengi.run) from `NOTIFY_FROM` (`Founders form <form@sengi.run>`), both `vars` in `wrangler.jsonc`
+  and `mezze/wrangler.jsonc`. The key is the secret `RESEND_API_KEY` on each Worker; make it in the team's Resend account
+  with sending access only, limited to the sender's domain (sengi.run, verified there). Subject
+  `<site>: <name> (<topic>)`; the body has the name and email, topic, team, time and country, and the message;
+  Reply-To is the sender, so replying answers them (an address of an unusual shape is left out of Reply-To but stays
+  in the body). Visitor text is plain text with control characters removed, never HTML. It is sent in
+  `ctx.waitUntil` after the answer: a failed send is logged (read with `npx wrangler tail`) and the visitor still gets
+  ok; the message is in KV either way. The bot trap, refused posts and rate-limited posts send nothing, so the only
+  brake on how many arrive is the per-address limit above. Without `RESEND_API_KEY` (as under `wrangler dev`)
+  nothing is sent and each message logs a warning.
+- Changing where it goes: set `NOTIFY_TO` in both configs and deploy. A new sender needs its domain verified in
+  Resend and a key that may send for it (`npx wrangler secret put RESEND_API_KEY`, and again with
+  `-c mezze/wrangler.jsonc`). To stop the emails, delete that secret; messages are still kept.
 
 Removal: delete a message with `npx wrangler kv key delete --binding CONTACT --remote "<key>"` (list keys with
 `npx wrangler kv key list --binding CONTACT --remote --prefix msg:`).

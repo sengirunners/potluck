@@ -62,28 +62,28 @@ func (r *run) ports() {
 	// expects the final upload page after read EOF.
 	const probe = `use strict;use warnings;use IO::Socket::INET;$|=1;my$l=IO::Socket::INET->new(LocalAddr=>'127.0.0.1',LocalPort=>0,Listen=>1,Proto=>'tcp') or die;print $l->sockport."\n";my$c=$l->accept() or die;alarm 20;my$seed='';sysread($c,$seed,1)==1&&$seed eq'S' or die;print "seed-read\n";my$b=pack('C*',0,255,128,42)x16384;my$out=$b;while(length$out){my$n=syswrite($c,$out);die unless$n;substr($out,0,$n)=''}shutdown($c,1);my$in='';my$upload=$b.$b;while(length($in)<length($upload)){my$n=sysread($c,my$p,65536);die unless$n;$in.=$p}die 'changed upload' unless$in eq$upload;print "upload-ok\n";`
 
-	pid, err := r.spawn(h.Handle, "argv", []string{"perl", "-e", probe}, "request_id", r.key(), "timeout_s", 30)
-	port := 0
+	// The probe prints its port once it listens. A cold guest can take
+	// seconds to start perl, so the check waits for that line (up to
+	// listenS) rather than guessing how fast the guest is; the probe's own
+	// limit leaves the exchange its time after the longest such wait.
+	const listenS, probeS = 30, 60
+	pid, err := r.spawn(h.Handle, "argv", []string{"perl", "-e", probe}, "request_id", r.key(), "timeout_s", probeS)
+	port, next := 0, int64(0)
 	if err == nil {
-		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); {
-			o, e := r.output(h.Handle, pid, "wait_s", 1)
-			if e != nil {
-				err = e
-				break
+		var out string
+		out, next, err = r.waitStdout(h.Handle, pid, 0, "\n", listenS*time.Second)
+		if err == nil {
+			line, _, _ := strings.Cut(out, "\n")
+			if port, err = strconv.Atoi(line); err != nil || port < 1 || port > 65535 {
+				port, err = 0, fmt.Errorf("guest port probe printed %q, not a port", line)
 			}
-			line, _, ok := strings.Cut(*o.Stdout, "\n")
-			if ok {
-				port, err = strconv.Atoi(line)
-				break
-			}
-		}
-		if port == 0 && err == nil {
-			err = fmt.Errorf("guest port probe did not listen")
+		} else {
+			err = fmt.Errorf("guest port probe did not listen: %w", err)
 		}
 	}
 	var stream string
 	if err == nil {
-		stream, err = r.portDuplexProbe(h.Handle, pid, port)
+		stream, err = r.portDuplexProbe(h.Handle, pid, port, next)
 	}
 	if err == nil {
 		var ended outputResult
@@ -119,7 +119,10 @@ func (r *run) ports() {
 	raw, _ := json.Marshal(protocol.PortRequest{Op: "open", Port: max(port, 1)})
 	r.add(portLease, r.expect(protocol.VerbPort, h.Handle, raw, protocol.CodeConflict))
 }
-func (r *run) portDuplexProbe(h, pid string, port int) (string, error) {
+
+// portDuplexProbe runs the exchange with the probe listening on port; from
+// is the probe's stdout offset after its port line.
+func (r *run) portDuplexProbe(h, pid string, port int, from int64) (string, error) {
 	ctx, cancel := context.WithTimeout(r.ctx, 15*time.Second)
 	defer cancel()
 	stream := ""
@@ -140,22 +143,8 @@ func (r *run) portDuplexProbe(h, pid string, port int) (string, error) {
 	if _, err := conn.Write([]byte("S")); err != nil {
 		return stream, err
 	}
-	seeded := false
-	for until := time.Now().Add(5 * time.Second); time.Now().Before(until); {
-		out, e := r.output(h, pid, "wait_s", 1)
-		if e != nil {
-			return stream, e
-		}
-		if strings.Contains(*out.Stdout, "seed-read\n") {
-			seeded = true
-			break
-		}
-		if !*out.Running {
-			return stream, fmt.Errorf("port peer ended before reading seed")
-		}
-	}
-	if !seeded {
-		return stream, fmt.Errorf("port peer did not read seed")
+	if _, _, err := r.waitStdout(h, pid, from, "seed-read\n", 5*time.Second); err != nil {
+		return stream, fmt.Errorf("port peer did not read seed: %w", err)
 	}
 	page := bytes.Repeat([]byte{0, 255, 128, 42}, protocol.PortPage/4)
 	written := make(chan error, 1)

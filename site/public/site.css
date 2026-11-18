@@ -368,6 +368,9 @@ footer nav{display:flex;flex-wrap:wrap;gap:8px 22px}
   .use.actions{margin-top:0}
   .use.agents,.use.actions{--tilt:0deg}
 }
+@media (max-width:760px){
+  .masthead nav .mezze{display:none}
+}
 @media (max-width:700px){
   body{font-size:18px}
   .masthead nav .sec{display:none}
@@ -659,3 +662,12 @@ pre.cmd .ln.mb-cmd-on{background:#E1EDD2}
 @media (prefers-reduced-motion:reduce){
   .mb-item,.mb-sub,.mb-cursor,pre.cmd .ln,.use{transition:none}
 }
+
+/* /join: the invite page (join.html). The command wraps, since a friend reads it once and pastes it. */
+.join p{margin-bottom:12px}
+.join .install{max-width:none;margin:16px 0}
+.join .install .line{white-space:normal;word-break:break-all;overflow-x:visible}
+.join .hint{font-size:16px;color:var(--soft)}
+.join .hint code{word-break:break-all}
+.invite-note{max-width:560px;margin-top:14px;font-size:16px;color:var(--soft)}
+.invite-note code{word-break:break-all}

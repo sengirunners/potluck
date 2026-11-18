@@ -8,16 +8,21 @@
 //
 // Generated: public/blog.html, public/blog/<slug>.html and .md, public/<page>.html, public/og/**.png,
 // public/sitemap.xml, feed.xml, llms.txt, llms-full.txt, robots.txt, and the parts of public/index.html between its
-// `seo:`, `blog-link:` and `agent-prompt:` markers. Everything else under public/ is hand-written (the icons and the template the
+// `seo:`, `blog-link:`, `mezze-nav:`, `mezze-footer:` and `agent-prompt:` markers. Everything else under public/ is hand-written (the icons and the template the
 // share images are drawn on come from `npm run og-assets`).
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { articlePage, authorName, BLOG_LINK, FEED_LINK, homeGraph, indexPage, PAGE_MARKER_PREFIX, seoTags, shareImagePath, url } from "./layout.mjs";
+import { articlePage, authorName, BLOG_LINK, FEED_LINK, homeGraph, indexPage, MEZZE_FOOTER_LINK, MEZZE_NAV_LINK, PAGE_MARKER_PREFIX, seoTags, shareImagePath, url } from "./layout.mjs";
 import { dropTitleHeading, escapeHtml as esc, inline, MarkdownError, toHtml } from "./markdown.mjs";
 import { parsePage, parsePost } from "./frontmatter.mjs";
 import { AGENT_PROMPT, BLOG, GOOGLE_SITE_VERIFICATION, HOME, ORIGIN, PAGES, RESERVED_SLUGS } from "./pages.mjs";
-import { samePixels, shareImage } from "./share.mjs";
+import { shareImage } from "./share.mjs";
+import { BOTS, diffFiles, robotsTxt as robotsFor, same, urlsetXml, writeFiles } from "./output.mjs";
+import * as mezze from "./mezze.mjs";
+
+export { BOTS, diffFiles, same, urlsetXml, writeFiles };
+export const robotsTxt = () => robotsFor(ORIGIN);
 
 export const SITE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -25,14 +30,6 @@ export const SITE_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const GENERATED_ROOT_FILES = ["blog.html", "sitemap.xml", "feed.xml", "llms.txt", "llms-full.txt", "robots.txt"];
 const GENERATED_DIRS = ["blog", "og"];
 
-// Bots that crawl for search and AI assistants, each allowed by name (a named group replaces the * group, so each
-// repeats the one disallowed path).
-export const BOTS = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-SearchBot", "PerplexityBot", "Google-Extended", "Bingbot"];
-
-export function robotsTxt() {
-  const group = (agent) => `User-agent: ${agent}\nAllow: /\nDisallow: /api/\n`;
-  return `${["*", ...BOTS].map(group).join("\n")}\nSitemap: ${ORIGIN}/sitemap.xml\n`;
-}
 
 /**
  * Reads and checks every Markdown file in `dir` (`content/<kind>/`): each is <slug>.md, its front matter parsed by
@@ -96,10 +93,8 @@ export function sitemapEntries(posts, pages = []) {
   return entries;
 }
 
-export function sitemapXml(posts, pages) {
-  const urls = sitemapEntries(posts, pages).map((e) => `  <url><loc>${esc(e.loc)}</loc><lastmod>${e.lastmod}</lastmod></url>`);
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join("\n")}\n</urlset>\n`;
-}
+
+export const sitemapXml = (posts, pages) => urlsetXml(sitemapEntries(posts, pages));
 
 export function feedXml(posts) {
   const byUpdated = [...posts].sort((a, b) => (a.meta.updated < b.meta.updated ? 1 : a.meta.updated > b.meta.updated ? -1 : a.meta.slug < b.meta.slug ? -1 : 1));
@@ -171,6 +166,8 @@ export function homePage(source, posts) {
   });
   region("seo:start", "seo:end", `\n${tags}\n`);
   region("blog-link:start", "blog-link:end", posts.length ? BLOG_LINK : "");
+  region("mezze-nav:start", "mezze-nav:end", MEZZE_NAV_LINK);
+  region("mezze-footer:start", "mezze-footer:end", MEZZE_FOOTER_LINK);
   region("agent-prompt:start", "agent-prompt:end", esc(AGENT_PROMPT));
   return source;
 }
@@ -232,47 +229,27 @@ export function ownedPaths(publicDir) {
   return owned;
 }
 
-/** True when what is on disk is what the build makes: the same text, or for a PNG the same pixels. */
-function same(file, made) {
-  const disk = readFileSync(file);
-  if (typeof made === "string") return disk.toString("utf8") === made;
-  return file.endsWith(".png") ? samePixels(disk, made) : disk.equals(made);
-}
+
 
 /** Differences between a fresh build and what is on disk: [{path, why}]. Empty when the committed output is current. */
 export function drift({ siteDir = SITE_DIR, ...opts } = {}) {
   const publicDir = opts.publicDir ?? join(siteDir, "public");
-  const { files } = build({ siteDir, ...opts });
-  const problems = [];
-  for (const [path, text] of files) {
-    const file = join(publicDir, path);
-    if (!existsSync(file)) problems.push({ path, why: "missing" });
-    else if (!same(file, text)) problems.push({ path, why: "differs" });
-  }
-  for (const path of ownedPaths(publicDir)) if (!files.has(path)) problems.push({ path, why: "stale: nothing builds it" });
-  return problems;
+  return diffFiles(build({ siteDir, ...opts }).files, publicDir, ownedPaths(publicDir));
 }
 
 export function write({ siteDir = SITE_DIR, ...opts } = {}) {
   const publicDir = opts.publicDir ?? join(siteDir, "public");
   const { files, posts, pages } = build({ siteDir, ...opts });
-  for (const path of ownedPaths(publicDir)) if (!files.has(path)) rmSync(join(publicDir, path), { recursive: true, force: true });
-  for (const [path, text] of files) {
-    const file = join(publicDir, path);
-    // A PNG with the same pixels is left alone, so a different zlib does not rewrite every picture.
-    if (typeof text !== "string" && existsSync(file) && same(file, text)) continue;
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, text);
-  }
+  writeFiles(files, publicDir, ownedPaths(publicDir));
   return { written: [...files.keys()], posts: posts.length, pages: pages.length };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   try {
     if (process.argv.includes("--check")) {
-      const problems = drift();
+      const problems = [...drift().map((p) => ({ ...p, path: `public/${p.path}` })), ...mezze.drift().map((p) => ({ ...p, path: `mezze/public/${p.path}` }))];
       if (problems.length) {
-        for (const p of problems) console.error(`public/${p.path}: ${p.why}`);
+        for (const p of problems) console.error(`${p.path}: ${p.why}`);
         console.error("The committed output is out of date: run `npm run build` and commit the result.");
         process.exit(1);
       }
@@ -280,6 +257,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     } else {
       const { written, posts, pages } = write();
       console.log(`built ${posts} post${posts === 1 ? "" : "s"} and ${pages} page${pages === 1 ? "" : "s"}; wrote ${written.map((p) => relative(".", join("public", p))).join(", ")}`);
+      console.log(`built mezze.sh; wrote ${mezze.write().map((p) => relative(".", join("mezze/public", p))).join(", ")}`);
     }
   } catch (e) {
     console.error(`build failed: ${e.message}`);

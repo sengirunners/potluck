@@ -14,7 +14,7 @@ data_sources:
   - "Potluck README (MCP for agents, Quick start); docs/network.md"
 model: claude-opus-5-5
 date: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 summary: "Add `{\"mcpServers\":{\"potluck\":{\"command\":\"potluck\",\"args\":[\"mcp\"]}}}` to your agent's MCP configuration. The agent then gets tools to create a sandbox on one of your pool's machines, run commands and read and write files in it, and delete it, so its commands run on a throwaway machine instead of your laptop. Potluck is free and open source (Apache-2.0)."
 ---
 
@@ -82,3 +82,7 @@ Give the agent no secret you would not want it to send elsewhere: a sandbox with
 
 For Claude Code sessions started from claude.ai, or code written for E2B, see the other ways in on the
 [agent sandbox page](/agent-sandbox).
+
+## How do you run more than one agent?
+
+To run several agents and keep track of them, [Mezze for teams of coding agents](https://mezze.sh/), a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.

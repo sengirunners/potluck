@@ -1,6 +1,6 @@
 # Give your AI agent a sandbox over MCP, on a machine you own
 
-Published 2026-11-17. https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp
+Published 2026-11-17, updated 2026-11-18. https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp
 
 A coding agent is most useful when it can run things: tests, builds, a server, a script it just wrote. It is most
 dangerous for the same reason. Potluck's MCP server gives the agent a separate machine for that work, a fresh VM or
@@ -66,3 +66,7 @@ Give the agent no secret you would not want it to send elsewhere: a sandbox with
 
 For Claude Code sessions started from claude.ai, or code written for E2B, see the other ways in on the
 [agent sandbox page](/agent-sandbox).
+
+## How do you run more than one agent?
+
+To run several agents and keep track of them, [Mezze for teams of coding agents](https://mezze.sh/), a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.

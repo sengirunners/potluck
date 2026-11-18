@@ -37,3 +37,14 @@ func TestPortConformanceHalfDuplex(t *testing.T) {
 		})
 	}
 }
+
+// A cold guest (a macOS VM just booted) can take seconds to start the probe.
+// The check waits for the probe to listen, as long as the probe may run.
+func TestPortConformanceSlowStart(t *testing.T) {
+	path, opt := fixture(t, "box", "spawn-slow-start")
+	opt.Only = []string{"ports"}
+	results := Run(context.Background(), path, opt)
+	if Failed(results) > 0 {
+		t.Fatal(Format(results))
+	}
+}

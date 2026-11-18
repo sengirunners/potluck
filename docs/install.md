@@ -56,6 +56,13 @@ Which keys are trusted, and how the signing key is replaced: [release-keys.md](r
 - `GH_TOKEN` (or `GITHUB_TOKEN`), if set, makes the script read the release through GitHub's API with that token. A
   private repository needs one that can read it (fetch the script with
   `curl -fsSL -H "Authorization: Bearer $GH_TOKEN" …`). A token GitHub refuses fails the download; it is not ignored.
+- `--join '<invite link or code>'` joins the pool of that link or code once potluck is installed (`potluck join`), so a friend with
+  an invite needs one line: `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --join '<invite code>'`.
+  If the join fails, potluck stays installed and the script says to run `potluck join` again.
+- When the install directory is not on PATH, the script adds `export PATH="$HOME/.local/bin:$PATH"` (fish:
+  `fish_add_path`) once to the startup file of your shell (`$SHELL`): `~/.zshrc`, `~/.bashrc` on Linux,
+  `~/.bash_profile` on a Mac, else `~/.profile`, or fish's `conf.d/potluck.fish`. A new terminal then finds
+  `potluck`. `--no-modify-path` leaves every startup file alone and prints the line instead.
 - `sh install.sh --version potluck-main-<12 hex>` installs that release instead of the newest.
 - `sh install.sh --from <dir>` installs from a release's files you already downloaded (`manifest.json`, its
   signatures and the tarball for this machine).

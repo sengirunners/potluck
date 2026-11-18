@@ -4,13 +4,14 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.js\"",
     "dev": "wrangler dev --local",
     "build": "node build/build.mjs",
     "build:check": "node build/build.mjs --check",
     "notify": "node build/notify.mjs",
     "readme-hero": "node build/readme-hero.mjs",
     "og-assets": "node build/og-assets.mjs",
-    "deploy": "node build/deploy.mjs"
+    "deploy": "node build/deploy.mjs",
+    "deploy:mezze": "node build/deploy-mezze.mjs"
   }
 }

@@ -25,7 +25,7 @@
 <link rel="manifest" href="/site.webmanifest">
 <meta name="google-site-verification" content="VtxYvTdYwVWYZa_DXm-MVSC0k4lRAy65l4ujzYZXrcI">
 <link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":["SoftwareApplication","SoftwareSourceCode"],"@id":"https://potluck.sh/#software","name":"Potluck","url":"https://potluck.sh/","description":"Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://www.apache.org/licenses/LICENSE-2.0","codeRepository":"https://github.com/sengirunners/potluck","programmingLanguage":"Go","downloadUrl":"https://github.com/sengirunners/potluck/releases","image":"https://potluck.sh/og/home.png","sameAs":["https://github.com/sengirunners/potluck"],"author":{"@id":"https://sengi.run/#organization"},"publisher":{"@id":"https://sengi.run/#organization"}},{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},{"@type":"WebSite","@id":"https://potluck.sh/#website","url":"https://potluck.sh/","name":"Potluck","publisher":{"@id":"https://sengi.run/#organization"}}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":["SoftwareApplication","SoftwareSourceCode"],"@id":"https://potluck.sh/#software","name":"Potluck","url":"https://potluck.sh/","description":"Potluck puts your team's idle Macs and Linux boxes to work: self-hosted GitHub Actions runners and sandboxes for coding agents, each job in a fresh VM or sandbox. Free and open source (Apache-2.0), early.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"license":"https://www.apache.org/licenses/LICENSE-2.0","codeRepository":"https://github.com/sengirunners/potluck","programmingLanguage":"Go","downloadUrl":"https://github.com/sengirunners/potluck/releases","image":"https://potluck.sh/og/home.png","sameAs":["https://github.com/sengirunners/potluck"],"author":{"@id":"https://sengi.run/#organization"},"publisher":{"@id":"https://sengi.run/#organization"}},{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},{"@type":"WebSite","@id":"https://potluck.sh/#website","url":"https://potluck.sh/","name":"Potluck","publisher":{"@id":"https://sengi.run/#organization"},"mentions":{"@type":"SoftwareApplication","@id":"https://mezze.sh/#software","name":"Mezze","url":"https://mezze.sh/"}}]}</script>
 <!-- seo:end -->
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
@@ -58,6 +58,7 @@
   <nav aria-label="Main">
     <a class="sec" href="#how">How it works</a>
     <a class="sec" href="#uses">What it's for</a>
+    <!-- mezze-nav:start --><a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a><!-- mezze-nav:end -->
     <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
     <a class="btn line" href="#founders">Talk to us</a>
   </nav>
@@ -315,7 +316,7 @@
       <button class="tag" type="button" data-for="server" aria-pressed="false"><span class="dot busy"></span><span class="name"><span class="long">The rented server</span><span class="short">Server</span></span></button>
       <button class="tag" type="button" data-for="mini-mac" aria-pressed="true"><span class="dot busy"></span><span class="name"><span class="long">Ana's Mac mini</span><span class="short">Ana's Mac</span></span></button>
       <button class="tag" type="button" data-for="laptop" aria-pressed="false"><span class="dot busy"></span><span class="name"><span class="long">Leo's MacBook Pro</span><span class="short">Leo's laptop</span></span></button>
-      <a class="tag soon" href="#dish" data-for="dish"><span class="long">Mezze, coming soon</span><span class="short">Coming soon</span></a>
+      <a class="tag soon" href="#dish" data-for="dish"><span class="long">Mezze, on mezze.sh</span><span class="short">Mezze</span></a>
     </div>
     <svg class="leader" id="leader" aria-hidden="true"></svg>
 
@@ -1028,7 +1029,7 @@ Stop and ask me before anything that needs a password, a sign-in or deleting fil
             <option value="run">I want to run it</option>
             <option value="broke">Something broke</option>
             <option value="build">I want to help build it</option>
-            <option value="dish">Try Mezze early</option>
+            <option value="dish">Try Mezze</option>
             <option value="other">Something else</option>
           </select></label>
           <label>Team or project<input name="team" autocomplete="organization" maxlength="120" placeholder="Optional"></label>
@@ -1040,11 +1041,11 @@ Stop and ask me before anything that needs a password, a sign-in or deleting fil
       <p class="addr">Or write to us at ops@sengi.run.</p>
     </div>
     <div class="recipe" id="dish">
-      <div class="head"><h2>Mezze</h2><span class="stamp">Coming soon</span></div>
+      <div class="head"><h2>Mezze</h2><span class="stamp">mezze.sh</span></div>
       <div class="body">
         <div>
           <p>Mezze is the agent and team layer that runs on Potluck. For a team running a brigade of coding agents: claim and track work, send messages between your agents and your people, and watch it all from one desktop app. It is a separate product from Potluck.</p>
-          <a href="/mezze">What Mezze does</a> · <a href="#founders" data-topic="dish">Ask to try it early</a>
+          <a href="https://mezze.sh/">What Mezze does</a> · <a href="#founders" data-topic="dish">Ask to try it early</a>
         </div>
         <svg viewBox="0 0 80 60" aria-hidden="true">
           <ellipse cx="40" cy="52" rx="36" ry="7" fill="#fff" stroke="#D8CFBF" stroke-width="1.2"/>
@@ -1071,6 +1072,7 @@ Stop and ask me before anything that needs a password, a sign-in or deleting fil
     <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
     <!-- blog-link:start --><a href="/blog">Blog</a><!-- blog-link:end -->
     <a href="#founders">Contact</a>
+    <!-- mezze-footer:start --><a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a><!-- mezze-footer:end -->
     <a href="https://sengi.run">Sengi</a>
   </nav>
 </footer>

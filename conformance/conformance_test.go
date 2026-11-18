@@ -714,6 +714,37 @@ func TestBrokenDrivers(t *testing.T) {
 	}
 }
 
+// Late tells a run that failed on time (a verb past its limit) from one that
+// failed on a fault, reading the suite's own output: share calls the first a
+// busy machine.
+func TestLateReadsTheSuitesTimingFailure(t *testing.T) {
+	for _, c := range []struct {
+		bug  string
+		edit func(*Options)
+		late bool
+	}{
+		{"slow-status", func(o *Options) { o.VerbLimit = 3 * time.Second }, true},
+		{"acquire-blocks", func(o *Options) { o.AcquireLimit = 3 * time.Second }, true},
+		{"no-commit-status", nil, false},
+	} {
+		t.Run(c.bug, func(t *testing.T) {
+			t.Parallel()
+			path, opt := fixture(t, "run", c.bug)
+			opt.Only = []string{"lifecycle"}
+			if c.edit != nil {
+				c.edit(&opt)
+			}
+			out := Format(Run(context.Background(), path, opt))
+			if FirstFailure(out) == "" {
+				t.Fatalf("the broken driver passed:\n%s", out)
+			}
+			if Late(out) != c.late {
+				t.Fatalf("Late = %v, want %v:\n%s", !c.late, c.late, out)
+			}
+		})
+	}
+}
+
 // The driver gets the allowlist and nothing else from the suite's environment.
 func TestOnlyAllowlistedEnvironment(t *testing.T) {
 	t.Setenv("ZM_CONFORMANCE_CANARY", "seen")

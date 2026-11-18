@@ -1,8 +1,11 @@
 package boxpush
 
-// The box's side of a push: three kinds of exec, each a short sh script
+// The box's side of a push: four kinds of exec, each a short sh script
 // with literal arguments (no value is ever spliced into the script):
 //
+//	have:   the commits the box holds for dest (its last push's, and the
+//	        base git directory's refs, read as files: the base's config is
+//	        never loaded), for Make to cut a bundle against
 //	probe:  git and a SHA-256 tool are there; which chunks already arrived
 //	chunk:  stdin (base64 on the wire) to $HOME/.potluck/push/<key>/c.<i>, kept
 //	        only when its SHA-256 matches (written to a temporary name, then
@@ -17,6 +20,9 @@ package boxpush
 // dest's physical path>, made by the first push to dest in the box (a box
 // that already has one under the old name, $HOME/.zm/push-git, keeps using
 // it: the push is incremental on it and its first clean is done);
+// with a base (PushOptions.Base) the git directory borrows the base's
+// objects (git alternates), and a bundle built on commits the box does not
+// hold is refused before anything is checked out (exit 67);
 // dest/.git is replaced by a file pointing at it on every finish. A .git
 // that was in dest before (a dependency layer's, the image's, a driver's
 // checkout) is never read: its config (hooks, fsmonitor), alternates or
@@ -50,10 +56,17 @@ type ExecFunc func(ctx context.Context, req computeapi.ExecRunTargetRequest) (co
 
 // PushOptions say where and how.
 type PushOptions struct {
-	Dest      string // the checkout in the box, relative to its HOME (default DefaultDest) or absolute
-	ChunkSize int    // default ChunkSize (tests use less)
-	Parallel  int    // chunks in flight (default 4)
-	Retries   int    // tries per call (default 4)
+	Dest string // the checkout in the box, relative to its HOME (default DefaultDest) or absolute
+	// Base is a git directory in the box (relative to its HOME, or
+	// absolute) whose commits a bundle may build on: a volume of the
+	// caller's that holds the repository, say. The checkout's git directory
+	// borrows its objects (git alternates) from then on, so the base must
+	// stay in the box as long as the checkout is used, and be trusted as
+	// much as the checkout: git takes its objects as they are.
+	Base      string
+	ChunkSize int // default ChunkSize (tests use less)
+	Parallel  int // chunks in flight (default 4)
+	Retries   int // tries per call (default 4)
 	// Progress, when set, hears each chunk as it lands (done of total).
 	Progress func(done, total int)
 }
@@ -68,6 +81,9 @@ type Result struct {
 	Sent    int    `json:"sent"`    // chunks sent by this push
 	Skipped int    `json:"skipped"` // chunks an earlier push left in the box
 	Bytes   int64  `json:"bytes"`   // the bundle's size
+	// Base are the commits the bundle built on: only what the commit adds
+	// to them was sent.
+	Base []string `json:"base,omitempty"`
 }
 
 // Exit codes of the box's scripts.
@@ -75,7 +91,12 @@ const (
 	exitChecksum = 65 // a chunk or the bundle did not match its SHA-256
 	exitMissing  = 66 // a chunk never arrived
 	exitNoTool   = 69 // no git or no SHA-256 tool in the box
+	exitBase     = 67 // the box lacks the base or a commit the bundle builds on
 )
+
+// errBaseGone is a refusal of a bundle built on commits the box does not
+// hold: the same commit pushed whole goes in.
+var errBaseGone = errors.New("the box does not hold the commits the bundle builds on")
 
 // ChunkDir is where a box keeps the chunks of a push, as its shell has it:
 // <ChunkDir>/<key>/c.<i>. Potluck before its rename kept them, and the push's
@@ -92,6 +113,8 @@ const shNeedGit = `command -v git >/dev/null 2>&1 || { echo "the box has no git:
 
 const shProbe = `[ -n "$(zmsum /dev/null)" ] || { echo "the box has no sha256sum, shasum or openssl" >&2; exit 69; }
 d="` + ChunkDir + `/$1"
+# A new send of these bytes: a refusal of an earlier one is no answer to it.
+rm -f "$d.refused"
 [ -d "$d" ] || exit 0
 cd "$d"
 for f in c.*; do case "$f" in c.|c.*[!0-9]*) ;; *) echo "${f#c.}" ;; esac; done
@@ -107,27 +130,51 @@ if [ "$got" != "$3" ]; then rm -f "$t"; echo "chunk $2 arrived with sha256 $got,
 mv -f "$t" "$d/c.$2"
 `
 
-const shFinish = ShSum + `set -e
-d="` + ChunkDir + `/$1"
-case "$4" in /*) dest="$4" ;; *) dest="$HOME/$4" ;; esac
-# g is the push's own git directory for dest, named by dest's physical path:
-# under HOME/.potluck, or where this box already has one made under the old
-# name, HOME/.zm. A dest that is /, HOME or holds it, or is in either of them
-# is refused: the first push cleans dest, and the push keeps its own files there.
-gdir() {
+// shGdir defines gdir, which sets g to the push's own git directory for
+// dest ($asked: dest as the caller named it, for messages), named by dest's
+// physical path: under HOME/.potluck, or where this box already has one made
+// under the old name, HOME/.zm. A dest that is /, HOME or holds it, or is in
+// either of them is refused: the first push cleans dest, and the push keeps
+// its own files there. It also defines basedir, which sets base to the git
+// directory its argument names, under HOME unless absolute ("" for "").
+const shGdir = `gdir() {
   pd=$(cd "$dest" && pwd -P); h=$(cd "$HOME" && pwd -P)
-  case "$pd" in /|"$h") echo "the checkout cannot be $4: name a directory under HOME, outside .potluck and .zm" >&2; exit 64 ;; esac
-  case "$h/" in "$pd"/*) echo "the checkout cannot be $4, which holds HOME: name a directory under HOME" >&2; exit 64 ;; esac
+  case "$pd" in /|"$h") echo "the checkout cannot be $asked: name a directory under HOME, outside .potluck and .zm" >&2; exit 64 ;; esac
+  case "$h/" in "$pd"/*) echo "the checkout cannot be $asked, which holds HOME: name a directory under HOME" >&2; exit 64 ;; esac
   for z in "$HOME/.potluck" "$HOME/.zm"; do
     [ -d "$z" ] || continue
     z=$(cd "$z" && pwd -P)
-    case "$pd" in "$z"|"$z"/*) echo "the checkout cannot be $4: name a directory under HOME, outside .potluck and .zm" >&2; exit 64 ;; esac
-    case "$z/" in "$pd"/*) echo "the checkout cannot be $4, which holds $z: name a directory under HOME" >&2; exit 64 ;; esac
+    case "$pd" in "$z"|"$z"/*) echo "the checkout cannot be $asked: name a directory under HOME, outside .potluck and .zm" >&2; exit 64 ;; esac
+    case "$z/" in "$pd"/*) echo "the checkout cannot be $asked, which holds $z: name a directory under HOME" >&2; exit 64 ;; esac
   done
-  p="$d.path.$$"; printf '%s' "$pd" >"$p"; k=$(zmsum "$p"); rm -f "$p"
+  mkdir -p "$HOME/.potluck/push"
+  p="$HOME/.potluck/push/.path.$$"; printf '%s' "$pd" >"$p"; k=$(zmsum "$p"); rm -f "$p"
   g="$HOME/.potluck/push-git/$k"
   [ -d "$g" ] || [ ! -d "$HOME/.zm/push-git/$k" ] || g="$HOME/.zm/push-git/$k"
 }
+basedir() { case "$1" in "") base= ;; /*) base="$1" ;; *) base="$HOME/$1" ;; esac; }
+`
+
+// shHave answers the commits the box holds for dest $1, one per line: its
+// last push's, and with a base $2 the ids the base's HEAD and refs name,
+// read as files (no git runs in the base, so its config is never read).
+// What it cannot read is left out: the push then sends more.
+const shHave = ShSum + shGdir + `asked="$1"
+case "$1" in /*) dest="$1" ;; *) dest="$HOME/$1" ;; esac
+if [ -d "$dest" ]; then ( gdir && [ -f "$g/HEAD" ] && git --git-dir="$g" rev-parse -q --verify refs/zm/push ) 2>/dev/null; fi
+basedir "$2"
+if [ -n "$base" ] && [ -d "$base" ]; then
+  { cat "$base/HEAD" "$base/packed-refs"; find "$base/refs" -type f -exec cat {} +; } 2>/dev/null | while read -r a _; do
+    case "$a" in ""|*[!0-9a-f]*) ;; *) echo "$a" ;; esac
+  done | head -n 256
+fi
+exit 0
+`
+
+const shFinish = ShSum + shGdir + `set -e
+d="` + ChunkDir + `/$1"
+asked="$4"
+case "$4" in /*) dest="$4" ;; *) dest="$HOME/$4" ;; esac
 # dest/.git becomes a file naming g, whatever was there. A .git directory
 # there (an earlier push's from before push-git, a layer's) is moved aside
 # unread, never deleted: commits made in it are not lost.
@@ -141,6 +188,11 @@ own() {
 # in the box's wants. A box without the shelf has no helper and skips it. Its
 # output is dropped and its failure never fails the push.
 ` + shelfhelper.LinkSh + `shelflink() { potluck_shelf_link "${POTLUCK_SHELF:-` + shelfhelper.BoxDir + `}" "$dest" >/dev/null 2>&1 || :; }
+# refuse: the bundle builds on what the box does not hold (exit 67, the
+# client then sends the commit whole). The chunks go, and a mark stays so the
+# same call sent again (its answer lost) refuses again, once.
+refuse() { rm -rf "$d"; : >"$d.refused"; echo "$1" >&2; exit 67; }
+if [ -e "$d.refused" ]; then rm -f "$d.refused"; echo "the box does not hold what the bundle builds on" >&2; exit 67; fi
 # Done already (this call's answer was lost and it is sent again): the
 # chunks are gone and the push's own git directory is at the commit.
 if [ ! -e "$d/c.0" ] && [ -d "$dest" ]; then
@@ -164,9 +216,48 @@ gdir
 git --git-dir="$g" config core.bare false
 own
 cd "$dest"
+# The base's objects are borrowed (alternates), once per git directory. git
+# never runs in the base: fetch would list its refs with git for-each-ref
+# there (reading its config), and alternateRefsCommand true lists none.
+basedir "$7"
+# An alternate whose directory is gone (a base no longer mounted) is dropped:
+# git refuses a repository naming one.
+a="$g/objects/info/alternates"
+if [ -f "$a" ]; then
+  while read -r l; do [ -d "$l" ] && printf '%s\n' "$l"; done <"$a" >"$a.$$" || :
+  mv -f "$a.$$" "$a"
+fi
+if [ -n "$base" ]; then
+  git --git-dir="$g" config core.alternateRefsCommand true
+  if [ ! -d "$base/objects" ]; then
+    [ -z "$8" ] || refuse "the base $7 is no git directory in the box (it has no objects/)"
+    echo "the base $7 is no git directory in the box (it has no objects/)" >&2; exit 64
+  fi
+  bo=$(cd "$base/objects" && pwd -P) || {
+    [ -z "$8" ] || refuse "the base $7 cannot be read"
+    echo "the base $7 cannot be read" >&2; exit 64
+  }
+  grep -qxF "$bo" "$a" 2>/dev/null || { mkdir -p "$g/objects/info"; printf '%s\n' "$bo" >>"$a"; }
+fi
+# The commits the bundle builds on ($8) must be here, or nothing is checked
+# out and the chunks go: the same commit pushed whole is another bundle. git
+# takes them only from its own refs, so each is named under refs/zm/base for
+# the fetch (and marked shallow: the base's history may stop there).
+for p in $8; do
+  git cat-file -e "$p^{commit}" 2>/dev/null || refuse "the box does not hold $p, which the bundle builds on"
+  grep -qx "$p" "$g/shallow" 2>/dev/null || echo "$p" >>"$g/shallow"
+  git update-ref "refs/zm/base/$p" "$p"
+done
 for s in $5; do grep -qx "$s" "$g/shallow" 2>/dev/null || echo "$s" >>"$g/shallow"; done
-git -c maintenance.auto=false fetch -q "$b" "+refs/zm/push:refs/zm/push"
-git -c advice.detachedHead=false checkout -q -f --detach "$6"
+# A bundle built on commits the box holds can still lack what they lead to
+# (a base without its blobs): any failure of its fetch or checkout is a
+# refusal, so the whole commit goes in instead.
+if git -c maintenance.auto=false fetch -q "$b" "+refs/zm/push:refs/zm/push" && git -c advice.detachedHead=false checkout -q -f --detach "$6"; then :; else
+  git for-each-ref --format='delete %(refname)' refs/zm/base | git update-ref --stdin
+  [ -z "$8" ] || refuse "the bundle built on what the box holds did not check out"
+  echo "the bundle did not check out" >&2; exit 1
+fi
+git for-each-ref --format='delete %(refname)' refs/zm/base | git update-ref --stdin
 # Until one clean has finished (a first finish may die before it), remove
 # what an earlier tree left: untracked files and nested repositories, but
 # ignored ones and node_modules.
@@ -197,7 +288,10 @@ func Push(ctx context.Context, exec ExecFunc, b *Bundle, o PushOptions) (Result,
 	if strings.ContainsRune(o.Dest, 0) || len(o.Dest) > 1024 {
 		return Result{}, fmt.Errorf("the box directory is over 1024 bytes or holds a NUL")
 	}
-	res := Result{Repo: b.Repo, Commit: b.Head, Bytes: b.Size, Dir: o.Dest}
+	if strings.ContainsRune(o.Base, 0) || len(o.Base) > 1024 {
+		return Result{}, fmt.Errorf("the base directory is over 1024 bytes or holds a NUL")
+	}
+	res := Result{Repo: b.Repo, Commit: b.Head, Bytes: b.Size, Dir: o.Dest, Base: b.Base}
 	f, err := os.Open(b.Path)
 	if err != nil {
 		return res, err
@@ -209,16 +303,75 @@ func Push(ctx context.Context, exec ExecFunc, b *Bundle, o PushOptions) (Result,
 		return res, err
 	}
 	x, err := Retry(ctx, o.Retries, func() (computeapi.RunTargetExec, error) {
-		return exec(ctx, computeapi.ExecRunTargetRequest{Argv: Script(shFinish, s.Key, strconv.Itoa(s.Chunks), b.Sum, o.Dest, b.Shallow, b.Head), TimeoutS: FinishTimeoutS})
+		return exec(ctx, computeapi.ExecRunTargetRequest{Argv: Script(shFinish, s.Key, strconv.Itoa(s.Chunks), b.Sum, o.Dest, b.Shallow, b.Head, o.Base, strings.Join(b.Base, " ")), TimeoutS: FinishTimeoutS})
 	})
 	if err != nil {
 		return res, fmt.Errorf("checking out in the box: %w", err)
+	}
+	if x.Exit == exitBase {
+		return res, fmt.Errorf("%w: %w", errBaseGone, BoxErr("the box refused the bundle", x))
 	}
 	if x.Exit != 0 {
 		return res, BoxErr("the box refused the bundle", x)
 	}
 	res.Dest = strings.TrimSpace(x.Stdout)
 	return res, nil
+}
+
+// Have answers the commits the box holds for o.Dest: its last push's there,
+// and the ids o.Base's HEAD and refs name. A box that cannot say answers
+// none (and an error), and a whole commit goes in.
+func Have(ctx context.Context, exec ExecFunc, o PushOptions) ([]string, error) {
+	if o.Dest == "" {
+		o.Dest = DefaultDest
+	}
+	x, err := Retry(ctx, max(o.Retries, 1), func() (computeapi.RunTargetExec, error) {
+		return exec(ctx, computeapi.ExecRunTargetRequest{Argv: Script(shHave, o.Dest, o.Base), TimeoutS: ChunkTimeoutS})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if x.Exit != 0 {
+		return nil, BoxErr("the box cannot say what it holds", x)
+	}
+	var out []string
+	for _, f := range strings.Fields(x.Stdout) {
+		if isID(f) && len(out) < HaveMax {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+// MakeAndPush asks the box what it holds (Have), bundles mo against it
+// (Make: only what the commit adds) and pushes that (Push). made, when set,
+// hears each bundle before it is sent. A bundle the box refuses for lack of
+// its base, or one built on a base that is over the limit, is made again
+// whole and pushed once more.
+func MakeAndPush(ctx context.Context, exec ExecFunc, mo MakeOptions, po PushOptions, made func(*Bundle)) (Result, error) {
+	if !mo.Full {
+		mo.Have, _ = Have(ctx, exec, po) // none: the whole commit goes in
+	}
+	res, err := makeAndPush(ctx, exec, mo, po, made)
+	// A thin bundle carries the history since its base: over the limit (an old
+	// base, a churning file), the whole commit may still fit.
+	if (errors.Is(err, errBaseGone) || api.IsCode(err, api.CodeTooLarge)) && len(mo.Have) > 0 {
+		mo.Have = nil
+		res, err = makeAndPush(ctx, exec, mo, po, made)
+	}
+	return res, err
+}
+
+func makeAndPush(ctx context.Context, exec ExecFunc, mo MakeOptions, po PushOptions, made func(*Bundle)) (Result, error) {
+	b, err := Make(ctx, mo)
+	if err != nil {
+		return Result{}, err
+	}
+	defer b.Close()
+	if made != nil {
+		made(b)
+	}
+	return Push(ctx, exec, b, po)
 }
 
 // Script is the argv of a box script with literal arguments ($1...): no

@@ -185,7 +185,7 @@ type SizeResult struct {
 	Bound       bool              `json:"bound"`
 	Error       string            `json:"error,omitempty"` // why it stayed unbound
 	// StillBound: this run failed, but a binding of the name from an earlier
-	// run remains (share never unbinds).
+	// run remains.
 	StillBound bool   `json:"still_bound,omitempty"`
 	Output     string `json:"output,omitempty"`
 }
@@ -843,6 +843,9 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 				}
 				sr.Error = fmt.Sprintf("conformance failed at %s (exit %d)", f, r.Exit)
 			}
+			if conformance.Late(r.Stdout) {
+				sr.Error += "; " + busyHint
+			}
 			continue
 		case namedNet && (o.Full || i == 0) && !strings.Contains(r.Stdout, mailPassed):
 			sr.Error = fmt.Sprintf("no outbound-mail check passed on oci network %q: none of --net-mail %s opened from this machine, so nothing was proven; try a mail server this machine reaches on port 25, 465 or 587 (your mail provider's submission server, e.g. smtp.<provider>:587)%s",
@@ -854,8 +857,15 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	return res, nil
 }
 
+// busyHint follows a conformance failure in which a driver call ran past its
+// time limit: on a machine busy with other work that is a timing failure, not
+// a fault of the driver, and a quiet run passes.
+const busyHint = "a driver call ran past its time limit, which happens when the machine is busy with other work (another share, an image pull): run this again once the machine is quiet"
+
 // Bind binds each size Check passed (o.Pool: machine-level, shared with it)
 // and says of each size that stayed unbound whether an older binding remains.
+// An earlier size no box fits on this machine any more is unbound
+// (dropUnfit), with a note.
 func Bind(ctx context.Context, b Binder, o ShareOptions, res ShareResult) ShareResult {
 	existing := map[string]bool{}
 	if l, ok := b.(lister); ok {
@@ -903,6 +913,9 @@ func Bind(ctx context.Context, b Binder, o ShareOptions, res ShareResult) ShareR
 			}
 		}
 	}
+	if !res.DryRun {
+		res.Notes = append(res.Notes, dropUnfit(ctx, b, o, res.Layer)...)
+	}
 	return res
 }
 
@@ -947,6 +960,11 @@ func chooseLayer(o ShareOptions) (Layer, error) {
 			}
 			// A Mac has one layer, Tart: say what it lacks (Softnet, Tart itself) instead of pointing at doctor.
 			if c, found := o.Report.Layer("tart"); found && c.Supported && o.Report.OS == "darwin" && len(c.Problems) > 0 {
+				return l, notReady(c)
+			}
+			// Linux lends through oci today: say what it lacks (Kata without
+			// passwordless sudo has no root step, only a fix to name).
+			if c, found := o.Report.Layer("oci"); found && c.Supported && o.Report.OS == "linux" && len(c.Problems) > 0 {
 				return l, notReady(c)
 			}
 			return l, errors.New("no layer can lend this machine: run `zm host doctor` for what is missing")

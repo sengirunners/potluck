@@ -2,10 +2,17 @@
 // content last changed in a way a search engine should recrawl; it is committed here, never read from git or the clock.
 // Blog posts are not listed here: each carries its own `date` and `updated` (content/blog/<slug>.md).
 import { INSTALLER_URL } from "../src/install.js";
+import { MEZZE_URL } from "../src/mezze-redirect.js";
 
 export const ORIGIN = "https://potluck.sh";
 export const REPO = "https://github.com/sengirunners/potluck";
 export const SENGI = "https://sengi.run";
+
+// Mezze's own site, which every potluck.sh page links to: the address is the one /mezze redirects to, and each page
+// names it in words that say what it is.
+export { MEZZE_URL };
+export const MEZZE_FOOTER_TEXT = "Mezze: mail and work items for coding agents";
+export const MEZZE_NAV_TEXT = "Mezze for agents";
 
 export const INSTALL = `curl -fsSL ${INSTALLER_URL} | sh`;
 
@@ -29,7 +36,7 @@ export const GOOGLE_SITE_VERIFICATION = "VtxYvTdYwVWYZa_DXm-MVSC0k4lRAy65l4ujzYZ
 // `headline` is the page's h1 (public/index.html), which its share image carries; `title` is the <title>.
 export const HOME = {
   path: "/",
-  lastmod: "2026-11-17",
+  lastmod: "2026-11-18",
   title: "Potluck: self-hosted GitHub Actions runners and AI agent sandboxes on your team's idle machines",
   headline: "Put your team's idle machines to work.",
   description:
@@ -47,4 +54,4 @@ export const BLOG = {
 export const PAGES = [HOME];
 
 /** Page slugs content/pages/ may not take: hand-written files, generated ones, and the Worker's routes. */
-export const RESERVED_SLUGS = ["index", "thanks", "blog", "feed", "sitemap", "robots", "llms", "llms-full", "og", "fonts", "api", "home"];
+export const RESERVED_SLUGS = ["index", "thanks", "join", "blog", "feed", "sitemap", "robots", "llms", "llms-full", "og", "fonts", "api", "home", "mezze"];

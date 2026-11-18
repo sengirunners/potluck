@@ -820,7 +820,9 @@ func (b *Bus) logs(sc authz.Scope, project string) []logDB {
 
 // Since returns stored events after the cursor (an event id; "" = from the
 // start) that sub may read and f matches, oldest first, at most limit
-// (default 500), redacted for sub.
+// (default 500), redacted for sub. Fewer than limit means the log holds no
+// more such events: stored events sub may not see are skipped page by page,
+// never counted against limit (zm-p7fk).
 func (b *Bus) Since(ctx context.Context, sub0 *authz.Subject, after string, f Filter, limit int) ([]api.Event, error) {
 	if limit <= 0 {
 		limit = 500
@@ -829,9 +831,69 @@ func (b *Bus) Since(ctx context.Context, sub0 *authz.Subject, after string, f Fi
 		return nil, api.Errorf(api.CodeBadRequest, "bad event cursor %q (want an event id)", after)
 	}
 	sc := sub0.Scope
-	var all []stored
-	for _, l := range b.logs(sc, f.Project) {
-		q := `SELECT json, mentions, audience FROM events WHERE id > ?`
+	owner, personal := OwnerReader(sub0), authz.PersonalMailReader(sub0)
+	// Hidden rows are read in raw pages of at least sinceScan, apart from
+	// the answer's limit, and a log is dropped once it has nothing left.
+	scan := max(limit, sinceScan)
+	logs := b.logs(sc, f.Project)
+	out := make([]api.Event, 0, min(limit, 64))
+	for len(logs) > 0 {
+		raw, more, err := sinceRaw(ctx, sc, logs, after, f, scan)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range raw {
+			if len(out) == limit {
+				return out, nil
+			}
+			after = r.id
+			x, ok := r.decode()
+			if !ok {
+				continue // unreadable: never delivered, but the cursor moves past it
+			}
+			if e, ok := b.deliverable(x, sc, sub0.Address, owner, f, personal); ok {
+				out = append(out, e)
+			}
+		}
+		logs = more
+	}
+	return out, nil
+}
+
+// sinceScan is the least number of raw rows Since reads from a log at once.
+const sinceScan = 500
+
+// rawRow is one stored event as read from a log, decoded only when used.
+type rawRow struct {
+	id, js, ms, au string
+}
+
+func (r rawRow) decode() (stored, bool) {
+	var x stored
+	if json.Unmarshal([]byte(r.js), &x.ev) != nil {
+		return x, false
+	}
+	_ = json.Unmarshal([]byte(r.ms), &x.mentions)
+	if r.au != "" {
+		x.audience = &Audience{}
+		if json.Unmarshal([]byte(r.au), x.audience) != nil {
+			x.audience.Need = authz.Admin // unreadable: fail closed
+		}
+	}
+	return x, true
+}
+
+// sinceRaw returns the first n stored events after the cursor over logs,
+// oldest first, filtered only by what SQL can (areas, subject, types), and
+// the logs that may hold more after the last of them. Each log gives at most
+// n rows, so the first n of their union are complete: no event of any log
+// falls between them.
+func sinceRaw(ctx context.Context, sc authz.Scope, logs []logDB, after string, f Filter, n int) ([]rawRow, []logDB, error) {
+	var all []rawRow
+	full := make([]bool, len(logs))
+	last := make([]string, len(logs))
+	for i, l := range logs {
+		q := `SELECT id, json, mentions, audience FROM events WHERE id > ?`
 		args := []any{after}
 		if l.project != api.ProjectNone {
 			w, a := sc.AreaSQL(l.project, "area", authz.Read)
@@ -851,47 +913,42 @@ func (b *Bus) Since(ctx context.Context, sub0 *authz.Subject, after string, f Fi
 			q += " AND (" + strings.Join(or, " OR ") + ")"
 		}
 		q += " ORDER BY id LIMIT ?"
-		args = append(args, limit)
+		args = append(args, n)
 		rows, err := l.db.QueryContext(ctx, q, args...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		got := 0
 		for rows.Next() {
-			var js, ms, au string
-			if err := rows.Scan(&js, &ms, &au); err != nil {
+			var r rawRow
+			if err := rows.Scan(&r.id, &r.js, &r.ms, &r.au); err != nil {
 				rows.Close()
-				return nil, err
+				return nil, nil, err
 			}
-			var x stored
-			if json.Unmarshal([]byte(js), &x.ev) != nil {
-				continue
-			}
-			_ = json.Unmarshal([]byte(ms), &x.mentions)
-			if au != "" {
-				x.audience = &Audience{}
-				if json.Unmarshal([]byte(au), x.audience) != nil {
-					x.audience.Need = authz.Admin // unreadable: fail closed
-				}
-			}
-			all = append(all, x)
+			all = append(all, r)
+			last[i] = r.id
+			got++
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
+		}
+		full[i] = got == n
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].id < all[j].id })
+	if len(all) > n {
+		all = all[:n]
+	}
+	var more []logDB
+	for i, l := range logs {
+		// A log may hold more if it filled its page, or if the cut left
+		// some of its rows unread.
+		if full[i] || (len(all) > 0 && last[i] > all[len(all)-1].id) {
+			more = append(more, l)
 		}
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].ev.ID < all[j].ev.ID })
-	out := make([]api.Event, 0, min(len(all), limit))
-	for _, x := range all {
-		if len(out) == limit {
-			break
-		}
-		if e, ok := b.deliverable(x, sc, sub0.Address, OwnerReader(sub0), f, authz.PersonalMailReader(sub0)); ok {
-			out = append(out, e)
-		}
-	}
-	return out, nil
+	return all, more, nil
 }
 
 // ErrStop can be returned from a ReadSSE callback to end reading without error.

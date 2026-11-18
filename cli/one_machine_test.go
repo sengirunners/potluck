@@ -41,6 +41,25 @@ func TestOneMachineTrialWithoutTailscale(t *testing.T) {
 // default): sandboxes on one machine, as the one-machine trial makes them.
 func onePoolMachine(t *testing.T, images ...string) *machine {
 	t.Helper()
+	m := soloMachine(t, "")
+	if out := m.ok(t, "create", "--via", "tunnel", "trial"); !strings.Contains(out, "pool trial is ready") {
+		t.Fatalf("create:\n%s", out)
+	}
+	args := []string{"host", "--sizes", "c1m2", "--name-prefix", "solo", "--reclaim-idle-s", "0", "--no-sudo"}
+	for _, im := range images {
+		args = append(args, "--image", im)
+	}
+	if out := m.ok(t, args...); !strings.Contains(out, "shared solo-c1m2") {
+		t.Fatalf("host:\n%s", out)
+	}
+	return m
+}
+
+// soloMachine is a Linux machine named solo, in no pool, that shares
+// itself with the reference driver (with bug, "" for none): every check it
+// runs passes.
+func soloMachine(t *testing.T, bug string) *machine {
+	t.Helper()
 	oldBeat, oldRunner, oldDetect, oldDriver := teamlink.BeatEvery, shareRunner, detectHost, shareDriver
 	t.Cleanup(func() {
 		teamlink.BeatEvery, shareRunner, detectHost, shareDriver = oldBeat, oldRunner, oldDetect, oldDriver
@@ -58,7 +77,7 @@ func onePoolMachine(t *testing.T, images ...string) *machine {
 	m := startMachine(t, tailnettest.New(), "solo", "judy@example.com")
 	fix, _ := filepath.EvalSymlinks(t.TempDir())
 	state := filepath.Join(fix, "state")
-	drv, err := refdriver.Install(fix, state, "")
+	drv, err := refdriver.Install(fix, state, bug)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,16 +91,5 @@ func onePoolMachine(t *testing.T, images ...string) *machine {
 		t.Fatal(err)
 	}
 	t.Cleanup(beat(module[*teamlink.Service](t, m)))
-
-	if out := m.ok(t, "create", "--via", "tunnel", "trial"); !strings.Contains(out, "pool trial is ready") {
-		t.Fatalf("create:\n%s", out)
-	}
-	args := []string{"host", "--sizes", "c1m2", "--name-prefix", "solo", "--reclaim-idle-s", "0", "--no-sudo"}
-	for _, im := range images {
-		args = append(args, "--image", im)
-	}
-	if out := m.ok(t, args...); !strings.Contains(out, "shared solo-c1m2") {
-		t.Fatalf("host:\n%s", out)
-	}
 	return m
 }

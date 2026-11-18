@@ -249,9 +249,9 @@ func AcquireBox(ctx context.Context, c *client.Client, w BoxWant, req computeapi
 }
 
 // Sandboxes lists the handles of every box binding the caller can see,
-// newest first; live keeps only those not yet ended. A binding that does not
-// answer is named in skipped, never silently left out.
-func Sandboxes(ctx context.Context, c *client.Client, live bool) (hs []computeapi.RunTargetHandle, skipped []string, err error) {
+// newest first, narrowed by f. A binding that does not answer is named in
+// skipped, never silently left out.
+func Sandboxes(ctx context.Context, c *client.Client, f HandleFilter) (hs []computeapi.RunTargetHandle, skipped []string, err error) {
 	l, err := RunTargets(ctx, c, false)
 	if err != nil {
 		return nil, nil, err
@@ -261,7 +261,7 @@ func Sandboxes(ctx context.Context, c *client.Client, live bool) (hs []computeap
 		if t.Kind != "box" {
 			continue
 		}
-		got, err := RunTargetHandles(ctx, c, t.Name, live)
+		got, err := ListHandles(ctx, c, t.Name, f)
 		if err != nil {
 			skipped = append(skipped, t.Name+": "+err.Error())
 			continue

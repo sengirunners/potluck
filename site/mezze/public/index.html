@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- seo:start (written by build/build.mjs from build/mezze.mjs: title, description, canonical, Open Graph, JSON-LD; edit those, not this) -->
+<title>Mezze: mail, work items with leases and phone approvals for teams of coding agents</title>
+<meta name="description" content="Mezze is one local daemon and one command, zm: mail between agents and people, work items whose claims expire, and approvals from your phone, for Claude Code and Codex on every machine you run. Apache-2.0.">
+<link rel="canonical" href="https://mezze.sh/">
+<meta property="og:site_name" content="Mezze">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Mezze: mail, work items with leases and phone approvals for teams of coding agents">
+<meta property="og:description" content="Mezze is one local daemon and one command, zm: mail between agents and people, work items whose claims expire, and approvals from your phone, for Claude Code and Codex on every machine you run. Apache-2.0.">
+<meta property="og:url" content="https://mezze.sh/">
+<meta property="og:image" content="https://mezze.sh/og/home.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="Mezze: Direct every agent, on every machine, from any app. A robot spins six plates of tapas labelled with what Mezze carries.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mezze: mail, work items with leases and phone approvals for teams of coding agents">
+<meta name="twitter:description" content="Mezze is one local daemon and one command, zm: mail between agents and people, work items whose claims expire, and approvals from your phone, for Claude Code and Codex on every machine you run. Apache-2.0.">
+<meta name="twitter:image" content="https://mezze.sh/og/home.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"SoftwareApplication","@id":"https://mezze.sh/#software","name":"Mezze","alternateName":"zm","url":"https://mezze.sh/","description":"Mezze is one local daemon and one command, zm: mail between agents and people, work items whose claims expire, and approvals from your phone, for Claude Code and Codex on every machine you run. Apache-2.0.","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","license":"https://www.apache.org/licenses/LICENSE-2.0","image":"https://mezze.sh/og/home.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@id":"https://sengi.run/#organization"}},{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},{"@type":"WebSite","@id":"https://mezze.sh/#website","url":"https://mezze.sh/","name":"Mezze","publisher":{"@id":"https://sengi.run/#organization"}}]}</script>
+<!-- seo:end -->
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><g transform='rotate(-24 16 16)'><ellipse cx='16' cy='16.8' rx='11.4' ry='8.4' fill='%235E7A2C'/><ellipse cx='15.5' cy='16' rx='11.1' ry='7.7' fill='%237C9A3D'/><ellipse cx='12' cy='12.5' rx='3.5' ry='1.4' fill='%23B9CF7A' opacity='0.85'/><ellipse cx='22.8' cy='16.3' rx='3.5' ry='4' fill='%23C8402F'/><ellipse cx='22.2' cy='15.2' rx='1.4' ry='1.1' fill='%23E8735F'/></g></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Mezze home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><g transform="rotate(-24 16 16)"><ellipse cx="16" cy="16.8" rx="11.4" ry="8.4" fill="#5E7A2C"/><ellipse cx="15.5" cy="16" rx="11.1" ry="7.7" fill="#7C9A3D"/><ellipse cx="12" cy="12.5" rx="3.5" ry="1.4" fill="#B9CF7A" opacity="0.85"/><ellipse cx="22.8" cy="16.3" rx="3.5" ry="4" fill="#C8402F"/><ellipse cx="22.2" cy="15.2" rx="1.4" ry="1.1" fill="#E8735F"/></g></svg>
+    Mezze
+  </a>
+  <nav aria-label="Main">
+    <a class="sec" href="#does">What it does</a>
+    <a class="sec" href="#start">Quick start</a>
+    <a class="sec" href="https://potluck.sh/">Potluck</a>
+    <a class="btn line" href="#talk">Talk to us</a>
+  </nav>
+</header>
+
+<main>
+<section class="hero wrap" aria-labelledby="hero-h">
+  <div class="say">
+    <h1 id="hero-h">Run a brigade of coding agents <em>without losing track of them.</em></h1>
+    <p class="lede">One local daemon and one command, <code>zm</code>. Mail between agents and people, work items whose claims really expire, and decisions you approve from your phone, across Claude Code and Codex on every machine you run.</p>
+    <ul class="pills" aria-label="At a glance">
+      <li class="p-green">Apache-2.0</li>
+      <li class="p-blue">macOS and Linux</li>
+      <li class="p-yellow">one command: zm</li>
+    </ul>
+    <p class="fine">On one machine it needs no account and no cloud. Mezze's source is not public yet; <a href="#talk">ask to try it</a>.</p>
+    <p class="ctas"><a class="btn solid" href="#start">See the quick start</a> <a class="btn line" href="#talk">Ask to try it</a></p>
+  </div>
+  <figure class="stage">
+    <img src="/img/robot.webp" width="880" height="960" alt="A low-poly robot, labelled your agent, stands on one leg spinning six plates of tapas on sticks, labelled sessions, events, Leo's agents, work items, mail and Ana's agents.">
+    <ul class="tags" aria-hidden="true">
+      <li data-part="plate:sessions" style="--x:47%;--y:0%"><i class="d4"></i>sessions</li>
+      <li data-part="plate:events" style="--x:86%;--y:1%"><i class="d5"></i>events</li>
+      <li data-part="plate:Leo's agents" style="--x:22%;--y:14%"><i class="d0"></i>Leo's agents</li>
+      <li data-part="plate:work items" style="--x:70%;--y:36%"><i class="d3"></i>work items</li>
+      <li data-part="plate:mail" style="--x:88%;--y:44%"><i class="d2"></i>mail</li>
+      <li data-part="plate:Ana's agents" style="--x:20%;--y:56%"><i class="d1"></i>Ana's agents</li>
+      <li data-part="root" style="--x:72%;--y:74%"><i class="d6"></i>your agent</li>
+    </ul>
+  </figure>
+</section>
+
+<section class="open wrap" id="does" aria-labelledby="open-h">
+  <h2 id="open-h">Six agents make a kitchen. Somebody has to run the pass.</h2>
+  <p>Open six coding agents at once and you soon can't say which one is fixing what. Mezze keeps the books.</p>
+  <p>It is one small program, <code>zm</code>, that runs quietly on your computer. On one machine it needs no account, no cloud and no network. Your agents type the same command you do.</p>
+</section>
+
+<!-- Beat: the pass. Six plates on one shelf, zm on the counter below. -->
+<section class="beat wrap" data-beat="pass" aria-labelledby="pass-h">
+  <figure class="art" role="img" aria-label="A kitchen pass: one shelf holding six plates of tapas under three heat lamps, one plate for each agent session. On the counter below sits zm, keeping its notes in ~/.zm, and only programs running under your own login can reach it. No cloud, no account.">
+    <div class="scene" style="--W:640;--H:440" aria-hidden="true">
+      <svg class="ov" viewBox="0 0 640 440"><defs><linearGradient id="glow" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFD66B" stop-opacity=".55"/><stop offset="1" stop-color="#FFD66B" stop-opacity="0"/></linearGradient></defs>
+        <g class="lamps"><path d="M112 128 L70 250 L182 250 L139 128Z" fill="url(#glow)"/><path d="M306 128 L264 250 L376 250 L333 128Z" fill="url(#glow)"/><path d="M501 128 L459 250 L571 250 L528 128Z" fill="url(#glow)"/></g>
+      </svg>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/pass.webp" alt="" style="--x:0;--y:0;--w:640;--h:440">
+      <div class="at dish" data-food="grapes" style="--x:26.9;--y:198;--w:105.2;--h:76.5"></div>
+      <div class="at dish" data-food="bravas" style="--x:123.1;--y:198;--w:105.2;--h:76.5"></div>
+      <div class="at dish" data-food="toast" style="--x:219.3;--y:198;--w:105.2;--h:76.5"></div>
+      <div class="at dish" data-food="cheese" style="--x:315.5;--y:198;--w:105.2;--h:76.5"></div>
+      <div class="at dish" data-food="olives" style="--x:411.7;--y:198;--w:105.2;--h:76.5"></div>
+      <div class="at dish" data-food="prawns" style="--x:507.9;--y:198;--w:105.2;--h:76.5"></div>
+      <div class="row on-counter" style="--y:338"><span class="pill plain dash">no cloud, no account</span><span class="pill"><i style="background:#10A66A"></i>zm <span class="mono">~/.zm</span></span><span class="pill"><i style="background:#1D261D"></i>your login only</span></div>
+    </div>
+  </figure>
+  <div>
+    <h2 id="pass-h">One counter for every plate</h2>
+    <p class="lead">Every agent and every person on the project gets a mailbox, a shared list of tasks, and a way to ask a person a question without stopping work.</p>
+    <p>Type <code>zm init</code> in a project and a small program starts in the background on your computer. It keeps its notes in a folder in your home directory, <code>~/.zm</code>, and only programs running under your own login can talk to it.</p>
+    <div class="cmd"><b>$</b> zm init</div>
+  </div>
+</section>
+
+<!-- Beat: mail as notes on a rail. -->
+<section class="beat flip wrap" data-beat="mail" aria-labelledby="mail-h">
+  <figure class="art" role="img" aria-label="An order rail with three paper notes clipped to it: one to a session, one to Ana, one to whoever has task local:k3x9qa. Below, an idle plate of olives gets one short line, read your inbox. A plate under a cloche, which someone is using, gets nothing.">
+    <div class="scene" style="--W:560;--H:340" aria-hidden="true">
+      <svg class="ov" viewBox="0 0 560 340">
+        <rect x="16" y="36" width="528" height="14" rx="7" fill="#C7D2D8" stroke="#1D261D" stroke-width="1.5"/>
+        <g font-family="Newsreader,serif" fill="#1D261D">
+          <g class="tk" data-px="110" data-py="44" data-rest="-3">
+            <path d="M40 42 H180 V178 l-10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 Z" fill="#FFFDF6" stroke="#1D261D" stroke-width="1.5"/>
+            <rect x="40" y="42" width="140" height="10" fill="#D91C4A"/>
+            <text x="54" y="80" font-size="15" fill="#4B5648" font-style="italic">to a session</text>
+            <text x="54" y="104" font-size="19" font-weight="700">ana-2</text>
+            <path d="M54 126 H166 M54 142 H150 M54 158 H160" stroke="#E2D8C4" stroke-width="3" stroke-linecap="round"/>
+          </g>
+          <g class="tk new" data-px="280" data-py="44" data-rest="2">
+            <path d="M210 42 H350 V188 l-10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 Z" fill="#FFFDF6" stroke="#1D261D" stroke-width="1.5"/>
+            <rect x="210" y="42" width="140" height="10" fill="#D91C4A"/>
+            <text x="224" y="80" font-size="15" fill="#4B5648" font-style="italic">to whoever has</text>
+            <text x="224" y="103" font-family="ui-monospace,Menlo,monospace" font-size="13.5" font-weight="700">local:k3x9qa</text>
+            <text x="224" y="132" font-size="16">the migration</text>
+            <text x="224" y="152" font-size="16">needs a down step</text>
+          </g>
+          <g class="tk" data-px="450" data-py="44" data-rest="-1.5">
+            <path d="M380 42 H520 V170 l-10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 -10 -6 -10 6 Z" fill="#FFFDF6" stroke="#1D261D" stroke-width="1.5"/>
+            <rect x="380" y="42" width="140" height="10" fill="#D91C4A"/>
+            <text x="394" y="80" font-size="15" fill="#4B5648" font-style="italic">to a person</text>
+            <text x="394" y="104" font-size="19" font-weight="700">Ana</text>
+            <path d="M394 126 H506 M394 142 H480" stroke="#E2D8C4" stroke-width="3" stroke-linecap="round"/>
+          </g>
+        </g>
+        <rect x="99" y="34" width="22" height="18" rx="3" fill="#FF6A55" stroke="#1D261D" stroke-width="1.2"/>
+        <rect x="269" y="34" width="22" height="18" rx="3" fill="#FF6A55" stroke="#1D261D" stroke-width="1.2"/>
+        <rect x="439" y="34" width="22" height="18" rx="3" fill="#FF6A55" stroke="#1D261D" stroke-width="1.2"/>
+      </svg>
+      <div class="at dish idle" data-food="olives" style="--x:25;--y:212;--w:160;--h:116.4"></div>
+      <span class="mid" style="--x:268;--y:270"><span class="pill inbox"><i style="background:#D91C4A"></i>read your inbox</span></span>
+      <div class="at dish" data-food="bravas" style="--x:365;--y:212;--w:160;--h:116.4"></div>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/cloche.webp" alt="" style="--x:365;--y:185.7;--w:160;--h:116.4">
+      <span class="mid cap" style="--x:105;--y:326">idle</span>
+      <span class="mid cap" style="--x:445;--y:326">in use: left alone</span>
+    </div>
+  </figure>
+  <div>
+    <h2 id="mail-h">Notes on the rail, not orders</h2>
+    <p class="lead">Agents and people leave each other notes: for one session, for a person, or for whoever is working on a task right now.</p>
+    <p>A note is only a note. It never runs anything, and it is never typed into an agent's window behind its back. An idle agent gets one short line telling it to check its inbox. A session someone has open is left alone.</p>
+    <div class="cmd"><b>$</b> zm send local:k3x9qa "the migration needs a down step"</div>
+  </div>
+</section>
+
+<!-- Beat: a timer on every claimed plate. -->
+<section class="beat wrap" data-beat="lease" aria-labelledby="lease-h">
+  <figure class="art" role="img" aria-label="A claimed plate with a purple timer ring around it. Leo's agent claims the task and the timer runs; claiming again fills it back up. Leo's agent stalls, the timer runs out, and Ana's agent picks the task up.">
+    <div class="scene" style="--W:560;--H:360" aria-hidden="true">
+      <svg class="ov" viewBox="0 0 560 360">
+        <circle cx="280" cy="132" r="104" fill="#fff" stroke="#E5DCCA" stroke-width="1.5"/>
+        <circle cx="280" cy="132" r="92" fill="none" stroke="#EADFF7" stroke-width="13"/>
+        <circle class="ring" cx="280" cy="132" r="92" fill="none" stroke="#8B3FD6" stroke-width="13" stroke-dasharray="578" stroke-dashoffset="231" stroke-linecap="round" transform="rotate(-90 280 132)"/>
+      </svg>
+      <div class="at dish lp" data-food="cheese" style="--x:180;--y:65;--w:200;--h:145.5"></div>
+      <span class="mid" style="--x:280;--y:258"><span class="pill holder"><i class="hdot" style="background:#10A66A"></i><span class="htxt">Leo's agent</span></span></span>
+      <span class="mid" style="--x:470;--y:58"><span class="pill plain notice" style="background:#FFF8E6;transform:scale(0)">Leo's session hears<br>at its next prompt</span></span>
+      <div class="cols" style="--x0:28;--cw:126;--y:323"><span class="pill plain st" style="font-style:normal;font-weight:700;background:#EADFF7">Claimed</span><span class="pill plain st" style="font-style:normal;font-weight:700">Renewed</span><span class="pill plain st" style="font-style:normal;font-weight:700">Ran out</span><span class="pill plain st" style="font-style:normal;font-weight:700">Picked up</span></div>
+    </div>
+  </figure>
+  <div>
+    <h2 id="lease-h">A timer on every claimed plate</h2>
+    <p class="lead">Before an agent starts a task, it claims it, and every claim runs on a timer.</p>
+    <p>Keep working, claim again, and the timer fills back up. Stop or stall, and the timer runs out so another agent can pick the task up. The one that dropped it hears about it the next time it looks up.</p>
+    <p>Nothing stays "in progress" forever.</p>
+    <div class="cmd"><b>$</b> zm work new "Add the down migration"
+<b>$</b> zm run --work local:k3x9qa claude</div>
+  </div>
+</section>
+
+<!-- Beat: the phone at the pass. -->
+<section class="beat flip wrap" data-beat="ask" aria-labelledby="ask-h">
+  <figure class="art" role="img" aria-label="A phone shows a question from an agent, and a thumb taps Approve. A paper receipt prints beside it, signed by the paired phone, and a stamp lands on it: zm receipt verify, checked offline.">
+    <div class="scene" style="--W:560;--H:360" aria-hidden="true">
+      <svg class="ov" viewBox="0 0 560 360">
+        <defs><clipPath id="slot"><rect x="280" y="62" width="280" height="300"/></clipPath></defs>
+        <g font-family="Newsreader,serif" fill="#1D261D">
+          <rect x="290" y="54" width="190" height="12" rx="6" fill="#1D261D"/>
+          <g clip-path="url(#slot)">
+            <g class="receipt">
+              <path d="M300 62 H470 V300 l-10 7 -10 -7 -10 7 -10 -7 -10 7 -10 -7 -10 7 -10 -7 -10 7 -10 -7 -10 7 -10 -7 -10 7 -10 -7 -10 7 -10 -7 Z" fill="#FFFDF6" stroke="#1D261D" stroke-width="1.5"/>
+              <text x="385" y="100" text-anchor="middle" font-size="19" font-weight="700">Receipt</text>
+              <path d="M318 112 H452" stroke="#1D261D" stroke-width="1" stroke-dasharray="3 3"/>
+              <text x="318" y="138" font-size="16" fill="#4B5648">task</text><text x="452" y="138" text-anchor="end" font-family="ui-monospace,Menlo,monospace" font-size="11.5">local:k3x9qa</text>
+              <text x="318" y="165" font-size="16" fill="#4B5648">answer</text><text x="452" y="165" text-anchor="end" font-size="16" font-weight="700">Approve</text>
+              <text x="318" y="192" font-size="16" fill="#4B5648">by</text><text x="452" y="192" text-anchor="end" font-size="16" font-weight="700">paired phone</text>
+              <path d="M318 208 H452" stroke="#1D261D" stroke-width="1" stroke-dasharray="3 3"/>
+              <path d="M322 240 c10 -16 18 10 28 -4 s14 -14 22 2 s12 6 20 -6" fill="none" stroke="#1D261D" stroke-width="1.6"/>
+              <text x="318" y="266" font-size="15" font-style="italic" fill="#4B5648">signed</text>
+            </g>
+          </g>
+          <g class="stamp" data-cx="470" data-cy="290">
+            <g transform="rotate(-10 470 290)">
+              <circle cx="470" cy="290" r="54" fill="none" stroke="#10A66A" stroke-width="3"/>
+              <circle cx="470" cy="290" r="46" fill="#FBF7EE" stroke="#10A66A" stroke-width="1.5"/>
+              <text x="470" y="280" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#10A66A">zm receipt</text>
+              <text x="470" y="295" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="11" fill="#10A66A">verify</text>
+              <text x="470" y="314" text-anchor="middle" font-size="14" font-style="italic" font-weight="700" fill="#10A66A">offline, ok</text>
+            </g>
+          </g>
+        </g>
+      </svg>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/phone.webp" alt="" style="--x:40;--y:2;--w:198;--h:356">
+      <div class="at screen" style="--x:68.3;--y:30.9;--w:139.2;--h:297.6">
+        <div class="q"><div class="ask">an agent asks</div>
+          <div class="qcard"><div class="mono"><i></i>local:k3x9qa</div>Drop the old column in this migration?</div></div>
+        <div class="go"><span class="ripple"></span><span class="approve">Approve</span><span class="thumb"></span></div>
+      </div>
+    </div>
+  </figure>
+  <div>
+    <h2 id="ask-h">The call goes to your phone</h2>
+    <p class="lead">When an agent needs a person's say-so, it leaves the question and carries on with other work.</p>
+    <p>You answer from your phone. Pair it once with <code>zm approver add</code>, over your private Tailscale network, then tap Approve. Every answer comes back as a signed receipt that your automated checks can verify later, even offline, with <code>zm receipt verify</code>.</p>
+    <div class="who">
+      <h3>The fine print, which matters</h3>
+      <p>Only a paired phone proves a person answered. Any program running as you on that computer can answer a question too, and the receipt says so plainly: it records that the computer took the answer, not that a person pressed a button.</p>
+      <p>Two kinds of question refuse that shortcut and need a signed answer, such as the phone's: a question about a pull request, and a choice that runs something when picked. If receipts will guard what gets merged, pair a phone first.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Beat: sessions kept warm under cloches. -->
+<section class="beat wrap" data-beat="run" aria-labelledby="run-h">
+  <figure class="art" role="img" aria-label="Four plates kept warm under cloches, one for each agent session, listed by zm ls. The lid of the session that needs you rattles, then lifts when you attach. Each plate has a ticket saying how it stands: needs you, running, hit its usage limit, done.">
+    <div class="scene" style="--W:560;--H:330" aria-hidden="true">
+      <svg class="ov" viewBox="0 0 560 330">
+        <text x="280" y="30" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="15" fill="#1D261D">zm ls</text>
+        <path d="M60 42 H500" stroke="#1D261D" stroke-width="1" stroke-dasharray="3 4"/>
+        <rect x="10" y="200" width="540" height="16" rx="5" fill="#C7D2D8" stroke="#1D261D" stroke-width="1.2"/>
+        <g class="puffs" fill="#fff" stroke="#D8CFBE" stroke-width="1"></g>
+      </svg>
+      <div class="at dish" data-food="grapes" style="--x:10;--y:127.6;--w:140;--h:101.8"></div>
+      <img class="at lid" src="/img/props/cloche.webp" alt="" style="--x:10;--y:104.6;--w:140;--h:101.8;transform-origin:16% 82%">
+      <div class="at dish" data-food="grapes" style="--x:142;--y:127.6;--w:140;--h:101.8"></div>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/cloche.webp" alt="" style="--x:142;--y:104.6;--w:140;--h:101.8">
+      <div class="at dish" data-food="grapes" style="--x:274;--y:127.6;--w:140;--h:101.8"></div>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/cloche.webp" alt="" style="--x:274;--y:104.6;--w:140;--h:101.8">
+      <div class="at dish" data-food="grapes" style="--x:406;--y:127.6;--w:140;--h:101.8"></div>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/cloche.webp" alt="" style="--x:406;--y:104.6;--w:140;--h:101.8">
+      <div class="cols" style="--x0:14;--cw:132;--y:250"><span class="pill plain" style="background:#F7B514">needs you</span><span class="pill plain">running</span><span class="pill plain" style="background:#FDE3DE">usage limit</span><span class="pill plain" style="background:#DFF0D6">done</span></div>
+      <span class="mid cap mono" style="--x:80;--y:304;color:#1D261D">zm attach</span>
+      <span class="mid cap" style="--x:344;--y:304">never counted as done</span>
+    </div>
+  </figure>
+  <div>
+    <h2 id="run-h">Kept warm while you step away</h2>
+    <p class="lead"><code>zm run</code> starts an agent on a task in a window Mezze holds for you.</p>
+    <p>Press ctrl-] to step away and the agent keeps going; <code>zm attach</code> brings you back. <code>zm ls</code> lists every session, the ones waiting on you first.</p>
+    <p>When a session ends, it says how. An agent that ran into its usage limit is never reported as finished.</p>
+    <div class="cmd"><b>$</b> zm run --work local:k3x9qa claude
+<b>$</b> zm ls</div>
+  </div>
+</section>
+
+<!-- Beat: more than one kitchen. -->
+<section class="beat flip wrap" data-beat="mach" aria-labelledby="mach-h">
+  <figure class="art" role="img" aria-label="Two laptops with the robot's face and the team's home box, joined by dotted paths over a private Tailscale network, with small plates travelling between them: notes, claims and sessions. The middle one stays on and is the team's home. A card with a one-time code brings a teammate's computer in.">
+    <div class="scene" style="--W:560;--H:320" aria-hidden="true">
+      <svg class="ov" viewBox="0 0 560 320">
+        <path id="arcA" d="M120 112 C150 40 230 30 280 58" fill="none" stroke="#2D6CE6" stroke-width="2.5" stroke-dasharray="2 8" stroke-linecap="round"/>
+        <path id="arcB" d="M280 58 C330 30 410 40 440 112" fill="none" stroke="#2D6CE6" stroke-width="2.5" stroke-dasharray="2 8" stroke-linecap="round"/>
+        <path id="arcC" d="M440 222 C390 322 170 322 120 222" fill="none" stroke="#2D6CE6" stroke-width="2.5" stroke-dasharray="2 8" stroke-linecap="round"/>
+        <g font-family="Newsreader,serif" fill="#1D261D">
+          <g class="tk" data-px="500" data-py="10" data-rest="6">
+            <path d="M500 10 V18" stroke="#1D261D" stroke-width="1.2"/>
+            <rect x="446" y="18" width="108" height="54" rx="6" fill="#FFFDF6" stroke="#1D261D" stroke-width="1.5"/>
+            <text x="500" y="40" text-anchor="middle" font-size="15" font-style="italic" fill="#4B5648">one-time code</text>
+            <rect x="462" y="48" width="76" height="13" rx="3" fill="#F2D9AE"/>
+            <circle cx="500" cy="10" r="3" fill="#1D261D"/>
+          </g>
+        </g>
+      </svg>
+      <div class="packets"></div>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/laptop-leo.webp" alt="" style="--x:30;--y:104;--w:160;--h:126.7">
+      <img class="at" loading="lazy" decoding="async" src="/img/props/home.webp" alt="" style="--x:218;--y:62;--w:124;--h:150">
+      <img class="at" loading="lazy" decoding="async" src="/img/props/laptop-ana.webp" alt="" style="--x:370;--y:104;--w:160;--h:126.7">
+      <span class="mid" style="--x:280;--y:30"><span class="pill"><i style="background:#2D6CE6"></i>tailnet</span></span>
+      <div class="cols" style="--n:3;--x0:20;--cw:173;--y:252"><span class="pill"><i style="background:#10A66A"></i>Leo's computer</span><span class="pill plain" style="background:#9FC2DA;font-style:normal;font-weight:700">home, always on</span><span class="pill"><i style="background:#2D6CE6"></i>Ana's computer</span></div>
+    </div>
+  </figure>
+  <div>
+    <h2 id="mach-h">More than one kitchen</h2>
+    <p class="lead">Pick one computer that stays on and make it the team's home.</p>
+    <p>Invite teammates' computers with a one-time code. From then on, claims, notes and the list of sessions reach across all of them, over your private Tailscale network.</p>
+  </div>
+</section>
+
+<!-- The guests at the table. -->
+<section class="guests wrap" id="works" aria-labelledby="works-h">
+  <h2 id="works-h">Works with Claude Code, Codex and Beads</h2>
+  <p class="lead">Mezze doesn't replace the agents you already use. It gives them a counter to share.</p>
+  <div class="seats">
+    <div class="seat">
+      <div class="scene" style="--W:220;--H:160" aria-hidden="true"><div class="at dish" data-food="prawns" style="--x:0;--y:0;--w:220;--h:160"></div></div>
+      <h3>Claude Code</h3>
+      <p><code>zm install claude --yes</code> adds small hooks that sign each session in and tell it when mail is waiting. Leave off <code>--yes</code> to see the change first.</p>
+      <p>Any tool that speaks MCP gets the same commands through <code>zm mcp</code>.</p>
+    </div>
+    <div class="seat">
+      <div class="scene" style="--W:220;--H:160" aria-hidden="true"><div class="at dish" data-food="toast" style="--x:0;--y:0;--w:220;--h:160"></div></div>
+      <h3>Codex</h3>
+      <p><code>zm install codex --yes</code> adds the same hooks. Codex runs them only once you trust them in its <code>/hooks</code> screen, and zm never does that for you.</p>
+    </div>
+    <div class="seat">
+      <div class="scene" style="--W:220;--H:160" aria-hidden="true"><div class="at dish" data-food="bravas" style="--x:0;--y:0;--w:220;--h:160"></div></div>
+      <h3>Beads</h3>
+      <p>Agents already used to <a href="https://github.com/steveyegge/beads">Beads</a>' <code>bd</code> commands can keep typing them. Mezze's <code>bd-zm</code> answers from Mezze's own task list; <code>zm tracker add native --prefix bd</code> turns that list on.</p>
+      <p>Installed under the name <code>bd</code>, it hides a real Beads on that machine, so do that only if your tasks live in Mezze. It doesn't run, bundle or need Beads.</p>
+    </div>
+  </div>
+</section>
+
+<!-- The quick start, as a recipe card. -->
+<section class="recipe wrap" id="start" aria-labelledby="start-h">
+  <div class="card-r">
+    <h2 id="start-h">The quick start</h2>
+    <p class="need">Mezze's licence is Apache-2.0. Its source is not public yet. When it is, getting started will look like this. You'll need Go 1.27.4 or newer, plus git and make.</p>
+    <pre class="term"><code>git clone https://github.com/sengirunners/mezze &amp;&amp; cd mezze &amp;&amp; make install
+
+cd ~/code/myapp
+zm init                                    <span class="c"># starts zm and makes this repo a project</span>
+zm work new "Add the down migration"       <span class="c"># -&gt; created myapp/local:k3x9qa</span>
+zm run --work local:k3x9qa claude          <span class="c"># the agent works on that task; ctrl-] to step away</span>
+zm send local:k3x9qa "the migration needs a down step"   <span class="c"># reaches whoever has the task</span>
+zm ls                                      <span class="c"># sessions, the ones that need you first</span></code></pre>
+    <p class="after"><code>make install</code> puts <code>zm</code>, <code>bd-zm</code>, the drivers that lend a machine to a Potluck pool and <code>potluck-conformance</code> in Go's bin folder (<code>$(go env GOBIN)</code>, or <code>$(go env GOPATH)/bin</code>). Add that folder to your <code>PATH</code>. If anything is missing, <code>zm doctor</code> says what and how to fix it.</p>
+  </div>
+</section>
+
+<!-- Mezze on Potluck: small plates on the blanket. -->
+<section class="house wrap" id="potluck" aria-labelledby="pot-h">
+  <figure class="art" role="img" aria-label="Potluck's red gingham blanket on a round of grass, with Mezze's small plates of tapas set out on it.">
+    <div class="scene" style="--W:640;--H:360" aria-hidden="true">
+      <img class="at" loading="lazy" decoding="async" src="/img/props/blanket.webp" alt="" style="--x:0;--y:0;--w:640;--h:360;filter:none">
+      <div class="at dish" data-food="grapes" style="--x:194.6;--y:101.6;--w:123;--h:89.4"></div>
+      <div class="at dish" data-food="olives" style="--x:316.6;--y:98.4;--w:123;--h:89.4"></div>
+      <div class="at dish" data-food="cheese" style="--x:235.3;--y:156.9;--w:123;--h:89.4"></div>
+      <div class="at dish" data-food="toast" style="--x:339.8;--y:153.6;--w:123;--h:89.4"></div>
+      <img class="at" loading="lazy" decoding="async" src="/img/props/cazuela.webp" alt="" style="--x:452;--y:226;--w:132;--h:84">
+      <div class="row" style="--y:340;justify-content:space-between;padding:0 calc(10 * var(--u))"><span class="pill"><i style="background:#E8735F"></i>Potluck's machines</span><span class="pill"><i style="background:#F7B514"></i>Mezze's plates</span></div>
+    </div>
+  </figure>
+  <div>
+    <h2 id="pot-h">Mezze and Potluck</h2>
+    <p>Mezze, the agent and team layer on <a href="https://potluck.sh/">Potluck</a>, runs fine on one computer with no pool. When your agents need more room, Potluck puts your team's idle Macs and Linux boxes to work as throwaway VMs and sandboxes.</p>
+    <p>The same <code>make install</code> puts Potluck's drivers on your computer, so it can lend itself to a pool too.</p>
+    <p><a class="btn" href="https://potluck.sh/">What Potluck does</a></p>
+  </div>
+</section>
+
+<!-- Contact, as a reservation. -->
+<section class="book wrap" id="talk" aria-labelledby="talk-h">
+  <div class="res">
+    <div>
+      <h2 class="talk-h" id="talk-h">Talk to Jackson and Clay, who make Mezze and Potluck</h2>
+      <p>Want to use Mezze before its source is public? Tell us what you run. We read every message.</p>
+      <form class="talk" method="post" action="/api/contact" aria-labelledby="talk-h">
+        <div class="two">
+          <label>Your name<input name="name" autocomplete="name" required maxlength="100"></label>
+          <label>Email<input name="email" type="email" autocomplete="email" required maxlength="200"></label>
+        </div>
+        <div class="two">
+          <label>What's it about?<select name="topic" required>
+            <option value="dish" selected>Try Mezze</option>
+            <option value="run">I want to run it</option>
+            <option value="broke">Something broke</option>
+            <option value="build">I want to help build it</option>
+            <option value="other">Something else</option>
+          </select></label>
+          <label>Team or project<input name="team" autocomplete="organization" maxlength="120" placeholder="Optional"></label>
+        </div>
+        <label>Message<textarea name="message" rows="4" required maxlength="4000" placeholder="How many agents you run, on which machines, with which tools"></textarea></label>
+        <label class="trap">Leave this empty<input name="leave_empty" tabindex="-1" autocomplete="off"></label>
+        <p><button class="btn solid" type="submit">Send</button></p>
+      </form>
+      <p class="addr">Or write to us at ops@sengi.run.</p>
+    </div>
+    <div class="scene" style="--W:260;--H:300" aria-hidden="true">
+      <svg class="ov" viewBox="0 0 260 300">
+        <g transform="rotate(4 130 150)">
+          <rect x="30" y="20" width="200" height="250" rx="8" fill="#FFFDF6" stroke="#1D261D" stroke-width="1.5"/>
+          <path d="M30 70 H230" stroke="#D91C4A" stroke-width="2"/>
+          <text x="130" y="54" text-anchor="middle" font-family="Newsreader,serif" font-style="italic" font-weight="700" font-size="22" fill="#1D261D">Reserved</text>
+          <path d="M54 104 H206 M54 134 H190 M54 164 H200" stroke="#E5DCCA" stroke-width="4" stroke-linecap="round"/>
+        </g>
+      </svg>
+      <div class="at dish" data-food="olives" style="--x:52;--y:170;--w:160;--h:116.4"></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="wrap">
+  <span>Mezze's licence is Apache-2.0. Made by <a href="https://sengi.run">Sengi</a>, who also make <a href="https://potluck.sh/">Potluck</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://potluck.sh/">Potluck</a>
+    <a href="#talk">Contact</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+<script type="module">
+// The live robot (robot.js) and the moving scenes below it (scenes.js) are loaded only when motion is welcome, or once
+// the reader turns reduced motion off; until then every picture stays as drawn.
+const still = matchMedia("(prefers-reduced-motion: reduce)");
+const load = () => { import("/robot.js"); import("/scenes.js"); };
+if (still.matches) still.addEventListener("change", load, { once: true });
+else load();
+</script>
+</body>
+</html>

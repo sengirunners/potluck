@@ -561,7 +561,7 @@ func TestDoctorCoolingMappedBinding(t *testing.T) {
 		t.Fatal(w.Body)
 	}
 	f.deliver(t, "workflow_job", jobEvent("queued", 8001, 130, "acme/app", true, "sengi:c8m32", "linux"))
-	eventually(t, "mapped binding cooling", func() bool { return strings.Contains(f.jobs(t)[8001].Why, "refused a job moments ago") })
+	eventually(t, "mapped binding cooling", func() bool { return strings.Contains(f.jobs(t)[8001].Why, "refused or failed a job moments ago") })
 	j := f.jobs(t)[8001]
 	if j.State != "waiting" || !strings.Contains(j.Why, "no box: ") || !strings.Contains(j.Why, "no capacity") {
 		t.Fatalf("cooldown lost the driver's refusal: %+v", j)
@@ -580,7 +580,7 @@ func TestDoctorCoolingMappedBinding(t *testing.T) {
 		t.Fatalf("cooldown changed or minted another runner: before=%+v after=%+v", j, later)
 	}
 	f.svc.DoctorRead = doctorReader(strings.ReplaceAll(goodDoctorWorkflow, ", sengi,", ", sengi:c8m32,"), false)
-	if c := f.doctor(t, "acme/app").Checks[11]; c.Status != "warn" || !strings.Contains(c.Message, "refused a job moments ago") {
+	if c := f.doctor(t, "acme/app").Checks[11]; c.Status != "warn" || !strings.Contains(c.Message, "refused or failed a job moments ago") {
 		t.Fatalf("%+v", c)
 	}
 }

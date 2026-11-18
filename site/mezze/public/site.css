@@ -1,0 +1,228 @@
+/* mezze.sh. The same family as potluck.sh (cream, Newsreader, ink outlines, the patch colours) with the jewel-tone
+   dot border of Mezze's picture. Newsreader by Production Type, SIL Open Font License 1.1 (fonts/OFL-Newsreader.txt). */
+@font-face{font-family:Newsreader;font-style:normal;font-weight:200 800;font-display:swap;
+  src:url(/fonts/newsreader-roman.woff2) format("woff2")}
+@font-face{font-family:Newsreader;font-style:italic;font-weight:200 800;font-display:swap;
+  src:url(/fonts/newsreader-italic.woff2) format("woff2")}
+
+:root{
+  color-scheme:light;
+  --cream:#FBF7EE; --card:#FFFFFF; --line:#E5DCCA;
+  --ink:#1D261D; --soft:#4B5648; --green:#2F6B34; --olive:#7C9A3D;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --gutter:max(16px,calc((100vw - 1200px) / 2));
+  /* The jewel colours of the picture's dot border, one dot each, 36px apart. */
+  --dots:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='252' height='24'%3E%3Ccircle cx='18' cy='12' r='5' fill='%2310A66A'/%3E%3Ccircle cx='54' cy='12' r='5' fill='%232D6CE6'/%3E%3Ccircle cx='90' cy='12' r='5' fill='%23D91C4A'/%3E%3Ccircle cx='126' cy='12' r='5' fill='%238B3FD6'/%3E%3Ccircle cx='162' cy='12' r='5' fill='%23F7B514'/%3E%3Ccircle cx='198' cy='12' r='5' fill='%230DB3AE'/%3E%3Ccircle cx='234' cy='12' r='5' fill='%23FF6A55'/%3E%3C/svg%3E");
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:16px}
+/* Cream with a soft dot grid, and a row of jewel dots along the top and the bottom. */
+body{background:var(--dots) 0 0/252px 24px repeat-x,
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56'%3E%3Ccircle cx='28' cy='28' r='2' fill='%23EEE4D0'/%3E%3C/svg%3E") 0 24px/56px 56px,var(--cream);
+  color:var(--ink);font-family:Newsreader,"Iowan Old Style","Palatino Linotype",Georgia,serif;font-size:19px;line-height:1.5;font-optical-sizing:auto}
+main,header,footer{overflow-x:clip}
+a{color:var(--green);text-underline-offset:.18em;text-decoration-thickness:1px}
+a:hover{color:var(--ink)}
+:focus-visible{outline:3px solid var(--ink);outline-offset:3px;border-radius:4px}
+code,pre{font-family:var(--mono);font-size:.82em}
+.wrap{padding:0 var(--gutter)}
+
+.btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:17px;font-weight:600;line-height:1;
+  padding:13px 20px;border-radius:999px;text-decoration:none;cursor:pointer;border:1.5px solid var(--ink)}
+.btn.solid{background:var(--ink);color:var(--cream)}
+.btn.solid:hover{background:var(--green);border-color:var(--green);color:#fff}
+.btn.line{background:transparent;color:var(--ink)}
+.btn.line:hover{background:#fff}
+
+.masthead{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-top:44px;padding-bottom:10px}
+.logo{display:flex;align-items:center;gap:9px;font-size:28px;font-weight:700;letter-spacing:-.02em;color:var(--ink);text-decoration:none}
+.logo svg{width:36px;height:36px}
+.masthead nav{display:flex;align-items:center;gap:26px;font-size:17px}
+.masthead nav a{color:var(--ink);text-decoration:none}
+.masthead nav a:hover{text-decoration:underline}
+.masthead nav .btn{padding:10px 16px;font-size:16px}
+
+/* Hero: the words on the left, the robot and its plates on the right. */
+.hero{display:grid;grid-template-columns:minmax(0,6fr) minmax(0,5fr);gap:32px;align-items:center;padding-top:28px;padding-bottom:40px}
+.hero h1{font-size:clamp(40px,4.6vw,66px);line-height:1.02;font-weight:700;letter-spacing:-.028em;margin-bottom:20px}
+.hero h1 em{font-style:normal;color:var(--green)}
+.lede{font-size:21px;line-height:1.45;color:var(--soft);max-width:31em;margin-bottom:20px}
+.lede code{color:var(--ink)}
+.pills{list-style:none;display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px}
+.pills li{font-weight:700;font-size:17px;padding:6px 16px;border-radius:999px}
+.p-green{background:#A9C98A}.p-blue{background:#9FC2DA}.p-yellow{background:#F0CB74}
+.fine{font-size:17px;color:var(--soft);max-width:34em}
+.ctas{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}
+.stage{position:relative;max-width:520px;justify-self:center;width:100%}
+.stage img{display:block;width:100%;height:auto}
+/* The live robot (robot.js) draws over the picture, in the same box and pose, so nothing moves when it arrives. */
+.stage canvas{position:absolute;inset:-8% -14% -2%;width:128%;height:110%;opacity:0;transition:opacity .4s;pointer-events:none}
+.stage.live{cursor:pointer}
+.stage.live canvas{opacity:1}
+/* Hidden by opacity only, so the picture stays in the accessibility tree: the canvas and labels are aria-hidden. */
+.stage.live img{opacity:0;transition:opacity 0s .4s}
+.tags{position:absolute;inset:0;z-index:1;pointer-events:none}
+/* The labels of the picture, beside their plates: white pills with a coloured dot, as on potluck.sh. */
+.tags{list-style:none}
+.tags li{position:absolute;left:var(--x);top:var(--y);transform:translateX(-50%);display:flex;align-items:center;gap:6px;
+  white-space:nowrap;background:#fff;border:1.5px solid var(--ink);border-radius:999px;padding:2px 12px 3px 8px;
+  font-size:15px;font-style:italic;font-weight:600;box-shadow:0 6px 14px -8px rgba(92,74,42,.5)}
+i[class^="d"]{display:inline-block;width:11px;height:11px;border-radius:50%;border:1.2px solid var(--ink);flex:none;font-style:normal}
+.d6{background:#FF6A55}.d0{background:#10A66A}.d1{background:#2D6CE6}.d2{background:#D91C4A}.d3{background:#8B3FD6}.d4{background:#F7B514}.d5{background:#0DB3AE}
+
+h2{font-size:clamp(28px,3vw,38px);line-height:1.1;letter-spacing:-.02em;margin-bottom:14px}
+h3{font-size:21px;line-height:1.2;margin-bottom:8px;display:flex;align-items:center;gap:9px}
+.term{background:#1D261D;color:#F3EEDF;border-radius:14px;padding:20px 22px;overflow-x:auto;line-height:1.6;margin-bottom:14px;font-size:15px}
+.term code{font-size:inherit}
+
+/* Below the hero: the page told in beats, each a small scene of the robot's props. */
+/* The opening: the whole idea of the page in a few plain sentences. */
+.open{padding-top:84px;padding-bottom:28px;text-align:center}
+.open h2{font-size:clamp(36px,4.6vw,62px);line-height:1.03;letter-spacing:-.028em;max-width:14em;margin:0 auto 22px}
+.open p{max-width:31em;margin:0 auto;color:var(--soft);font-size:21px}
+.open p+p{margin-top:14px}
+.open code{color:var(--ink)}
+
+/* A beat: its scene on one side, its words on the other, swapping sides down the page. */
+.beat{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,9fr);gap:64px;align-items:center;padding-top:64px;padding-bottom:64px}
+.beat.flip .art{order:2}
+.beat h2,.house h2,.guests>h2,.recipe h2,.talk-h{font-size:clamp(30px,3.2vw,42px);line-height:1.08;letter-spacing:-.022em;margin-bottom:14px}
+.lead{font-size:23px;line-height:1.4;color:var(--ink);margin-bottom:14px}
+.beat p:not(.lead){color:var(--soft);max-width:30em}
+.beat p+p{margin-top:14px}
+.beat p code,.house p code,.seat p code{color:var(--ink);background:#F3EDDF;padding:1px 5px;border-radius:5px}
+.cmd{background:var(--ink);color:#F3EEDF;border-radius:12px;padding:12px 16px;margin-top:20px;font-family:var(--mono);font-size:14.5px;line-height:1.7;overflow-x:auto;white-space:pre}
+.cmd b{color:#A9C98A;font-weight:600}
+.who{margin-top:22px;background:#FFF8E6;border:1.5px solid var(--ink);border-radius:16px;padding:18px 20px;font-size:17.5px;line-height:1.55;max-width:32em}
+.who h3{font-size:19px;margin-bottom:6px}
+.who p{color:var(--soft)}
+.who p+p{margin-top:8px}
+
+/* A scene: a box of a fixed shape whose parts are placed in its own units (the --W by --H it was drawn at), so it
+   scales as one picture. The props are drawn from the robot's own shapes with its own shader
+   (build/mezze-props.mjs, img/props/); scenes.js moves them. */
+.scene{position:relative;width:100%;aspect-ratio:var(--W)/var(--H);container-type:inline-size;
+  --u:calc(100cqw / var(--W));--fs:max(12px,calc(15 * var(--u)))}
+.scene>.ov{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.at{position:absolute;left:calc(var(--x) * var(--u));top:calc(var(--y) * var(--u));width:calc(var(--w) * var(--u));height:calc(var(--h) * var(--u))}
+img.at{display:block;filter:drop-shadow(0 calc(8 * var(--u)) calc(7 * var(--u)) rgba(92,74,42,.22))}
+.mid{position:absolute;left:calc(var(--x) * var(--u));top:calc(var(--y) * var(--u));transform:translate(-50%,-50%);white-space:nowrap}
+/* A plate: its still picture; scenes.js swaps in its sheet of turns when the scene comes near, then turns it, sways it
+   and lets the pointer push it. */
+.dish{background:no-repeat 0 0/100% 100%;transform-origin:50% 51.5%;cursor:grab;touch-action:pan-y;
+  filter:drop-shadow(0 calc(7 * var(--u)) calc(6 * var(--u)) rgba(92,74,42,.25))}
+.dish[data-food=bravas]{background-image:url(/img/props/plate-bravas.webp)}
+.dish[data-food=toast]{background-image:url(/img/props/plate-toast.webp)}
+.dish[data-food=olives]{background-image:url(/img/props/plate-olives.webp)}
+.dish[data-food=grapes]{background-image:url(/img/props/plate-grapes.webp)}
+.dish[data-food=cheese]{background-image:url(/img/props/plate-cheese.webp)}
+.dish[data-food=prawns]{background-image:url(/img/props/plate-prawns.webp)}
+.dish.grey{filter:saturate(.12) brightness(1.06) drop-shadow(0 calc(7 * var(--u)) calc(6 * var(--u)) rgba(92,74,42,.2))}
+/* Labels, as beside the robot's plates: white pills with a coloured dot, in real text that stays readable. */
+.pill{display:inline-flex;align-items:center;gap:.4em;background:#fff;border:1.5px solid var(--ink);border-radius:999px;
+  padding:.12em .8em .18em .55em;font-style:italic;font-weight:600;font-size:var(--fs);line-height:1.25;box-shadow:0 6px 14px -8px rgba(92,74,42,.5)}
+.pill i{width:.62em;height:.62em;border-radius:50%;border:1.2px solid var(--ink);flex:none}
+.pill.plain{padding-left:.8em}
+.pill.dash{border-style:dashed}
+.row{position:absolute;left:0;right:0;top:calc(var(--y) * var(--u));transform:translateY(-50%);display:flex;flex-wrap:wrap;justify-content:center;gap:calc(10 * var(--u)) calc(14 * var(--u))}
+/* The labels on the pass's counter stay within its front (x 59-581 of the scene's 640) and wrap to a second row before
+   they would run past it; their text never goes under 12px, even where other scenes' labels go to 11. */
+.scene .on-counter{left:calc(66 * var(--u));right:calc(66 * var(--u))}
+.scene .on-counter .pill{--fs:max(12px,calc(15 * var(--u)))}
+.scene .on-counter .mono{font-size:max(12px,calc(var(--fs) * .85))}
+/* Labels in columns, one per thing above them (--n of them from --x0, --cw wide each): they wrap inside their column on a narrow
+   screen instead of running into the next one. */
+.cols{position:absolute;left:calc(var(--x0) * var(--u));top:calc(var(--y) * var(--u));transform:translateY(-50%);display:grid;
+  grid-template-columns:repeat(var(--n,4),calc(var(--cw) * var(--u)));justify-items:center;align-items:center}
+.cols .pill{white-space:normal;text-align:center;justify-content:center;max-width:calc((var(--cw) - 6) * var(--u))}
+@container (max-width:420px){.scene *{--fs:max(11px,calc(15 * var(--u)))}}
+.cap{font-style:italic;color:var(--soft);font-size:var(--fs)}
+.mono{font-family:var(--mono);font-style:normal;font-size:calc(var(--fs) * .85)}
+
+/* The guests: three tools at the table. */
+.guests{padding-top:64px;padding-bottom:64px}
+.guests>.lead{color:var(--soft);max-width:34em}
+.seats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:56px}
+.seat{background:var(--card);border:1.5px solid var(--ink);border-radius:18px;padding:0 24px 24px}
+.seat .scene{width:170px;margin:-52px auto 4px}
+.seat h3{font-size:23px;margin-bottom:6px}
+.seat p{color:var(--soft);font-size:17.5px;line-height:1.55}
+.seat p+p{margin-top:8px}
+
+/* The quick start, as a recipe card pinned to the pass. */
+.recipe{padding-top:48px;padding-bottom:64px}
+.card-r{position:relative;background:#FFFDF6;border:1.5px solid var(--ink);border-radius:6px;padding:32px 34px 30px;max-width:980px;margin:0 auto;
+  background-image:linear-gradient(transparent 0 50px,#F2B8B0 50px 51.5px,transparent 51.5px),repeating-linear-gradient(transparent 0 31px,#E2EAF3 31px 32px);
+  box-shadow:0 22px 40px -30px rgba(29,38,29,.7);transform:rotate(-.4deg)}
+.card-r:before{content:"";position:absolute;top:-14px;left:50%;width:22px;height:22px;margin-left:-11px;border-radius:50%;background:#D91C4A;border:1.5px solid var(--ink)}
+.recipe .need{color:var(--soft);margin:18px 0 14px;max-width:40em}
+.term .c{color:#A8B39E}
+.recipe .after{color:var(--soft);margin-top:16px;max-width:40em}
+.recipe .after code{color:var(--ink)}
+
+/* Mezze on Potluck: the small plates on Potluck's blanket. */
+.house{display:grid;grid-template-columns:minmax(0,11fr) minmax(0,9fr);gap:64px;align-items:center;padding-top:64px;padding-bottom:64px}
+.house p{color:var(--soft);max-width:30em}
+.house p+p{margin-top:14px}
+
+/* Contact, as a reservation card. */
+.book{padding-top:48px;padding-bottom:72px}
+.res{background:var(--card);border:1.5px solid var(--ink);border-radius:18px;padding:32px 34px;display:grid;grid-template-columns:minmax(0,7fr) minmax(0,4fr);gap:36px;align-items:start}
+.res>div>p{color:var(--soft)}
+
+/* The phone's screen, drawn in page text over the rendered phone. */
+.screen{display:flex;flex-direction:column;gap:calc(8 * var(--u));padding:calc(26 * var(--u)) calc(11 * var(--u)) calc(16 * var(--u));font-size:calc(14 * var(--u))}
+.screen .ask{font-style:italic;color:var(--soft);font-size:max(9.5px,calc(14 * var(--u)))}
+.screen .qcard{overflow:hidden;background:#fff;border:1.3px solid var(--ink);border-radius:calc(10 * var(--u));padding:calc(10 * var(--u));font-weight:700;line-height:1.2;font-size:max(10.5px,calc(17 * var(--u)))}
+.screen .qcard .mono{display:flex;align-items:center;gap:.4em;font-weight:400;margin-bottom:.5em;font-size:max(8.5px,calc(11.5 * var(--u)))}
+.screen .qcard .mono i{width:.7em;height:.7em;border-radius:50%;background:#8B3FD6;border:1px solid var(--ink)}
+.screen .go{margin-top:auto;position:relative}
+.screen .approve{display:block;text-align:center;background:#10A66A;color:#fff;border:1.5px solid var(--ink);border-radius:999px;padding:.35em 0;font-weight:700;font-size:max(11px,calc(18 * var(--u)))}
+.screen .ripple{position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px;border-radius:50%;border:2px solid #10A66A;opacity:0}
+.screen .thumb{position:absolute;right:8%;top:40%;width:calc(38 * var(--u));height:calc(48 * var(--u));border-radius:50% 50% 45% 45%;background:#E8B48F;border:1.5px solid var(--ink);opacity:0}
+
+
+.talk{display:grid;gap:14px;margin-top:16px;max-width:760px}
+.talk .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.talk label{display:grid;gap:4px;font-size:16px;font-weight:600}
+.talk input,.talk select,.talk textarea{font:inherit;font-size:17px;font-weight:400;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);width:100%}
+.talk input:focus,.talk select:focus,.talk textarea:focus{border-color:var(--ink);outline:none}
+.talk .trap{position:absolute;left:-9999px}
+.addr{margin-top:14px;color:var(--soft);font-size:17px}
+
+/* footer.wrap, so its own padding wins over .wrap's and the text stays clear of the dot row below it. */
+footer.wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;padding-top:30px;padding-bottom:56px;font-size:16px;color:var(--soft);
+  background:var(--dots) 0 100%/252px 24px repeat-x}
+footer nav{display:flex;gap:18px}
+
+/* The sent page (thanks.html, and the form's answer when it could not keep a message). */
+.sent{padding-top:80px;padding-bottom:80px;max-width:640px}
+.sent h1{font-size:44px;margin-bottom:12px}
+
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr}
+  .stage{max-width:440px}
+  .masthead nav .sec{display:none}
+}
+@media (max-width:560px){
+  .tags li{font-size:12px;padding:1px 8px 2px 6px}
+  i[class^="d"]{width:9px;height:9px}
+  .talk .two{grid-template-columns:1fr}
+  .lede{font-size:19px}
+}
+
+@media (max-width:900px){
+  .beat,.house{grid-template-columns:minmax(0,1fr);gap:26px;padding-top:44px;padding-bottom:44px}
+  .beat.flip .art{order:0}
+  .seats{grid-template-columns:minmax(0,1fr);gap:60px}
+  .res{grid-template-columns:minmax(0,1fr)}
+  .res .scene{display:none}
+}
+@media (max-width:560px){
+  .open{padding-top:52px;text-align:left}
+  .open p{font-size:19px}
+  .lead{font-size:20.5px}
+  .card-r{padding:26px 18px;transform:none}
+  .res{padding:22px 18px}
+  .term,.cmd{font-size:13px}
+}

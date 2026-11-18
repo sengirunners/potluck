@@ -12,6 +12,8 @@ const PUBLIC = join(SITE_DIR, "public");
 const FIXTURES = join(SITE_DIR, "test/fixtures/blog");
 const PAGE_FIXTURES = join(SITE_DIR, "test/fixtures/pages");
 const SLUG = "run-a-coding-agent-in-a-sandbox";
+// Hand-written pages that are noindex: not in the sitemap, no canonical, no share image.
+const UNLISTED = new Set(["thanks.html", "join.html"]);
 
 /** A throwaway copy of public/ that a build with the fixture post can write into. */
 function scratch(t, contentDir = FIXTURES, pagesDir = PAGE_FIXTURES) {
@@ -105,6 +107,8 @@ test("the home page carries SoftwareApplication, Organization and WebSite JSON-L
   assert.equal(graph[0].license, "https://www.apache.org/licenses/LICENSE-2.0");
   assert.equal(graph[0].codeRepository, "https://github.com/sengirunners/potluck");
   assert.deepEqual(graph.slice(1).map((n) => n["@type"]), ["Organization", "WebSite"]);
+  assert.deepEqual(graph[2].mentions, { "@type": "SoftwareApplication", "@id": "https://mezze.sh/#software", name: "Mezze", url: "https://mezze.sh/" });
+  assert.equal(graph[0].sameAs.some((u) => u.includes("mezze")), false, "Mezze is a separate product, not a profile of Potluck");
   assert.match(home, /<link rel="canonical" href="https:\/\/potluck\.sh\/">/);
   assert.match(home, /<!-- blog-link:start --><a href="\/blog">Blog<\/a><!-- blog-link:end -->/);
 });
@@ -114,7 +118,7 @@ test("the sitemap lists exactly the public built pages, with real dates", (t) =>
     const xml = readFileSync(join(publicDir, "sitemap.xml"), "utf8");
     const entries = [...xml.matchAll(/<url><loc>([^<]+)<\/loc><lastmod>([^<]+)<\/lastmod><\/url>/g)].map((m) => ({ loc: m[1], lastmod: m[2] }));
     for (const e of entries) assert.ok(isDay(e.lastmod), `${e.loc} lastmod ${e.lastmod}`);
-    const built = walk(publicDir).filter((f) => f.endsWith(".html") && f !== "thanks.html").map((f) => (f === "index.html" ? "/" : `/${f.slice(0, -5)}`));
+    const built = walk(publicDir).filter((f) => f.endsWith(".html") && !UNLISTED.has(f)).map((f) => (f === "index.html" ? "/" : `/${f.slice(0, -5)}`));
     assert.deepEqual(entries.map((e) => e.loc.slice(ORIGIN.length)).sort(), built.sort());
     assert.doesNotMatch(readFileSync(join(publicDir, "thanks.html"), "utf8"), /canonical/);
     assert.match(readFileSync(join(publicDir, "thanks.html"), "utf8"), /name="robots" content="noindex"/);
@@ -221,7 +225,7 @@ test("sitemap and canonical addresses use the form Workers assets answer with 20
   }
   for (const f of walk(publicDir).filter((f) => f.endsWith(".html"))) {
     const canon = readFileSync(join(publicDir, f), "utf8").match(/<link rel="canonical" href="([^"]+)">/)?.[1];
-    if (f === "thanks.html") continue;
+    if (UNLISTED.has(f)) continue;
     assert.equal(canon, f === "index.html" ? `${ORIGIN}/` : `${ORIGIN}/${f.slice(0, -5)}`, f);
   }
 });
@@ -285,7 +289,7 @@ test("a post's author names a person in the byline, the feed and the JSON-LD; wi
 test("every built page has its own share image, 1200x630, named in og:image and twitter:image", (t) => {
   for (const publicDir of [PUBLIC, scratch(t)]) {
     const seen = new Set();
-    for (const f of walk(publicDir).filter((f) => f.endsWith(".html") && f !== "thanks.html")) {
+    for (const f of walk(publicDir).filter((f) => f.endsWith(".html") && !UNLISTED.has(f))) {
       const html = readFileSync(join(publicDir, f), "utf8");
       const [og] = attr(html, "content").filter((c) => c.startsWith(`${ORIGIN}/og/`));
       assert.ok(og, `${f}: no share image`);
@@ -325,7 +329,7 @@ test("the icons exist and every built page names them", () => {
     const png = readFileSync(join(PUBLIC, icon.src.slice(1)));
     assert.equal(`${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`, icon.sizes, icon.src);
   }
-  for (const f of walk(PUBLIC).filter((f) => f.endsWith(".html") && f !== "thanks.html")) {
+  for (const f of walk(PUBLIC).filter((f) => f.endsWith(".html") && !UNLISTED.has(f))) {
     const html = readFileSync(join(PUBLIC, f), "utf8");
     for (const link of ['rel="icon" href="/favicon.ico"', 'rel="apple-touch-icon" href="/apple-touch-icon.png"', 'rel="manifest" href="/site.webmanifest"']) assert.ok(html.includes(link), `${f}: ${link}`);
   }
@@ -347,4 +351,22 @@ test("the getting-started prompt is one text: the home page, content/home.md and
   assert.equal(fence("content/pages/agent-sandbox.md"), AGENT_PROMPT);
   assert.ok(AGENT_PROMPT.includes(INSTALL), "it installs with the README's command");
   assert.match(AGENT_PROMPT, /do not run sudo yourself/);
+});
+
+test("every potluck.sh page links to mezze.sh in its footer, and every one but the form's thank-you page in its header", () => {
+  const pages = [...walk(PUBLIC).filter((f) => f.endsWith(".html"))];
+  assert.ok(pages.length >= 8, "found the built pages");
+  for (const f of pages) {
+    const html = readFileSync(join(PUBLIC, f), "utf8");
+    const footer = html.match(/<footer[\s\S]*?<\/footer>/)?.[0] ?? "";
+    assert.match(footer, /<a href="https:\/\/mezze\.sh\/">Mezze: mail and work items for coding agents<\/a>/, `${f}: footer link`);
+    if (!UNLISTED.has(f)) assert.match(html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "", /<a class="sec mezze" href="https:\/\/mezze\.sh\/">Mezze for agents<\/a>/, `${f}: header link`);
+  }
+});
+
+test("the coding-agent pages say what Mezze adds, and llms.txt and llms-full.txt link to it", () => {
+  for (const f of ["agent-sandbox.html", "blog/give-your-ai-agent-a-sandbox-over-mcp.html", "blog/run-coding-agents-in-a-sandbox-on-your-own-machines.html"]) {
+    assert.match(readFileSync(join(PUBLIC, f), "utf8"), /<a href="https:\/\/mezze\.sh\/">Mezze for teams of coding agents<\/a>, a separate product/, f);
+  }
+  for (const f of ["llms.txt", "llms-full.txt"]) assert.match(readFileSync(join(PUBLIC, f), "utf8"), /https:\/\/mezze\.sh\/\n/, f);
 });

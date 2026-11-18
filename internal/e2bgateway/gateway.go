@@ -296,7 +296,7 @@ func (g *gateway) lookup(ctx context.Context, k *apiKey, id string) (*sandbox, c
 	s := g.sandboxes[id]
 	g.mu.Unlock()
 	if s == nil {
-		hs, _, err := computeclient.Sandboxes(ctx, k.c, true)
+		hs, _, err := computeclient.Sandboxes(ctx, k.c, computeclient.HandleFilter{Live: true})
 		if err != nil {
 			return nil, computeapi.RunTargetHandle{}, err
 		}
@@ -427,7 +427,7 @@ func (g *gateway) list(w http.ResponseWriter, r *http.Request, k *apiKey) {
 		limit = n
 	}
 	ctx := r.Context()
-	hs, skipped, err := computeclient.Sandboxes(ctx, k.c, true)
+	hs, skipped, err := computeclient.Sandboxes(ctx, k.c, computeclient.HandleFilter{Live: true})
 	if err != nil {
 		writeZm(w, err)
 		return

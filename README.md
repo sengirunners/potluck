@@ -7,6 +7,7 @@
   <a href="#quick-start">Quick start</a> ·
   <a href="docs/">Docs</a> ·
   <a href="https://potluck.sh/blog">Blog</a> ·
+  <a href="https://mezze.sh">Mezze</a> ·
   <a href="https://github.com/sengirunners/potluck/discussions">Discussions</a>
 </p>
 
@@ -65,13 +66,14 @@ its owner returns. Pools will let people you invite lend machines too.
 curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 ```
 
-macOS and Linux, no Go needed. The script puts `potluck`, its drivers, `potluck-conformance` and `potluck-e2b` in `~/.local/bin`. If it says that is not on
-your PATH, run the line it prints (for zsh, the default on macOS: `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && . ~/.zshrc`).
-Other ways to install, and what the script checks:
+macOS and Linux, no Go needed. The script puts `potluck`, its drivers, `potluck-conformance` and `potluck-e2b` in `~/.local/bin`. If that is not on
+your PATH, it adds one line to your shell's startup file (`~/.zshrc` on a Mac), so a new terminal finds `potluck`
+(`--no-modify-path` leaves startup files alone). Other ways to install, and what the script checks:
 
 | You want | Do this |
 | --- | --- |
 | The newest release | the line above |
+| To install and join a pool from an invite code | `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh \| sh -s -- --join '<invite code>'` |
 | A release you downloaded | `sh install.sh --from <dir>` ([docs/install.md](docs/install.md)) |
 | A given release | `sh install.sh --version potluck-main-<12 hex>` |
 | What the script checks | the release signature, with macOS's own `ssh-keygen` or OpenSSL 3, before anything runs ([docs/install.md](docs/install.md#what-is-checked)) |
@@ -129,11 +131,14 @@ make `friends`: add `--pool friends` to the commands that pick a pool (`invite`,
 
 ```sh
 potluck create friends       # the first time, prints a Tailscale login link and waits for you to sign in
-potluck invite ana           # a code for a friend who runs sandboxes (add --pool friends if you made `trial`)
+potluck invite ana           # a link for a friend who runs sandboxes (add --pool friends if you made `trial`)
 potluck invite carl --host   # a code for a friend who shares a machine (--trust public for a stranger; same --pool note)
 ```
 
-On a friend's machine, with a sandbox code: `potluck join '<code>'`. Then, from any member's machine, the same
+`potluck invite ana` prints a link, `https://potluck.sh/join#v1.<code>`, and then the code. Send the link: the page
+shows the friend one line that installs Potluck and joins (`curl -fsSL https://potluck.sh/install.sh | sh -s -- --join
+'<link>'`). The code is in the part after `#`, which a browser never sends to the site. A friend who has Potluck
+already runs `potluck join '<link or code>'`. Then, from any member's machine, the same
 `potluck sandbox create`, `exec` and `rm` as above. Machines reach each other over Tailscale, or with `--via tunnel`
 over a tunnel you set up (below). Potluck names a machine after its host name plus `-potluck` (`POTLUCK_MACHINE` overrides
 it), so its tailnet node (`potluck-<machine>`) does not take the name of another daemon's node on the same machine.
@@ -161,7 +166,7 @@ The daemon reads the file only when it starts, so restart it, then make the pool
 potluck daemon stop                   # skip if no daemon is running
 potluck daemon --detach
 potluck create friends --via tunnel
-potluck invite ana --via tunnel --pool friends   # an https code, for a friend's `potluck join`
+potluck invite ana --via tunnel --pool friends   # an https code (and its link): the friend needs no Tailscale
 ```
 
 A quick tunnel's address changes each time it starts, so this suits a trial. This path runs every night, and within the
@@ -303,6 +308,10 @@ for each layer and an example run are in [cmd/potluck-driver-tart/README.md](cmd
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems as [SECURITY.md](SECURITY.md) says, not in a
 public issue.
+
+## Mezze
+
+Running a team of coding agents on Potluck? [Mezze: mail and work items for coding agents](https://mezze.sh) is a separate product from the same makers that runs on Potluck: mail between agents and people, and work items whose claims expire.
 
 ## Sengi
 

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Potluck: your invite</title>
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light">
+<link rel="stylesheet" href="/site.css">
+<script type="module" src="/join.js"></script>
+</head>
+<body>
+<main class="wrap sent join">
+  <div id="ok" hidden>
+    <h1>You have an invite to a Potluck pool.</h1>
+    <p>On the Mac or Linux machine you want to use, paste this in a terminal.</p>
+    <p id="mac-hint" class="hint" hidden>On a Mac, Terminal is in Applications, then Utilities.</p>
+    <div class="install">
+      <div class="row">
+        <div class="line" tabindex="0" role="region" aria-label="The command"><code id="cmd"></code></div>
+        <button class="copy" type="button" data-copy="cmd">Copy</button>
+      </div>
+    </div>
+    <p class="hint">Already have Potluck? Run <code id="manual"></code> <button class="copy" type="button" data-copy="manual">Copy</button></p>
+    <p class="hint">The invite works once and expires. If it is refused, ask whoever sent it for a new one. Only use a link from someone you know.</p>
+  </div>
+  <div id="phone" hidden>
+    <h1>You have an invite to a Potluck pool.</h1>
+    <p>Open this link on the Mac or Linux machine you want to join with.</p>
+    <div class="install">
+      <div class="row">
+        <div class="line" tabindex="0" role="region" aria-label="The link"><code id="link-text"></code></div>
+        <button class="copy" type="button" data-copy="link-text">Copy link</button>
+      </div>
+    </div>
+    <p class="hint">The invite works once and expires. If it is refused, ask whoever sent it for a new one. Only use a link from someone you know.</p>
+  </div>
+  <div id="bad" hidden>
+    <h1>This link is incomplete.</h1>
+    <p>Ask for it again.</p>
+  </div>
+  <noscript>
+    <h1>You have an invite to a Potluck pool.</h1>
+    <p>On the Mac or Linux machine you want to use, paste this in a terminal. Put this page's full address where the angle brackets are.</p>
+    <div class="install">
+      <div class="row">
+        <div class="line" tabindex="0" role="region" aria-label="The command"><code>curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '&lt;paste this page's full address here&gt;'</code></div>
+      </div>
+    </div>
+    <p class="hint">The invite works once and expires. If it is refused, ask whoever sent it for a new one. Only use a link from someone you know.</p>
+  </noscript>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>.</span>
+  <nav aria-label="Footer">
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+  </nav>
+</footer>
+</body>
+</html>

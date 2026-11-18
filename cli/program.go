@@ -90,7 +90,7 @@ func RunProgram(ctx context.Context, p Program, args []string, stdin io.Reader, 
 // programApp is the potluck program's own run of p: the host whose prefix
 // is "potluck", whose client is ownClient and whose flags root defines.
 func programApp(p Program, stdin io.Reader, stdout, stderr io.Writer) *app {
-	a := newApp(Host{Prefix: programName, Stdin: stdin, Stdout: stdout, Stderr: stderr})
+	a := newApp(Host{Prefix: programName, JoinLink: joinPage, Stdin: stdin, Stdout: stdout, Stderr: stderr})
 	a.prog, a.own = p, true
 	a.host.Client = a.ownClient
 	return a

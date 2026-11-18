@@ -7,6 +7,7 @@ Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; f
 - Install: `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh`
 - Source, issues and documentation: https://github.com/sengirunners/potluck
 - Releases: https://github.com/sengirunners/potluck/releases
+- Mezze, mail and work items for teams of coding agents, a separate product from the same makers that runs on Potluck: https://mezze.sh/
 - Maker: Sengi, https://sengi.run
 
 ---
@@ -68,7 +69,7 @@ At GitHub's listed rate for its standard macOS runner ($0.062 a minute as of Nov
 
 ## Who makes it
 
-Jackson and Clay at Sengi make Potluck. Write to ops@sengi.run, or use the form on the page. Mezze, the agent and team layer that runs on Potluck, is coming soon. It is for a team running a brigade of coding agents, and is a separate product. Sengi also runs hosted GitHub Actions runners for $1 per 1,000 minutes, with 3,000 free minutes a month: https://sengi.run
+Jackson and Clay at Sengi make Potluck. Write to ops@sengi.run, or use the form on the page. Mezze, the agent and team layer that runs on Potluck, has its own site: https://mezze.sh. It is for a team running a brigade of coding agents, and is a separate product. Sengi also runs hosted GitHub Actions runners for $1 per 1,000 minutes, with 3,000 free minutes a month: https://sengi.run
 
 ---
 
@@ -76,7 +77,7 @@ Source: https://potluck.sh/agent-sandbox
 
 # A sandbox for AI coding agents on machines you own
 
-Updated 2026-11-17. https://potluck.sh/agent-sandbox
+Updated 2026-11-18. https://potluck.sh/agent-sandbox
 
 An agent that runs commands on your laptop can read your files, your keys and your network. A sandbox moves those
 commands onto a machine that holds none of that, and throws the machine away afterwards. Potluck finds that machine
@@ -163,6 +164,10 @@ macOS sandboxes run in Tart VMs, two at a time at most, as Apple's licence allow
 ([what Tart is, its licence, and what Potluck adds](/tart)). On a Mac, `potluck sandbox create` and the MCP tools give an agent a macOS VM to work in; `--template agent` and
 `potluck agent-runner` use Linux machines.
 
+## Running more than one agent
+
+To run several agents and keep track of them, [Mezze for teams of coding agents](https://mezze.sh/), a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.
+
 ---
 
 Source: https://potluck.sh/github-actions-runner
@@ -246,89 +251,6 @@ The machine that runs a job's VM can read everything in it, secrets included, so
 people you trust with that.
 
 On a Mac, Potluck uses Tart: [what Tart is and what Potluck adds](/tart).
-
----
-
-Source: https://potluck.sh/mezze
-
-# Run a brigade of coding agents without losing track of them
-
-Updated 2026-11-17. https://potluck.sh/mezze
-
-Mezze, the agent and team layer on Potluck, is for the moment you have six agent sessions open in six terminals and
-can no longer say which one is fixing what. It gives every agent and every person on the project the same small set
-of tools: a mailbox, a list of work items that each agent claims before starting, and a way to ask a person a
-question and carry on until the answer comes back. You don't need Potluck to use it: Mezze works on one machine with
-no pool.
-
-## What zm is
-
-`zm` is Mezze's one command. The first time you run `zm init` in a repository it starts a small daemon that stays
-running on your machine and keeps its state under `~/.zm`, in SQLite files. Agents use the same `zm` command you
-do. On one machine it needs no account, no
-cloud and no network: it listens only on a Unix socket that just your user can reach.
-
-## What it does
-
-- **Mail between agents and people.** Send a message to a session, to a person, or to whoever holds a work item:
-  `zm send local:k3x9qa "the migration needs a down step"`. Mail is data, never authority: a message never runs
-  anything and is never typed into an agent's terminal. An idle agent gets one fixed line telling it to read its
-  inbox; a session someone has open is never typed into.
-- **Work items whose claims really expire.** Every claim is a lease with a deadline, renewed by claiming again.
-  When an agent stops or stalls, its lease runs out and another agent can claim the item; the session that held it
-  sees a notice at its next prompt. Nothing stays "in progress" forever.
-- **Decisions approved from your phone.** An agent leaves a question with `zm ask new` and keeps working. You
-  pair a phone on your tailnet with `zm approver add`, tap Approve on it, and every decision becomes a
-  signed receipt a CI gate can check offline with `zm receipt verify`.
-- **Agent sessions you can attach to.** `zm run --work <item> claude` starts the agent in a terminal the daemon
-  owns, holding the item. Detach and it keeps running; `zm attach` brings you back, `zm ls` lists sessions with the
-  ones that need you first. Each session records its agent, command, model and worktree, and ends with a typed
-  outcome (`ok`, `quota`, `auth`, `failed` and a few more), so a usage-limit stop is never reported as success.
-- **Claude Code and Codex, on every machine.** `zm install claude --yes` and `zm install codex --yes` add hooks
-  that register each session and tell it when mail is waiting (without `--yes` they only show the change; Codex runs
-  the hooks once you trust them in its `/hooks`), and `zm mcp` gives any MCP client the same verbs as the command. Make
-  one always-on machine a team project's home and invite teammates' machines with a one-time code: claims, mail and
-  the list of sessions then reach across all of them over your Tailscale tailnet.
-
-## Works with Beads
-
-If your agents already use [Beads](https://github.com/steveyegge/beads)' `bd` commands, Mezze's `bd-zm` answers
-them from the project's native issues (`zm tracker add native --prefix bd` turns those on), with Beads' flags and
-output for the daily commands. Link it as `bd` and your agents keep typing what they know; on that machine the link
-hides a real Beads `bd`, so do it only if your issues live in zm. It does not run, bundle or need Beads, and it does not import issues from a Beads database.
-
-## Who can answer a question
-
-Only a paired phone makes an answer provably a person's. On one machine, every program running as your user can
-reach the daemon's socket, so an agent there can answer an ask too; the receipt then records that the machine's
-socket took the answer, not that a person pressed a button. A pull request's ask, and a choice that runs something
-when picked, are refused from the socket and need a signed answer, such as the paired phone's. Pair one before you let a receipt gate a
-merge.
-
-## Source and install
-
-Mezze's licence is Apache-2.0. Its source is not public yet. When it is, the quick start will look like this
-(from Mezze's README; you need Go 1.27.4 or newer, plus git and make for the full install):
-
-```sh
-git clone https://github.com/sengirunners/mezze && cd mezze && make install
-
-cd ~/code/myapp
-zm init                                    # starts the daemon and makes this repo a project
-zm work new "Add the down migration"       # -> created myapp/local:k3x9qa
-zm run --work local:k3x9qa claude          # the agent runs holding the item; detach with ctrl-]
-zm send local:k3x9qa "the migration needs a down step"   # reaches whoever holds the item
-zm ls                                      # sessions, the ones that need you first
-```
-
-`make install` puts `zm`, `bd-zm`, the drivers that lend a machine to a Potluck pool and `potluck-conformance` in
-Go's bin directory (`$(go env GOBIN)`, or `$(go env GOPATH)/bin`), which you add to your `PATH`. `zm doctor`
-checks the machine's setup and says how to fix what is missing.
-
-## Talk to us
-
-To use Mezze before its source is public, tell us what you run: use the form on [the home page](/#founders) and pick
-"Try Mezze early", or write to ops@sengi.run. Jackson and Clay, who make Potluck and Mezze, read every message.
 
 ---
 
@@ -421,7 +343,7 @@ Source: https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp
 
 # Give your AI agent a sandbox over MCP, on a machine you own
 
-Published 2026-11-17. https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp
+Published 2026-11-17, updated 2026-11-18. https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp
 
 A coding agent is most useful when it can run things: tests, builds, a server, a script it just wrote. It is most
 dangerous for the same reason. Potluck's MCP server gives the agent a separate machine for that work, a fresh VM or
@@ -487,6 +409,10 @@ Give the agent no secret you would not want it to send elsewhere: a sandbox with
 
 For Claude Code sessions started from claude.ai, or code written for E2B, see the other ways in on the
 [agent sandbox page](/agent-sandbox).
+
+## How do you run more than one agent?
+
+To run several agents and keep track of them, [Mezze for teams of coding agents](https://mezze.sh/), a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.
 
 ---
 
@@ -689,7 +615,7 @@ Source: https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machi
 
 # How to run Claude Code and Codex in a sandbox on your own machines instead of a hosted sandbox service
 
-Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
+Published 2026-11-16, updated 2026-11-18. https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines
 
 You can run a coding agent such as Claude Code or Codex in a sandbox on machines you own, with no hosted sandbox service. Potluck starts a fresh VM or container on a Mac or Linux box in your pool (the ready-made agent image needs a Linux box), runs the agent's commands inside it, and deletes it afterward. The sandbox cannot reach the machine that hosts it, that machine's network, or other sandboxes.
 
@@ -794,6 +720,10 @@ Potluck starts one fresh sandbox per runner and keeps a fresh one going as each 
 
 - The machine that runs the sandbox, and the agent's session in it, can read the key. Lend runners only to machines you would give the key to, and rotate it after any session you suspect.
 - A sandbox on a trusted machine reaches the internet and never the machine or its LAN (on Tart, apart from Softnet's DNS forwarder on the host). On Linux it reaches the internet only once the root line from `potluck doctor` has made the filtered network. `--net off` gives it no network at all.
+
+## How do you keep track of several agents?
+
+To run several agents and keep track of them, [Mezze for teams of coding agents](https://mezze.sh/), a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.
 
 ## FAQ
 

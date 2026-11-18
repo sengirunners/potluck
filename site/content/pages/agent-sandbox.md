@@ -12,7 +12,7 @@ target_searches:
 data_sources:
   - "Potluck README (MCP for agents), docs/agent-runners.md, docs/daemon.md (Templates, E2B gateway), docs/network.md, cmd/potluck-driver-tart/images/agent/Dockerfile"
 date: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 summary: "Potluck gives a coding agent its own throwaway machine on one of your team's idle computers, deleted when the agent is done. Use it from the terminal, over MCP, as Claude Code's self-hosted runner, or through the E2B SDK."
 ---
 
@@ -100,3 +100,7 @@ connect and kill. Read more in
 macOS sandboxes run in Tart VMs, two at a time at most, as Apple's licence allows
 ([what Tart is, its licence, and what Potluck adds](/tart)). On a Mac, `potluck sandbox create` and the MCP tools give an agent a macOS VM to work in; `--template agent` and
 `potluck agent-runner` use Linux machines.
+
+## Running more than one agent
+
+To run several agents and keep track of them, [Mezze for teams of coding agents](https://mezze.sh/), a separate product from the same makers that runs on Potluck, adds mail between agents and people and work items whose claims expire.

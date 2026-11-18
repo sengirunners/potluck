@@ -437,6 +437,20 @@ func FirstFailure(out string) string {
 	return ""
 }
 
+// Late reports whether out (Format's output) failed because a verb ran past
+// its time limit: the timing check failed, or a check gave up waiting for a
+// verb's answer. A machine busy with other work (another share, an image
+// pull) fails this way though its driver is sound.
+func Late(out string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		rest, ok := strings.CutPrefix(line, "FAIL  ")
+		if ok && (strings.HasPrefix(rest, timingCheck+": ") || strings.Contains(rest, ": "+noAnswer+" ")) {
+			return true
+		}
+	}
+	return false
+}
+
 // must turns a refusal into an error for checks that expect success.
 func must(e *protocol.Error, err error) error {
 	if err != nil {

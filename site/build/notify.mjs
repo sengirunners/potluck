@@ -16,11 +16,15 @@ import { INDEXNOW_KEY, ORIGIN } from "./pages.mjs";
 import { SITE_DIR } from "./build.mjs";
 
 export const ENDPOINT = "https://api.indexnow.org/indexnow";
-export const KEY_URL = `${ORIGIN}/${INDEXNOW_KEY}.txt`;
-export const SITEMAP_URL = `${ORIGIN}/sitemap.xml`;
+// Each site serves the same key file and its own sitemap (mezze.sh passes its origin; potluck.sh's is the default).
+const keyUrl = (origin) => `${origin}/${INDEXNOW_KEY}.txt`;
+const sitemapUrl = (origin) => `${origin}/sitemap.xml`;
+export const KEY_URL = keyUrl(ORIGIN);
+export const SITEMAP_URL = sitemapUrl(ORIGIN);
 export const WAIT = { attempts: 13, intervalMs: 10_000 }; // about two minutes
 export const TIMEOUT_MS = 15_000; // for each request, so the wait above is bounded in time as well as in tries
 export const SENT_FILE = join(SITE_DIR, ".wrangler/indexnow-sent.xml");
+export const MEZZE_SENT_FILE = join(SITE_DIR, ".wrangler/indexnow-sent-mezze.xml");
 
 /** The sitemap IndexNow was last told about, or "" when there is none. */
 export const readSent = (file = SENT_FILE) => (existsSync(file) ? readFileSync(file, "utf8") : "");
@@ -47,7 +51,8 @@ const get = async (fetchFn, url) => {
 };
 
 /** Waits until the live sitemap equals `expected`; throws after `attempts` tries. */
-export async function waitForSitemap({ fetchFn, expected, sleep, attempts = WAIT.attempts, intervalMs = WAIT.intervalMs, log = () => {} }) {
+export async function waitForSitemap({ fetchFn, expected, sleep, attempts = WAIT.attempts, intervalMs = WAIT.intervalMs, log = () => {}, origin = ORIGIN }) {
+  const SITEMAP_URL = sitemapUrl(origin);
   let last = "";
   for (let i = 1; i <= attempts; i++) {
     try {
@@ -66,7 +71,8 @@ export async function waitForSitemap({ fetchFn, expected, sleep, attempts = WAIT
 }
 
 /** Notifies IndexNow of what changed. Returns the addresses sent (none: nothing was posted). */
-export async function notify({ committed, previous = "", fetchFn = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), dryRun = false, log = console.log, wait = {} }) {
+export async function notify({ committed, previous = "", fetchFn = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), dryRun = false, log = console.log, wait = {}, origin = ORIGIN }) {
+  const KEY_URL = keyUrl(origin);
   const current = parseSitemap(committed);
   if (!current.size) throw new Error("the committed sitemap lists no pages");
   const urls = changedUrls(parseSitemap(previous), current);
@@ -74,7 +80,7 @@ export async function notify({ committed, previous = "", fetchFn = fetch, sleep 
     log("no page is new or changed; nothing to send");
     return [];
   }
-  await waitForSitemap({ fetchFn, expected: committed, sleep, log, ...wait });
+  await waitForSitemap({ fetchFn, expected: committed, sleep, log, origin, ...wait });
   const key = await get(fetchFn, KEY_URL);
   if (key.status !== 200 || key.text.trim() !== INDEXNOW_KEY) throw new Error(`${KEY_URL} does not serve the IndexNow key (status ${key.status})`);
   for (const url of urls) {
@@ -89,7 +95,7 @@ export async function notify({ committed, previous = "", fetchFn = fetch, sleep 
     method: "POST",
     headers: { "content-type": "application/json; charset=utf-8", "user-agent": "potluck-site-notify/1" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
-    body: JSON.stringify({ host: new URL(ORIGIN).host, key: INDEXNOW_KEY, keyLocation: KEY_URL, urlList: urls }),
+    body: JSON.stringify({ host: new URL(origin).host, key: INDEXNOW_KEY, keyLocation: KEY_URL, urlList: urls }),
   });
   if (![200, 202].includes(res.status)) throw new Error(`IndexNow answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
   log(`IndexNow accepted ${urls.length} address${urls.length === 1 ? "" : "es"} (${res.status})`);

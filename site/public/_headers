@@ -1,0 +1,7 @@
+# Cloudflare Workers static assets read this file. The invite code is in the page's address after "#": the
+# browser does not send it, and these headers keep it from leaking in a Referer or a cache (test/join.test.js).
+/join
+  Referrer-Policy: no-referrer
+  Cache-Control: no-store
+  Content-Security-Policy: default-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'
+  X-Robots-Tag: noindex

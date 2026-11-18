@@ -37,6 +37,7 @@ var tokenReaders = map[string]string{
 	"kit/project/team.go JoinedNodes":     "node-bound only",
 	"kit/project/team.go Redeem":          "by its own invite's token id: never a limited one",
 	"kit/project/team.go nodeLive":        "node-bound only",
+	"kit/project/team.go endedInvites":    "node-bound only (by a redeemed invite's node)",
 	"kit/project/team.go RevokeOwn":       "node-bound only",
 	"kit/project/team.go MachineProjects": "node-bound only",
 	"kit/project/team.go MachineJoin":     "node-bound only",

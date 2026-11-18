@@ -2,7 +2,8 @@
 // dependency: the blank share-image template (build/og/template.png: the quilt, the logo, no words), the glyphs of
 // the site's font at the sizes the build sets titles in (build/og/glyphs.json: each glyph's coverage, advance and
 // the kerning between pairs), and the icons (public/favicon.ico with 16, 32 and 48 px pictures, apple-touch-icon.png
-// at 180 px, icon-192.png and icon-512.png for site.webmanifest). Run it after the font, the logo or the quilt
+// at 180 px, icon-192.png and icon-512.png for site.webmanifest), for potluck.sh from its logo and for mezze.sh
+// (mezze/public/) from the olive. Run it after the font, a logo or the quilt
 // changes, and commit what it writes. It needs Chrome (CHROME names the binary). The build itself
 // (build/share.mjs) runs on Node's standard library alone.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -12,11 +13,17 @@ import { deflateSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { chrome, HTML, PUBLIC_DIR, run, serve, SITE_DIR } from "./chrome.mjs";
 import { CHARS, FACES } from "./share.mjs";
+import { OLIVE_SVG, PUBLIC_DIR as MEZZE_PUBLIC_DIR } from "./mezze.mjs";
 
 const OG_DIR = join(SITE_DIR, "build", "og");
 
 // The logo, as the page's header draws it.
 const LOGO_SVG = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='#C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='#2F6B34'/></svg>`;
+// Each site's icons: its logo, and the directory they go in.
+const ICON_SETS = [
+  { site: "potluck", logo: LOGO_SVG, dir: PUBLIC_DIR },
+  { site: "mezze", logo: OLIVE_SVG, dir: MEZZE_PUBLIC_DIR },
+];
 // The page's quilt (site.css): the patchwork strip along the top and the diamond stitching on cream.
 const STRIP_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='168' height='10'><rect x='0' width='24' height='10' fill='#E9A99B'/><rect x='24' width='24' height='10' fill='#F0CB74'/><rect x='48' width='24' height='10' fill='#A9C98A'/><rect x='72' width='24' height='10' fill='#9FC2DA'/><rect x='96' width='24' height='10' fill='#F6E7C8'/><rect x='120' width='24' height='10' fill='#E9A99B'/><rect x='144' width='24' height='10' fill='#A9C98A'/><path d='M0 5h168' stroke='#FFFBF0' stroke-width='1' stroke-dasharray='3 2.5'/></svg>`;
 const DIAMOND_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='56' height='56'><path d='M0 28L28 0L56 28L28 56Z' fill='none' stroke='#EEE4D0' stroke-width='1.1' stroke-dasharray='3.5 3.5'/></svg>`;
@@ -38,6 +45,7 @@ async function main() {
   await Promise.all(FACES.map((f) => document.fonts.load(f.weight + " " + f.size + "px Newsreader", CHARS)));
   const logo = await svg(${JSON.stringify(LOGO_SVG)});
   const out = { faces: {}, icons: {} };
+  const ICON_SETS = ${JSON.stringify(ICON_SETS.map(({ site, logo }) => ({ site, logo })))};
 
   // The template: the quilt, and the logo with the name, where the home page's share image had them.
   const [t, g] = canvas(1200, 630);
@@ -73,12 +81,16 @@ async function main() {
     out.faces[f.name] = { glyphs, kern };
   }
 
-  // The icons: the logo alone, clear around it at small sizes, on cream with a margin where a platform crops.
-  for (const [name, size, pad, bg] of [["16", 16, 0, ""], ["32", 32, 0, ""], ["48", 48, 0, ""], ["apple-touch-icon", 180, 22, "#FBF7EE"], ["icon-192", 192, 24, "#FBF7EE"], ["icon-512", 512, 64, "#FBF7EE"]]) {
-    const [c, x] = canvas(size, size);
-    if (bg) { x.fillStyle = bg; x.fillRect(0, 0, size, size); }
-    x.drawImage(logo, pad, pad, size - 2 * pad, size - 2 * pad);
-    out.icons[name] = c.toDataURL("image/png");
+  // The icons: each site's logo alone, clear around it at small sizes, on cream with a margin where a platform crops.
+  for (const set of ICON_SETS) {
+    const mark = await svg(set.logo);
+    out.icons[set.site] = {};
+    for (const [name, size, pad, bg] of [["16", 16, 0, ""], ["32", 32, 0, ""], ["48", 48, 0, ""], ["apple-touch-icon", 180, 22, "#FBF7EE"], ["icon-192", 192, 24, "#FBF7EE"], ["icon-512", 512, 64, "#FBF7EE"]]) {
+      const [c, x] = canvas(size, size);
+      if (bg) { x.fillStyle = bg; x.fillRect(0, 0, size, size); }
+      x.drawImage(mark, pad, pad, size - 2 * pad, size - 2 * pad);
+      out.icons[set.site][name] = c.toDataURL("image/png");
+    }
   }
   document.getElementById("out").textContent = JSON.stringify(out);
 }
@@ -123,9 +135,12 @@ async function main() {
     // Each glyph's coverage is kept deflated, so the file stays small enough to read in a diff's summary.
     for (const face of Object.values(out.faces)) for (const g of Object.values(face.glyphs)) g.a = deflateSync(Buffer.from(g.a, "base64")).toString("base64");
     writeFileSync(join(OG_DIR, "glyphs.json"), `${JSON.stringify(out.faces)}\n`);
-    writeFileSync(join(PUBLIC_DIR, "favicon.ico"), ico(["16", "32", "48"].map((s) => ({ size: Number(s), data: png(out.icons[s]) }))));
-    for (const name of ["apple-touch-icon", "icon-192", "icon-512"]) writeFileSync(join(PUBLIC_DIR, `${name}.png`), png(out.icons[name]));
-    console.log("og-assets: wrote build/og/template.png, build/og/glyphs.json, public/favicon.ico, apple-touch-icon.png, icon-192.png, icon-512.png");
+    for (const { site, dir } of ICON_SETS) {
+      const icons = out.icons[site];
+      writeFileSync(join(dir, "favicon.ico"), ico(["16", "32", "48"].map((s) => ({ size: Number(s), data: png(icons[s]) }))));
+      for (const name of ["apple-touch-icon", "icon-192", "icon-512"]) writeFileSync(join(dir, `${name}.png`), png(icons[name]));
+    }
+    console.log("og-assets: wrote build/og/template.png, build/og/glyphs.json, and favicon.ico, apple-touch-icon.png, icon-192.png, icon-512.png in public/ and mezze/public/");
   } finally {
     server.close();
     rmSync(work, { recursive: true, force: true });

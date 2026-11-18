@@ -118,6 +118,19 @@ func TestHandleAreas(t *testing.T) {
 	if hs, err := computeclient.RunTargetHandles(ctx, owner, "sandbox", false); err != nil || len(hs) != 1 {
 		t.Errorf("the owner's list: %+v %v", hs, err)
 	}
+	// Another member of the same area sees ana's sandbox only when asking for every one; mine=1 keeps the
+	// caller's own.
+	cy := member("cy", "team1")
+	mine := computeclient.HandleFilter{Mine: true}
+	if hs, err := computeclient.ListHandles(ctx, cy, "sandbox", mine); err != nil || len(hs) != 0 {
+		t.Errorf("another member's own list: %+v %v", hs, err)
+	}
+	if hs, err := computeclient.RunTargetHandles(ctx, cy, "sandbox", false); err != nil || len(hs) != 1 {
+		t.Errorf("another member's full list: %+v %v", hs, err)
+	}
+	if hs, err := computeclient.ListHandles(ctx, ana, "sandbox", mine); err != nil || len(hs) != 1 || hs[0].Handle != h.Handle {
+		t.Errorf("the holder's own list: %+v %v", hs, err)
+	}
 	if rel, err := computeclient.ReleaseRunTarget(ctx, ana, "sandbox", idOf(h.Handle)); err != nil || !rel.Released {
 		t.Errorf("release by the holder: %+v %v", rel, err)
 	}

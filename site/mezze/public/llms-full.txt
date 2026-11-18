@@ -1,0 +1,99 @@
+# Mezze
+
+> Mezze is one local daemon and one command, `zm`, for a person or a small team with more coding agents than they can keep in their head. It carries mail between agents and people, work items whose claims really expire, and decisions a person approves from a phone, across Claude Code and Codex on every machine they run. Its licence is Apache-2.0; its source is not public yet.
+
+Mezze is the agent and team layer on Potluck (https://potluck.sh), and works on one machine with no Potluck pool. It runs on macOS and Linux. On one machine it needs no account, no cloud and no network.
+
+- Site: https://mezze.sh
+- Potluck, the machine pool Mezze can lend your machines to: https://potluck.sh
+- Contact: the form at https://mezze.sh/#talk, or ops@sengi.run
+- Maker: Sengi, https://sengi.run
+
+---
+
+Source: https://mezze.sh/
+
+# Run a brigade of coding agents without losing track of them
+
+One local daemon and one command, `zm`. Mail between agents and people, work items whose claims really expire, and decisions you approve from your phone, across Claude Code and Codex on every machine you run. Apache-2.0, macOS and Linux. On one machine it needs no account and no cloud. Mezze's source is not public yet.
+
+## Six agents make a kitchen. Somebody has to run the pass.
+
+Open six coding agents at once and you soon can't say which one is fixing what. Mezze keeps the books.
+
+It is one small program, `zm`, that runs quietly on your computer. On one machine it needs no account, no cloud and no network. Your agents type the same command you do.
+
+## One counter for every plate
+
+Every agent and every person on the project gets a mailbox, a shared list of tasks (work items), and a way to ask a person a question without stopping work.
+
+Type `zm init` in a project and a small program (a daemon) starts in the background on your computer. It keeps its notes in a folder in your home directory, `~/.zm`, in SQLite files, and listens only on a Unix socket that just your user can reach.
+
+## Notes on the rail, not orders
+
+Agents and people leave each other notes (mail): for one session, for a person, or for whoever is working on a task right now.
+
+A note is only a note. It never runs anything, and it is never typed into an agent's window behind its back. An idle agent gets one short line telling it to check its inbox. A session someone has open is left alone.
+
+```sh
+zm send local:k3x9qa "the migration needs a down step"
+```
+
+## A timer on every claimed plate
+
+Before an agent starts a task, it claims it, and every claim runs on a timer: a lease with a deadline.
+
+Keep working, claim again, and the timer fills back up. Stop or stall, and the timer runs out so another agent can pick the task up. The one that dropped it hears about it the next time it looks up: a notice at its next prompt.
+
+Nothing stays "in progress" forever.
+
+## The call goes to your phone
+
+When an agent needs a person's say-so, it leaves the question with `zm ask new` and carries on with other work.
+
+You answer from your phone. Pair it once with `zm approver add`, over your private Tailscale network (your tailnet), then tap Approve. Every answer comes back as a signed receipt that your automated checks (a CI gate) can verify later, even offline, with `zm receipt verify`.
+
+The fine print, which matters. Only a paired phone proves a person answered. Any program running as you on that computer can answer a question too, through the daemon's socket, and the receipt says so plainly: it records that the computer took the answer, not that a person pressed a button. Two kinds of question refuse that shortcut and need a signed answer, such as the phone's: a question about a pull request, and a choice that runs something when picked. If receipts will guard what gets merged, pair a phone first.
+
+## Kept warm while you step away
+
+`zm run --work <item> claude` starts an agent on a task in a window Mezze holds for you: a terminal the daemon owns, holding the work item. Press ctrl-] to step away and the agent keeps going; `zm attach` brings you back. `zm ls` lists every session, the ones waiting on you first.
+
+When a session ends, it says how (a typed outcome). An agent that ran into its usage limit is never reported as finished.
+
+## More than one kitchen
+
+Pick one computer that stays on and make it the team's home (a team project's home). Invite teammates' computers with a one-time code. From then on, claims, notes and the list of sessions reach across all of them, over your private Tailscale network.
+
+## Works with Claude Code, Codex and Beads
+
+Mezze doesn't replace the agents you already use. It gives them a counter to share.
+
+- Claude Code: `zm install claude --yes` adds small hooks that sign each session in and tell it when mail is waiting. Leave off `--yes` to see the change first. Any tool that speaks MCP gets the same commands through `zm mcp`.
+- Codex: `zm install codex --yes` adds the same hooks. Codex runs them only once you trust them in its `/hooks` screen, and zm never does that for you.
+- Beads: agents already used to Beads' `bd` commands can keep typing them. Mezze's `bd-zm` answers from Mezze's own task list; `zm tracker add native --prefix bd` turns that list on. Installed under the name `bd`, it hides a real Beads on that machine, so do that only if your tasks live in Mezze. It doesn't run, bundle or need Beads.
+
+## The quick start
+
+Mezze's licence is Apache-2.0. Its source is not public yet. When it is, getting started will look like this. You'll need Go 1.27.4 or newer, plus git and make.
+
+```sh
+git clone https://github.com/sengirunners/mezze && cd mezze && make install
+
+cd ~/code/myapp
+zm init                                    # starts zm and makes this repo a project
+zm work new "Add the down migration"       # -> created myapp/local:k3x9qa
+zm run --work local:k3x9qa claude          # the agent works on that task; ctrl-] to step away
+zm send local:k3x9qa "the migration needs a down step"   # reaches whoever has the task
+zm ls                                      # sessions, the ones that need you first
+```
+
+`make install` puts `zm`, `bd-zm`, the drivers that lend a machine to a Potluck pool and `potluck-conformance` in Go's bin folder (`$(go env GOBIN)`, or `$(go env GOPATH)/bin`). Add that folder to your `PATH`. If anything is missing, `zm doctor` says what and how to fix it.
+
+## Mezze and Potluck
+
+Mezze, the agent and team layer on Potluck (https://potluck.sh), runs fine on one computer with no pool. When your agents need more room, Potluck puts your team's idle Macs and Linux boxes to work as throwaway VMs and sandboxes. The same `make install` puts Potluck's drivers on your computer, so it can lend itself to a pool too.
+
+## Talk to us
+
+Jackson and Clay, who make Mezze and Potluck, read every message: use the form at https://mezze.sh/#talk (it picks "Try Mezze") or write to ops@sengi.run.

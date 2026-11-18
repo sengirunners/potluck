@@ -7,4 +7,5 @@ Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; f
 - Install: `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh`
 - Source, issues and documentation: https://github.com/sengirunners/potluck
 - Releases: https://github.com/sengirunners/potluck/releases
+- Mezze, mail and work items for teams of coding agents, a separate product from the same makers that runs on Potluck: https://mezze.sh/
 - Maker: Sengi, https://sengi.run

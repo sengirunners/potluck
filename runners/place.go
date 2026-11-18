@@ -175,16 +175,18 @@ type refusal struct {
 	why string
 }
 
-// refusedBy notes that target refused a box: placement skips it for RefuseCool.
+// refusedBy notes that target refused a box, or that a box it gave failed
+// before its job started (boxGone): placement skips it for RefuseCool.
 func (s *Service) refusedBy(target, why string) {
 	s.flight.Lock()
 	s.refused[target] = refusal{at: s.now(), why: oneLine(why)}
 	s.flight.Unlock()
 }
 
-// cooling is the bindings that refused a box within RefuseCool: whatever
-// the number of jobs waiting, a binding that says available but refuses
-// costs at most one runner minted and deleted per RefuseCool.
+// cooling is the bindings that refused or failed a box within RefuseCool:
+// whatever the number of jobs waiting, a binding that says available but
+// refuses costs at most one runner minted and deleted per RefuseCool, and a
+// job whose box failed is served again elsewhere first.
 func (s *Service) cooling() map[string]string {
 	s.flight.Lock()
 	defer s.flight.Unlock()
@@ -192,7 +194,7 @@ func (s *Service) cooling() map[string]string {
 	for t, r := range s.refused {
 		until := r.at.Add(s.RefuseCool)
 		if s.now().Before(until) {
-			out[t] = "no box: " + strconv.Quote(r.why) + " (refused a job moments ago; retry after " + until.Format(time.RFC3339) + ")"
+			out[t] = "no box: " + strconv.Quote(r.why) + " (refused or failed a job moments ago; retry after " + until.Format(time.RFC3339) + ")"
 		} else {
 			delete(s.refused, t)
 		}

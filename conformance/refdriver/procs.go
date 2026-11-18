@@ -173,6 +173,10 @@ func (d *drv) publishGroup(pd boxproc.Dir, group int) {
 	})
 }
 
+// slowStart is how long "spawn-slow-start" holds a spawned program before it
+// starts: longer than a check may take to see a program it waits on start.
+const slowStart = 7 * time.Second
+
 // hold runs one process and records its output and exit.
 func hold(state, handle, pid, bug string) int {
 	d := &drv{state: state, bug: bug}
@@ -193,6 +197,9 @@ func hold(state, handle, pid, bug string) int {
 	return boxproc.Hold(pd, func(stdout, stderr io.Writer) (func() int, error) {
 		if len(spec.Argv) == 0 {
 			return nil, fmt.Errorf("no spec")
+		}
+		if d.is("spawn-slow-start") { // not a bug: a cold guest takes seconds to start a program
+			time.Sleep(slowStart)
 		}
 		cmd := exec.Command(spec.Argv[0], spec.Argv[1:]...)
 		cmd.Dir = boxDir(r, spec.Cwd)

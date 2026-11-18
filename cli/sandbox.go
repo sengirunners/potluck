@@ -272,6 +272,7 @@ type pushFlags struct {
 	dir         string
 	maxMiB      int
 	repo        string // the checkout ("" = the working directory)
+	base        string // push only: a git directory in the sandbox whose commits the bundle may build on
 }
 
 func (p *pushFlags) add(f *pflag.FlagSet) {
@@ -286,39 +287,91 @@ func (p *pushFlags) add(f *pflag.FlagSet) {
 // untracked file it carries.
 // It reports progress on w, its lines starting with the program's name.
 func (p *pushFlags) bundle(ctx context.Context, ref string, w io.Writer, name string) (*boxpush.Bundle, error) {
-	switch {
-	case p.maxMiB <= 0:
-		return nil, fmt.Errorf("--max-mib must be positive")
-	case p.untracked && !p.dirty:
-		return nil, fmt.Errorf("--include-untracked goes with --dirty")
-	}
-	b, err := boxpush.Make(ctx, boxpush.MakeOptions{Dir: p.repo, Ref: ref, Dirty: p.dirty, Untracked: p.untracked, Full: p.full, Max: int64(p.maxMiB) << 20})
+	mo, err := p.makeOptions(ref)
 	if err != nil {
 		return nil, err
 	}
+	b, err := boxpush.Make(ctx, mo)
+	if err != nil {
+		return nil, err
+	}
+	sayUntracked(w, name, b)
+	return b, nil
+}
+
+func (p *pushFlags) makeOptions(ref string) (boxpush.MakeOptions, error) {
+	switch {
+	case p.maxMiB <= 0:
+		return boxpush.MakeOptions{}, fmt.Errorf("--max-mib must be positive")
+	case p.untracked && !p.dirty:
+		return boxpush.MakeOptions{}, fmt.Errorf("--include-untracked goes with --dirty")
+	case p.base != "" && p.full:
+		return boxpush.MakeOptions{}, fmt.Errorf("--base goes without --full: a whole history builds on nothing")
+	}
+	return boxpush.MakeOptions{Dir: p.repo, Ref: ref, Dirty: p.dirty, Untracked: p.untracked, Full: p.full, Max: int64(p.maxMiB) << 20}, nil
+}
+
+func sayUntracked(w io.Writer, name string, b *boxpush.Bundle) {
 	for _, f := range b.Untracked {
 		fmt.Fprintf(w, "%s: sending untracked %s\n", name, f)
 	}
-	return b, nil
 }
 
 // push sends b into the sandbox, with progress on w for a big one (its
 // lines start with the program's name).
 func (p *pushFlags) push(ctx context.Context, c *client.Client, target, id string, b *boxpush.Bundle, w io.Writer, name string) (boxpush.Result, error) {
-	o := boxpush.PushOptions{Dest: p.dir}
-	if b.Size > 4*boxpush.ChunkSize {
-		o.Progress = func(done, total int) {
-			fmt.Fprintf(w, "\r%s: sending %s: %d/%d chunks", name, shortSHA(b.Head), done, total)
+	o, done := p.progress(w, name, func() *boxpush.Bundle { return b })
+	res, err := boxpush.Push(ctx, boxpush.Exec(c, target, id), b, o)
+	done(res, err)
+	return res, err
+}
+
+// sendInto bundles ref against what the sandbox already holds (its last
+// push, --base) and pushes only what that lacks, with the lines of bundle
+// and push on w.
+func (p *pushFlags) sendInto(ctx context.Context, c *client.Client, target, id, ref string, w io.Writer, name string) (boxpush.Result, error) {
+	mo, err := p.makeOptions(ref)
+	if err != nil {
+		return boxpush.Result{}, err
+	}
+	var b *boxpush.Bundle
+	o, done := p.progress(w, name, func() *boxpush.Bundle { return b })
+	res, err := boxpush.MakeAndPush(ctx, boxpush.Exec(c, target, id), mo, o, func(made *boxpush.Bundle) {
+		b = made
+		sayUntracked(w, name, b)
+	})
+	done(res, err)
+	return res, err
+}
+
+// progress is the push's options with progress on w for a big bundle (the
+// one bundle answers when the push starts), and what to call when it ends.
+func (p *pushFlags) progress(w io.Writer, name string, bundle func() *boxpush.Bundle) (boxpush.PushOptions, func(boxpush.Result, error)) {
+	o := boxpush.PushOptions{Dest: p.dir, Base: p.base}
+	shown := false
+	o.Progress = func(done, total int) {
+		if total > 4 {
+			shown = true
+			fmt.Fprintf(w, "\r%s: sending %s: %d/%d chunks", name, shortSHA(bundle().Head), done, total)
 		}
 	}
-	res, err := boxpush.Push(ctx, boxpush.Exec(c, target, id), b, o)
-	if o.Progress != nil {
-		fmt.Fprintln(w)
+	return o, func(res boxpush.Result, err error) {
+		if shown {
+			fmt.Fprintln(w)
+		}
+		if err != nil {
+			return
+		}
+		on := ""
+		switch len(res.Base) {
+		case 0:
+		case 1:
+			on = fmt.Sprintf(", built on %s the sandbox holds", shortSHA(res.Base[0]))
+		default:
+			on = fmt.Sprintf(", built on %d commits the sandbox holds", len(res.Base))
+		}
+		fmt.Fprintf(w, "%s: checked out %s at %s in the sandbox (%.1f MiB sent%s; exec --cwd %s)\n", name, shortSHA(res.Commit), res.Dest, float64(res.Bytes)/(1<<20), on, res.Dest)
 	}
-	if err == nil {
-		fmt.Fprintf(w, "%s: checked out %s at %s in the sandbox (%.1f MiB sent; exec --cwd %s)\n", name, shortSHA(res.Commit), res.Dest, float64(b.Size)/(1<<20), res.Dest)
-	}
-	return res, err
 }
 
 func shortSHA(c string) string { return c[:min(len(c), 12)] }
@@ -329,19 +382,22 @@ func (a *app) sandboxPushCmd() *cobra.Command {
 		Long: `Sends the commit (and with --dirty your uncommitted changes) from this
 checkout into the sandbox as a git bundle in chunks, checked against its
 SHA-256 there, and checks it out in ~/checkout (--dir). No credential enters
-the sandbox. A push cut off resumes when run again.`,
+the sandbox. A push cut off resumes when run again.
+
+Only what the sandbox lacks is sent: the bundle builds on the commit an
+earlier push left in --dir, and with --base <git dir> on the commits that
+git directory in the sandbox names (a volume holding the repository, say),
+when this checkout has them and they are ancestors of the commit sent. The
+checkout then borrows the base's objects, so keep it mounted while you use
+the checkout, and use only a base you trust as much as the checkout: git
+takes its objects as they are.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, t, id, err := a.sandboxClient(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
-			b, err := push.bundle(cmd.Context(), append(args[1:], "")[0], a.host.Stderr, a.name())
-			if err != nil {
-				return err
-			}
-			defer b.Close()
-			res, err := push.push(cmd.Context(), c, t, id, b, a.host.Stderr, a.name())
+			res, err := push.sendInto(cmd.Context(), c, t, id, append(args[1:], "")[0], a.host.Stderr, a.name())
 			if err != nil {
 				return err
 			}
@@ -351,19 +407,20 @@ the sandbox. A push cut off resumes when run again.`,
 			return nil
 		}}
 	push.add(cmd.Flags())
+	cmd.Flags().StringVar(&push.base, "base", "", "a git directory in the sandbox (relative to its HOME) whose commits the bundle may build on: only what they lack is sent")
 	return cmd
 }
 
 func (a *app) sandboxLsCmd() *cobra.Command {
-	var live bool
-	cmd := &cobra.Command{Use: "ls [--live]", Short: "Sandboxes you can see in the pool, newest first",
+	var live, all bool
+	cmd := &cobra.Command{Use: "ls [--live] [--all]", Short: "Your sandboxes in the pool, newest first (--all: every one you can see)",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.inPool(cmd.Context())
 			if err != nil {
 				return err
 			}
-			hs, skipped, err := computeclient.Sandboxes(cmd.Context(), c, live)
+			hs, skipped, err := computeclient.Sandboxes(cmd.Context(), c, computeclient.HandleFilter{Live: live, Mine: !all})
 			if err != nil {
 				return err
 			}
@@ -384,6 +441,7 @@ func (a *app) sandboxLsCmd() *cobra.Command {
 			return nil
 		}}
 	cmd.Flags().BoolVar(&live, "live", false, "only sandboxes not yet ended")
+	cmd.Flags().BoolVar(&all, "all", false, "every sandbox you can see in the pool, not only your own")
 	return cmd
 }
 

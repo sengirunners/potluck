@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -311,5 +312,52 @@ func TestShareAdmissionUnbindsAKeylessBindingOnFailure(t *testing.T) {
 	o.AdmissionURL, o.Earlier[0].Config = NoAdmission, map[string]string{"vm": "oci"}
 	if _, err := shareOn(context.Background(), failing(), u, o); err != nil || len(u.host)+len(u.project) != 0 {
 		t.Errorf("none: %v %v %v", err, u.host, u.project)
+	}
+}
+
+// A re-run on a machine that no longer has room for an earlier size (a
+// hardware or disk swap) unbinds that size, machine-level with --pool, and
+// says so; a size that still fits (an earlier --share) stays, as does
+// another machine's or layer's binding. A failed unbind names the command
+// that does it; a report that fits nothing (a misread) unbinds nothing.
+func TestShareUnbindsASizeTheMachineNoLongerFits(t *testing.T) {
+	passing := &fakeRunner{on: func(string) (Result, bool) { return Result{}, true }}
+	o := ShareOptions{Report: bigReport(), Images: []string{pinA}, NamePrefix: "h", Driver: "ref"}
+	o.Report.Cores, o.Report.RAMMB = 8, 16<<10
+	o.Earlier = []computeapi.RunTarget{
+		{Name: "h-c8m32", Kind: "box", Config: map[string]string{"vm": "oci"}},
+		{Name: "h-c4m16", Kind: "box", Config: map[string]string{"vm": "oci"}},
+		{Name: "other-c8m32", Kind: "box", Config: map[string]string{"vm": "oci"}},
+		{Name: "h-c8m32", Kind: "box", Host: "elsewhere", Config: map[string]string{"vm": "oci"}},
+	}
+	bind := func(context.Context, computeapi.BindRunTargetRequest) (computeapi.RunTargetView, error) {
+		return computeapi.RunTargetView{}, nil
+	}
+	u := &unbindRecorder{binderFunc: bind}
+	res, err := shareOn(context.Background(), passing, u, o)
+	notes := strings.Join(res.Notes, "\n")
+	if err != nil || !slices.Equal(u.project, []string{"h-c8m32"}) || len(u.host) != 0 ||
+		!strings.Contains(notes, "h-c8m32, bound by an earlier share, is 8 vCPU and 32768 MB, more than this machine has (8 cores, 16384 MB): it was unbound") {
+		t.Fatalf("%v: unbound %v %v; notes %q", err, u.project, u.host, notes)
+	}
+	o.Pool = "team"
+	u = &unbindRecorder{binderFunc: bind}
+	if _, err := shareOn(context.Background(), passing, u, o); err != nil || !slices.Equal(u.host, []string{"h-c8m32"}) || len(u.project) != 0 {
+		t.Errorf("--pool: %v %v %v", err, u.host, u.project)
+	}
+	u = &unbindRecorder{binderFunc: bind, err: errors.New("it has live handles")}
+	if res, _ = shareOn(context.Background(), passing, u, o); !strings.Contains(strings.Join(res.Notes, "\n"),
+		"and unbinding it failed (it has live handles): zm target unbind --host h-c8m32 removes it") {
+		t.Errorf("unbind failed: %q", res.Notes)
+	}
+	o.Earlier[0].Config["vm"] = "tart" // another layer's binding of the name
+	u = &unbindRecorder{binderFunc: bind}
+	if _, err := shareOn(context.Background(), passing, u, o); err != nil || len(u.host)+len(u.project) != 0 {
+		t.Errorf("tart binding: %v %v %v", err, u.host, u.project)
+	}
+	o.Earlier[0].Config["vm"] = "oci"
+	u = &unbindRecorder{binderFunc: bind}
+	if res := Bind(context.Background(), u, ShareOptions{NamePrefix: "h", Earlier: o.Earlier, Pool: "team"}, ShareResult{Layer: "oci"}); len(u.host)+len(u.project) != 0 || len(res.Notes) != 0 {
+		t.Errorf("misread report: %v %v %q", u.host, u.project, res.Notes)
 	}
 }

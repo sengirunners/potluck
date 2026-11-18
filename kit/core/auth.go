@@ -126,6 +126,39 @@ func (d *Deps) asSession(ctx context.Context, as string) (string, error) {
 		WithHint("a session acts as its address or its name while it is live; zm ls lists them")
 }
 
+// OwnAddress reports whether addr is one of sub's own: its address, its
+// identity's, and for a replica's token its machine or any session on that
+// machine, or on this machine's socket this machine's human, machine or any
+// session here (live or ended). A record of who made what (a sandbox's
+// actor) is the caller's own by it, whichever of their sessions made it.
+func (d *Deps) OwnAddress(sub *authz.Subject, addr string) bool {
+	if sub == nil || addr == "" {
+		return false
+	}
+	if addr == sub.Address {
+		return true
+	}
+	a, err := api.ParseAddress(addr)
+	if err != nil {
+		return false
+	}
+	if sub.Identity.Name != "" && a.Kind == api.KindHuman && sub.Identity.Kind != api.IdentityMachine && a.Human == sub.Identity.Name {
+		return true
+	}
+	onMachine := func(m string) bool {
+		return m != "" && (a.Kind == api.KindSession || a.Kind == api.KindMachine) && a.Machine == m
+	}
+	cfg := d.Config
+	switch {
+	case sub.Node != "" && sub.Machine != "":
+		// As withAddress: never this machine's own name.
+		return sub.Machine != cfg.Machine && onMachine(sub.Machine)
+	case sub.Via == authz.ViaLocal && !sub.Remote:
+		return onMachine(cfg.Machine) || (a.Kind == api.KindHuman && a.Human == cfg.Human)
+	}
+	return false
+}
+
 // withAddress applies a Zm-As header: it may only pick a reply address the
 // subject already owns, never add rights.
 func (d *Deps) withAddress(ctx context.Context, sub *authz.Subject, as string) (*authz.Subject, error) {

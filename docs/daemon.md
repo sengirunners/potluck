@@ -845,8 +845,10 @@ commands wrap the steps above and keep no state of their own.
 - `potluck create <pool> [--via tunnel]` creates the project if missing, with the areas `team` and `hosts`, makes
   this machine the one that runs it, and brings the tailnet node up unless `--via tunnel` (printing the login URL
   once, waiting up to 10 minutes). Running it again on an existing pool is safe.
-- `potluck invite NAME` prints a one-time invite for a renter (a member of the team area; they run `potluck join
-  '<code>'`). `potluck invite NAME --host [--trust public]` prints one for a host (a guest of `hosts`; they run
+- `potluck invite NAME` prints a one-time invite for a renter (a member of the team area): first a link to
+  potluck.sh's join page carrying the code in its fragment (`https://potluck.sh/join#v1.<base64url of the code>`),
+  which shows the one line that installs Potluck and joins, then `potluck join '<code>'` for a friend who has Potluck.
+  `--json` adds `link`. `--via tunnel` makes a code the friend uses with no Tailscale. `potluck invite NAME --host [--trust public]` prints one for a host (a guest of `hosts`; they run
   `potluck host '<code>'`).
 - Each host invite carries its machine's class: `trusted` by default, `public` with `--trust public`. The machine has
   it the moment it joins.
@@ -854,7 +856,7 @@ commands wrap the steps above and keep no state of their own.
 - The class rules then apply as for any host: a class the owner chose enrolls it (a `trusted` host's boxes are placed
   and take secrets; a `public` host's only when named, never with secrets), and an area guest's machine with a chosen
   class is listed (it sends no machine numbers).
-- `potluck join '<code>'` joins.
+- `potluck join '<link or code>'` joins; a link is read as the code inside it (`kit/project/joinlink.go`).
 - `potluck host` is described in `docs/hosts.md`.
 
 ## Clients
@@ -866,8 +868,9 @@ A program built on Potluck carries these commands in its own command tree, in it
 
 `potluck sandbox create|ls|exec|extend|rm|push|cp|shell|logs|signal`, `potluck usage` and `potluck run`.
 
-- `potluck sandbox ls` lists the sandboxes the caller can see in the pool, newest first: each with who made it
-  (`by=`), and an ended one's end time (`ended=`) in place of `expires=`.
+- `potluck sandbox ls` lists your own sandboxes in the pool (made from this machine's human, machine or any of its
+  sessions), newest first: each with who made it (`by=`), and an ended one's end time (`ended=`) in place of
+  `expires=`. `--all` lists every one your role lets you see, so a friend in a pool sees only their own unless they ask.
 - `potluck sandbox logs -f` pages until the process exits and exits with its code, or 1 for a process that ended with
   no exit.
 - `create` places the box. `--on` takes a binding as named. Otherwise every box binding describes itself, and the

@@ -28,8 +28,8 @@ func targetsHandler(targets ...computeapi.RunTargetView) http.Handler {
 		case "/v0/run_targets/a/handles":
 			api.WriteJSON(w, 200, computeapi.RunTargetHandles{Handles: []computeapi.RunTargetHandle{{Handle: "box:a/b1", Created: "2026-11-06T11:00:00Z"}}})
 		case "/v0/run_targets/b/handles":
-			if r.URL.Query().Get("live") != "1" {
-				api.WriteError(w, api.Errorf(api.CodeBadRequest, "want ?live=1"))
+			if r.URL.Query().Get("live") != "1" || r.URL.Query().Get("mine") != "1" {
+				api.WriteError(w, api.Errorf(api.CodeBadRequest, "want ?live=1&mine=1"))
 				return
 			}
 			api.WriteJSON(w, 200, computeapi.RunTargetHandles{Handles: []computeapi.RunTargetHandle{{Handle: "box:b/b1", Created: "2026-11-06T11:00:00.5Z"}}})
@@ -141,15 +141,15 @@ func TestPlaceBox(t *testing.T) {
 }
 
 // TestSandboxes lists box handles only, across bindings, newest first by
-// time (not by string: 11:00:00.5Z sorts after 11:00:00Z), passing live on;
+// time (not by string: 11:00:00.5Z sorts after 11:00:00Z), passing live and mine on;
 // a binding that fails is named in skipped and the rest still listed.
 func TestSandboxes(t *testing.T) {
 	c := client.WithHandler(targetsHandler(view("a", "box"), view("r", "run"), view("b", "box")))
-	hs, skipped, err := Sandboxes(context.Background(), c, true)
+	hs, skipped, err := Sandboxes(context.Background(), c, HandleFilter{Live: true, Mine: true})
 	if err != nil || len(skipped) != 0 || len(hs) != 2 || hs[0].Handle != "box:b/b1" || hs[1].Handle != "box:a/b1" {
 		t.Fatalf("%+v %v %v", hs, skipped, err)
 	}
-	hs, skipped, err = Sandboxes(context.Background(), c, false) // b refuses without live
+	hs, skipped, err = Sandboxes(context.Background(), c, HandleFilter{Live: true}) // b refuses without mine
 	if err != nil || len(hs) != 1 || hs[0].Handle != "box:a/b1" || len(skipped) != 1 || !strings.HasPrefix(skipped[0], "b: ") {
 		t.Fatalf("%+v %v %v", hs, skipped, err)
 	}

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -78,34 +79,8 @@ keyboard). Running create again on an existing pool is safe.`,
 }
 
 func (a *app) poolCreate(ctx context.Context, c *client.Client, slug, via string) error {
-	if !api.ValidSlug(slug) {
-		return fmt.Errorf("pool name %q: use lowercase letters, digits and dashes", slug)
-	}
-	p, err := c.GetProject(ctx, slug)
-	missing := api.IsCode(err, api.CodeNotFound)
-	if err != nil && !missing {
-		return err
-	}
-	// The tailnet login before anything is made: a create cancelled while it
-	// waits leaves no half-made pool behind.
-	if via != api.ViaTunnel {
-		if err := a.ensureTailnet(ctx, c); err != nil {
-			return err
-		}
-	}
-	if missing {
-		if p, err = c.CreateProject(ctx, api.NewProjectRequest{Slug: slug}); err != nil {
-			return err
-		}
-	}
-	for _, area := range []string{HostsArea, TeamArea} {
-		if !slices.ContainsFunc(p.Areas, func(x api.Area) bool { return x.Name == area }) {
-			if p, err = c.AddArea(ctx, slug, api.AddAreaRequest{Name: area}); err != nil {
-				return fmt.Errorf("area %s: %w", area, err)
-			}
-		}
-	}
-	if _, err := c.ProjectTeam(ctx, slug); err != nil {
+	p, err := a.makePool(ctx, c, slug, via)
+	if err != nil {
 		return err
 	}
 	if a.asJSON() {
@@ -120,6 +95,42 @@ func (a *app) poolCreate(ctx context.Context, c *client.Client, slug, via string
 	a.say("next: %s for a friend who runs sandboxes, %s for one who shares a machine", a.cmd("invite <name>"), a.cmd("invite <name> --host"))
 	a.say("share this machine too: %s", a.cmd("host"))
 	return nil
+}
+
+// makePool makes pool slug run by this machine, or completes one made
+// before (its areas, its team): create's work, without its words.
+func (a *app) makePool(ctx context.Context, c *client.Client, slug, via string) (api.Project, error) {
+	if !api.ValidSlug(slug) {
+		return api.Project{}, fmt.Errorf("pool name %q: use lowercase letters, digits and dashes", slug)
+	}
+	p, err := c.GetProject(ctx, slug)
+	missing := api.IsCode(err, api.CodeNotFound)
+	if err != nil && !missing {
+		return p, err
+	}
+	// The tailnet login before anything is made: a create cancelled while it
+	// waits leaves no half-made pool behind.
+	if via != api.ViaTunnel {
+		if err := a.ensureTailnet(ctx, c); err != nil {
+			return p, err
+		}
+	}
+	if missing {
+		if p, err = c.CreateProject(ctx, api.NewProjectRequest{Slug: slug}); err != nil {
+			return p, err
+		}
+	}
+	for _, area := range []string{HostsArea, TeamArea} {
+		if !slices.ContainsFunc(p.Areas, func(x api.Area) bool { return x.Name == area }) {
+			if p, err = c.AddArea(ctx, slug, api.AddAreaRequest{Name: area}); err != nil {
+				return p, fmt.Errorf("area %s: %w", area, err)
+			}
+		}
+	}
+	if _, err := c.ProjectTeam(ctx, slug); err != nil {
+		return p, err
+	}
+	return p, nil
 }
 
 // ensureTailnet brings this machine's tailnet node up, waiting out the first
@@ -199,7 +210,9 @@ nothing else of the pool. A shared machine is trusted (a friend's: sandboxes
 are placed on it unasked, and it may get members' secrets and run GitHub
 Actions jobs) unless --trust public (a stranger's: only sandboxes a member
 names, no secrets, no Actions jobs). The trust is yours to choose here; the
-machine cannot change it. Codes work once and expire (--ttl).`,
+machine cannot change it. Codes work once and expire (--ttl). Run it on the
+machine that runs the pool, or on any machine of yours that joined it if
+you own the pool there.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if trust != "" && !host {
@@ -222,8 +235,10 @@ machine cannot change it. Codes work once and expire (--ttl).`,
 			if err != nil {
 				return err
 			}
+			// AddArea: a pool made before it had both areas is completed
+			// here, where the invite needs one.
 			req := api.InviteRequest{Project: c.Project, Area: TeamArea, As: args[0], Role: api.RoleMember, Via: via,
-				TTLSeconds: int64(ttl / time.Second)}
+				TTLSeconds: int64(ttl / time.Second), AddArea: true}
 			if host {
 				req.Area, req.Role, req.Class = HostsArea, "guest", trust
 				if req.Class == "" {
@@ -234,8 +249,12 @@ machine cannot change it. Codes work once and expire (--ttl).`,
 			if err != nil {
 				return err
 			}
+			link := "" // a link only joins: a host invite has none
+			if a.host.JoinLink != "" && !host {
+				link = project.JoinLink(a.host.JoinLink, r.Code)
+			}
 			if a.asJSON() {
-				return a.printJSON(r)
+				return a.printJSON(inviteAnswer{InviteResponse: r, Link: link})
 			}
 			until := r.Invite.Expires.Local().Format("Jan 2 15:04")
 			if host {
@@ -245,8 +264,12 @@ machine cannot change it. Codes work once and expire (--ttl).`,
 				}
 				a.say("host %s (one use, until %s), on the machine they share:\n  %s\n  (or %s, then %s)\n  their machine will be %s\n%s",
 					args[0], until, a.cmd("host '"+r.Code+"'"+img), a.cmd("join '"+r.Code+"'"), a.cmd("host"+img), classMeans[req.Class], tailnetStep(args[0], r.Code))
+			} else if link != "" {
+				a.say("member %s (one use, until %s). Send them this link; it shows the one line that installs %s and joins:\n  %s\n"+
+					"If %s is already on their machine, this does the same:\n  %s\n%s%s",
+					args[0], until, programName, link, programName, a.cmd("join '"+r.Code+"'"), quickTunnelNote(r.Code), tailnetStep(args[0], r.Code))
 			} else {
-				a.say("member %s (one use, until %s), on their machine:\n  %s\n%s", args[0], until, a.cmd("join '"+r.Code+"'"), tailnetStep(args[0], r.Code))
+				a.say("member %s (one use, until %s), on their machine:\n  %s\n%s%s", args[0], until, a.cmd("join '"+r.Code+"'"), quickTunnelNote(r.Code), tailnetStep(args[0], r.Code))
 			}
 			return nil
 		},
@@ -259,13 +282,32 @@ machine cannot change it. Codes work once and expire (--ttl).`,
 	return cmd
 }
 
+// inviteAnswer is invite's --json: the pool's answer and, for a host with a
+// join page, the invite link.
+type inviteAnswer struct {
+	api.InviteResponse
+	Link string `json:"link,omitempty"`
+}
+
+// quickTunnelNote warns that a quick tunnel's address changes when
+// cloudflared restarts (README): its codes then stop working.
+func quickTunnelNote(code string) string {
+	u, err := url.Parse(code)
+	if err != nil || !strings.HasSuffix(u.Hostname(), ".trycloudflare.com") {
+		return ""
+	}
+	return "  (the pool's tunnel is a quick one: its address changes when cloudflared restarts, and this invite then stops working)\n"
+}
+
 // tailnetStep is what the pool's owner does so a friend's machine reaches
-// this one with a tailnet code, in plain words; "" for a tunnel code.
+// the pool's machine (the one that runs it, which the code names: this one,
+// or the authority of a pool this machine joined) with a tailnet code, in
+// plain words; "" for a tunnel code.
 func tailnetStep(name, code string) string {
 	if strings.HasPrefix(code, "https://") || strings.HasPrefix(code, "http://") {
 		return ""
 	}
-	node := "this machine's node" // its name in the admin console: the code's node name
+	node := "the node of the machine that runs the pool" // its name in the admin console: the code's node name
 	if jc, err := project.ParseJoinCode(code); err == nil {
 		prefix := jc.NodePrefix
 		if prefix == "" {
@@ -273,16 +315,16 @@ func tailnetStep(name, code string) string {
 		}
 		node = prefix + jc.Machine
 	}
-	return fmt.Sprintf("  before %s runs it, their machine must reach this one over Tailscale: if they are not on your tailnet,\n"+
-		"  share this machine with them at https://login.tailscale.com/admin/machines (%s, then the ... menu, Share)\n"+
+	return fmt.Sprintf("  before %s runs it, their machine must reach the machine that runs the pool over Tailscale: if they are not on your tailnet,\n"+
+		"  share that machine with them at https://login.tailscale.com/admin/machines (%s, then the ... menu, Share)\n"+
 		"  and send them the link, or invite them to your tailnet at https://login.tailscale.com/admin/users", name, node)
 }
 
 func (a *app) joinCmd() *cobra.Command {
 	var authKey string
 	cmd := &cobra.Command{
-		Use:   "join '<invite code>'",
-		Short: "Join a pool with the invite code its owner sent",
+		Use:   "join '<invite link or code>'",
+		Short: "Join a pool with the invite link or code its owner sent",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, _, err := a.client()
@@ -317,6 +359,11 @@ func (a *app) poolJoin(ctx context.Context, c *client.Client, code, authKey stri
 	req := api.JoinRequest{Code: strings.TrimSpace(code), AuthKey: authKey, WaitMS: 10000}
 	req.Cwd, _ = os.Getwd()
 	r, err := a.joinUntilDone(ctx, c, req)
+	var bad *api.Error
+	if errors.As(err, &bad) && bad.Code == project.ErrBadCode.Code && bad.Message == project.ErrBadCode.Message {
+		// kit's hint names zm's team invite; a pool's is invite.
+		return api.Remote{}, bad.WithHint("ask the pool's owner for a new code: " + a.cmd("invite <you>"))
+	}
 	if err != nil {
 		return api.Remote{}, err
 	}
@@ -486,6 +533,20 @@ machine is in. On a Mac a sandbox ends when you touch the keyboard or pointer
 	return cmd
 }
 
+// noSizePassed is host's answer when every size failed its checks: what
+// happened, and what to do next in plain words. The checks run after the
+// pulls, and a pulled image stays on this machine, so a second run starts at
+// the checks; a check can fail once on a busy or just-booted machine.
+func (a *app) noSizePassed(byCode bool) error {
+	unspent := ""
+	if byCode {
+		unspent = ", and the invite is not spent"
+	}
+	return fmt.Errorf("no size passed conformance: this machine did not join the pool%s.\n"+
+		"Next: run the same %s command again. The images it pulled stay on this machine, so it starts at the checks, not the download.\n"+
+		"If the same check fails again, it is not a one-off: keep the output above, which names the check that failed.", unspent, a.cmd("host"))
+}
+
 // poolHost shares this machine with the pool. root, when set, runs the
 // root step once the pool is known and the share's own checks pass; after,
 // when set, runs once a size is shared (the host's AfterLend).
@@ -534,7 +595,7 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 		}
 		res = hostprobe.Bind(ctx, nb, no, res)
 		_ = a.reportShare(res, w)
-		return errors.New("no size passed conformance: this machine did not join the pool")
+		return a.noSizePassed(byCode)
 	}
 	if byCode {
 		rem, err := a.poolJoin(ctx, c, arg, "")

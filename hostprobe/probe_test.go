@@ -347,6 +347,48 @@ func TestDoctorRunsDriverEngineCheck(t *testing.T) {
 	}
 }
 
+// On Kata, doctor also reports what the driver's own check says of the
+// native parent's root calls (vmhost.ErrOCIHostNeedsSudo): without
+// passwordless sudo, oci is not ready, and the problem names its two fixes
+// (passwordless sudo, which the owner gives, or the exact root line that
+// lends with gVisor instead) once, however many calls sudo refused. The root
+// line asks for nothing new: at most the ownership helper. Share, with no
+// flags, says the same instead of pointing at doctor.
+func TestDoctorKataNeedsPasswordlessSudo(t *testing.T) {
+	out := map[string]Result{"docker --version": ok("Docker version 29\n"),
+		"docker info --format {{json .Runtimes}}": ok(`{"kata-qemu":{},"runc":{}}`)}
+	needsRoot := fmt.Errorf("verify local Docker engine: %w: sudo: a password is required", vmhost.ErrOCIOwnerNeedsRoot)
+	busctl := fmt.Errorf("%w: sudo -n -k busctl: sudo: a password is required", vmhost.ErrOCIHostNeedsSudo)
+	journal := fmt.Errorf("read active Docker configuration evidence: %w: sudo -n -k journalctl: sudo: a password is required", vmhost.ErrOCIHostNeedsSudo)
+	for name, engine := range map[string]error{
+		"helper missing too": errors.Join(needsRoot, busctl),
+		"helper installed":   errors.Join(journal, busctl),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := linux("docker", "curl", "bzip2")
+			f.paths["/dev/kvm"] = true
+			f.engine = engine
+			r := Detect(context.Background(), &fakeRunner{out: out}, f, "")
+			l, _ := r.Layer("oci")
+			problems := strings.Join(l.Problems, "\n")
+			if l.Runtime != "kata-qemu" || l.Available || strings.Count(problems, "passwordless sudo yourself") != 1 ||
+				!strings.Contains(problems, "lend with gVisor instead") || !strings.Contains(problems, "runsc install") {
+				t.Fatalf("%+v", l)
+			}
+			root := RootCommand(r.RootSteps("oci"))
+			if strings.Contains(root, "runsc") || strings.Contains(root, "NOPASSWD: ALL") ||
+				strings.Contains(root, vmhost.DockerOwnerHelper) != (name == "helper missing too") {
+				t.Errorf("root line: %q", root)
+			}
+			_, err := shareOn(context.Background(), &fakeRunner{}, binderFunc(nil), ShareOptions{Report: r, Images: []string{pinA}, NamePrefix: "h"})
+			var nr *NotReadyError
+			if !errors.As(err, &nr) || nr.Layer != "oci" || !strings.Contains(err.Error(), "passwordless sudo yourself") {
+				t.Errorf("share: %v", err)
+			}
+		})
+	}
+}
+
 // Detect carries the swap state beside its note, for the advert and doctor.
 func TestDetectReportsSwap(t *testing.T) {
 	r := Detect(context.Background(), &fakeRunner{out: map[string]Result{

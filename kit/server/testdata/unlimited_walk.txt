@@ -234,12 +234,12 @@ POST /v0/identities [token-no-whois] 403 {"error":{"code":"forbidden","message":
 POST /v0/identities [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/identities [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/identities [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
-POST /v0/invites [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
-POST /v0/invites [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
-POST /v0/invites [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/invites [owner-token] 403 {"error":{"code":"forbidden","message":"only the project's owner (or an admin of the whole project) makes an invite","hint":"run it on the machine that runs the project, or on an owner's own machine that joined it"}}
+POST /v0/invites [guest-token] 403 {"error":{"code":"forbidden","message":"only the project's owner (or an admin of the whole project) makes an invite","hint":"run it on the machine that runs the project, or on an owner's own machine that joined it"}}
+POST /v0/invites [token-no-whois] 403 {"error":{"code":"forbidden","message":"only the project's owner (or an admin of the whole project) makes an invite","hint":"run it on the machine that runs the project, or on an owner's own machine that joined it"}}
 POST /v0/invites [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/invites [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
-POST /v0/invites [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+POST /v0/invites [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner (or an admin of the whole project) makes an invite","hint":"run it on the machine that runs the project, or on an owner's own machine that joined it"}}
 POST /v0/invites/redeem [owner-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
 POST /v0/invites/redeem [guest-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
 POST /v0/invites/redeem [token-no-whois] 401 {"error":{"code":"unauthenticated","message":"unknown caller","hint":"redeem with zm join \u003ccode\u003e"}}

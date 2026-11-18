@@ -134,7 +134,8 @@ test("the page offers the install line, the founders' form and address, Mezze an
   assert.equal((HTML.match(/<form/g) ?? []).length, 1, "one form: the founders'");
   assert.match(HTML, /ops@sengi\.run/);
   assert.doesNotMatch(HTML, /mailto:/, "mailto links fail for people with no mail app set up");
-  assert.match(INDEX, /Mezze, coming soon/);
+  assert.match(INDEX, /Mezze, on mezze\.sh/);
+  assert.doesNotMatch(INDEX, /[Cc]oming soon/, "Mezze has a live site");
   assert.match(INDEX, /<h2>Mezze<\/h2>/);
   assert.match(INDEX, /Mezze is the agent and team layer that runs on Potluck/);
   assert.doesNotMatch(INDEX, /Potluck Dish/);
