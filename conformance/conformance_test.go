@@ -419,6 +419,9 @@ var brokenDrivers = []struct {
 	// refusals
 	{"run", "no-request-id-ok", "refuse", "FAIL  acquire without request_id", nil},
 	{"run", "ttl-no-cap", "refuse", "FAIL  a ttl_s past", nil},
+	{"run", "ttl-negative-ok", "refuse", "FAIL  a negative ttl_s", nil},
+	{"box", "ttl-negative-ok", "refuse", "FAIL  a negative ttl_s", nil},
+	{"db", "ttl-negative-ok", "refuse", "FAIL  a negative ttl_s", nil},
 	{"run", "shell-string", "refuse", "FAIL  a shell-string script", nil},
 	{"db", "ttl-no-cap", "refuse", "FAIL  a ttl_s past", nil},
 	{"db", "create-in-ok", "refuse", "FAIL  a db host not in create_in", nil},

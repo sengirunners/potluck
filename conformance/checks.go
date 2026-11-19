@@ -1017,17 +1017,20 @@ func (r *run) expiry() {
 func (r *run) refuse() {
 	ttl := r.shortTTL()
 	over := r.ttlMax() + 1
-	var noKey, overTTL json.RawMessage
+	var noKey, overTTL, negativeTTL json.RawMessage
 	switch r.kind {
 	case "db":
 		noKey = args("actor", actor, "ttl_s", ttl, "name", r.dbName())
 		overTTL = r.dbArgs(r.key(), r.dbName(), over)
+		negativeTTL = r.dbArgs(r.key(), r.dbName(), -1)
 	case "box":
 		noKey = args("actor", actor, "ttl_s", ttl)
 		overTTL = r.boxArgs(r.key(), over, false)
+		negativeTTL = r.boxArgs(r.key(), -1, false)
 	default:
 		noKey = args("actor", actor, "ttl_s", ttl, "ref", r.opt.Ref, "commit", r.opt.Commit, "script", r.opt.Script, "args", []string{"exit", "0"})
 		overTTL = r.runArgs(r.key(), over, "exit", "0")
+		negativeTTL = r.runArgs(r.key(), -1, "exit", "0")
 	}
 	refused := func(a json.RawMessage, cfg map[string]string, codes ...string) error {
 		res, e, err := r.acquire(a, cfg)
@@ -1038,6 +1041,7 @@ func (r *run) refuse() {
 	}
 	r.add("acquire without request_id answers bad_request", refused(noKey, r.cfg, protocol.CodeBadRequest))
 	r.add("a ttl_s past ttl_max_s answers bad_request", refused(overTTL, r.cfg, protocol.CodeBadRequest))
+	r.add("a negative ttl_s answers bad_request", refused(negativeTTL, r.cfg, protocol.CodeBadRequest))
 	if r.kind == "db" {
 		r.add("acquire without a name answers bad_request",
 			refused(args("request_id", r.key(), "actor", actor, "ttl_s", ttl), r.cfg, protocol.CodeBadRequest))
