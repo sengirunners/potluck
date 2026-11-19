@@ -2,6 +2,7 @@ package teamlink
 
 import (
 	"context"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"slices"
 	"strings"
@@ -121,7 +122,7 @@ func (s *Service) handleSolo(r *http.Request) (any, error) {
 		return nil, err
 	} else if n > 0 {
 		return nil, api.Errorf(api.CodeConflict, "%d replicas are joined to %s", n, p.Slug).
-			WithHint("each member runs zm leave " + p.Slug + ", or revoke their tokens: zm token ls, zm token revoke <id>")
+			WithHint("each member runs " + config.Command("leave", p.Slug) + ", or revoke their tokens: " + config.Command("token ls") + ", " + config.Command("token revoke", "<id>"))
 	}
 	n, err := s.moveLeases(r.Context(), p.ID, false)
 	if err != nil {
@@ -213,8 +214,9 @@ func (s *Service) handleInvite(r *http.Request) (any, error) {
 // member machine's node-bound token (whatever area it joined) whose
 // identity owns or administers the whole project by its own grants here
 // (as core.Deps.ProjectAdmin judges): that token is capped at member, so
-// the invite is judged by those grants, uncapped. A minted token, a box's
-// token and a tailnet login never make one.
+// the invite is judged by those grants, uncapped; a member an owner made
+// an inviter, likewise, for the guest invites CreateInvite allows them. A
+// minted token, a box's token and a tailnet login never make one.
 func (s *Service) inviter(ctx context.Context, ref string) (*authz.Subject, error) {
 	sub := core.SubjectOf(ctx)
 	refuse := api.Errorf(api.CodeForbidden, "only the project's owner (or an admin of the whole project) makes an invite").
@@ -241,7 +243,13 @@ func (s *Service) inviter(ctx context.Context, ref string) (*authz.Subject, erro
 	}
 	own := authz.FromTuples(tuples, nil)
 	if !own.Can(authz.Admin, authz.Object{Project: p.ID}) {
-		return nil, refuse
+		// An inviter's token may ask too; CreateInvite holds the invite to
+		// a guest's (project/inviter.go).
+		if ok, err := s.d.Projects.InvitesAnywhere(ctx, sub.Identity.ID, p.ID); err != nil {
+			return nil, err
+		} else if !ok {
+			return nil, refuse
+		}
 	}
 	x := *sub
 	x.Scope, x.Cap = own, nil
@@ -307,14 +315,14 @@ func (s *Service) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case core.IsLocal(ctx):
-		api.WriteError(w, api.Errorf(api.CodeForbidden, "a join code is redeemed from the member's machine").WithHint("run zm join <code> on the member's machine"))
+		api.WriteError(w, api.Errorf(api.CodeForbidden, "a join code is redeemed from the member's machine").WithHint("run "+config.Command("join", "<code>")+" on the member's machine"))
 		return
 	case rm == nil || rm.NodeID == "" || t == nil:
-		api.WriteError(w, api.Errorf(api.CodeUnauthenticated, "unknown caller").WithHint("redeem with zm join <code>"))
+		api.WriteError(w, api.Errorf(api.CodeUnauthenticated, "unknown caller").WithHint("redeem with "+config.Command("join", "<code>")))
 		return
 	case rm.Self:
 		api.WriteError(w, api.Errorf(api.CodeForbidden, "a join code is not redeemed from the authority's own machine").
-			WithHint("run zm join on the member's machine"))
+			WithHint("run "+config.Command("join")+" on the member's machine"))
 		return
 	}
 	var req api.RedeemRequest
@@ -327,13 +335,13 @@ func (s *Service) handleRedeem(w http.ResponseWriter, r *http.Request) {
 	// the others' joins out.
 	lim, who := s.limiterFor(t.Via()), t.RateKey(rm)
 	if !lim.allow(who, time.Now()) {
-		api.WriteError(w, project.ErrBadCode)
+		api.WriteError(w, project.BadCode())
 		return
 	}
 	in := t.RedeemInput(ctx, rm, req)
 	out, err := s.d.Projects.Redeem(ctx, in)
 	if err != nil {
-		if err == project.ErrBadCode {
+		if project.IsBadCode(err) {
 			lim.fail(who, time.Now())
 		}
 		api.WriteError(w, err)

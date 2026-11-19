@@ -162,7 +162,7 @@ func TestShareDefaultImagePerLayer(t *testing.T) {
 			!strings.HasSuffix(conf, "--config images="+c.want) {
 			t.Errorf("%s: conformance %s", c.name, conf)
 		}
-		if told := strings.Contains(strings.Join(said, "\n"), "zm's default"); told != c.dflt {
+		if told := strings.Contains(strings.Join(said, "\n"), "potluck's default"); told != c.dflt {
 			t.Errorf("%s: progress %q", c.name, said)
 		}
 	}

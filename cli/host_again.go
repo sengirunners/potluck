@@ -97,7 +97,7 @@ func (a *app) askAgain(ctx context.Context, c *client.Client, arg string, o host
 	if !a.asJSON() {
 		w := a.host.Stdout
 		fmt.Fprintf(w, "this machine already shares %s with pool %s; %s again would do this:\n", strings.Join(again, ", "), sc.pool, a.cmd("host"))
-		printShare(words{w}, res, prefix(a.host.Prefix))
+		printShare(w, res, prefix(a.host.Prefix))
 	}
 	return e
 }

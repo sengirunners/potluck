@@ -299,7 +299,7 @@ func TestShareAdmissionUnbindsAKeylessBindingOnFailure(t *testing.T) {
 	}
 	u = &unbindRecorder{err: errors.New("it has live handles")}
 	if res, _ = shareOn(context.Background(), failing(), u, o); !strings.Contains(res.Sizes[0].Error,
-		"h-c2m4 is still bound from before WITHOUT admission: its boxes are uncounted by the controller (unbind: it has live handles); run again, or zm target unbind --host h-c2m4") {
+		"h-c2m4 is still bound from before WITHOUT admission: its boxes are uncounted by the controller (unbind: it has live handles); run again, or potluck target unbind --host h-c2m4") {
 		t.Errorf("unbind failed: %q", res.Sizes[0].Error)
 	}
 	// An earlier binding with admission keys, or a run without them: nothing is unbound.
@@ -346,7 +346,7 @@ func TestShareUnbindsASizeTheMachineNoLongerFits(t *testing.T) {
 	}
 	u = &unbindRecorder{binderFunc: bind, err: errors.New("it has live handles")}
 	if res, _ = shareOn(context.Background(), passing, u, o); !strings.Contains(strings.Join(res.Notes, "\n"),
-		"and unbinding it failed (it has live handles): zm target unbind --host h-c8m32 removes it") {
+		"and unbinding it failed (it has live handles): potluck target unbind --host h-c8m32 removes it") {
 		t.Errorf("unbind failed: %q", res.Notes)
 	}
 	o.Earlier[0].Config["vm"] = "tart" // another layer's binding of the name

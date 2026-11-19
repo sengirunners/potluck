@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 // SPEC 20's limits on background processes.
@@ -268,7 +270,7 @@ func Hold(d Dir, start func(stdout, stderr io.Writer) (wait func() int, err erro
 		if err == nil {
 			code = wait()
 		} else {
-			fmt.Fprintln(errw, "zm: the process did not start:", err)
+			fmt.Fprintln(errw, config.Program+": the process did not start:", err)
 		}
 	}
 	out.close()

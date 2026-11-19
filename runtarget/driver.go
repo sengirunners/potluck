@@ -15,6 +15,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget/rt"
 )
@@ -36,11 +37,13 @@ const (
 )
 
 // envAllowlist is all of the daemon's environment a driver gets (SPEC 20:
-// env = "inherit" does not apply to run targets).
+// env = "inherit" does not apply to run targets). driverEnv adds only that
+// and how a person types Potluck's commands here (config.EnvPrefix), which
+// the driver's messages name.
 var envAllowlist = []string{"PATH", "HOME", "LANG", "TERM", "TZ"}
 
 func driverEnv() []string {
-	env := []string{}
+	env := []string{config.EnvPrefix + "=" + config.PotluckPrefix()}
 	for _, k := range envAllowlist {
 		if v, ok := os.LookupEnv(k); ok {
 			env = append(env, k+"="+v)

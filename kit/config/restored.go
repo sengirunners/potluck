@@ -129,13 +129,13 @@ func CheckNotRestoring(home string) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("%s holds a %s marker that cannot be read (%v): it may be a partial restore. Restore again into a fresh home (zm backup restore --to <new dir>)", home, FileRestoring, err)
+		return fmt.Errorf("%s holds a %s marker that cannot be read (%v): it may be a partial restore. Restore again into a fresh home (%s)", home, FileRestoring, err, Command("backup restore", "--to <new dir>"))
 	}
 	stamp := strings.TrimSpace(string(b))
 	if stamp == "" || strings.ContainsAny(stamp, " \t\r\n") {
-		return fmt.Errorf("%s holds a malformed %s marker: it may be a partial restore. Restore again into a fresh home (zm backup restore --to <new dir>)", home, FileRestoring)
+		return fmt.Errorf("%s holds a malformed %s marker: it may be a partial restore. Restore again into a fresh home (%s)", home, FileRestoring, Command("backup restore", "--to <new dir>"))
 	}
-	return fmt.Errorf("%s holds an interrupted restore of set %s: it may be partial. Restore again into a fresh home (zm backup restore --to <new dir>)", home, stamp)
+	return fmt.Errorf("%s holds an interrupted restore of set %s: it may be partial. Restore again into a fresh home (%s)", home, stamp, Command("backup restore", "--to <new dir>"))
 }
 
 func syncDir(dir string) error {

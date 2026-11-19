@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"slices"
 	"sync"
@@ -166,7 +167,7 @@ func linkable(sub *authz.Subject) error {
 	case sub.Via == authz.ViaToken && sub.Node != "":
 		return nil // a team replica's node-bound token: the member who joined
 	}
-	return api.Errorf(api.CodeForbidden, "only you can link your identity: run zm login github on your own machine").
+	return api.Errorf(api.CodeForbidden, "only you can link your identity: run %s on your own machine", config.Command("login github")).
 		WithHint("a minted token or a tailnet login cannot link an identity to GitHub")
 }
 
@@ -194,9 +195,9 @@ func (s *Service) link(ctx context.Context, identity api.Identity, acc Account, 
 		s.tellLinked(ctx, identity, acc, from)
 		for _, o := range others {
 			s.tell(ctx, o, nil, fmt.Sprintf("GitHub @%s (%s), linked to your identity %s, was also linked to identity %s on %s, from %s: "+
-				"both are now one person. If that was not you: zm identity unlink github %s --revoke (the machine owner or a project admin). "+
+				"both are now one person. If that was not you: %s (the machine owner or a project admin). "+
 				"The account stays on record against %s even after the unlink, so an owner removing or lowering %s's grants lowers %s's too.",
-				acc.Login, acc.ID, o.Name, identity.Name, s.d.Config.Machine, from, identity.Name, identity.Name, identity.Name, o.Name))
+				acc.Login, acc.ID, o.Name, identity.Name, s.d.Config.Machine, from, config.Command("identity unlink", "github", identity.Name, "--revoke"), identity.Name, identity.Name, o.Name))
 		}
 	}
 	return out, nil
@@ -224,8 +225,9 @@ func linkedOthers(ctx context.Context, tx *sql.Tx, account, except string) ([]ap
 // tellLinked is the mail of an account's first link to an identity.
 func (s *Service) tellLinked(ctx context.Context, identity api.Identity, acc Account, from string) {
 	s.tell(ctx, identity, nil, fmt.Sprintf("GitHub @%s (%s) was linked to identity %s on %s, from %s. If that was not you: "+
-		"zm identity unlink github %s --revoke (the machine owner or a project admin), then link again with zm login github.",
-		acc.Login, acc.ID, identity.Name, s.d.Config.Machine, from, identity.Name))
+		"%s (the machine owner or a project admin), then link again with %s.",
+		acc.Login, acc.ID, identity.Name, s.d.Config.Machine, from,
+		config.Command("identity unlink", "github", identity.Name, "--revoke"), config.Command("login github")))
 }
 
 // linkTx is link inside tx; first is a new link (not a refresh).

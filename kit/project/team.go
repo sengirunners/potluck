@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/sengirunners/potluck/kit/config"
 	"net"
 	"net/netip"
 	"net/url"
@@ -88,8 +89,21 @@ const (
 // ErrBadCode is the one answer for a wrong, used, expired or removed join
 // code, and for a tagged node using an invite without --allow-tagged: the
 // caller learns nothing about which.
-var ErrBadCode = api.Errorf(api.CodeForbidden, "invalid, used or expired join code").
-	WithHint("ask the project's owner for a new invite: zm invite <project> --as <you> --role member")
+//
+// ErrBadCode carries no hint (the hint names a command of the running
+// program, so it is made when the error is: BadCode). Compare with IsBadCode.
+var ErrBadCode = api.Errorf(api.CodeForbidden, "invalid, used or expired join code")
+
+// BadCode is ErrBadCode with its hint.
+func BadCode() *api.Error {
+	return ErrBadCode.WithHint("ask the project's owner for a new invite: " + config.Command("invite", "<project> --as <you> --role member"))
+}
+
+// IsBadCode reports whether err is the answer BadCode makes.
+func IsBadCode(err error) bool {
+	var e *api.Error
+	return errors.As(err, &e) && e.Code == ErrBadCode.Code && e.Message == ErrBadCode.Message
+}
 
 // crockford is Crockford's base32 (no I, L, O, U).
 const crockford = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -465,8 +479,9 @@ type InviteInput struct {
 }
 
 // CreateInvite stores an invite for a team project and returns its join
-// code, once. Admin on the project/area; at most MaxLiveInvites live per
-// project. No identity, grant or token exists until redemption.
+// code, once. Admin on the project/area, or an inviter's guest invite
+// (inviteTarget); at most MaxLiveInvites live per project. No identity,
+// grant or token exists until redemption.
 func (r *Registry) CreateInvite(ctx context.Context, sub *authz.Subject, in InviteInput) (api.InviteResponse, error) {
 	rel, err := authz.ParseRelation(in.Role)
 	if err != nil {
@@ -474,15 +489,15 @@ func (r *Registry) CreateInvite(ctx context.Context, sub *authz.Subject, in Invi
 	}
 	if rel == authz.Owner {
 		return api.InviteResponse{}, api.Errorf(api.CodeBadRequest, "an invite's role is member or guest").
-			WithHint("owners are the authority's; grant owner with zm grant after they join")
+			WithHint("owners are the authority's; grant owner with " + config.Command("grant") + " after they join")
 	}
-	pid, area, err := r.grantTarget(sub, in.Project, in.Area)
+	pid, area, inviter, err := r.inviteTarget(ctx, sub, in, rel)
 	if err != nil {
 		return api.InviteResponse{}, err
 	}
 	if !r.IsTeam(pid) {
 		return api.InviteResponse{}, api.Errorf(api.CodeConflict, "project %s is solo", r.Slug(pid)).
-			WithHint("make this machine its authority first: zm project team " + r.Slug(pid))
+			WithHint("make this machine its authority first: " + config.Command("project team", r.Slug(pid)))
 	}
 	name := strings.TrimSpace(in.As)
 	if !api.ValidName(name) || name != strings.ToLower(name) {
@@ -512,7 +527,7 @@ func (r *Registry) CreateInvite(ctx context.Context, sub *authz.Subject, in Invi
 		secret = NewTunnelSecret()
 	} else if !api.ValidName(in.Authority) || len(in.Fingerprint) != 16 {
 		return api.InviteResponse{}, api.Errorf(api.CodeUnavailable, "this machine's tailnet node is not running").
-			WithHint("a join code names the authority's tailnet node: run zm tailnet up first (or set tunnel.url and use --via tunnel)")
+			WithHint("a join code names the authority's tailnet node: run " + config.Command("tailnet up") + " first (or set tunnel.url and use --via tunnel)")
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	inv := api.Invite{ID: ids.New(), Project: r.Slug(pid), ProjectID: pid, Area: area, As: name, Role: string(rel),
@@ -523,13 +538,18 @@ func (r *Registry) CreateInvite(ctx context.Context, sub *authz.Subject, in Invi
 			pid, store.Millis(now)).Scan(&live); err != nil {
 			return err
 		}
+		if inviter != "" {
+			if err := inviterInviteTx(ctx, tx, inviter, pid, area, name); err != nil {
+				return err
+			}
+		}
 		if live >= MaxLiveInvites {
 			return api.Errorf(api.CodeConflict, "project %s already has %d live invites", inv.Project, live).
-				WithHint("remove one first: zm invite ls, zm invite rm <id>")
+				WithHint("remove one first: " + config.Command("invite ls") + ", " + config.Command("invite rm", "<id>"))
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO invites (id, project, area, identity, role, code_hash, allow_tagged, class, created, expires, created_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, inv.ID, pid, area, name, inv.Role, joinHash(NormalizeJoinSecret(secret)),
-			in.AllowTagged, class, store.Millis(now), store.Millis(inv.Expires), sub.Address)
+		_, err := tx.ExecContext(ctx, `INSERT INTO invites (id, project, area, identity, role, code_hash, allow_tagged, class, created, expires, created_by, inviter)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, inv.ID, pid, area, name, inv.Role, joinHash(NormalizeJoinSecret(secret)),
+			in.AllowTagged, class, store.Millis(now), store.Millis(inv.Expires), sub.Address, inviter)
 		return err
 	})
 	if err != nil {
@@ -661,7 +681,7 @@ type RedeemInput struct {
 // code is not spent).
 func (r *Registry) Redeem(ctx context.Context, in RedeemInput) (api.RedeemResponse, error) {
 	if (in.Secret == "" && in.Hash == "") || in.Node == "" {
-		return api.RedeemResponse{}, ErrBadCode
+		return api.RedeemResponse{}, BadCode()
 	}
 	machine := strings.TrimSpace(in.Machine)
 	if !api.ValidName(machine) || machine != strings.ToLower(machine) {
@@ -676,7 +696,7 @@ func (r *Registry) Redeem(ctx context.Context, in RedeemInput) (api.RedeemRespon
 	// check before the transaction, for the name this invite would create.
 	var name string
 	if err := db.QueryRowContext(ctx, `SELECT identity FROM invites WHERE code_hash = ?`, hash).Scan(&name); err != nil {
-		return api.RedeemResponse{}, ErrBadCode
+		return api.RedeemResponse{}, BadCode()
 	}
 	if _, err := r.identity(ctx, name); api.IsCode(err, api.CodeNotFound) {
 		r.mu.RLock()
@@ -691,14 +711,14 @@ func (r *Registry) Redeem(ctx context.Context, in RedeemInput) (api.RedeemRespon
 	var out api.RedeemResponse
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	err := store.Tx(ctx, db, func(tx *sql.Tx) error {
-		var id, pid, area, ident, role, class, node, token, pending string
+		var id, pid, area, ident, role, class, node, token, pending, inviter string
 		var tagged bool
 		var expires int64
 		var attempts int
-		err := tx.QueryRowContext(ctx, `SELECT id, project, area, identity, role, class, allow_tagged, expires, node, token, pending_secret, attempts
-			FROM invites WHERE code_hash = ?`, hash).Scan(&id, &pid, &area, &ident, &role, &class, &tagged, &expires, &node, &token, &pending, &attempts)
+		err := tx.QueryRowContext(ctx, `SELECT id, project, area, identity, role, class, allow_tagged, expires, node, token, pending_secret, attempts, inviter
+			FROM invites WHERE code_hash = ?`, hash).Scan(&id, &pid, &area, &ident, &role, &class, &tagged, &expires, &node, &token, &pending, &attempts, &inviter)
 		if err != nil {
-			return ErrBadCode
+			return BadCode()
 		}
 		// A retry from the node that redeemed it is not an attempt: until
 		// the token's first call it gets the same token, however often a
@@ -734,6 +754,13 @@ func (r *Registry) Redeem(ctx context.Context, in RedeemInput) (api.RedeemRespon
 		if expires <= store.Millis(now) {
 			return errSpent
 		}
+		if inviter != "" {
+			if ok, err := r.inviterRedeemable(ctx, tx, id, inviter, pid, area, ident); err != nil {
+				return err
+			} else if !ok {
+				return errSpent
+			}
+		}
 		if err := r.freshJoin(ctx, tx, pid, machine, in.Node, now); err != nil {
 			return err
 		}
@@ -741,6 +768,11 @@ func (r *Registry) Redeem(ctx context.Context, in RedeemInput) (api.RedeemRespon
 			project: pid, area: area, role: role, class: class, by: "invite:" + id, invite: true})
 		if err != nil {
 			return err
+		}
+		if inviter != "" {
+			if err := markGuestOf(ctx, tx, who, inviter); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE invites SET node = ?, machine = ?, token = ?, pending_secret = ?, redeemed = ? WHERE id = ?`,
 			in.Node, machine, tid, secret, store.Millis(now), id); err != nil {
@@ -754,7 +786,7 @@ func (r *Registry) Redeem(ctx context.Context, in RedeemInput) (api.RedeemRespon
 		// The attempt counter must stick, so the refusal commits: answer
 		// ErrBadCode after recording the attempt.
 		_, _ = db.ExecContext(ctx, `UPDATE invites SET attempts = attempts + 1 WHERE code_hash = ?`, hash)
-		return api.RedeemResponse{}, ErrBadCode
+		return api.RedeemResponse{}, BadCode()
 	}
 	if err != nil {
 		return api.RedeemResponse{}, err

@@ -578,7 +578,7 @@ sandboxes is always refused.`,
 			}
 			was := ""
 			if err == nil && a.pool() == "" && len(removed) > 0 { // this run left nothing shared: a pause has nothing left to keep
-				w := io.Writer(words{a.host.Stdout})
+				w := a.host.Stdout
 				if a.asJSON() {
 					w = a.host.Stderr
 				}

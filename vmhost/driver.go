@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 )
 
@@ -29,6 +30,7 @@ const (
 // Main is potluck-driver-tart (and zm-run-tart, its old name): one SPEC 11 envelope on stdin, one answer on stdout,
 // exit 0; or, re-executed by acquire, a run's supervisor; or the owner's `host set` (hostset.go).
 func Main(argv []string) int {
+	kitconfig.PrefixFromEnv()
 	if len(argv) == 3 && argv[0] == flagSupervise {
 		return supervise(argv[1], argv[2])
 	}

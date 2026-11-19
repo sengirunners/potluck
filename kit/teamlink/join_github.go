@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/kit/config"
 	"net"
 	"net/http"
 	"slices"
@@ -81,7 +82,7 @@ func (s *Service) joinGitHub(ctx context.Context, req api.JoinRequest) (any, err
 		return early, err
 	}
 	if s.ByName(req.Project) != nil {
-		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", req.Project).WithHint("zm leave " + req.Project + " first")
+		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", req.Project).WithHint(config.Command("leave", req.Project) + " first")
 	}
 	found, skipped, err := s.findAuthorities(ctx, req.From)
 	if err != nil {
@@ -93,7 +94,7 @@ func (s *Service) joinGitHub(ctx context.Context, req api.JoinRequest) (any, err
 			return nil, noAuthorityAt(len(skipped), skipped, "")
 		}
 		return api.JoinResponse{Authorities: found, Skipped: skipped,
-			Notes: []string{"choose the authority: zm join " + req.Project + " --from <machine>"}}, nil
+			Notes: []string{"choose the authority: " + config.Command("join", req.Project, "--from <machine>")}}, nil
 	}
 	at := found[0]
 	fp := project.NodeFingerprint(at.Node)
@@ -124,7 +125,7 @@ func (s *Service) joinGitHubTunnel(ctx context.Context, req api.JoinRequest) (an
 		return nil, err
 	}
 	if strings.TrimSpace(req.Area) == "" {
-		return nil, api.Errorf(api.CodeBadRequest, "a GitHub join over https names one area").WithHint("zm join " + req.Project + "/<area> --from " + req.From)
+		return nil, api.Errorf(api.CodeBadRequest, "a GitHub join over https names one area").WithHint(config.Command("join", req.Project+"/<area>", "--from", req.From))
 	}
 	if req.Role == "" {
 		req.Role = api.RoleGuest
@@ -142,7 +143,7 @@ func (s *Service) joinGitHubTunnel(ctx context.Context, req api.JoinRequest) (an
 		return early, err
 	}
 	if s.ByName(req.Project) != nil {
-		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", req.Project).WithHint("zm leave " + req.Project + " first")
+		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", req.Project).WithHint(config.Command("leave", req.Project) + " first")
 	}
 	extra, err := t.Extra(req)
 	if err != nil {
@@ -154,8 +155,8 @@ func (s *Service) joinGitHubTunnel(ctx context.Context, req api.JoinRequest) (an
 		return nil, err
 	}
 	if !au.Authority || !au.GitHub {
-		return nil, api.Errorf(api.CodeNotFound, "%s is not a zm authority that runs GitHub logins", base).
-			WithHint("ask the project's owner for an invite: zm join <code>")
+		return nil, api.Errorf(api.CodeNotFound, "%s is not a %s authority that runs GitHub logins", base, config.Program).
+			WithHint("ask the project's owner for an invite: " + config.Command("join", "<code>"))
 	}
 	var st api.GitHubLoginStart
 	if err := s.call(ctx, core.ViaTunnel, hc, http.MethodPost, base+"/v0/join/github", "", api.GitHubJoinRequest{Project: req.Project, Machine: machine, Area: req.Area, Role: req.Role}, &st); err != nil {
@@ -202,8 +203,8 @@ func noAuthorityAt(checked int, skipped []api.JoinSkipped, why string) error {
 	if why != "" {
 		detail += "; " + why
 	}
-	return api.Errorf(api.CodeNotFound, "no zm authority answered on the tailnet for GitHub joins (%s); is Tailscale up? or pass a join code (it contains ':')", detail).
-		WithHint("ask the project's owner to share their zm node with you in Tailscale, or for an invite: zm join <code>")
+	return api.Errorf(api.CodeNotFound, "no %s authority answered on the tailnet for GitHub joins (%s); is Tailscale up? or pass a join code (it contains ':')", config.Program, detail).
+		WithHint("ask the project's owner to share their " + config.Program + " node with you in Tailscale, or for an invite: " + config.Command("join", "<code>"))
 }
 
 // findAuthorities asks every zm peer (or only from, without case) whether
@@ -276,11 +277,11 @@ func (s *Service) askAuthority(ctx context.Context, machine, host string) (api.J
 	err := s.call(ctx, core.ViaTailnet, &http.Client{Transport: tr}, http.MethodGet, hostURL(host)+"/v0/join/github", "", nil, &a)
 	switch {
 	case api.IsCode(err, api.CodeNotFound):
-		return api.JoinAuthority{}, "not a zm authority (no GitHub join route)"
+		return api.JoinAuthority{}, "not a " + config.Program + " authority (no GitHub join route)"
 	case err != nil:
 		return api.JoinAuthority{}, "no answer"
 	case !a.Authority || a.Machine != machine || peerNode == "":
-		return api.JoinAuthority{}, "not a zm authority"
+		return api.JoinAuthority{}, "not a " + config.Program + " authority"
 	case !a.GitHub:
 		return api.JoinAuthority{}, "runs no GitHub logins (github:false)"
 	}
@@ -295,7 +296,7 @@ func (s *Service) askAuthority(ctx context.Context, machine, host string) (api.J
 func (s *Service) continueGitHub(ctx context.Context, req api.JoinRequest) (any, error) {
 	v, ok := s.ghJoins.Load(req.Login)
 	if !ok {
-		return nil, api.NotFound("GitHub join", req.Login).WithHint("start again: zm join <project>")
+		return nil, api.NotFound("GitHub join", req.Login).WithHint("start again: " + config.Command("join", "<project>"))
 	}
 	j := v.(*ghJoin)
 	j.mu.Lock()
@@ -309,7 +310,7 @@ func (s *Service) continueGitHub(ctx context.Context, req api.JoinRequest) (any,
 	if err == nil && out.Pending {
 		if time.Now().After(j.expires.Add(time.Minute)) {
 			s.ghJoins.Delete(req.Login)
-			return nil, api.Errorf(api.CodeForbidden, "the GitHub login expired").WithHint("start again: zm join " + j.project)
+			return nil, api.Errorf(api.CodeForbidden, "the GitHub login expired").WithHint("start again: " + config.Command("join", j.project))
 		}
 		v := j.view
 		return api.JoinResponse{GitHub: &v}, nil

@@ -17,6 +17,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/placement"
 	"github.com/sengirunners/potluck/protocol"
 )
@@ -67,7 +68,7 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 	if w.Template != "" {
 		var ok bool
 		if tmpl, ok = computeapi.BoxTemplateImage(w.Template); !ok {
-			return nil, api.Errorf(api.CodeBadRequest, "no box template %q (zm's: %s)", w.Template, strings.Join(computeapi.BoxTemplates(), ", "))
+			return nil, api.Errorf(api.CodeBadRequest, "no box template %q (%s's: %s)", w.Template, config.Program, strings.Join(computeapi.BoxTemplates(), ", "))
 		}
 	}
 	if w.On != "" {
@@ -113,7 +114,7 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 	switch {
 	case len(boxes) == 0 && len(public) == 0 && len(lacking) > 0:
 		return nil, &NoTarget{Err: api.Errorf(api.CodeUnavailable, "no box run target here lends the %s template image (%s): %s", w.Template, tmpl, strings.Join(lacking, ", ")).
-			WithHint("a box's owner lends it beside the default by running zm host share again")}
+			WithHint("a box's owner lends it beside the default by running " + config.PotluckCommand("host") + " again")}
 	case len(boxes) == 0 && len(public) > 0:
 		return nil, &NoTarget{Err: api.Errorf(api.CodeUnavailable, "only public hosts serve sandboxes here (%s): placement does not pick one", strings.Join(public, ", ")).
 			WithHint("name one to use it: --on " + public[0])}
@@ -205,7 +206,7 @@ func MadeNothing(err error) bool {
 // AcquireBox places a box (PlaceBox) and acquires it on the first binding
 // that takes it. It passes to the next only on a refusal the daemon marked
 // as made before it recorded the request (computeapi.RefusedBeforeRecord:
-// unavailable, handles_max, budget, lifetime, driver) or on prep's Misfit, so every
+// unavailable, handles_max, budget, lifetime, driver, image) or on prep's Misfit, so every
 // binding is asked with the same request id and at most one ever makes a
 // box. Any other failure, a timeout or a cancelled ctx among them, ends the
 // walk at that binding: the box may still come up there, and a retry with

@@ -24,6 +24,7 @@ const (
 	RefusedBudget      = "budget"      // the binding's budget for the period is spent
 	RefusedLifetime    = "lifetime"    // ttl_s is past the binding's lifetime cap
 	RefusedDriver      = "driver"      // the binding's driver refused the acquire (no capacity, a size it cannot place)
+	RefusedImage       = "image"       // the binding lends no pin of the image the acquire needs (a database recipe's)
 )
 
 // RefusedBeforeRecord says whether err is an acquire refusal marked
@@ -38,7 +39,7 @@ func RefusedBeforeRecord(err error) (string, bool) {
 		return "", false
 	}
 	switch r.Reason {
-	case RefusedUnavailable, RefusedHandlesMax, RefusedBudget, RefusedLifetime, RefusedDriver:
+	case RefusedUnavailable, RefusedHandlesMax, RefusedBudget, RefusedLifetime, RefusedDriver, RefusedImage:
 		return r.Reason, true
 	}
 	return "", false

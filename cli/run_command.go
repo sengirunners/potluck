@@ -36,7 +36,7 @@ type jobOptions struct {
 
 func (a *app) runCmd() *cobra.Command {
 	var o jobOptions
-	cmd := &cobra.Command{Use: "run [--on <machine-size> | --size S --os O] [--ref HEAD] [--dirty] [--timeout 30m] [--keep] [-- <argv...>]",
+	cmd := &cobra.Command{Use: "run [--on <machine-size> | --size S --os O] [--database <recipe>] [--ref HEAD] [--dirty] [--timeout 30m] [--keep] [-- <argv...>]",
 		Short: "Run a command (default: the commit's .potluck/job) at this checkout's commit in a fresh sandbox; exits with its code",
 		Long: `Places a sandbox as ` + a.cmd("sandbox create") + ` does, sends the commit (default
 HEAD; with --dirty your uncommitted changes too) as a git bundle, starts the
@@ -105,6 +105,7 @@ machine of another member's, name a --template, not an --image.`,
 	f.StringVar(&o.net, "net", "on", netUsage)
 	o.push.add(f)
 	o.df.Add(f)
+	databaseFlags(cmd, &o.database)
 	return cmd
 }
 

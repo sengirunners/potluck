@@ -418,7 +418,7 @@ func (r *Registry) rewrite(id string, e *entry, f File) error {
 	}
 	if err == nil && string(b) != e.written {
 		return api.Errorf(api.CodeConflict, "project.toml was edited by hand since the daemon loaded it; "+
-			"restart the daemon to load the edit (zm daemon stop; the next command starts it), then retry")
+			"restart the daemon to load the edit (%s; the next command starts it), then retry", config.Command("daemon stop"))
 	}
 	text := f.Encode()
 	if err := atomicfile.WritePrivate(path, []byte(text)); err != nil {
@@ -457,7 +457,7 @@ func LocalSettingsError(what string) *api.Error { return errLocalSettings(what) 
 
 func errLocalSettings(what string) *api.Error {
 	return api.Errorf(api.CodeForbidden, "%s are machine settings: only the machine's owner on its own socket may change them", what).
-		WithHint("ask the machine's owner to run zm project set / zm area add / zm area set on that machine")
+		WithHint("ask the machine's owner to run " + config.Command("project set") + " / " + config.Command("area add") + " / " + config.Command("area set") + " on that machine")
 }
 
 // AddArea adds an area. Admin on the project; repo rules need the machine's
@@ -775,7 +775,7 @@ func (r *Registry) grantTarget(sub *authz.Subject, project, area string) (string
 	}
 	if area != "" && !r.HasArea(id, area) {
 		return "", "", api.Errorf(api.CodeNotFound, "no area %q in project %s", area, r.Slug(id)).
-			WithHint("add it: zm area add " + area + " --project " + r.Slug(id))
+			WithHint("add it: " + config.Command("area add", area, "--project", r.Slug(id)))
 	}
 	if err := sub.Check(authz.Admin, authz.Object{Project: id, Area: area}, "project", project); err != nil {
 		return "", "", err
@@ -788,15 +788,22 @@ func (r *Registry) grantTarget(sub *authz.Subject, project, area string) (string
 // (setCeiling), so a GitHub join does not raise it back (ownerCap), and
 // lowers the other identities of the same GitHub account (lowerSameAccount);
 // created_by stays, so revoking the GitHub grant that first gave it still
-// removes it (RevokeAdmitted).
+// removes it (RevokeAdmitted). Role inviter is member with the inviter
+// flag (inviter.go), which only an admin of the whole project gives; any
+// other role on the object clears the flag.
 func (r *Registry) Grant(ctx context.Context, sub *authz.Subject, req api.GrantRequest) (api.Grant, error) {
-	rel, err := authz.ParseRelation(req.Role)
+	rel, inviter, err := grantRole(req.Role)
 	if err != nil {
 		return api.Grant{}, err
 	}
 	pid, area, err := r.grantTarget(sub, req.Project, req.Area)
 	if err != nil {
 		return api.Grant{}, err
+	}
+	if inviter {
+		if err := r.inviterNamed(ctx, sub, pid, req.Identity); err != nil {
+			return api.Grant{}, err
+		}
 	}
 	who, err := r.ensureIdentity(ctx, req.Identity, api.IdentityHuman)
 	if err != nil {
@@ -807,18 +814,37 @@ func (r *Registry) Grant(ctx context.Context, sub *authz.Subject, req api.GrantR
 	var also []string
 	if err = store.Tx(ctx, r.st.Registry(), func(tx *sql.Tx) error {
 		var prev string
-		switch err := tx.QueryRowContext(ctx, `SELECT relation FROM grants WHERE subject = ? AND object = ?`, who.ID, obj).Scan(&prev); {
+		var wasInviter bool
+		switch err := tx.QueryRowContext(ctx, `SELECT relation, inviter FROM grants WHERE subject = ? AND object = ?`, who.ID, obj).Scan(&prev, &wasInviter); {
 		case errors.Is(err, sql.ErrNoRows):
 		case err != nil:
 			return err
 		}
-		if prev == string(rel) {
+		if prev == string(rel) && wasInviter == inviter {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO grants (subject, relation, object, project, area, created, created_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (subject, object) DO UPDATE SET relation = excluded.relation`,
-			who.ID, string(rel), obj, pid, area, store.Millis(now), sub.Address); err != nil {
+		if inviter && !wasInviter {
+			if err := inviterGrantAllowed(sub, pid, r.Slug(pid)); err != nil {
+				return err
+			}
+		}
+		if inviter && prev != string(authz.Member) {
+			return api.Errorf(api.CodeConflict, "%s is no member of %s%s: an inviter is a member an owner lets invite guests", who.Name, r.Slug(pid), areaSuffix(area)).
+				WithHint("make them a member there first")
+		}
+		if err := guestRaise(ctx, tx, sub, who.ID, who.Name, rel); err != nil {
 			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO grants (subject, relation, object, project, area, created, created_by, inviter)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (subject, object) DO UPDATE SET relation = excluded.relation, inviter = excluded.inviter`,
+			who.ID, string(rel), obj, pid, area, store.Millis(now), sub.Address, inviter); err != nil {
+			return err
+		}
+		if err := endInviterInvites(ctx, tx, who.ID, pid); err != nil {
+			return err
+		}
+		if prev == string(rel) {
+			return bumpScope(ctx, tx, who.ID) // only the inviter flag changed
 		}
 		if err := setCeiling(ctx, tx, who.ID, pid, area, authz.Relation(prev), rel, sub.Address, now); err != nil {
 			return err
@@ -833,7 +859,7 @@ func (r *Registry) Grant(ctx context.Context, sub *authz.Subject, req api.GrantR
 		return api.Grant{}, err
 	}
 	r.forgetMachines() // a replica's node-bound token whose last grant went may count again
-	return api.Grant{Identity: who.Name, Role: string(rel), Project: r.Slug(pid), Area: area, Object: obj, Created: store.FromMillis(store.Millis(now)),
+	return api.Grant{Identity: who.Name, Role: string(rel), Inviter: inviter, Project: r.Slug(pid), Area: area, Object: obj, Created: store.FromMillis(store.Millis(now)),
 		AlsoLowered: also}, nil
 }
 
@@ -859,6 +885,9 @@ func (r *Registry) Revoke(ctx context.Context, sub *authz.Subject, req api.Grant
 	var also []string
 	err = store.Tx(ctx, r.st.Registry(), func(tx *sql.Tx) error {
 		if err := tx.QueryRowContext(ctx, `DELETE FROM grants WHERE subject = ? AND object = ? RETURNING relation`, who.ID, obj).Scan(&rel); err != nil {
+			return err
+		}
+		if err := endInviterInvites(ctx, tx, who.ID, pid); err != nil {
 			return err
 		}
 		now := time.Now().UTC()
@@ -909,7 +938,7 @@ func (r *Registry) Grants(ctx context.Context, sub *authz.Subject, project strin
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.st.Registry().QueryContext(ctx, `SELECT i.name, g.relation, g.object, g.project, g.area, g.created
+	rows, err := r.st.Registry().QueryContext(ctx, `SELECT i.name, g.relation, g.inviter, g.object, g.project, g.area, g.created
 		FROM grants g JOIN identities i ON i.id = g.subject WHERE (? = '' OR g.project = ?) ORDER BY g.project, g.area, i.name`, pid, pid)
 	if err != nil {
 		return nil, err
@@ -920,7 +949,7 @@ func (r *Registry) Grants(ctx context.Context, sub *authz.Subject, project strin
 		var g api.Grant
 		var p string
 		var created int64
-		if err := rows.Scan(&g.Identity, &g.Role, &g.Object, &p, &g.Area, &created); err != nil {
+		if err := rows.Scan(&g.Identity, &g.Role, &g.Inviter, &g.Object, &p, &g.Area, &created); err != nil {
 			return nil, err
 		}
 		if !sub.Can(authz.Admin, authz.Object{Project: p, Area: g.Area}) {
@@ -958,7 +987,7 @@ func (r *Registry) Mint(ctx context.Context, sub *authz.Subject, req api.MintTok
 	var pid, area string
 	if req.Project != "" {
 		if !req.NoGrant {
-			g, err := r.Grant(ctx, sub, api.GrantRequest{Identity: req.As, Role: req.Role, Project: req.Project, Area: req.Area})
+			g, err := r.Grant(ctx, sub, api.GrantRequest{Identity: req.As, Role: r.mintRole(ctx, req.As, req.Project, req.Area, req.Role), Project: req.Project, Area: req.Area})
 			if err != nil {
 				return api.MintTokenResponse{}, err
 			}
@@ -1190,8 +1219,8 @@ func (r *Registry) FromTailscale(ctx context.Context, login string) (*authz.Subj
 	var idv string
 	err := r.st.Registry().QueryRowContext(ctx, `SELECT id FROM identities WHERE tailscale_login = ?`, strings.TrimSpace(login)).Scan(&idv)
 	if errors.Is(err, sql.ErrNoRows) || login == "" {
-		return nil, api.Errorf(api.CodeUnauthenticated, "this tailnet login is not a zm identity").
-			WithHint("the machine owner can run: zm identity add <name> --tailscale <login>, then zm grant")
+		return nil, api.Errorf(api.CodeUnauthenticated, "this tailnet login is not a %s identity", config.Program).
+			WithHint("the machine owner can run: " + config.Command("identity add", "<name> --tailscale <login>") + ", then " + config.Command("grant"))
 	}
 	if err != nil {
 		return nil, err

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/ids"
 	"github.com/sengirunners/potluck/kit/sealbox"
@@ -94,8 +95,8 @@ func (d *door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fp := Fingerprint(key.Public().(ed25519.PublicKey))
 	caller, ok := verifyRequest(r, fp, body)
 	if !ok {
-		api.WriteError(bw, api.Errorf(api.CodeUnauthenticated, "every request on this listener is signed by a zm daemon's key").
-			WithHint("join with zm join <https code>; this is not a web page"))
+		api.WriteError(bw, api.Errorf(api.CodeUnauthenticated, "every request on this listener is signed by a %s daemon's key", config.Program).
+			WithHint("join with "+config.Command("join", "<https code>")+"; this is not a web page"))
 		return
 	}
 	// Freshness is 400, not 401: three 401s purge a replica's token, and a
@@ -111,7 +112,7 @@ func (d *door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Header.Get(api.HeaderAuthorization) == "" && !tokenless(r.Method, r.URL.Path) {
 		api.WriteError(bw, api.Errorf(api.CodeUnauthenticated, "authentication required").
-			WithHint("only a member's key-bound token works here (zm join)"))
+			WithHint("only a member's key-bound token works here ("+config.Command("join")+")"))
 		return
 	}
 	if r.Header.Get(api.HeaderAuthorization) == "" && r.Method == http.MethodPost && githubJoinCall(r.Method, r.URL.Path) {
@@ -183,7 +184,7 @@ func (d *door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if !allowed {
 			api.WriteError(bw, api.Errorf(api.CodeUnavailable, "the home is not taking writes over the tunnel for %s after its start without a fresh recovery challenge", time.Duration(keepFor())*time.Second).
-				WithHint("reads work; a current zm retries safely, or try the write again later"))
+				WithHint("reads work; a current "+config.Program+" retries safely, or try the write again later"))
 			return
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 )
 
@@ -31,7 +32,7 @@ func (s *Service) node() (Node, error) {
 	r := s.run
 	s.mu.Unlock()
 	if r == nil {
-		return nil, api.Errorf(api.CodeUnavailable, "this machine's tailnet node is not running").WithHint("zm tailnet up")
+		return nil, api.Errorf(api.CodeUnavailable, "this machine's tailnet node is not running").WithHint(config.Command("tailnet up"))
 	}
 	return r.node, nil
 }

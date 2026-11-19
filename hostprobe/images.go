@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/sengirunners/potluck/imagepins"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 type DefaultPin = imagepins.DefaultPin
@@ -29,11 +30,11 @@ func DefaultImage(layer string) (DefaultPin, error) {
 			continue
 		}
 		if p.Image == "" {
-			return p, fmt.Errorf("zm has no default %s image for %s boxes yet (zm's own is not published): pass --image name@sha256:<64 hex>, an image with sh, bash, perl, git, nc, ip and ping", osName[p.OS], layer)
+			return p, fmt.Errorf("%s has no default %s image for %s boxes yet (%[1]s's own is not published): pass --image name@sha256:<64 hex>, an image with sh, bash, perl, git, nc, ip and ping", config.Program, osName[p.OS], layer)
 		}
 		return p, nil
 	}
-	return DefaultPin{}, fmt.Errorf("zm has no default image for %s boxes: pass --image name@sha256:<64 hex>", layer)
+	return DefaultPin{}, fmt.Errorf("%s has no default image for %s boxes: pass --image name@sha256:<64 hex>", config.Program, layer)
 }
 
 // LayerTemplates are the template lines of a layer, in images.pin's order

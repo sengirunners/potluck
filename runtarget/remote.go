@@ -19,6 +19,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget/rt"
 )
@@ -125,7 +126,7 @@ func (s *Service) hostTrusted(ctx context.Context, b computeapi.RunTarget, what 
 		return nil
 	}
 	return api.Errorf(api.CodeForbidden, "%s is a public host: it is given no %s, only secret-free work", b.Host, what).
-		WithHint("if you trust whoever runs it: zm machine-class " + b.Host + " trusted -P <project>")
+		WithHint("if you trust whoever runs it: " + config.Command("machine-class", b.Host, "trusted -P <project>"))
 }
 
 // remoteViews are the bindings project's machines advertise, as list shows them.

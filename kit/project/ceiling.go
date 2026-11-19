@@ -206,9 +206,12 @@ func lowerSameAccount(ctx context.Context, tx *sql.Tx, subject string, except []
 			if rel == authz.None {
 				_, err = tx.ExecContext(ctx, `DELETE FROM grants WHERE subject = ? AND object = ?`, s.id, obj)
 			} else {
-				_, err = tx.ExecContext(ctx, `UPDATE grants SET relation = ? WHERE subject = ? AND object = ?`, string(rel), s.id, obj)
+				_, err = tx.ExecContext(ctx, `UPDATE grants SET relation = ?, inviter = 0 WHERE subject = ? AND object = ?`, string(rel), s.id, obj)
 			}
 			if err != nil {
+				return nil, err
+			}
+			if err := endInviterInvites(ctx, tx, s.id, project); err != nil {
 				return nil, err
 			}
 			if err := setCeiling(ctx, tx, s.id, project, h.area, h.rel, rel, by, now); err != nil {

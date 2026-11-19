@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"github.com/sengirunners/potluck/kit/config"
 
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/authz"
@@ -50,11 +51,11 @@ func (d *Deps) WriteTarget(ctx context.Context, area string, a authz.Action) (Ta
 		if in := ResolveInputOf(ctx); in.Explicit != "" {
 			return Target{}, api.NotFound("project", in.Explicit)
 		}
-		hint := "pass --project <slug>, set ZM_PROJECT, or run `zm project use <slug>` in the repo; `zm project why` explains"
+		hint := "pass --project <slug>, set ZM_PROJECT, or run `" + config.Command("project use", "<slug>") + "` in the repo; `" + config.Command("project why") + "` explains"
 		if IsLocal(ctx) && ResolveInputOf(ctx).Cwd != "" {
 			// A socket caller in a directory no project claims: the first
 			// step is to make it one (SPEC 17.1).
-			hint = "run `zm init` here to make this directory a project; or " + hint
+			hint = "run `" + config.Command("init") + "` here to make this directory a project; or " + hint
 		}
 		return Target{}, api.Errorf(api.CodeBadRequest, "no project for this call (%s)", last).WithHint(hint)
 	}

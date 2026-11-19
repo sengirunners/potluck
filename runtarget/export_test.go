@@ -145,3 +145,10 @@ const CancelsActorRelayedMax = cancelsActorRelayedMax
 // AddHolderCheck registers f as the session module would: whether a holder
 // is live (core.Deps.HolderLive).
 func (s *Service) AddHolderCheck(f core.HolderCheck) { s.d.AddHolderCheck(f) }
+
+// SetDatabaseRecipesForTest sets project's [[databases]] recipes, as its
+// owner's project.toml would.
+func (s *Service) SetDatabaseRecipesForTest(ctx context.Context, project string, recipes any) error {
+	_, err := s.d.Projects.SetSection(ctx, project, "databases", func(any) (any, error) { return recipes, nil })
+	return err
+}

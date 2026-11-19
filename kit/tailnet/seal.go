@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/sealbox"
 )
@@ -200,7 +201,7 @@ func (t *sealTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			switch {
 			case ownErr != nil:
 				return nil, api.Errorf(api.CodeUnavailable, "this machine cannot read its seal key, so it sends no secrets: %v", ownErr).
-					WithHint("fix the key file named (zm status shows the home), then try again")
+					WithHint("fix the key file named (" + config.Command("status") + " shows the home), then try again")
 			case id == "":
 				// Sealing off: this daemon stands in for a build from before
 				// sealing, which sent the body as it is.

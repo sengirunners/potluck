@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/project"
 )
@@ -71,7 +72,7 @@ func (dm *Daemon) resolveDevice(ctx context.Context, name string) (project.Pin, 
 	}
 	self, err := net.Self(ctx)
 	if err != nil || !self.Running {
-		return project.Pin{}, api.TokenDevice{}, api.Errorf(api.CodeUnavailable, "this daemon's tailnet node is not running").WithHint("zm tailnet up")
+		return project.Pin{}, api.TokenDevice{}, api.Errorf(api.CodeUnavailable, "this daemon's tailnet node is not running").WithHint(config.Command("tailnet up"))
 	}
 	var found []core.NetPeer
 	for _, p := range self.PeerList {

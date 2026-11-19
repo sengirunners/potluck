@@ -917,6 +917,41 @@ yours has a grant (Potluck alone makes none; the machine that runs it asks GitHu
 refused, since it would add a pool's area there. `potluck remotes` shows a remote's local copy when its program
 keeps one.
 
+### Inviters
+
+Only an owner (or an admin of the whole project) makes invites, unless an owner makes a member an inviter. An
+inviter makes guest invites, nothing else. The rule is in `kit/project/inviter.go`; every program built on Potluck
+gets it from there.
+
+- An owner of the whole project grants a member's grant the role `inviter` (`POST /v0/grants` with role `inviter`;
+  in zm, `zm grant <name> inviter <project>[/<area>]`). The grant stays `member`, with `inviter` set in the grants
+  list. Only someone who is already a member there can be made an inviter. Nobody is an inviter by default, and an
+  area's owner cannot make anyone an inviter.
+- To take it back, an owner grants the plain role again (`member`, or any other role), or revokes the grant.
+- An inviter's invite must have role `guest`. It goes into the object of the inviter's own grant: an area member's
+  invite goes into that area, and a project-wide inviter's into the project or any of its areas. So the guest never
+  sees more than the inviter does. It carries no machine class and no `--allow-tagged`, since those are an
+  owner's to give. It names someone new: never an existing identity, never a name another live invite holds, and
+  never a name the daemon keeps for its own identities (`zm`, `potluck`, or one starting `zm-` or `potluck-`).
+  An inviter changes no grant and no role.
+- A project-wide inviter may invite a guest into any area, a pool's `hosts` included. With no class, such a guest's
+  machine is not a host (see Machine class).
+- A member or owner invite from an inviter is refused with `an inviter makes guest invites only`. A plain member is
+  refused as before.
+- An inviter's code joins only while its inviter still holds the permission and its name is still free. When the
+  permission goes (another role, a revoke, a lowering, a raise to owner), that inviter's unredeemed codes are
+  deleted. Giving the permission back does not restore them.
+- The identity an inviter's guest invite creates stays a guest. An inviter picks the name, and it may be one an owner
+  or the daemon meant for someone else (a future member, the runner broker's `zm-runners`). So no invite, join or
+  grant by the daemon makes it more than a guest; those are refused. Only an owner's own grant can raise it. After
+  that, it is an identity like any other.
+- Minting a member token for an inviter keeps them an inviter.
+- An inviter's live invites count toward the project's cap on live invites, like an owner's. An owner sees them in
+  the invite list, made by the inviter, and removes them there.
+- In a pool, `potluck invite NAME` makes a member invite, and `--host` gives the machine a class. Both are refused
+  for an inviter. A pool inviter's guest invites go into the area they joined, with `potluck invite <pool>/team --as NAME
+  --role guest`.
+
 ## Clients
 
 A program built on Potluck carries these commands in its own command tree, in its own words:

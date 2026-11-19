@@ -295,6 +295,10 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		return nil, api.Errorf(api.CodeUnavailable, "run target %s is not available: %s", b.Name, oneLine(d.Why))
 	}
 	if !seen {
+		if dbRecipe != nil && !s.lendsDatabaseImage(ctx, b, dbRecipe.Image) {
+			return nil, markRefused(api.Errorf(api.CodeBadRequest, "run target %s does not lend database %s's image %s", b.Name, dbRecipe.Name, dbRecipe.Image).
+				WithHint("its owner pins that image on the binding"), computeapi.RefusedImage)
+		}
 		if c := lifetimeCap(b, d); c > 0 && req.TTLS > c {
 			return nil, markRefused(api.Errorf(api.CodeBadRequest, "ttl_s %d is past the lifetime cap %d", req.TTLS, c), computeapi.RefusedLifetime)
 		}

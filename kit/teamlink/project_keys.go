@@ -26,6 +26,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"strings"
 	"time"
@@ -97,7 +98,7 @@ func (s *Service) sameProjectKey(ctx context.Context, cap api.TeamCap, via, fing
 	return api.Errorf(api.CodeForbidden, "this machine first joined project %s at another authority (%s, key %s over %s); this join's authority (%s, key %s over %s) answers with the same project id, so the join is refused: the boxes, shares and records this machine keeps for that project stay with the authority it first joined",
 		cap.Project, bAuth, bFP, bVia, authority, fingerprint, via).
 		WithHint("ask the project's owner for a join code from the authority this machine first joined it at; " +
-			"if that authority itself got a new key or is now reached another way, this machine's owner can forget the old key: zm forget " + cap.Project)
+			"if that authority itself got a new key or is now reached another way, this machine's owner can forget the old key: " + config.Command("forget", cap.Project))
 }
 
 // bindAndSave binds cap's project to the authority's key, saves x and
@@ -147,9 +148,9 @@ func (s *Service) noJoinRecorded(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	hint := "zm leave " + slug + " first"
+	hint := config.Command("leave", slug) + " first"
 	if s.ByName(id) == nil { // a row a failed delete left: the next start loads it
-		hint = "restart the daemon (zm daemon stop, then zm daemon --detach), then zm leave " + slug
+		hint = "restart the daemon (" + config.Command("daemon stop") + ", then " + config.Command("daemon", "--detach") + "), then " + config.Command("leave", slug)
 	}
 	return api.Errorf(api.CodeConflict, "this machine has a join of %s (%s, %s); its authority key is not forgotten while the join is recorded", slug, id, state).
 		WithHint(hint)

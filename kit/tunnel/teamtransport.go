@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/project"
 )
@@ -23,7 +24,14 @@ var ErrHomeKey = errors.New("the answer is not signed by the home this invite pi
 
 // ErrUnsigned is an answer with no home signature: the tunnel's own error
 // page while the home is down, or something that is not a zm home.
-var ErrUnsigned = errors.New("the answer is not signed by a zm home")
+var ErrUnsigned error = unsignedError{}
+
+// unsignedError builds its text when read, because the program's name is set after package init.
+type unsignedError struct{}
+
+func (unsignedError) Error() string {
+	return "the answer is not signed by a " + config.Program + " home"
+}
 
 // TeamTransport is the tunnel's driver.
 func (s *Service) TeamTransport() core.TeamTransport { return teamTransport{s} }
@@ -80,7 +88,7 @@ func (t teamTransport) Prepare(_ context.Context, _ api.JoinRequest, _ string, t
 	if own, err := t.s.Fingerprint(); err != nil {
 		return "", "", err
 	} else if own == target.Fingerprint {
-		return "", "", api.Errorf(api.CodeBadRequest, "this join code is for this machine's own key").WithHint("run zm join on the member's machine")
+		return "", "", api.Errorf(api.CodeBadRequest, "this join code is for this machine's own key").WithHint("run " + config.Command("join") + " on the member's machine")
 	}
 	return "", "", nil
 }

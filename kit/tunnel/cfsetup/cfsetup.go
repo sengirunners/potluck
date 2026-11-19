@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/tunnel"
 )
 
@@ -262,7 +263,7 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 		return err
 	}
 	if st.Hostname != "" && st.Hostname != host {
-		return fmt.Errorf("this home is already set up for %s; run zm tunnel remove first", st.Hostname)
+		return fmt.Errorf("this home is already set up for %s; run %s first", st.Hostname, config.Command("tunnel remove"))
 	}
 	var names []string // the tunnel to reuse: the one on record, else either default name
 	switch {
@@ -296,7 +297,7 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 	// 1. Log in (once per home): cloudflared prints a URL; open it on any
 	// device, pick the zone, and it writes the certificate here.
 	if _, err := os.Stat(s.cert()); err != nil {
-		s.printf("zm: log in to Cloudflare and pick the zone for %s (open this URL on any device; waiting):\n", host)
+		s.printf(config.Program+": log in to Cloudflare and pick the zone for %s (open this URL on any device; waiting):\n", host)
 		if err := os.MkdirAll(s.cfHome(), 0o700); err != nil {
 			return err
 		}
@@ -307,7 +308,7 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 			return fmt.Errorf("cloudflared login wrote no certificate at %s", s.cert())
 		}
 		_ = os.Chmod(s.cert(), 0o600)
-		s.printf("zm: logged in (certificate %s, 0600)\n", s.cert())
+		s.printf(config.Program+": logged in (certificate %s, 0600)\n", s.cert())
 	}
 
 	// 2. The tunnel: the one with this name, or a new one.
@@ -329,7 +330,7 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 				return fmt.Errorf("fetching the credentials of tunnel %s: %w", s.Name, err)
 			}
 		}
-		s.printf("zm: tunnel %s (%s) exists; reusing it\n", s.Name, id)
+		s.printf(config.Program+": tunnel %s (%s) exists; reusing it\n", s.Name, id)
 	default:
 		out, err := s.CF.Run(ctx, s.env(), io.Discard, append(s.origin(), "create", "--credentials-file", s.creds(), "--output", "json", s.Name)...)
 		if err != nil {
@@ -354,7 +355,7 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 			_ = os.Remove(s.creds())
 			st.TunnelID, st.Created = "", false
 		})
-		s.printf("zm: created tunnel %s (%s)\n", s.Name, t.ID)
+		s.printf(config.Program+": created tunnel %s (%s)\n", s.Name, t.ID)
 	}
 	_ = os.Chmod(s.creds(), 0o600)
 	if err := s.save(&st); err != nil {
@@ -372,7 +373,7 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 	if err := s.save(&st); err != nil {
 		return err
 	}
-	s.printf("zm: %s routes to tunnel %s\n", host, s.Name)
+	s.printf(config.Program+": %s routes to tunnel %s\n", host, s.Name)
 
 	if err := s.routePreview(ctx, st); err != nil {
 		return err
@@ -395,14 +396,14 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 	// 5. zm's listener and config (live: no restart).
 	was, _ := s.Zm.Tunnel(ctx)
 	if _, err := s.Zm.TunnelUp(ctx, api.TunnelUpRequest{Listen: s.Listen, URL: "https://" + host, PreviewDomain: st.PreviewDomain, EdgeSecret: st.EdgeSecret}); err != nil {
-		return fmt.Errorf("starting zm's tunnel listener: %w", err)
+		return fmt.Errorf("starting %s's tunnel listener: %w", config.Program, err)
 	}
 	undo = append(undo, func() {
 		if was.URL == "" {
 			_, _ = s.Zm.TunnelDown(context.WithoutCancel(ctx))
 		}
 	})
-	s.printf("zm: listening on %s for cloudflared; invites name https://%s\n", s.Listen, host)
+	s.printf(config.Program+": listening on %s for cloudflared; invites name https://%s\n", s.Listen, host)
 
 	// 6. cloudflared kept running by the service manager, as this user.
 	u := s.unit(st)
@@ -417,10 +418,10 @@ func (s *Setup) Run(ctx context.Context) (err error) {
 		// started with: a rewritten ingress (runners.listen) takes a restart.
 		return fmt.Errorf("restarting the %s service: %w", s.Sup.Name(), err)
 	}
-	s.printf("zm: cloudflared runs as a %s service (%s), as %s\n", s.Sup.Name(), s.Sup.Path(u), currentUser())
+	s.printf(config.Program+": cloudflared runs as a %s service (%s), as %s\n", s.Sup.Name(), s.Sup.Path(u), currentUser())
 	if s.Linger != nil {
 		if on, err := s.Linger(); err == nil && !on {
-			s.printf("zm: note: this user's services stop when you log out; to keep the tunnel up on a server run: loginctl enable-linger %s\n", currentUser())
+			s.printf(config.Program+": note: this user's services stop when you log out; to keep the tunnel up on a server run: loginctl enable-linger %s\n", currentUser())
 		}
 	}
 	if err := s.save(&st); err != nil {
@@ -455,7 +456,7 @@ func (s *Setup) RunQuick(ctx context.Context) (err error) {
 		return err
 	}
 	if st.Hostname != "" && !st.Quick {
-		return fmt.Errorf("this home is set up for %s; run zm tunnel remove first", st.Hostname)
+		return fmt.Errorf("this home is set up for %s; run %s first", st.Hostname, config.Command("tunnel remove"))
 	}
 	newEdgeSecret(&st)
 	st.Quick, st.Listen, st.Label = true, s.Listen, s.label(st)
@@ -497,14 +498,14 @@ func (s *Setup) RunQuick(ctx context.Context) (err error) {
 		return fmt.Errorf("cloudflared printed no trycloudflare name within %s (see %s)", QuickWait, s.logPath())
 	}
 	if _, err := s.Zm.TunnelUp(ctx, api.TunnelUpRequest{Listen: s.Listen, URL: "https://" + host, PreviewDomain: st.PreviewDomain, EdgeSecret: st.EdgeSecret}); err != nil {
-		return fmt.Errorf("starting zm's tunnel listener: %w", err)
+		return fmt.Errorf("starting %s's tunnel listener: %w", config.Program, err)
 	}
 	undo = append(undo, func() { _, _ = s.Zm.TunnelDown(context.WithoutCancel(ctx)) })
 	st.Hostname = host
 	if err := s.save(&st); err != nil {
 		return err
 	}
-	s.printf("zm: quick tunnel https://%s (temporary: the name changes when cloudflared restarts)\n", host)
+	s.printf(config.Program+": quick tunnel https://%s (temporary: the name changes when cloudflared restarts)\n", host)
 	undo = nil
 	return s.Verify(ctx, host)
 }
@@ -533,15 +534,15 @@ func (s *Setup) Verify(ctx context.Context, host string) error {
 		last, lastErr = a, err
 		switch {
 		case err == nil && a.Challenge:
-			return fmt.Errorf("Cloudflare answers %s with a challenge, which zm's clients cannot pass. %s", url, botFightSteps(host))
+			return fmt.Errorf("Cloudflare answers %s with a challenge, which %s's clients cannot pass. %s", url, config.Program, botFightSteps(host))
 		case err == nil && a.OtherHome:
-			return fmt.Errorf("%s answers as another zm home, or with a signature this home's key (%s) did not make: the hostname points elsewhere", host, zs.Fingerprint)
+			return fmt.Errorf("%s answers as another %s home, or with a signature this home's key (%s) did not make: the hostname points elsewhere", host, config.Program, zs.Fingerprint)
 		case err == nil && a.Status == 401 && a.Signed:
 			if st, err := s.Zm.Tunnel(ctx); err == nil && st.EdgeSecret && st.EdgeSeen == nil {
 				break // through the edge, but not with the secret yet: wait
 			}
-			s.printf("zm: https://%s answers zm's signed 401 from this home; the edge secret arrives\n", host)
-			s.printf("zm: done. Invite someone with: zm invite <project> --as <name> --role member --via tunnel\n")
+			s.printf("%s: https://%s answers %s's signed 401 from this home; the edge secret arrives\n", config.Program, host, config.Program)
+			s.printf("%s: done. Invite someone with: %s\n", config.Program, config.Command("invite", "<project> --as <name> --role member --via tunnel"))
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -559,7 +560,7 @@ func (s *Setup) Verify(ctx context.Context, host string) error {
 	} else if last.EdgeError {
 		why = fmt.Sprintf("Cloudflare could not reach the tunnel (%d): is the %s service running? see %s", last.Status, s.Sup.Name(), s.logPath())
 	}
-	return fmt.Errorf("https://%s did not answer as this zm home within %s (%s); the setup stays in place: zm tunnel status checks again", host, wait, why)
+	return fmt.Errorf("https://%s did not answer as this %s home within %s (%s); the setup stays in place: %s checks again", host, config.Program, wait, why, config.Command("tunnel status"))
 }
 
 func botFightSteps(host string) string {
@@ -567,7 +568,7 @@ func botFightSteps(host string) string {
 	if i := strings.Index(host, "."); i >= 0 {
 		zone = host[i+1:]
 	}
-	return "In the Cloudflare dashboard, open the zone " + zone + ", Security > Bots, and turn Bot Fight Mode off (on the Free plan it cannot be skipped for one hostname). Then run zm tunnel status."
+	return "In the Cloudflare dashboard, open the zone " + zone + ", Security > Bots, and turn Bot Fight Mode off (on the Free plan it cannot be skipped for one hostname). Then run " + config.Command("tunnel status") + "."
 }
 
 // env is every cloudflared call's: HOME is the setup's own, so cloudflared
@@ -616,7 +617,7 @@ func (s *Setup) Ingress(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	if s.CFPath == "" {
-		return false, fmt.Errorf("no cloudflared to restart (run zm tunnel setup %s again)", st.Hostname)
+		return false, fmt.Errorf("no cloudflared to restart (run %s again)", config.Command("tunnel setup", st.Hostname))
 	}
 	if err := writeFile(s.config(), []byte(want)); err != nil {
 		return false, err
@@ -690,7 +691,7 @@ func (s *Setup) Remove(ctx context.Context, keepTunnel bool) error {
 	}
 	var errs []error
 	if _, err := s.Zm.TunnelDown(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("stopping zm's listener: %w", err))
+		errs = append(errs, fmt.Errorf("stopping %s's listener: %w", config.Program, err))
 	}
 	if st.Label == "" {
 		// None on record: a state from before labels were kept, so the old
@@ -707,17 +708,17 @@ func (s *Setup) Remove(ctx context.Context, keepTunnel bool) error {
 		// A tunnel this machine reused was made elsewhere: it is not ours to
 		// delete, and neither is its DNS record.
 		_ = os.Remove(s.creds())
-		s.printf("zm: kept tunnel %s (%s) and its DNS record in Cloudflare; this machine no longer runs it\n", st.Name, st.TunnelID)
+		s.printf(config.Program+": kept tunnel %s (%s) and its DNS record in Cloudflare; this machine no longer runs it\n", st.Name, st.TunnelID)
 		keepTunnel = true
 	default:
 		if _, err := s.CF.Run(ctx, s.env(), io.Discard, append(s.origin(), "delete", "-f", st.TunnelID)...); err != nil {
 			errs = append(errs, fmt.Errorf("deleting tunnel %s: %w", st.Name, err))
 		} else {
 			_ = os.Remove(s.creds())
-			s.printf("zm: deleted tunnel %s\n", st.Name)
+			s.printf(config.Program+": deleted tunnel %s\n", st.Name)
 		}
 		if st.Routed {
-			s.printf("zm: one step is yours: in the Cloudflare dashboard, DNS > Records, delete the CNAME %s (-> %s.cfargotunnel.com); cloudflared cannot delete DNS records\n", st.Hostname, st.TunnelID)
+			s.printf(config.Program+": one step is yours: in the Cloudflare dashboard, DNS > Records, delete the CNAME %s (-> %s.cfargotunnel.com); cloudflared cannot delete DNS records\n", st.Hostname, st.TunnelID)
 		}
 	}
 	if len(errs) > 0 {
@@ -729,9 +730,9 @@ func (s *Setup) Remove(ctx context.Context, keepTunnel bool) error {
 	}
 	_ = os.Remove(s.statePath())
 	if fileExists(s.cert()) {
-		s.printf("zm: removed (the Cloudflare login stays in %s; delete it to log out)\n", s.cfHome())
+		s.printf(config.Program+": removed (the Cloudflare login stays in %s; delete it to log out)\n", s.cfHome())
 	} else {
-		s.printf("zm: removed\n")
+		s.printf("%s: removed\n", config.Program)
 	}
 	return nil
 }

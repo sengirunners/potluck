@@ -186,7 +186,7 @@ func TestForgetLetsAReKeyedAuthorityJoin(t *testing.T) {
 	tn.SetIdentity("nMINI", rekeyed)
 	err = join("ana2")
 	var ae *api.Error
-	if !errors.As(err, &ae) || !strings.Contains(ae.Hint, "zm forget "+p.ID) {
+	if !errors.As(err, &ae) || !strings.Contains(ae.Hint, "potluck forget "+p.ID) {
 		t.Fatalf("join at the new key: %v, want a refusal whose hint names the forget", err)
 	}
 	if _, err := m.ForgetProjectKey(ctx, p.ID, api.ForgetProjectKeyRequest{Fingerprint: first.Fingerprint}); !api.IsCode(err, api.CodeBadRequest) {

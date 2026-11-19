@@ -67,7 +67,7 @@ func FindDriver(dirs []string, driver string) (string, error) {
 }
 
 // repinHint is the command that re-pins driver.
-func repinHint(driver string) string { return config.Program + " driver pin " + driver }
+func repinHint(driver string) string { return config.PotluckCommand("driver pin", driver) }
 
 // short is a hash's first 12 characters, for messages.
 func short(sum string) string { return sum[:min(len(sum), 12)] }

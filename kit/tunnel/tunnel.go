@@ -110,9 +110,9 @@ func (s *Service) Routes(r *core.Router) {
 	r.HandleFunc("GET /v0/tunnel", core.Local, "local: the tunnel listener's status and this daemon's key fingerprint", func(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, s.Status())
 	})
-	r.HandleFunc("POST /v0/tunnel/up", core.Local, "local: start (or move) the loopback listener and save tunnel.* in config (zm tunnel setup)", s.handleUp)
-	r.HandleFunc("POST /v0/tunnel/down", core.Local, "local: stop the listener and clear tunnel.* in config (zm tunnel remove)", s.handleDown)
-	r.HandleFunc("POST /v0/tunnel/key", core.Local, "local: name (or clear) the secret reference that holds this daemon's key outside the home, after checking it holds this key (zm tunnel key)", s.handleKey)
+	r.HandleFunc("POST /v0/tunnel/up", core.Local, "local: start (or move) the loopback listener and save tunnel.* in config ("+config.Command("tunnel setup")+")", s.handleUp)
+	r.HandleFunc("POST /v0/tunnel/down", core.Local, "local: stop the listener and clear tunnel.* in config ("+config.Command("tunnel remove")+")", s.handleDown)
+	r.HandleFunc("POST /v0/tunnel/key", core.Local, "local: name (or clear) the secret reference that holds this daemon's key outside the home, after checking it holds this key ("+config.Command("tunnel key")+")", s.handleKey)
 }
 
 // handleKey is POST /v0/tunnel/key {"ref"}: the escrow is saved only when
@@ -132,7 +132,7 @@ func (s *Service) handleKey(w http.ResponseWriter, r *http.Request) {
 		if s.cfg().Key != "" {
 			if _, err := s.key(); err != nil {
 				api.WriteError(w, api.Errorf(api.CodeConflict, "this daemon has no key: clearing its escrow would make a new one, and every member would refuse this home").
-					WithHint("point it at the key instead: zm tunnel key escrow --to <where the key is>"))
+					WithHint("point it at the key instead: "+config.Command("tunnel key escrow", "--to <where the key is>")))
 				return
 			}
 		}
@@ -232,7 +232,7 @@ func (s *Service) adoptOrMatch(seed []byte) error {
 	}
 	if !ed25519.NewKeyFromSeed(seed).Equal(k) {
 		return api.Errorf(api.CodeConflict, "the escrow holds another key than this daemon's").
-			WithHint("zm tunnel key escrow writes this daemon's key there")
+			WithHint(config.Command("tunnel key escrow") + " writes this daemon's key there")
 	}
 	return nil
 }
@@ -398,7 +398,7 @@ func (s *Service) Status() api.TunnelStatus {
 	c := s.cfg()
 	st := api.TunnelStatus{PreviewDomain: c.PreviewDomain, Listen: c.Listen, URL: s.URL(), Fingerprint: fp, Error: s.err, EdgeSecret: c.EdgeSecret != "", KeyEscrow: c.Key}
 	if kerr != nil && st.Error == "" {
-		st.Error = "no home key: " + kerr.Error() + " (zm tunnel key escrow --to <where the key is> adopts it; never clear it)"
+		st.Error = "no home key: " + kerr.Error() + " (" + config.Command("tunnel key escrow", "--to <where the key is>") + " adopts it; never clear it)"
 	}
 	if s.srv != nil {
 		st.Running, st.Listen = true, s.listen

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 )
 
@@ -43,7 +44,7 @@ func (c *config) parseBox(m map[string]string, bad *[]string) {
 		*bad = append(*bad, "runner_dir must be a plain path")
 	}
 	if c.JITRunnerDir != "" && c.VM == "oci" && c.OCINetwork == "none" { // zm-eakh.12.24.6
-		*bad = append(*bad, "runner_dir needs a network: a GitHub runner must reach GitHub, and oci_network is none (zm host doctor prints the root step that makes zm's filtered network)")
+		*bad = append(*bad, "runner_dir needs a network: a GitHub runner must reach GitHub, and oci_network is none ("+kitconfig.PotluckCommand("doctor")+" prints the root step that makes "+kitconfig.Program+"'s filtered network)")
 	}
 }
 

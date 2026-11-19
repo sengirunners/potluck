@@ -71,9 +71,10 @@ func (a *app) agentTaskCmd() *cobra.Command {
 	)
 	def := agenttasks.Default()
 	cmd := &cobra.Command{
-		Use:   "agent-task [" + strings.Join(agenttasks.Names(), "|") + "] --prompt-file <file|-> [--secret-file <file>] [--on <machine-size>] [--ref HEAD] [--dirty] [--timeout 1h] [--keep]",
+		Use:   "agent-task [" + strings.Join(agenttasks.Names(), "|") + "] --prompt-file <file|-> [--secret-file <file>] [--on <machine-size>] [--database <recipe>] [--ref HEAD] [--dirty] [--timeout 1h] [--keep]",
 		Short: "Run a coding agent once in a fresh sandbox on this checkout's commit; its commits come back as a local ref",
-		Long: `Places a sandbox from the agent template (network on) as ` + a.cmd("run") + ` does,
+		Long: `Places a sandbox from the agent template (network on; with --database, the
+project's database recipe image instead) as ` + a.cmd("run") + ` does,
 sends the commit (default HEAD; with --dirty your uncommitted changes too),
 and runs the agent there non-interactively with the prompt on its stdin.
 When it ends, what it left uncommitted becomes one more commit, and the
@@ -124,7 +125,7 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 				return err
 			}
 			o.want.Net, o.want.BoxSecrets = computeapi.NetOn, true
-			if o.image == "" {
+			if o.image == "" && o.database == "" {
 				o.want.Template = o.adapter.Template
 			}
 			o.out, o.errw, o.p = a.host.Stdout, a.host.Stderr, prefix(a.host.Prefix)
@@ -172,7 +173,7 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 	f.StringVar(&secretName, "secret-name", "", "what the credential is, one of "+strings.Join(def.Secrets, ", ")+" (default: the first; with no --secret-file, the only variable read)")
 	f.StringVar(&o.want.On, "on", "", "a shared machine size, as "+a.cmd("status")+" lists it (default: the smallest that fits)")
 	f.StringVar(&o.want.Size, "size", "", "a size the machine states")
-	f.StringVar(&o.image, "image", "", "one of the machine's images, by name, that ships the agent's command (default: the agent's template's; "+def.Name+": "+def.Template+")")
+	f.StringVar(&o.image, "image", "", "one of the machine's images, by name, that ships the agent's command (default: the agent's template's, "+def.Name+": "+def.Template+"; with --database, the recipe's image)")
 	f.StringVar(&o.ref, "ref", "", "the commit the agent starts from, in this checkout (default HEAD)")
 	f.DurationVar(&o.timeout, "timeout", time.Hour, "kill the agent after this long (exit 124)")
 	f.BoolVar(&o.keep, "keep", false, "leave the sandbox up afterwards, for "+a.cmd("sandbox exec")+" (it ends at its lease)")
@@ -182,6 +183,7 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 	o.addProxyFlags(cmd)
 	o.df.Add(f)
 	o.push.add(f)
+	databaseFlags(cmd, &o.database)
 	return cmd
 }
 

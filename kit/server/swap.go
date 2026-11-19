@@ -226,7 +226,7 @@ func (dm *Daemon) zmState() *api.MachineZm {
 func (dm *Daemon) stopGuard(ctx context.Context, req api.DaemonStopRequest) error {
 	if h, held := swap.Holder(dm.Deps.Config.Home); held && (req.Swap == "" || req.Swap != h.Nonce) {
 		return api.Errorf(api.CodeConflict, "%s", (&swap.BusyError{Holder: h}).Error()).
-			WithHint("wait for it to finish; zm status shows the last swap")
+			WithHint("wait for it to finish; " + config.Command("status") + " shows the last swap")
 	}
 	if req.Force {
 		return nil

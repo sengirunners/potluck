@@ -197,7 +197,7 @@ func (s *Service) setup(r *http.Request) (any, error) {
 			rc.PublicURL = strings.TrimRight(f.Tunnel.URL, "/")
 		default:
 			hint := "set tunnel.url in config.json, or run " + s.cmd("runners setup <pool> --url https://<host>") + " for your own proxy to " + addr
-			if config.Has("tunnel setup") {
+			if !config.Missing("tunnel setup") {
 				hint = "run " + s.cmd("tunnel setup <hostname>") + " first, or " + hint
 			}
 			return api.Errorf(api.CodeBadRequest, "no public URL: GitHub must reach this machine").WithHint(hint)

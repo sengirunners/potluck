@@ -74,7 +74,7 @@ func serve(args []string) int {
 	tlsOnly := fs.Bool("tls-only", false, "refuse plain HTTP (required for a non-loopback --addr)")
 	project := fs.String("project", "", "project (default $ZM_PROJECT, then the repo you are in)")
 	var want computeclient.BoxWant
-	fs.StringVar(&want.On, "on", "", "this box run target (default: placement, as "+config.Cmd("sandbox create")+")")
+	fs.StringVar(&want.On, "on", "", "this box run target (default: placement, as "+config.PotluckCommand("sandbox create")+")")
 	fs.StringVar(&want.Size, "size", "", "a size the box target states")
 	fs.StringVar(&want.OS, "os", "", "linux or macos")
 	if err := fs.Parse(args); err != nil {

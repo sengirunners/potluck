@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 )
 
@@ -213,7 +214,7 @@ func parseConfig(m map[string]string) (config, error) {
 			c.OCINetwork = "none"
 		}
 		if m["network"] != "nat" && !ociIsolatedNet(c.OCINetwork) { // isolated (network=nat is the unsafe dev setting)
-			bad = append(bad, "oci_network "+strconv.Quote(c.OCINetwork)+" may reach the host or its LAN: none, or the plain name of a network made for zm with egress filtered")
+			bad = append(bad, "oci_network "+strconv.Quote(c.OCINetwork)+" may reach the host or its LAN: none, or the plain name of a network made for "+kitconfig.Program+" with egress filtered")
 		}
 		switch v := m["oci_dns"]; {
 		case c.OCINetwork == "none" && v != "":

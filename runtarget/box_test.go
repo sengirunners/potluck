@@ -149,7 +149,7 @@ func TestBoxes(t *testing.T) {
 		req    computeapi.AcquireRunTargetRequest
 		want   string
 	}{
-		"unknown template":                     {"agentbox", computeapi.AcquireRunTargetRequest{RequestID: "t1", Template: "nope"}, `no box template "nope" (zm's: agent, browser)`},
+		"unknown template":                     {"agentbox", computeapi.AcquireRunTargetRequest{RequestID: "t1", Template: "nope"}, `no box template "nope" (potluck's: agent, browser)`},
 		"template and image":                   {"agentbox", computeapi.AcquireRunTargetRequest{RequestID: "t2", Template: "agent", Image: "ref-image"}, "template or an image, not both"},
 		"binding without it":                   {"sandbox", computeapi.AcquireRunTargetRequest{RequestID: "t3", Template: "agent"}, "run target sandbox lends no agent template image"},
 		"the template's name":                  {"agentbox", computeapi.AcquireRunTargetRequest{RequestID: "t4", Template: "agent"}, "ghcr.io/sengirunners/potluck-box-agent"},

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/sengirunners/potluck/kit/config"
 	"io"
 	"net/http"
 	"strconv"
@@ -20,9 +21,9 @@ func Ended(r api.Remote) error {
 	}
 	err := api.Errorf(api.CodeUnauthenticated, "this machine's access to %s ended (%s)", r.Project.Slug, r.LastError)
 	if r.State == api.RemoteRevoked {
-		return err.WithHint("access is rechecked automatically; zm leave " + r.Project.Slug + " forgets it")
+		return err.WithHint("access is rechecked automatically; " + config.Command("leave", r.Project.Slug) + " forgets it")
 	}
-	return err.WithHint("ask its owner for a new invite (then zm join <code>); zm leave " + r.Project.Slug + " forgets it")
+	return err.WithHint("ask its owner for a new invite (then " + config.Command("join", "<code>") + "); " + config.Command("leave", r.Project.Slug) + " forgets it")
 }
 
 // Send is every call to an authority: the token, the scope_version, the

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 )
 
@@ -57,7 +58,7 @@ func (r *run) describe() bool {
 	}
 	r.cfg["kind"] = r.kind
 	if d.Isolation == "none" || (d.Credentials != nil && *d.Credentials) {
-		r.warn("the class is credentialed or unisolated", fmt.Sprintf("isolation %q, credentials %v: zm sends it only trusted commits and listed scripts, and this suite's probe runs on it", d.Isolation, *d.Credentials))
+		r.warn("the class is credentialed or unisolated", fmt.Sprintf("isolation %q, credentials %v: %s sends it only trusted commits and listed scripts, and this suite's probe runs on it", d.Isolation, *d.Credentials, config.Program))
 	}
 	return true
 }
@@ -848,7 +849,7 @@ func (r *run) unproven() string {
 	case len(f) == 0:
 		return fmt.Sprintf("--repo has no ref %s", r.opt.Ref)
 	case f[0] == r.opt.Commit:
-		return "--commit is the tip of --ref, so a driver ignoring commit would pass: use an older pushed commit (the ref moving after zm resolved it)"
+		return "--commit is the tip of --ref, so a driver ignoring commit would pass: use an older pushed commit (the ref moving after " + config.Program + " resolved it)"
 	}
 	return ""
 }

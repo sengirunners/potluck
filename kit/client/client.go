@@ -214,7 +214,7 @@ func (c *Client) Do(ctx context.Context, method, path string, in, out any) error
 		var q api.QueuedResponse
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if json.Unmarshal(b, &q) == nil && q.Queued {
-			return &api.Error{Code: api.CodeQueued, Message: q.Note, Hint: "write " + q.Write + "; zm outbox shows how it ends",
+			return &api.Error{Code: api.CodeQueued, Message: q.Note, Hint: "write " + q.Write + "; " + config.Command("outbox") + " shows how it ends",
 				Data: json.RawMessage(b), HTTPStatus: resp.StatusCode}
 		}
 		if out == nil {
@@ -287,8 +287,8 @@ func (c *Client) send(ctx context.Context, method, path string, in any, hdr http
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, &api.Error{Code: api.CodeUnavailable, Message: "zm daemon not running at " + c.Socket + " and it did not start: " + serr.Error(),
-			Hint: "start it by hand to see why: zm daemon"}
+		return nil, &api.Error{Code: api.CodeUnavailable, Message: config.Program + " daemon not running at " + c.Socket + " and it did not start: " + serr.Error(),
+			Hint: "start it by hand to see why: " + config.Command("daemon")}
 	}
 	return c.sendOnce(ctx, method, path, body, in != nil, hdr)
 }
@@ -367,10 +367,10 @@ func (c *Client) sendOnce(ctx context.Context, method, path string, b []byte, ha
 	if p := api.GetHeader(resp.Header, api.HeaderProtocol); !api.SameProtocol(p, api.WireProtocol) {
 		resp.Body.Close()
 		if p == "" {
-			p = "no zm protocol"
+			p = "no " + config.Program + " protocol"
 		}
-		return nil, &api.Error{Code: api.CodeUnavailable, Message: fmt.Sprintf("the daemon speaks %s; this zm speaks %s", p, api.WireProtocol),
-			Hint: "use the same zm version for the daemon and the CLI (zm daemon stop; zm daemon --detach)"}
+		return nil, &api.Error{Code: api.CodeUnavailable, Message: fmt.Sprintf("the daemon speaks %s; this %s speaks %s", p, config.Program, api.WireProtocol),
+			Hint: "use the same " + config.Program + " version for the daemon and the CLI (" + config.Command("daemon stop") + "; " + config.Command("daemon", "--detach") + ")"}
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode != http.StatusSwitchingProtocols {
 		defer resp.Body.Close()
@@ -395,8 +395,8 @@ func socketFailure(socket, method string, err error, reached bool) error {
 	var oe *net.OpError
 	dial := errors.As(err, &oe) && oe.Op == "dial"
 	if (dial || !reached) && isNoDaemon(err) {
-		return noDaemonError{&api.Error{Code: api.CodeUnavailable, Message: "zm daemon not running at " + socket,
-			Hint: "start it with: zm daemon --detach; most zm commands start it on their own"}}
+		return noDaemonError{&api.Error{Code: api.CodeUnavailable, Message: config.Program + " daemon not running at " + socket,
+			Hint: "start it with: " + config.Command("daemon", "--detach") + "; most " + config.Program + " commands start it on their own"}}
 	}
 	if reached {
 		return cutOff(socket, method)
@@ -408,10 +408,10 @@ func socketFailure(socket, method string, err error, reached bool) error {
 // was connected: it stopped or restarted meanwhile (zm daemon stop, an
 // upgrade). A write may or may not have been applied.
 func cutOff(socket, method string) *api.Error {
-	e := &api.Error{Code: api.CodeUnavailable, Message: "the zm daemon at " + socket + " stopped or restarted during this request",
-		Hint: "run it again once the daemon is back (zm status; zm daemon --detach starts it)"}
+	e := &api.Error{Code: api.CodeUnavailable, Message: "the " + config.Program + " daemon at " + socket + " stopped or restarted during this request",
+		Hint: "run it again once the daemon is back (" + config.Command("status") + "; " + config.Command("daemon", "--detach") + " starts it)"}
 	if method != http.MethodGet && method != http.MethodHead {
-		e.Hint = "it may or may not have taken effect: check, then retry once the daemon is back (zm status; zm daemon --detach starts it)"
+		e.Hint = "it may or may not have taken effect: check, then retry once the daemon is back (" + config.Command("status") + "; " + config.Command("daemon", "--detach") + " starts it)"
 	}
 	return e
 }

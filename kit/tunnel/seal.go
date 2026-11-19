@@ -152,7 +152,7 @@ func grantInClear(path string, body []byte) bool {
 func errClear(path string, body []byte, who string) error {
 	if grantInClear(path, body) {
 		return api.Errorf(api.CodeForbidden, "a secret grant names a secret, so it goes between machines only sealed to the receiving machine's key, and %s runs a Potluck (or zm) too old to seal it: update it", who).
-			WithHint("update the daemon there (potluck daemon update, or zm daemon update); listing and removing grants still work")
+			WithHint("update the daemon there (potluck upgrade, or zm daemon update); listing and removing grants still work")
 	}
 	return sealbox.ErrNoKey(who)
 }

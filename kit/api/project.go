@@ -232,8 +232,11 @@ type NewIdentityRequest struct {
 type Grant struct {
 	Identity string `json:"identity"` // identity name
 	Role     string `json:"role"`
-	Project  string `json:"project"` // slug
-	Area     string `json:"area,omitempty"`
+	// Inviter is a member an owner let make guest invites into Object
+	// (granted with role "inviter").
+	Inviter bool   `json:"inviter,omitempty"`
+	Project string `json:"project"` // slug
+	Area    string `json:"area,omitempty"`
 	// Object is the stored tuple object: "project:<ulid>" or "area:<ulid>/<name>".
 	Object  string    `json:"object"`
 	Created time.Time `json:"created,omitzero"`
@@ -244,9 +247,9 @@ type Grant struct {
 
 // GrantRequest is POST /v0/grants and DELETE /v0/grants (Role ignored).
 type GrantRequest struct {
-	Identity string `json:"identity"` // name or ULID; POST creates a human identity if missing
-	Role     string `json:"role,omitempty"`
-	Project  string `json:"project"` // slug or ULID
+	Identity string `json:"identity"`       // name or ULID; POST creates a human identity if missing
+	Role     string `json:"role,omitempty"` // owner | member | guest | inviter (a member who may make guest invites)
+	Project  string `json:"project"`        // slug or ULID
 	Area     string `json:"area,omitempty"`
 }
 

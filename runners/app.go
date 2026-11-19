@@ -99,7 +99,7 @@ func (s *Service) manifest(name, org string) ghapp.Manifest {
 	return ghapp.Manifest{Name: name, URL: c.PublicURL, HookURL: c.PublicURL + "/v0/runners/hook",
 		RedirectURL: c.PublicURL + "/v0/runners/app/created", CallbackURLs: []string{c.PublicURL + "/v0/runners/oauth"},
 		SetupURL:    c.PublicURL + "/v0/runners/app/installed",
-		Description: "Runs this team's GitHub Actions jobs in zm's throwaway VMs (SPEC 20 runner broker)."}
+		Description: "Runs this team's GitHub Actions jobs in " + config.Program + "'s throwaway VMs (SPEC 20 runner broker)."}
 }
 
 // appPage is GET /v0/runners/app/new: posts the manifest to GitHub. The
@@ -130,10 +130,10 @@ func (s *Service) appPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action "+s.conf().GitHub.WebURL+"; style-src 'unsafe-inline'")
 	fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Create the runner App</title>
 <body style="font:16px system-ui;max-width:36rem;margin:3rem auto;padding:0 1rem"><h1>Create %s</h1>
-<p>GitHub will show the App zm needs to run this team's Actions jobs in throwaway VMs: runner registration, read and write access to Actions
-(write only to re-run a job whose box its lender took back), read access to org members (to check who may link an org), the workflow_job event. Its key and secrets come back to zm directly; nobody copies them.</p>
+<p>GitHub will show the App %s needs to run this team's Actions jobs in throwaway VMs: runner registration, read and write access to Actions
+(write only to re-run a job whose box its lender took back), read access to org members (to check who may link an org), the workflow_job event. Its key and secrets come back to %s directly; nobody copies them.</p>
 <form method="post" action="%s"><input type="hidden" name="manifest" value="%s"><button type="submit">Create on GitHub</button></form>`,
-		html.EscapeString(name), html.EscapeString(action), html.EscapeString(string(m)))
+		html.EscapeString(name), html.EscapeString(config.Program), html.EscapeString(config.Program), html.EscapeString(action), html.EscapeString(string(m)))
 }
 
 // appCreated is GET /v0/runners/app/created: GitHub's return with the

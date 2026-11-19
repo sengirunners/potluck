@@ -35,7 +35,7 @@ if [ -d "$p" ]; then
   command -v tar >/dev/null 2>&1 || { rm -rf "$d"; echo "the box has no tar: copy files one at a time, or use an image that has it" >&2; exit 69; }
   s=$(cd -- "$d" && pwd -P); r=$(cd -- "$p" && pwd -P) || { rm -rf "$d"; exit 70; }
   [ "$r" = / ] && r=
-  case "$s/" in "$r"/*) rm -rf "$d"; echo "that directory holds the box's temporary directory, where zm stages a copy: copy a directory beneath it" >&2; exit 64 ;; esac
+  case "$s/" in "$r"/*) rm -rf "$d"; echo "that directory holds the box's temporary directory, where the copy is staged: copy a directory beneath it" >&2; exit 64 ;; esac
   kind=dir
   { (cd -- "$p" && COPYFILE_DISABLE=1 tar -cf - .) || : >"$d/failed"; } | head -c "$3" >"$o"
 elif [ -f "$p" ]; then

@@ -64,6 +64,23 @@ func (s *Service) databaseFor(ctx context.Context, projectID string, req compute
 	return d, nil
 }
 
+// lendsDatabaseImage says whether binding b lends a recipe's exact pinned
+// image: its driver boots no other for a database. A binding another machine
+// serves lends what its host advertises (pins only, cleanAdverts); with no
+// advert, one naming no pins, or one at advertImagesMax, the host answers
+// for itself.
+func (s *Service) lendsDatabaseImage(ctx context.Context, b computeapi.RunTarget, image string) bool {
+	pins := b.Images
+	if b.Host != "" {
+		ra, ok := s.advertOf(ctx, b)
+		if !ok || len(ra.Describe.Images) == 0 || len(ra.Describe.Images) >= advertImagesMax {
+			return true // an advert at its cap may have cut the pin off
+		}
+		pins = ra.Describe.Images
+	}
+	return slices.Contains(pins, image)
+}
+
 func checkDatabaseDriver(d *protocol.Database, caps []string) error {
 	if d != nil && !slices.Contains(caps, protocol.CapDatabase) {
 		return api.Errorf(api.CodeBadRequest, "driver has no %s capability", protocol.CapDatabase)

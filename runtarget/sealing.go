@@ -273,7 +273,7 @@ func (s *Service) callerSealed(ctx context.Context, what string) error {
 	stopped := s.stoppedSealing(t.Project.ID, machine, "it sent "+what+" in the clear")
 	if s.sealingMode(ctx, t.Project.ID) == computeapi.SealingRequired {
 		return api.Errorf(api.CodeForbidden, "this pool requires sealing, and the calling machine runs a Potluck (or zm) too old to seal %s: update it", what).
-			WithHint("update the daemon on the calling machine (potluck daemon update, or zm daemon update); calls without secrets still work")
+			WithHint("update the daemon on the calling machine (potluck upgrade, or zm daemon update); calls without secrets still work")
 	}
 	if !stopped {
 		s.warnUnsealed(t.Project.ID, machine, "sent "+what)

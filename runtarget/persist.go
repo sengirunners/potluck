@@ -19,6 +19,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/authz"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 const (
@@ -65,7 +66,7 @@ func (s *Service) persistentBox(r *http.Request, ownerToo bool) (string, compute
 		return "", b, nil, rw, holder(r.Context(), rw, ownerToo)
 	case !rw.Persist:
 		return "", b, nil, rw, api.Errorf(api.CodeBadRequest, "sandbox %s was created without persist: it has no disk to keep", sandboxID(rw.Handle)).
-			WithHint("zm sandbox rm ends it; zm sandbox create --persist makes a box that stops and starts")
+			WithHint(config.PotluckCommand("sandbox rm") + " ends it; " + config.PotluckCommand("sandbox create", "--persist") + " makes a box that stops and starts")
 	}
 	return pid, b, db, rw, nil
 }

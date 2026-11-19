@@ -40,12 +40,13 @@ var (
 // boxJobOptions is what boxJob needs: where the box goes, how long the
 // command may run, and where its output goes.
 type boxJobOptions struct {
-	started time.Time // command entry, before local prompt/dependency preparation
-	timing  *jobTiming
-	base    *pushbase.Plan
-	want    computeclient.BoxWant
-	image   string
-	timeout time.Duration
+	started  time.Time // command entry, before local prompt/dependency preparation
+	timing   *jobTiming
+	base     *pushbase.Plan
+	want     computeclient.BoxWant
+	database string
+	image    string
+	timeout  time.Duration
 	// finishGrace reserves time after the command deadline for in-box cleanup.
 	finishGrace time.Duration
 	// drain is how long a command sent TERM on Ctrl-C has to end by itself,
@@ -112,7 +113,7 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, in jobResult
 	}
 	r = in // named: the deferred end of the sandbox below sets Kept and Released on what is returned
 	key := "job-" + strings.ToLower(ids.New())
-	areq := computeapi.AcquireRunTargetRequest{RequestID: key, Image: o.image, Template: o.want.Template, Net: o.want.Net,
+	areq := computeapi.AcquireRunTargetRequest{RequestID: key, Database: o.database, Image: o.image, Template: o.want.Template, Net: o.want.Net,
 		Deps: o.deps, DepsWaitS: o.depsWaitS}
 	var prepErr error // a refusal before the acquire: nothing was asked of that binding
 	// planned is the lease the job is planned for (the end of the sandbox's

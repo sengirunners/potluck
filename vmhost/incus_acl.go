@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 )
 
 // An isolated Incus VM sends no mail (zm-eakh.12.5.13): before boot, and
@@ -106,7 +108,7 @@ func (l incusCLI) mailFenced(in incusInstance) error {
 			}
 			out, err := l.run("query", l.apiPath("/1.0/network-acls/"+acl+"?project="+l.project))
 			if err != nil {
-				return fmt.Errorf("nic %s: zm cannot read its ACL %s to check it blocks outbound mail: %v", n, acl, err)
+				return fmt.Errorf("nic %s: %s cannot read its ACL %s to check it blocks outbound mail: %v", n, kitconfig.Program, acl, err)
 			}
 			var a struct {
 				Egress []json.RawMessage `json:"egress"`

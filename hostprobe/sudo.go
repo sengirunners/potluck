@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 // Root and Docker in a box (zm-eakh.12.5.26; SPEC 20 "Boxes", Root and
@@ -49,16 +50,16 @@ const SudoRuntime = "runsc-root"
 // (sudoRuntimeWrong): a hand-made or stale entry of that name could be runc,
 // or runsc with --net-raw or --network=host.
 func detectSudo(l *Layer, runtimes string, registered map[string]bool, installing bool) {
-	const why = "sandboxes with root and docker (zm host share --docker) need a runtime that honours setuid in the box: "
+	why := "sandboxes with root and docker (" + config.PotluckCommand("host", "--docker") + ") need a runtime that honours setuid in the box: "
 	fromDocker := `p=$(docker info --format "{{(index .Runtimes \"runsc\").Path}}") && case "$p" in /*) ;; *) p=$(command -v "$p") ;; esac && "$p"`
 	switch {
 	case l.Isolation == "vm" && l.Runtime != "": // Kata: a guest kernel
 		l.Sudo = l.Runtime
 	case l.CLI != "docker" && (l.Runtime != "" || installing):
-		l.SudoProblem = why + "zm registers runsc with --allow-suid as docker's " + SudoRuntime + " only; on " + l.CLI + " there is none (Kata may serve, unmeasured)"
+		l.SudoProblem = why + config.Program + " registers runsc with --allow-suid as docker's " + SudoRuntime + " only; on " + l.CLI + " there is none (Kata may serve, unmeasured)"
 	case registered[SudoRuntime] && l.Runtime == "runsc":
 		if wrong := sudoRuntimeWrong(runtimes); wrong != "" {
-			l.SudoProblem = why + wrong + "; the root line replaces it with zm's (runsc install --clobber)"
+			l.SudoProblem = why + wrong + "; the root line replaces it with " + config.Program + "'s (runsc install --clobber)"
 			l.SudoSteps = []string{dockerRegisterSudo(fromDocker)}
 		} else {
 			l.Sudo = SudoRuntime

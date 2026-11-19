@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"github.com/sengirunners/potluck/kit/config"
 	"net"
 	"net/http"
 	"net/netip"
@@ -33,7 +34,7 @@ import (
 func (d *Deps) ambientGuard(r *http.Request) error {
 	refuse := func(msg string) error {
 		return api.Errorf(api.CodeUnauthenticated, "%s", msg).
-			WithHint("a tailnet login works from zm clients at this node's own name; scripts send Potluck-Protocol: potluck/1, browsers sign in with a token")
+			WithHint("a tailnet login works from " + config.Program + " clients at this node's own name; scripts send Potluck-Protocol: potluck/1, browsers sign in with a token")
 	}
 	if !d.OwnTailnetHost(r.Context(), r.Host) {
 		return refuse("a tailnet login is accepted only at this node's own tailnet name or address")

@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 
 	"github.com/sengirunners/potluck/kit/api"
@@ -97,6 +98,6 @@ func (s *Service) Unlink(ctx context.Context, sub *authz.Subject, ref string, re
 		}
 	}
 	s.tell(ctx, who, nil, fmt.Sprintf("Identity %s was unlinked from GitHub @%s (%s) on %s by %s; %d node-bound tokens revoked. "+
-		"The GitHub user links again with zm login github, or zm join <project>.", who.Name, login, account, s.d.Config.Machine, sub.Address, len(out.Revoked)))
+		"The GitHub user links again with %s, or %s.", who.Name, login, account, s.d.Config.Machine, sub.Address, len(out.Revoked), config.Command("login github"), config.Command("join", "<project>")))
 	return out, nil
 }

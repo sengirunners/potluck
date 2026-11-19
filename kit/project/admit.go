@@ -80,6 +80,9 @@ func (r *Registry) admitTx(ctx context.Context, tx *sql.Tx, now time.Time, a adm
 	case err != nil && !errors.Is(err, sql.ErrNoRows):
 		return "", "", "", err
 	}
+	if err := heldAsGuest(ctx, tx, a.identity, authz.Relation(a.role)); err != nil {
+		return "", "", "", err
+	}
 	who, err = ensureIdentityTx(ctx, tx, a.identity, now)
 	if err != nil {
 		return "", "", "", err
@@ -95,9 +98,14 @@ func (r *Registry) admitTx(ctx context.Context, tx *sql.Tx, now time.Time, a adm
 		// A stronger grant already there is kept (an invite never demotes).
 		// An invite's raise is an owner's act and moves the ceiling; a
 		// GitHub join's role is already capped by it (ownerCap).
+		// A raise ends an inviter flag (an owner invites anyway), and with
+		// it the invites the flag alone allowed.
 		if _, err := tx.ExecContext(ctx, `INSERT INTO grants (subject, relation, object, project, area, created, created_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (subject, object) DO UPDATE SET relation = excluded.relation`,
+			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (subject, object) DO UPDATE SET relation = excluded.relation, inviter = 0`,
 			who, a.role, obj, a.project, a.area, store.Millis(now), a.by); err != nil {
+			return "", "", "", err
+		}
+		if err := endInviterInvites(ctx, tx, who, a.project); err != nil {
 			return "", "", "", err
 		}
 		if a.invite {
@@ -315,6 +323,9 @@ func (r *Registry) RevokeAdmitted(ctx context.Context, identityID, project, area
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
 			gone = true
+			if err := endInviterInvites(ctx, tx, identityID, project); err != nil {
+				return err
+			}
 			return bumpScope(ctx, tx, identityID)
 		}
 		return nil

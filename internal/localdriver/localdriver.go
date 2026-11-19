@@ -39,6 +39,7 @@ import (
 	"syscall"
 	"time"
 
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 )
 
@@ -79,6 +80,7 @@ func refuse(code, format string, a ...any) error { return refusal{code, fmt.Spri
 // one envelope on stdin, one answer on stdout; or, behind its flag, a run's
 // supervisor. It returns the exit code.
 func Main() int {
+	kitconfig.PrefixFromEnv()
 	if len(os.Args) == 3 && (os.Args[1] == flagSupervise || os.Args[1] == flagSuperviseOld) {
 		return supervise(os.Args[2])
 	}
@@ -436,7 +438,7 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 	case !refPattern.MatchString(a.Ref) || strings.Contains(a.Ref, "..") || strings.HasPrefix(a.Ref, "refs/"):
 		return nil, refuse("bad_request", "ref must be a pushed branch or tag name, such as main")
 	case !commitPattern.MatchString(a.Commit):
-		return nil, refuse("bad_request", "commit must be the full 40-character commit zm resolved")
+		return nil, refuse("bad_request", "commit must be the full 40-character commit %s resolved", kitconfig.Program)
 	}
 	if err := checkScript(a.Script); err != nil {
 		return nil, err

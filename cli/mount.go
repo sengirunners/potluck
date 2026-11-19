@@ -103,7 +103,7 @@ func Commands(h Host) []*cobra.Command {
 // validate panics on a Host that Commands and Report cannot use.
 func (h Host) validate() {
 	switch {
-	case !prefixWords.MatchString(h.Prefix):
+	case !config.ValidPrefix(h.Prefix):
 		panic("cli: Host.Prefix must be how a person types Potluck's root, words of letters, digits, '.', '_' and '-' with one space between, e.g. \"potluck\": got " + strconv.Quote(h.Prefix))
 	case h.Client == nil:
 		panic("cli: Host.Client is required")
@@ -115,11 +115,6 @@ func (h Host) validate() {
 		panic("cli: Host.AfterLend.Skip is a flag name: got " + strconv.Quote(h.AfterLend.Skip))
 	}
 }
-
-// prefixWords is what a Host.Prefix may hold: words a shell takes as they
-// are, since hints and generated scripts (ci pr, the ci doctor probe) put
-// it in their text unquoted.
-var prefixWords = regexp.MustCompile(`^[A-Za-z0-9._-]+( [A-Za-z0-9._-]+)*$`)
 
 // flagName is a long flag's name without its dashes.
 var flagName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -185,7 +180,7 @@ func (a *app) pool() string {
 }
 
 // Report prints err, returned by one of Potluck's commands built for h, as
-// the potluck program does (h's --json; kit's words in the program's, with
+// the potluck program does (h's --json; the message as written, with
 // Potluck's hints for a daemon that is not running or a tailnet name that
 // is taken) on h.Stderr, and returns its exit code: ExitCode's, 3 when the
 // daemon is not running, 2 for a usage error, else 1. A host with its own

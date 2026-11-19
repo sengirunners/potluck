@@ -15,6 +15,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ import (
 )
 
 func (s *Service) joinRoutes(r *core.Router) {
-	r.HandleFunc("GET /v0/join/github", core.Public, "none: \"a zm authority\", its protocol and machine; no project input, no project list", jsonH(s.handleDiscover))
+	r.HandleFunc("GET /v0/join/github", core.Public, "none: \"a "+config.Program+" authority\", its protocol and machine; no project input, no project list", jsonH(s.handleDiscover))
 	r.HandleFunc("POST /v0/join/github", core.Public, "a tailnet node WhoIs identified (not the socket, not this machine, not a tagged node), or a tunnel caller's key (not the home's own); any project name starts a login; optional area and role scope it (the tunnel requires an area and is guest only); only that node or key collects; at most 4 logins in flight per node", jsonH(s.handleJoin))
 }
 
@@ -43,14 +44,14 @@ func (s *Service) handleJoin(r *http.Request) (any, error) {
 	tunnel := rm != nil && rm.Via == core.ViaTunnel
 	switch {
 	case core.IsLocal(ctx):
-		return nil, api.Errorf(api.CodeForbidden, "a GitHub join comes from the member's own machine").WithHint("run zm join <project> on the member's machine")
+		return nil, api.Errorf(api.CodeForbidden, "a GitHub join comes from the member's own machine").WithHint("run " + config.Command("join", "<project>") + " on the member's machine")
 	case rm == nil || rm.NodeID == "":
-		return nil, api.Errorf(api.CodeUnauthenticated, "unknown tailnet node").WithHint("join through the tailnet: zm join <project>")
+		return nil, api.Errorf(api.CodeUnauthenticated, "unknown tailnet node").WithHint("join through the tailnet: " + config.Command("join", "<project>"))
 	case rm.Self:
 		return nil, api.Errorf(api.CodeForbidden, "a GitHub join does not come from the authority's own machine")
 	case rm.Tagged:
 		return nil, api.Errorf(api.CodeForbidden, "a tagged node is a server, not a person's machine").
-			WithHint("machines and agents join with an invite: zm invite <project> --as <name>")
+			WithHint("machines and agents join with an invite: " + config.Command("invite", "<project> --as <name>"))
 	}
 	var req api.GitHubJoinRequest
 	if err := api.DecodeJSON(r, &req); err != nil {
@@ -82,7 +83,7 @@ func (s *Service) handleJoin(r *http.Request) (any, error) {
 		// a guest unless more is asked (and granted), never a whole
 		// project and never the strongest grant by default.
 		if area == "" {
-			return nil, api.Errorf(api.CodeBadRequest, "a GitHub join over https names one area").WithHint("zm join <project>/<area> --from https://<host>#<fingerprint>")
+			return nil, api.Errorf(api.CodeBadRequest, "a GitHub join over https names one area").WithHint(config.Command("join", "<project>/<area>", "--from https://<host>#<fingerprint>"))
 		}
 		if role == "" {
 			role = api.RoleGuest
@@ -91,7 +92,7 @@ func (s *Service) handleJoin(r *http.Request) (any, error) {
 		// approving the code: over the internet a join is a guest's.
 		if role != api.RoleGuest {
 			return nil, api.Errorf(api.CodeBadRequest, "a GitHub join over https is a guest's, not %s", role).
-				WithHint("a member or owner joins over the tailnet, or with an invite: zm invite <project> --as <name>")
+				WithHint("a member or owner joins over the tailnet, or with an invite: " + config.Command("invite", "<project> --as <name>"))
 		}
 	}
 	name := rm.Node
@@ -130,7 +131,7 @@ func orGrant(role string) string {
 // this account: the same bytes but for what the joiner typed.
 func noGrant(ref string) error {
 	return api.Errorf(api.CodeForbidden, "no grant for you in %q on this authority", ref).
-		WithHint("the project's owner runs: zm grant @<your GitHub login> member <project>")
+		WithHint("the project's owner runs: " + config.Command("grant", "@<your GitHub login> member <project>"))
 }
 
 // admit runs when the joining node collects the outcome: the grant, the
@@ -212,8 +213,9 @@ func (s *Service) admit(ctx context.Context, l *login, acc Account) (api.RedeemR
 	}
 	if out.NewNode {
 		s.tell(ctx, who, []string{p.ID}, fmt.Sprintf("GitHub @%s (%s) joined %s as identity %s (%s%s) from %s. If that was not them: "+
-			"zm identity unlink github %s --revoke (the machine owner or a project admin), and zm revoke @%s %s.",
-			acc.Login, acc.ID, p.Slug, who.Name, out.Cap.Role, areaSuffix(out.Cap.Area), l.from, who.Name, acc.Login, p.Slug))
+			"%s (the machine owner or a project admin), and %s.",
+			acc.Login, acc.ID, p.Slug, who.Name, out.Cap.Role, areaSuffix(out.Cap.Area), l.from,
+			config.Command("identity unlink", "github", who.Name, "--revoke"), config.Command("revoke", "@"+acc.Login, p.Slug)))
 	}
 	if _, err := s.d.Events.Publish(ctx, events.Input{Type: api.EventTeamJoined, Subject: out.Machine, Data: api.TeamJoined{
 		Project: api.ProjectRef{ID: out.Cap.Project, Slug: out.Cap.Slug}, Area: out.Cap.Area, Role: out.Cap.Role,

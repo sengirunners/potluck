@@ -12,6 +12,7 @@ package teamlink
 import (
 	"context"
 	"encoding/json"
+	"github.com/sengirunners/potluck/kit/config"
 	"io"
 	"net/http"
 	"sync"
@@ -416,7 +417,7 @@ func (s *Service) HandleBeat(r *http.Request) (any, error) {
 	sub := core.SubjectOf(ctx)
 	if sub.Node == "" || sub.Machine == "" {
 		return nil, api.Errorf(api.CodeForbidden, "presence comes from a team replica's daemon (its node-bound token)").
-			WithHint("a replica sends it by itself every 15 s once it joined: zm join <code>")
+			WithHint("a replica sends it by itself every 15 s once it joined: " + config.Command("join", "<code>"))
 	}
 	// Unknown fields and parts are tolerated (unlike other routes).
 	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBeatBody+1))

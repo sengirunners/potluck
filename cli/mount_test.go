@@ -151,7 +151,7 @@ func TestAProgramMountsPotlucksCommands(t *testing.T) {
 
 	// supper runs as its own program: its names and config.Program.
 	config.Use(config.Names{HomeEnvs: []string{"SUPPER_HOME"}, HomeDirs: []string{".supper"}, Sockets: []string{"supper.sock"}})
-	config.Program, config.Verbs, config.MachineSuffix = "supper", nil, ""
+	config.Program, config.Lacks, config.MachineSuffix = "supper", nil, ""
 	t.Cleanup(UseHome)
 	s := supper{socket: filepath.Join(m.home, "supper.sock"), home: m.home, lent: new(int)}
 	sw := useSwitch(t)
@@ -271,6 +271,12 @@ func TestAProgramMountsPotlucksCommands(t *testing.T) {
 // names a command as the potluck program's.
 func TestMountedCommandsSpeakTheHostsWords(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	// kit's own messages (a daemon that is not running) name the program's
+	// own commands with config.Program, which a host sets in its main; one
+	// name stands for both hosts here. Potluck's commands are checked below
+	// in both hosts' words.
+	config.Program, config.Prefix, config.Lacks = "host", "", nil
+	t.Cleanup(UseHome)
 	none := noDaemon(t)
 	runs := [][]string{
 		{"sandbox", "cp", "x", "a", "b"},
@@ -418,7 +424,7 @@ func TestProgramCommandsAreThePotluckPrograms(t *testing.T) {
 func TestMountedCommandsWithNoDaemon(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	// supper's own words for kit's messages, as a host sets them.
-	config.Program, config.Verbs = "supper", nil
+	config.Program, config.Lacks = "supper", nil
 	t.Cleanup(UseHome)
 	oldDetect := detectHost // this machine's own probe is not the test's
 	t.Cleanup(func() { detectHost = oldDetect })

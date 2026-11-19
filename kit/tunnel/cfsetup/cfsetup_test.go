@@ -215,7 +215,7 @@ func TestSetupFromNothing(t *testing.T) {
 	if !ok || strings.Join(u.Args[1:], " ") != "--no-autoupdate tunnel --config "+filepath.Join(Dir(r.s.ZmHome), "config.yml")+" run" {
 		t.Fatalf("service %+v", r.sup.installed)
 	}
-	if !strings.Contains(r.out.String(), "zm invite <project> --as <name> --role member --via tunnel") {
+	if !strings.Contains(r.out.String(), "potluck invite <project> --as <name> --role member --via tunnel") {
 		t.Fatalf("no invite hint:\n%s", r.out)
 	}
 }
@@ -360,14 +360,14 @@ func TestVerifyRefusesAnotherHome(t *testing.T) {
 	r.s.Probe = func(context.Context, string, string) (Answer, error) {
 		return Answer{Status: 401, OtherHome: true}, nil
 	}
-	if err := r.s.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "another zm home") {
+	if err := r.s.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "another potluck home") {
 		t.Fatalf("got %v", err)
 	}
 	r2 := newRig(t)
 	r2.s.Probe = func(context.Context, string, string) (Answer, error) {
 		return Answer{Status: 401, HomeKey: r2.key}, nil
 	}
-	if err := r2.s.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "did not answer as this zm home") {
+	if err := r2.s.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "did not answer as this potluck home") {
 		t.Fatalf("unsigned 401 taken: %v", err)
 	}
 }
@@ -425,7 +425,7 @@ func TestOneHostnamePerHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.s.Hostname, r.s.Name = "other.example.com", ""
-	if err := r.s.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "zm tunnel remove") {
+	if err := r.s.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "potluck tunnel remove") {
 		t.Fatalf("got %v", err)
 	}
 }

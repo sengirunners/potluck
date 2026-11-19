@@ -75,8 +75,8 @@ func TestClientSendsNewNamesReadsBoth(t *testing.T) {
 	answer = func(w http.ResponseWriter) { w.Header().Set("Potluck-Protocol", "potluck/2") }
 	_, err = c.Health(context.Background())
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeUnavailable || ae.Message != "the daemon speaks potluck/2; this zm speaks potluck/1" ||
-		ae.Hint != "use the same zm version for the daemon and the CLI (zm daemon stop; zm daemon --detach)" {
+	if !errors.As(err, &ae) || ae.Code != api.CodeUnavailable || ae.Message != "the daemon speaks potluck/2; this potluck speaks potluck/1" ||
+		ae.Hint != "use the same potluck version for the daemon and the CLI (potluck daemon stop; potluck daemon --detach)" {
 		t.Fatalf("potluck/2 answer: %v", err)
 	}
 	answer = func(w http.ResponseWriter) {}
@@ -97,14 +97,14 @@ func TestHostURLNodePrefixes(t *testing.T) {
 	}
 }
 
-// With zm's defaults the client's own messages are byte for byte main's.
+// With the default program the client's messages name potluck.
 func TestClientMessagesUnchanged(t *testing.T) {
 	e := cutOff("/s/zm.sock", http.MethodPost)
-	if e.Message != "the zm daemon at /s/zm.sock stopped or restarted during this request" ||
-		e.Hint != "it may or may not have taken effect: check, then retry once the daemon is back (zm status; zm daemon --detach starts it)" {
+	if e.Message != "the potluck daemon at /s/zm.sock stopped or restarted during this request" ||
+		e.Hint != "it may or may not have taken effect: check, then retry once the daemon is back (potluck status; potluck daemon --detach starts it)" {
 		t.Fatalf("cutOff: %+v", e)
 	}
-	if e := cutOff("/s/zm.sock", http.MethodGet); e.Hint != "run it again once the daemon is back (zm status; zm daemon --detach starts it)" {
+	if e := cutOff("/s/zm.sock", http.MethodGet); e.Hint != "run it again once the daemon is back (potluck status; potluck daemon --detach starts it)" {
 		t.Fatalf("cutOff GET: %+v", e)
 	}
 }

@@ -19,7 +19,6 @@ import (
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
-	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/project"
 )
 
@@ -433,7 +432,7 @@ func (a *app) remotesCmd() *cobra.Command {
 						}
 						fmt.Fprintf(&b, "%-20s %-7s on %-12s via %-7s as %-10s %s", where, x.Cap.Role, x.Authority, via, x.Identity, x.State)
 						if x.LastError != "" {
-							fmt.Fprintf(&b, ": %s", config.Text(x.LastError))
+							fmt.Fprintf(&b, ": %s", x.LastError)
 						}
 						if x.OwnerNow != "" {
 							fmt.Fprintf(&b, "\n  WARNING: the machine that runs it now belongs to tailnet owner %s, not %s as when joined", x.OwnerNow, x.AuthorityOwner)

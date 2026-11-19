@@ -11,6 +11,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/project"
 )
 
@@ -192,7 +193,7 @@ func ValidateRunTarget(remotes []string, t computeapi.RunTarget) error {
 	}
 	for _, k := range sortedKeys(t.Config) {
 		if k == "target" || k == "kind" {
-			return bad("config key %s is zm's own", k)
+			return bad("config key %s is %s's own", k, config.Program)
 		}
 		if secretKey.MatchString(k) && !strings.HasSuffix(k, "_file") {
 			return bad("config %s looks like a secret value: name a 0600 file with %s_file instead", k, k)

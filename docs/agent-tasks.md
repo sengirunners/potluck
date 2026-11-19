@@ -173,3 +173,21 @@ hot rotation of a running login. Remote mode stays off because Claude can persis
 in that mode. There is no environment-value or disk-file fallback when the door or descriptor mapping is
 unavailable. The agent can still read its box's secret file; this prevents inheritance, not access by code
 running as the same user. Box secrets disappear on release; a kept box retains them until it ends.
+
+## A private project database
+
+Pass `--database <recipe>` to start the task with the project's configured
+Postgres snapshot and `DATABASE_URL` set. The owner selects the immutable image
+and schema/seed manifest; the image must also contain the chosen agent CLI.
+This is Postgres only, with no Supabase API, authentication or storage service.
+
+```sh
+potluck agent-task --database example-db --deps npm --prompt-file task.md
+```
+
+The recipe replaces the implicit agent image template. Explicit `--image`
+conflicts with `--database`; normal credential grants, box secrets and optional
+proxy settings still apply. Automatic Git bases and dependency layers remain
+available, so repeat tasks reuse cached repository objects and packages.
+See [database snapshots](database-snapshots.md) for owner configuration,
+image-lending restrictions and the database lifecycle.

@@ -108,7 +108,7 @@ func (noop) Routes(*core.Router) {}
 func startProgram(t *testing.T, tn *tailnettest.Net, home string) *machine {
 	t.Helper()
 	config.Use(config.Names{HomeEnvs: []string{"SUPPER_HOME"}, HomeDirs: []string{".supper"}, Sockets: []string{"supper.sock"}})
-	config.Program, config.Verbs, config.MachineSuffix = "supper", nil, ""
+	config.Program, config.Lacks, config.MachineSuffix = "supper", nil, ""
 	defer UseHome()
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)

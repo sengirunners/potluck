@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 )
 
 // incusCLI is the Incus VM layer (vm=incus, zm-eakh.12.7.1): each run is a
@@ -67,10 +69,10 @@ func (incusCLI) ParseConfig(m map[string]string, c *config) (bad []string) {
 		}
 	}
 	if c.IncusProfile == "" {
-		bad = append(bad, "incus_profile is required: the profile (root disk, a NIC on the zm bridge with port isolation and an ACL) every run's VM uses")
+		bad = append(bad, "incus_profile is required: the profile (root disk, a NIC on the "+kitconfig.Program+" bridge with port isolation and an ACL) every run's VM uses")
 	}
 	if c.IncusProject == "default" {
-		bad = append(bad, "incus_project must be a project made for zm, not default")
+		bad = append(bad, "incus_project must be a project made for "+kitconfig.Program+", not default")
 	}
 	return bad
 }
@@ -143,7 +145,7 @@ func (l incusCLI) restricted() error {
 	case !ok:
 		return fmt.Errorf("incus has no remote %q", name)
 	case !strings.HasPrefix(r.Addr, "https://"):
-		return fmt.Errorf("incus remote %q is %s, the admin socket: zm needs a remote reached with a client certificate restricted to project %s", name, r.Addr, l.project)
+		return fmt.Errorf("incus remote %q is %s, the admin socket: %s needs a remote reached with a client certificate restricted to project %s", name, r.Addr, kitconfig.Program, l.project)
 	}
 	// A certificate restricted to the project sees that project only; a
 	// full-trust one (incus-admin in effect) sees them all.
@@ -188,7 +190,7 @@ func (l incusCLI) OSOf(name string) (string, error) {
 	}
 	if out, err := l.run("image", "info", l.imageRef(name), "--project", l.project); err == nil {
 		if !strings.Contains(out, "virtual-machine") {
-			return "", fmt.Errorf("incus image %q is not a virtual-machine image: zm runs untrusted code in VMs only", name)
+			return "", fmt.Errorf("incus image %q is not a virtual-machine image: %s runs untrusted code in VMs only", name, kitconfig.Program)
 		}
 		return "linux", nil
 	}

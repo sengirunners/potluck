@@ -16,6 +16,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/ids"
 	"github.com/sengirunners/potluck/kit/project"
 )
@@ -96,7 +97,7 @@ func validateHostBox(h computeapi.HostRunTarget, valid func(string) bool, what s
 		return err
 	}
 	if _, ok := h.Config["share"]; ok {
-		return api.Errorf(api.CodeBadRequest, "run target %q: config key share is zm's own", h.Name)
+		return api.Errorf(api.CodeBadRequest, "run target %q: config key share is %s's own", h.Name, config.Program)
 	}
 	if len(h.Share) == 0 {
 		return api.Errorf(api.CodeBadRequest, "run target %q: share names at least one team project", h.Name)
@@ -112,7 +113,7 @@ func validateHostBox(h computeapi.HostRunTarget, valid func(string) bool, what s
 // EncodeHostRunTargets writes a run_targets.toml.
 func EncodeHostRunTargets(ts []computeapi.HostRunTarget) string {
 	var b strings.Builder
-	b.WriteString("# Machine-level box bindings (zm host share --pool, zm target bind --host).\n# Edited through the daemon; share lists the team projects that may use each.\n")
+	b.WriteString("# Machine-level box bindings (" + config.PotluckCommand("host", "--pool") + ", " + config.Command("target bind", "--host") + ").\n# Edited through the daemon; share lists the team projects that may use each.\n")
 	fmt.Fprintf(&b, "format = %d\n", HostFileFormat)
 	for _, t := range ts {
 		encodeRunTarget(&b, t.RunTarget)

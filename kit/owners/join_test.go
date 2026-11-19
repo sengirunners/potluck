@@ -95,7 +95,7 @@ func TestGitHubJoin(t *testing.T) {
 	teamProject(t, x, "orchid")
 	carl, _ := x.gh.AddUser("carlexample", "User")
 	n := carlNode(x)
-	// Discover says only "a zm authority": no project input, no list.
+	// Discover says only "a potluck authority": no project input, no list.
 	var au api.GitHubAuthority
 	if err := n.do(t, "GET", "/v0/join/github?project=orchid", nil, &au); err != nil || !au.Authority || au.Machine != "mini" || !au.GitHub || au.Protocol != api.WireProtocol {
 		t.Fatalf("discover = %+v %v", au, err)

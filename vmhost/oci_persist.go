@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 )
 
 // Kept disks on the OCI layer (persist.go): a kept box is the same container,
@@ -135,7 +137,7 @@ func (o ociCLI) imageHome(image string) (string, error) {
 	case user == "" || user == "root" || user == "0":
 		home = "/root"
 	case strings.Trim(user, "0123456789") == "":
-		return "", fmt.Errorf("image %s runs as uid %s with no HOME: zm cannot tell where to keep its home", image, user)
+		return "", fmt.Errorf("image %s runs as uid %s with no HOME: %s cannot tell where to keep its home", image, user, kitconfig.Program)
 	default:
 		home = "/home/" + user
 	}
@@ -174,7 +176,7 @@ func (o ociCLI) KeptBootErr(err error) error {
 	if !o.rootFlag() {
 		return err
 	}
-	return fmt.Errorf("%w; a kept box on runsc boots with the annotation %s (so its root survives a stop), which %s refuses unless it allows overlay2 per container: see the run log, and update runsc (zm host doctor installs a pinned one)", err, ociRunscKeepRoot, o.runscVersion())
+	return fmt.Errorf("%w; a kept box on runsc boots with the annotation %s (so its root survives a stop), which %s refuses unless it allows overlay2 per container: see the run log, and update runsc (%s installs a pinned one)", err, ociRunscKeepRoot, o.runscVersion(), kitconfig.PotluckCommand("doctor"))
 }
 
 // runscVersion is the runtime's own version line, as the CLI runs it.

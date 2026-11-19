@@ -22,6 +22,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 // NoAdmission is --admission-url none: the binding carries no admission keys.
@@ -197,5 +198,5 @@ func dropKeyless(ctx context.Context, b Binder, o ShareOptions, res ShareResult,
 		}
 		why = fmt.Sprintf(" (unbind: %v)", err)
 	}
-	return fmt.Sprintf("; %s is still bound from before WITHOUT admission: its boxes are uncounted by the controller%s; run again, or zm target unbind %s%s", name, why, flag, name), true
+	return fmt.Sprintf("; %s is still bound from before WITHOUT admission: its boxes are uncounted by the controller%s; run again, or %s", name, why, config.Command("target unbind", flag+name)), true
 }

@@ -28,10 +28,11 @@ import (
 )
 
 // onUsage is the --on flag's help: the names it takes, and where the
-// program lists them when it has such a command.
+// program lists them when it has such a command (target is a program's
+// own, not one of Potluck's).
 func (a *app) onUsage() string {
-	if config.Has("target ls") {
-		return "a shared machine: a name " + a.cmd("target ls") + " lists, or a machine name alone with --size (default: the smallest that fits)"
+	if !config.Missing("target ls") {
+		return "a shared machine: a name " + config.Command("target ls") + " lists, or a machine name alone with --size (default: the smallest that fits)"
 	}
 	return "a shared machine: a machine name with --size, or a target's full name, <name>@<machine> (default: the smallest that fits)"
 }
@@ -215,7 +216,7 @@ func (a *app) sandboxLsCmd() *cobra.Command {
 				return err
 			}
 			for _, s := range skipped {
-				fmt.Fprintln(a.host.Stderr, a.name()+": skipped", config.Text(s))
+				fmt.Fprintln(a.host.Stderr, a.name()+": skipped", s)
 			}
 			if len(hs) == 0 && len(skipped) > 0 {
 				return exitWith{code: 1, err: fmt.Errorf("no shared machine answered")}
@@ -600,7 +601,7 @@ func warnCredentialLike(w io.Writer, paths []string, name string) {
 			fmt.Fprintf(w, "%s: warning: and %d more that look like credentials files\n", name, len(paths)-i)
 			break
 		}
-		fmt.Fprintf(w, "%s: warning: %s looks like a credentials file\n", name, config.Text(p))
+		fmt.Fprintf(w, "%s: warning: %s looks like a credentials file\n", name, p)
 	}
 	if len(paths) > 0 {
 		fmt.Fprintln(w, name+": a copy is written to the box's disk and is not a secret channel; send secrets with exec --secret NAME=@file (a file in the box's memory, gone when the command ends)")
@@ -675,7 +676,7 @@ against its SHA-256. A copy cut off on the way up resumes when run again.`,
 				fmt.Fprintln(a.host.Stderr)
 			}
 			for _, l := range res.Left {
-				fmt.Fprintln(a.host.Stderr, a.name()+": left out", config.Text(l))
+				fmt.Fprintln(a.host.Stderr, a.name()+": left out", l)
 			}
 			warnCredentialLike(a.host.Stderr, res.CredentialLike, a.name())
 			if err != nil {

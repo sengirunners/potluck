@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/vmhost/shelfhelper"
 )
 
@@ -450,7 +451,7 @@ func (o ociCLI) boot(vm string, isolated bool, log io.Writer, deadman string) (*
 		return nil, nil, err
 	}
 	if isolated && !ociIsolatedNet(o.network) {
-		return nil, nil, fmt.Errorf("oci_network %q may reach the host or its LAN: an isolated run needs none or the plain name of a network made for zm with egress filtered", o.network)
+		return nil, nil, fmt.Errorf("oci_network %q may reach the host or its LAN: an isolated run needs none or the plain name of a network made for %s with egress filtered", o.network, kitconfig.Program)
 	}
 	cmd := exec.Command("sh", "-c", deadman, "sh", vm, o.bin)
 	cmd.Env = dockerEngineEnv(o.engineHost)

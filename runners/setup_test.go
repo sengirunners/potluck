@@ -422,16 +422,17 @@ func TestOAuthCallbackLoadedTwice(t *testing.T) {
 func TestSetupWithNoPublicURLNamesTheTunnelCommandTheProgramHas(t *testing.T) {
 	for _, c := range []struct {
 		program  string
-		verbs    map[string]string
+		lacks    func(string) bool
 		want     string
 		wantNone string
 	}{
 		{"zm", nil, "run zm tunnel setup <hostname> first", ""},
-		{"potluck", map[string]string{"tunnel setup": ""}, "set tunnel.url in config.json", "tunnel setup"},
+		{"potluck", func(w string) bool { return w == "tunnel setup" }, "set tunnel.url in config.json", "tunnel setup"},
 	} {
 		t.Run(c.program, func(t *testing.T) {
-			config.Program, config.Verbs = c.program, c.verbs
-			t.Cleanup(func() { config.Program, config.Verbs = "zm", nil })
+			prog, lacks := config.Program, config.Lacks
+			config.Program, config.Lacks = c.program, c.lacks
+			t.Cleanup(func() { config.Program, config.Lacks = prog, lacks })
 			f := newFixtureWith(t, func(r *config.Runners) {
 				*r = config.Runners{GitHub: config.RunnersGitHub{APIURL: r.GitHub.APIURL, WebURL: r.GitHub.WebURL}}
 			})

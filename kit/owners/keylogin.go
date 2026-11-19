@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 
 	"github.com/sengirunners/potluck/kit/api"
@@ -112,7 +113,7 @@ func (s *Service) bindKey(ctx context.Context, l *login, acc Account) (api.GitHu
 				return err
 			}
 			if len(others) > 0 {
-				return api.Errorf(api.CodeConflict, "this GitHub account already belongs to another identity here; join them first with zm login github")
+				return api.Errorf(api.CodeConflict, "this GitHub account already belongs to another identity here; join them first with %s", config.Command("login github"))
 			}
 		}
 		if b, err = s.d.KeyLogin.Bind(ctx, tx, core.KeyBind{KeyStart: *l.key, Identity: l.identity, Account: acc.ID, Login: acc.Login}); err != nil {
@@ -128,7 +129,7 @@ func (s *Service) bindKey(ctx context.Context, l *login, acc Account) (api.GitHu
 		s.tellLinked(ctx, l.identity, acc, l.from)
 	}
 	s.tell(ctx, l.identity, []string{l.key.Project.ID}, fmt.Sprintf("A signing key (%s) now answers as GitHub @%s (identity %s) from machine %s, bound by a GitHub sign-in on %s. "+
-		"If that was not you: zm approver rm %s on %s.",
-		b.Fingerprint, acc.Login, l.identity.Name, l.key.Machine, s.d.Config.Machine, b.Approver, s.d.Config.Machine))
+		"If that was not you: %s on %s.",
+		b.Fingerprint, acc.Login, l.identity.Name, l.key.Machine, s.d.Config.Machine, config.Command("approver rm", b.Approver), s.d.Config.Machine))
 	return api.GitHubLoginOutcome{Key: &b}, nil
 }

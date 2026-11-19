@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 // dropUnfit unbinds this machine's earlier box bindings (<prefix>-<size> on
@@ -41,7 +42,7 @@ func dropUnfit(ctx context.Context, b Binder, o ShareOptions, layer string) []st
 		}
 		why := fmt.Sprintf("%s, bound by an earlier share, is %d vCPU and %d MB, more than this machine has (%d cores, %d MB)", t.Name, s.CPU, s.MemoryMB, o.Report.Cores, o.Report.RAMMB)
 		if u == nil {
-			notes = append(notes, fmt.Sprintf("%s: zm target unbind %s%s removes it", why, flag, t.Name))
+			notes = append(notes, fmt.Sprintf("%s: %s removes it", why, config.Command("target unbind", flag+t.Name)))
 			continue
 		}
 		if o.Pool != "" {
@@ -55,7 +56,7 @@ func dropUnfit(ctx context.Context, b Binder, o ShareOptions, layer string) []st
 			notes = append(notes, why+": it was unbound")
 		case errors.As(err, &ae) && ae.Code == api.CodeNotFound:
 		default:
-			notes = append(notes, fmt.Sprintf("%s, and unbinding it failed (%v): zm target unbind %s%s removes it", why, err, flag, t.Name))
+			notes = append(notes, fmt.Sprintf("%s, and unbinding it failed (%v): %s removes it", why, err, config.Command("target unbind", flag+t.Name)))
 		}
 	}
 	return notes

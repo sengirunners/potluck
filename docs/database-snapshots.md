@@ -1,5 +1,19 @@
 # Project database snapshots
 
+Use a project-owned recipe from any box command:
+
+```sh
+potluck sandbox create --database example-db
+potluck run --database example-db --deps npm -- npm test
+potluck agent-task --database example-db --deps npm --prompt-file task.md
+```
+
+`--database` selects the recipe's image, so it cannot be combined with
+`--image`, `--template` or `--persist`. An agent task keeps its credential and
+proxy requirements, but does not select the default agent template when a
+database recipe supplies the image. That image must include the selected agent.
+The automatic Git base and disjoint dependency layers remain available.
+
 A box acquire can name a database recipe with `"database":"example-db"`. The
 project owner configures that name in `project.toml`:
 
@@ -11,7 +25,8 @@ manifest = "<the exact JSON text of the image's manifest.json, TOML-escaped>"
 ```
 
 The image must also be lent by the chosen box binding, pinned to that same
-immutable digest. Its `/opt/potluck-db/manifest.json` and `pgdata.tar.gz` follow
+immutable digest. A binding that does not lend it refuses before it makes
+anything, so placement asks the next database-capable binding. Its `/opt/potluck-db/manifest.json` and `pgdata.tar.gz` follow
 `potluck-postgres-snapshot-v1`. It contains the PostgreSQL runtime under `/nix`
 and `/usr/lib/postgresql`, and its configuration under `/etc/postgresql`.
 `manifest.project` identifies the source repository; the recipe belongs to the

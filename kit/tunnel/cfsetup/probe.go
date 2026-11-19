@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/tunnel"
 )
 
@@ -87,7 +88,7 @@ type ExecRunner struct{ Path string }
 // Run implements Runner.
 func (e ExecRunner) Run(ctx context.Context, env []string, out io.Writer, args ...string) ([]byte, error) {
 	if e.Path == "" {
-		return nil, errors.New("cloudflared is not provisioned in $ZM_HOME/tools (zm tunnel setup fetches the pinned one)")
+		return nil, errors.New("cloudflared is not provisioned in $ZM_HOME/tools (" + config.Command("tunnel setup") + " fetches the pinned one)")
 	}
 	cmd := exec.CommandContext(ctx, e.Path, args...)
 	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "USER=" + os.Getenv("USER")}, env...)

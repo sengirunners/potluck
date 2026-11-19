@@ -355,7 +355,7 @@ func (s *Service) describeOf(ctx context.Context, b computeapi.RunTarget) (*comp
 			if d.Why != "" {
 				why = " (it says: " + d.Why + ")"
 			}
-			return nil, api.Errorf(api.CodeBadRequest, "potluck-driver-%s describes a box without its size%s: run %s on the machine that lends it, which checks the machine again, pulls its image if that is missing and rebinds the size", b.Driver, why, config.Cmd("host share"))
+			return nil, api.Errorf(api.CodeBadRequest, "potluck-driver-%s describes a box without its size%s: run %s on the machine that lends it, which checks the machine again, pulls its image if that is missing and rebinds the size", b.Driver, why, config.PotluckCommand("host"))
 		}
 	}
 	for _, v := range required {
@@ -595,7 +595,7 @@ func boxPin(b computeapi.RunTarget, req computeapi.AcquireRunTargetRequest) (pin
 		case req.Image != "":
 			return "", "", api.Errorf(api.CodeBadRequest, "name a template or an image, not both")
 		case !ok:
-			return "", "", api.Errorf(api.CodeBadRequest, "no box template %q (zm's: %s)", req.Template, strings.Join(computeapi.BoxTemplates(), ", "))
+			return "", "", api.Errorf(api.CodeBadRequest, "no box template %q (%s's: %s)", req.Template, config.Program, strings.Join(computeapi.BoxTemplates(), ", "))
 		}
 	}
 	if b.Kind == computeapi.RunTargetKindBox && len(b.Images) > 0 {
@@ -610,7 +610,7 @@ func boxPin(b computeapi.RunTarget, req computeapi.AcquireRunTargetRequest) (pin
 			switch {
 			case pin == "" && req.Template != "":
 				return "", "", api.Errorf(api.CodeBadRequest, "run target %s lends no %s template image (%s)", b.Name, req.Template, tmplImage).
-					WithHint("its owner lends it beside the default by running zm host share again")
+					WithHint("its owner lends it beside the default by running " + config.PotluckCommand("host") + " again")
 			case pin == "":
 				return "", "", api.Errorf(api.CodeBadRequest, "image %q is not one of run target %s's images", req.Image, b.Name)
 			}

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 )
 
 // Root and Docker inside an oci box (zm-eakh.12.5.26; SPEC 20 "Boxes", Root
@@ -99,7 +101,7 @@ func (c *config) parseRoot(m map[string]string, bad *[]string) {
 	switch {
 	case !ociHonoursSetuid(c.OCIRuntime):
 		*bad = append(*bad, "root needs a runtime that honours setuid in the box: gVisor ignores setuid bits unless runsc has --allow-suid, so use oci_runtime "+
-			ociSudoRuntime+" (zm host doctor's root line registers it with docker) or Kata, not "+strconv.Quote(c.OCIRuntime))
+			ociSudoRuntime+" ("+kitconfig.PotluckCommand("doctor")+"'s root line registers it with docker) or Kata, not "+strconv.Quote(c.OCIRuntime))
 	case c.OCIRuntime == ociSudoRuntime && !strings.HasPrefix(filepath.Base(c.OCICLI), "docker"):
 		*bad = append(*bad, ociSudoRuntime+" is a docker runtime entry: root on gVisor needs oci_cli docker")
 	}
@@ -159,7 +161,7 @@ func (o ociCLI) checkSudoRuntime() error {
 		return fmt.Errorf("root=on: cannot read docker's runtimes to check %s: %v", ociSudoRuntime, err)
 	}
 	if why := sudoRuntimeWrong(out); why != "" {
-		return fmt.Errorf("root=on: %s; zm host share --docker replaces it", why)
+		return fmt.Errorf("root=on: %s; %s replaces it", why, kitconfig.PotluckCommand("host", "--docker"))
 	}
 	return nil
 }

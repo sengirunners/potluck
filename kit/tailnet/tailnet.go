@@ -120,7 +120,7 @@ func (s *Service) Routes(r *core.Router) {
 	r.HandleFunc("GET /v0/tailnet", core.Local, "local: node status", s.handleStatus)
 	r.HandleFunc("POST /v0/tailnet/up", core.Local, "local: join the tailnet (saves config)", s.handleUp)
 	r.HandleFunc("POST /v0/tailnet/down", core.Local, "local: leave", s.handleDown)
-	r.HandleFunc("GET /v0/peers", core.Local, "local: zm nodes on the tailnet", s.handlePeers)
+	r.HandleFunc("GET /v0/peers", core.Local, "local: "+config.Program+" nodes on the tailnet", s.handlePeers)
 }
 
 // Start brings the node up when config says tailnet.enabled. It never
@@ -208,21 +208,21 @@ func (s *Service) up(req api.TailnetUpRequest) error {
 	if _, ok := machineFromHost(nc.Hostname); !ok {
 		s.mu.Unlock()
 		return api.Errorf(api.CodeBadRequest, "tailnet hostname %q does not start with %q", nc.Hostname, HostPrefix).
-			WithHint("zm peers finds other daemons by their potluck-<machine> (or older zm-<machine>) node name; use e.g. --hostname " + HostPrefix + cfg.Machine)
+			WithHint(config.Command("peers") + " finds other daemons by their potluck-<machine> (or older zm-<machine>) node name; use e.g. --hostname " + HostPrefix + cfg.Machine)
 	}
 	if r := s.run; r != nil {
 		switch {
 		case nc.Hostname != r.cfg.Hostname || nc.ControlURL != r.cfg.ControlURL:
 			s.mu.Unlock()
 			return api.Errorf(api.CodeConflict, "already on the tailnet as %s", r.cfg.Hostname).
-				WithHint("run zm tailnet down first to change the hostname or control server")
+				WithHint("run " + config.Command("tailnet down") + " first to change the hostname or control server")
 		case r.failed.Load():
 			// The listener died (serve set lastErr): start over, never a no-op.
 		case nc.AuthKey != "":
 			if st, err := r.node.Status(s.ctx); err == nil && st.State == StateRunning {
 				s.mu.Unlock()
 				return api.Errorf(api.CodeConflict, "already logged in to the tailnet as %s; the auth key was not used", r.cfg.Hostname).
-					WithHint("run zm tailnet down first to use a new auth key")
+					WithHint("run " + config.Command("tailnet down") + " first to use a new auth key")
 			}
 			// Still waiting for a login: restart the node with the new key.
 		default:
@@ -242,7 +242,7 @@ func (s *Service) up(req api.TailnetUpRequest) error {
 		if err := s.recordName(nc.Hostname); err != nil {
 			s.lastErr = err.Error()
 			return api.Errorf(api.CodeInternal, "could not save this node's name %s in config.json (tailnet.hostname): %v", nc.Hostname, err).
-				WithHint("fix config.json (or the home's permissions), then run zm tailnet up again; the node was not started")
+				WithHint("fix config.json (or the home's permissions), then run " + config.Command("tailnet up") + " again; the node was not started")
 		}
 	}
 	if err := os.MkdirAll(nc.Dir, 0o700); err != nil {
@@ -304,7 +304,7 @@ func (s *Service) serve(ctx context.Context, r *runner) {
 	r.serving.Store(true)
 	tlsStarted = true
 	go s.serveHTTPS(ctx, r, st.SelfDNS)
-	s.d.Log.Info("tailnet: serving the zm API", "hostname", r.cfg.Hostname, "port", s.port())
+	s.d.Log.Info("tailnet: serving the "+config.Program+" API", "hostname", r.cfg.Hostname, "port", s.port())
 	s.publish(context.WithoutCancel(ctx), api.EventTailnetUp)
 	s.refreshPeers(ctx)
 

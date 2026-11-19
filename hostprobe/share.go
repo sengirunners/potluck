@@ -17,6 +17,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/conformance"
 	"github.com/sengirunners/potluck/imagepins"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/vmhost"
 )
@@ -468,7 +469,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		}
 		res.Images, res.DefaultImage, res.NamedImage = []string{p.Image}, o.With == "", o.With
 		if o.With == "" {
-			say(fmt.Sprintf("no --image: lending zm's default %s image for %s, %s", osName[p.OS], layer.Name, p.Image))
+			say(fmt.Sprintf("no --image: lending %s's default %s image for %s, %s", config.Program, osName[p.OS], layer.Name, p.Image))
 		} else {
 			say(fmt.Sprintf("--with %s: lending %s", o.With, p.Image))
 		}
@@ -477,12 +478,12 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 				continue
 			}
 			if tp.Image == "" {
-				res.Notes = append(res.Notes, "zm's "+tp.Template+" template image is not published yet: boxes lend the default image only")
+				res.Notes = append(res.Notes, config.Program+"'s "+tp.Template+" template image is not published yet: boxes lend the default image only")
 				continue
 			}
 			res.Images = append(res.Images, tp.Image)
 			templates[tp.Image] = tp.Template
-			say(fmt.Sprintf("and zm's %s template image, %s (zm sandbox create --template %s)", tp.Template, tp.Image, tp.Template))
+			say(fmt.Sprintf("and %s's %s template image, %s (%s)", config.Program, tp.Template, tp.Image, config.PotluckCommand("sandbox create", "--template "+tp.Template)))
 		}
 	}
 	if o.With == "" && len(o.Images) == 0 {
@@ -538,8 +539,8 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		runner = ""
 	case runner == "":
 		if runner = ImageRunnerDir(res.Images); runner == "" {
-			res.Notes = append(res.Notes, "boxes serve jobs only, not GitHub Actions: zm knows of no GitHub runner in "+strings.Join(res.Images, ", ")+
-				"; if the image has one, pass --runner-dir PATH (zm's Linux image keeps it in /home/runner)")
+			res.Notes = append(res.Notes, "boxes serve jobs only, not GitHub Actions: "+config.Program+" knows of no GitHub runner in "+strings.Join(res.Images, ", ")+
+				"; if the image has one, pass --runner-dir PATH ("+config.Program+"'s Linux image keeps it in /home/runner)")
 		}
 	}
 	base := map[string]string{"vm": layer.Name}
@@ -601,7 +602,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		}
 		base["oci_cli"], base["oci_runtime"] = cli, rt
 		if n := o.OCINetwork; n != "" && n != "none" && len(o.NetMail) == 0 {
-			return res, fmt.Errorf("oci network %q: name an outside mail server with --net-mail, so conformance checks no box can send mail through it. Tart and Incus block outbound mail in code; zm cannot read a named network's firewall rules", n)
+			return res, fmt.Errorf("oci network %q: name an outside mail server with --net-mail, so conformance checks no box can send mail through it. Tart and Incus block outbound mail in code; %s cannot read a named network's firewall rules", n, config.Program)
 		}
 		network := o.OCINetwork
 		if runner != "" && (network == "" || network == "none") { // a runner must reach GitHub (zm-eakh.12.24.6)
@@ -716,7 +717,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			return res, fmt.Errorf("--linux-slots %d%s: no size fits twice inside %s, so Potluck would run one box at a time: raise --share, or pass --linux-slots 1",
 				res.LinuxSlots, keptFrom(res.LinuxSlotsFrom), o.Limits.Within())
 		}
-		res.Notes = append(res.Notes, "one box at a time: no size fits twice inside "+o.Limits.Within()+", so zm lends what fits once and runs one box at a time (--share to choose more of it)")
+		res.Notes = append(res.Notes, "one box at a time: no size fits twice inside "+o.Limits.Within()+", so "+config.Program+" lends what fits once and runs one box at a time (--share to choose more of it)")
 	}
 	if err := slotsAlike(o, res.LinuxSlots, res.LinuxSlotsFrom, sizes); err != nil {
 		return res, err
@@ -841,7 +842,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		case why == "":
 			pulled = append(pulled, im)
 		case isTmpl: // a private package, a full disk, the network: the default still lends
-			res.Notes = append(res.Notes, "zm's "+tmpl+" template image did not pull, so boxes lend the default image only ("+why+")")
+			res.Notes = append(res.Notes, config.Program+"'s "+tmpl+" template image did not pull, so boxes lend the default image only ("+why+")")
 		default:
 			return res, errors.New(why)
 		}
@@ -1040,7 +1041,7 @@ func chooseLayer(o ShareOptions) (Layer, error) {
 			if c, found := o.Report.Layer("oci"); found && c.Supported && o.Report.OS == "linux" && len(c.Problems) > 0 {
 				return l, notReady(c)
 			}
-			return l, errors.New("no layer can lend this machine: run `zm host doctor` for what is missing")
+			return l, errors.New("no layer can lend this machine: run `" + config.PotluckCommand("doctor") + "` for what is missing")
 		}
 		return best, nil
 	}

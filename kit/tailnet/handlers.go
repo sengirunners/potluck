@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 // Every route here is core.Local: the router has already refused token and
@@ -31,7 +32,7 @@ func (s *Service) handleUp(w http.ResponseWriter, r *http.Request) {
 		// The node started but cannot serve (e.g. the listener failed):
 		// never a 200, and nothing saved. The next up starts it over.
 		api.WriteError(w, api.Errorf(api.CodeUnavailable, "tailnet: %s", st.Error).
-			WithHint("run zm tailnet up again to retry, or zm tailnet down"))
+			WithHint("run "+config.Command("tailnet up")+" again to retry, or "+config.Command("tailnet down")))
 		return
 	}
 	// Saved only once the node started, so a bad auth key or control URL
@@ -39,7 +40,7 @@ func (s *Service) handleUp(w http.ResponseWriter, r *http.Request) {
 	if err := s.saveEnabled(true, req); err != nil {
 		s.d.Log.Warn("tailnet: save config", "err", err)
 		api.WriteError(w, api.Errorf(api.CodeInternal, "the node is up but config.json was not saved: %v", err).
-			WithHint("it will not come back after a daemon restart; fix config.json and run zm tailnet up again"))
+			WithHint("it will not come back after a daemon restart; fix config.json and run "+config.Command("tailnet up")+" again"))
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, st)
@@ -49,7 +50,7 @@ func (s *Service) handleDown(w http.ResponseWriter, r *http.Request) {
 	if err := s.saveEnabled(false, api.TailnetUpRequest{}); err != nil {
 		s.d.Log.Warn("tailnet: save config", "err", err)
 		api.WriteError(w, api.Errorf(api.CodeInternal, "config.json was not saved: %v", err).
-			WithHint("the node is still up; fix config.json and run zm tailnet down again"))
+			WithHint("the node is still up; fix config.json and run "+config.Command("tailnet down")+" again"))
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, s.Down(r.Context()))

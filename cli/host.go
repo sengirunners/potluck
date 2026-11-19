@@ -156,7 +156,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				}
 				return nil
 			}
-			w := words{a.host.Stdout}
+			w := a.host.Stdout
 			fmt.Fprintf(w, "%s/%s, %d cores, %d MB RAM, %.0f GB free in %s, kvm: %t\n", r.OS, r.Arch, r.Cores, r.RAMMB, r.FreeDiskGB, r.StateDir, r.KVM)
 			if r.MacOS != "" {
 				fmt.Fprintf(w, "macOS %s\n", r.MacOS)
@@ -463,7 +463,7 @@ func (a *app) shareOptions(cmd *cobra.Command, s *shareFlags) (hostprobe.ShareOp
 	o.Report = detectHost(cmd.Context(), dir)
 	o.HostAddrs = hostprobe.HostAddrs()
 	if !a.asJSON() {
-		o.Progress = func(line string) { fmt.Fprintln(words{a.host.Stderr}, line) }
+		o.Progress = func(line string) { fmt.Fprintln(a.host.Stderr, line) }
 	}
 	return o, nil
 }
@@ -509,7 +509,7 @@ func (a *app) reportShare(res hostprobe.ShareResult, w io.Writer) error {
 			return err
 		}
 	} else {
-		printShare(words{w}, res, prefix(a.host.Prefix))
+		printShare(w, res, prefix(a.host.Prefix))
 	}
 	if res.Failed() {
 		return errors.New("some sizes were not shared")

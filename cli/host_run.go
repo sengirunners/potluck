@@ -108,7 +108,7 @@ func (a *app) notes() io.Writer {
 	if a.asJSON() {
 		return a.host.Stderr
 	}
-	return words{a.host.Stdout}
+	return a.host.Stdout
 }
 
 // afterLend is the host program's AfterLend for this run: nil without one,

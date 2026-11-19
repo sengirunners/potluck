@@ -59,7 +59,7 @@ func (a *app) daemonCmd() *cobra.Command {
 			if verbose {
 				lvl = slog.LevelDebug
 			}
-			log := slog.New(slog.NewTextHandler(words{a.host.Stderr}, &slog.HandlerOptions{Level: lvl}))
+			log := slog.New(slog.NewTextHandler(a.host.Stderr, &slog.HandlerOptions{Level: lvl}))
 			return serve(cmd.Context(), cfg, log, a.prog.wiring())
 		},
 	}

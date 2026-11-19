@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/kit/config"
 	"maps"
 	"net/http"
 	"slices"
@@ -259,7 +260,7 @@ func (rt *Router) guard(pattern string, access Access, h http.Handler) http.Hand
 		sub := SubjectOf(r.Context())
 		if sub == nil {
 			api.WriteError(w, api.Errorf(api.CodeUnauthenticated, "authentication required").
-				WithHint("send Authorization: Bearer <token> (zm token mint) or call from the machine's socket"))
+				WithHint("send Authorization: Bearer <token> ("+config.Command("token mint")+") or call from the machine's socket"))
 			return
 		}
 		// The server refused a limited token on a route that does not admit
@@ -289,7 +290,7 @@ func deviceGuard(h http.Handler) http.Handler {
 		switch rm := RemoteOf(ctx); {
 		case IsLocal(ctx):
 			api.WriteError(w, api.Errorf(api.CodeForbidden, "no socket caller holds the decide right").
-				WithHint("the project's owner answers with zm ask answer <id> <choice>; a paired device decides on its approvals page"))
+				WithHint("the project's owner answers with "+config.Command("ask answer", "<id> <choice>")+"; a paired device decides on its approvals page"))
 		case r.Header.Get(api.HeaderAuthorization) != "":
 			api.WriteError(w, api.Errorf(api.CodeForbidden, "approvals take no token: the right is bound to a paired device's tailnet node"))
 		case rm == nil || rm.NodeID == "" || rm.NodeKey == "" || rm.Via != "":

@@ -308,7 +308,7 @@ func TestLinkManyIdentities(t *testing.T) {
 		t.Fatalf("the account's links: %d, %v; want 2", n, err)
 	}
 	told := x.mail.to("orchid", "human:judy")
-	if len(told) != 2 || !strings.Contains(told[1], "also linked to identity carl") || !strings.Contains(told[1], "zm identity unlink github carl") {
+	if len(told) != 2 || !strings.Contains(told[1], "also linked to identity carl") || !strings.Contains(told[1], "potluck identity unlink github carl") {
 		t.Fatalf("judy's mail = %q", told)
 	}
 	if ms := x.mail.to("orchid", "human:carl"); len(ms) != 1 || !strings.Contains(ms[0], "linked to identity carl") {
@@ -448,7 +448,7 @@ func TestLinkMailUnlinkRelink(t *testing.T) {
 	}
 	ms := x.mail.to("orchid", "human:judy")
 	if len(ms) != 1 || !strings.Contains(ms[0], "@ana") || !strings.Contains(ms[0], "this machine (mini)") ||
-		!strings.Contains(ms[0], "zm identity unlink github judy") {
+		!strings.Contains(ms[0], "potluck identity unlink github judy") {
 		t.Fatalf("link mail = %q", ms)
 	}
 	// A stranger cannot unlink (the 404 of a missing identity).

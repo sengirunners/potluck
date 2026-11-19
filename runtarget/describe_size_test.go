@@ -30,15 +30,14 @@ func TestBoxWithoutSizeSaysHowToFix(t *testing.T) {
 		config        map[string]string
 		why, fix      string
 	}{
-		{"with the driver's reason", "zm", map[string]string{"window": soon + "-" + later}, "reclaimed: outside the window " + soon + "-" + later, "run zm host share on the machine that lends it"},
-		{"no reason given", "zm", nil, "", "run zm host share on the machine that lends it"},
+		{"with the driver's reason", "zm", map[string]string{"window": soon + "-" + later}, "reclaimed: outside the window " + soon + "-" + later, "run zm host on the machine that lends it"},
+		{"no reason given", "zm", nil, "", "run zm host on the machine that lends it"},
 		{"in potluck's words", "potluck", nil, "", "run potluck host on the machine that lends it"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if c.program != "zm" {
-				config.Program, config.Verbs = c.program, map[string]string{"host share": "host"}
-				t.Cleanup(func() { config.Program, config.Verbs = "zm", nil })
-			}
+			prog, lacks := config.Program, config.Lacks
+			config.Program, config.Lacks = c.program, nil
+			t.Cleanup(func() { config.Program, config.Lacks = prog, lacks })
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			fix, _ := filepath.EvalSymlinks(t.TempDir())

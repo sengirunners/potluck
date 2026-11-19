@@ -19,6 +19,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"strings"
 	"sync"
@@ -143,7 +144,7 @@ func (s *Service) startLogin(ctx context.Context, sub *authz.Subject, hdr http.H
 		}
 		if sub.Identity.Kind != api.IdentityHuman {
 			return api.GitHubLoginStart{}, api.Errorf(api.CodeForbidden, "only a person links GitHub; identity %s is a %s", sub.Identity.Name, sub.Identity.Kind).
-				WithHint("machines and agents keep zm's invites and tokens")
+				WithHint("machines and agents keep " + config.Program + "'s invites and tokens")
 		}
 	case PurposeBind:
 		if sub == nil || sub.Identity.Kind != api.IdentityHuman {
@@ -361,7 +362,7 @@ func (s *Service) run(l *login, code DeviceCode) {
 		case errors.Is(err, ErrDenied):
 			return Account{}, api.Errorf(api.CodeForbidden, "the GitHub login was declined")
 		case errors.Is(err, ErrExpired), errors.Is(err, context.DeadlineExceeded):
-			return Account{}, api.Errorf(api.CodeForbidden, "the GitHub login code expired").WithHint("start again: zm login github")
+			return Account{}, api.Errorf(api.CodeForbidden, "the GitHub login code expired").WithHint("start again: " + config.Command("login github"))
 		case err != nil:
 			return Account{}, api.Errorf(api.CodeUnavailable, "GitHub login: %v", err)
 		}

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"strconv"
 	"strings"
@@ -123,7 +124,7 @@ func (d *Deps) asSession(ctx context.Context, as string) (string, error) {
 		}
 	}
 	return "", api.Errorf(api.CodeForbidden, "%s %q is no session on this machine", api.HeaderAs, as).
-		WithHint("a session acts as its address or its name while it is live; zm ls lists them")
+		WithHint("a session acts as its address or its name while it is live; " + config.Command("ls") + " lists them")
 }
 
 // OwnAddress reports whether addr is one of sub's own: its address, its

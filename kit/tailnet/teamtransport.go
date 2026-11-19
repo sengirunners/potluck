@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/project"
 )
@@ -105,7 +106,7 @@ func (t *teamTransport) ParseCode(code string) (core.JoinTarget, bool, error) {
 func (t *teamTransport) Prepare(ctx context.Context, req api.JoinRequest, machine string, target core.JoinTarget) (string, string, error) {
 	if target.Authority != "" && target.Authority == t.d.Config.Machine {
 		return "", "", api.Errorf(api.CodeBadRequest, "this join code is for %s, this machine", target.Authority).
-			WithHint("run zm join on the member's machine")
+			WithHint("run " + config.Command("join") + " on the member's machine")
 	}
 	if t.net == nil {
 		return "", "", api.Errorf(api.CodeUnavailable, "this daemon has no tailnet module")
@@ -120,9 +121,9 @@ func (t *teamTransport) Prepare(ctx context.Context, req api.JoinRequest, machin
 	}
 	if !st.Running {
 		if st.AuthURL != "" {
-			return st.AuthURL, "log in to Tailscale at the URL, then run zm join again", nil
+			return st.AuthURL, "log in to Tailscale at the URL, then run " + config.Command("join") + " again", nil
 		}
-		return "", "", api.Errorf(api.CodeUnavailable, "the tailnet node did not come up within %s", wait).WithHint("zm tailnet (status), then zm join again")
+		return "", "", api.Errorf(api.CodeUnavailable, "the tailnet node did not come up within %s", wait).WithHint(config.Command("tailnet") + " (status), then " + config.Command("join") + " again")
 	}
 	self, err := t.net.Self(ctx)
 	if err != nil {
@@ -254,7 +255,7 @@ func (t *teamTransport) Explain(url string, err error) error {
 			WithHint("the join code names another node than the one answering under its name; ask for a new invite")
 	}
 	return api.Errorf(api.CodeUnavailable, "authority %s unreachable: %v", url, err).
-		WithHint("check both machines are on the tailnet: zm tailnet, zm peers")
+		WithHint("check both machines are on the tailnet: " + config.Command("tailnet") + ", " + config.Command("peers"))
 }
 
 // Invite names this node as the tailnet named it: a replica dials
@@ -262,7 +263,7 @@ func (t *teamTransport) Explain(url string, err error) error {
 // zm-mini would reach the other node and fail its fingerprint check.
 func (t *teamTransport) Invite(ctx context.Context) (core.InviteTarget, error) {
 	down := api.Errorf(api.CodeUnavailable, "this machine's tailnet node is not running").
-		WithHint("a join code names the authority's tailnet node: run zm tailnet up first (or set tunnel.url and use --via tunnel)")
+		WithHint("a join code names the authority's tailnet node: run " + config.Command("tailnet up") + " first (or set tunnel.url and use --via tunnel)")
 	if t.net == nil {
 		return core.InviteTarget{}, down
 	}
@@ -276,7 +277,7 @@ func (t *teamTransport) Invite(ctx context.Context) (core.InviteTarget, error) {
 	}
 	if want := self.Hostname; want != "" && name != want {
 		return core.InviteTarget{}, api.Errorf(api.CodeConflict, "%s is taken on this tailnet (this node got %s): a join code naming it would not reach this machine", want, name).
-			WithHint("in the Tailscale admin console, remove or rename the other " + want + " and give this node the name " + want + ", then zm invite again")
+			WithHint("in the Tailscale admin console, remove or rename the other " + want + " and give this node the name " + want + ", then " + config.Command("invite") + " again")
 	}
 	// The code carries the node's full MagicDNS name: a node shared in from
 	// another tailnet resolves only by it (zm-my5).

@@ -156,12 +156,12 @@ GET /v0/tailnet [token-no-whois] 403 {"error":{"code":"forbidden","message":"thi
 GET /v0/tailnet [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 GET /v0/tailnet [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 GET /v0/tailnet [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
-GET /v0/team/machines/class [owner-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
-GET /v0/team/machines/class [guest-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
-GET /v0/team/machines/class [token-no-whois] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+GET /v0/team/machines/class [owner-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
+GET /v0/team/machines/class [guest-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
+GET /v0/team/machines/class [token-no-whois] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
 GET /v0/team/machines/class [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 GET /v0/team/machines/class [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
-GET /v0/team/machines/class [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+GET /v0/team/machines/class [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
 GET /v0/team/ops [owner-token] 403 {"error":{"code":"forbidden","message":"machine ops go to a team replica's daemon (its node-bound token)"}}
 GET /v0/team/ops [guest-token] 403 {"error":{"code":"forbidden","message":"machine ops go to a team replica's daemon (its node-bound token)"}}
 GET /v0/team/ops [token-no-whois] 403 {"error":{"code":"forbidden","message":"machine ops go to a team replica's daemon (its node-bound token)"}}
@@ -216,12 +216,12 @@ POST /v0/daemon/swaps [token-no-whois] 403 {"error":{"code":"forbidden","message
 POST /v0/daemon/swaps [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/daemon/swaps [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/daemon/swaps [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
-POST /v0/grants [owner-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
-POST /v0/grants [guest-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
-POST /v0/grants [token-no-whois] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants [owner-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member, guest or inviter, not \"\""}}
+POST /v0/grants [guest-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member, guest or inviter, not \"\""}}
+POST /v0/grants [token-no-whois] 400 {"error":{"code":"bad_request","message":"role must be owner, member, guest or inviter, not \"\""}}
 POST /v0/grants [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/grants [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
-POST /v0/grants [socket-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
+POST /v0/grants [socket-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member, guest or inviter, not \"\""}}
 POST /v0/grants/github [owner-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
 POST /v0/grants/github [guest-token] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
 POST /v0/grants/github [token-no-whois] 400 {"error":{"code":"bad_request","message":"role must be owner, member or guest, not \"\""}}
@@ -240,18 +240,18 @@ POST /v0/invites [token-no-whois] 403 {"error":{"code":"forbidden","message":"on
 POST /v0/invites [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/invites [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/invites [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner (or an admin of the whole project) makes an invite","hint":"run it on the machine that runs the project, or on an owner's own machine that joined it"}}
-POST /v0/invites/redeem [owner-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
-POST /v0/invites/redeem [guest-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
-POST /v0/invites/redeem [token-no-whois] 401 {"error":{"code":"unauthenticated","message":"unknown caller","hint":"redeem with zm join \u003ccode\u003e"}}
-POST /v0/invites/redeem [token-tunnel] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
-POST /v0/invites/redeem [bad-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: zm invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
-POST /v0/invites/redeem [socket-token] 403 {"error":{"code":"forbidden","message":"a join code is redeemed from the member's machine","hint":"run zm join \u003ccode\u003e on the member's machine"}}
-POST /v0/login/github/start [owner-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
-POST /v0/login/github/start [guest-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
-POST /v0/login/github/start [token-no-whois] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/invites/redeem [owner-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: potluck invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [guest-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: potluck invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [token-no-whois] 401 {"error":{"code":"unauthenticated","message":"unknown caller","hint":"redeem with potluck join \u003ccode\u003e"}}
+POST /v0/invites/redeem [token-tunnel] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: potluck invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [bad-token] 403 {"error":{"code":"forbidden","message":"invalid, used or expired join code","hint":"ask the project's owner for a new invite: potluck invite \u003cproject\u003e --as \u003cyou\u003e --role member"}}
+POST /v0/invites/redeem [socket-token] 403 {"error":{"code":"forbidden","message":"a join code is redeemed from the member's machine","hint":"run potluck join \u003ccode\u003e on the member's machine"}}
+POST /v0/login/github/start [owner-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run potluck login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/login/github/start [guest-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run potluck login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/login/github/start [token-no-whois] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run potluck login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
 POST /v0/login/github/start [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/login/github/start [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
-POST /v0/login/github/start [socket-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run zm login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
+POST /v0/login/github/start [socket-token] 403 {"error":{"code":"forbidden","message":"only you can link your identity: run potluck login github on your own machine","hint":"a minted token or a tailnet login cannot link an identity to GitHub"}}
 POST /v0/login/github/x [owner-token] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
 POST /v0/login/github/x [guest-token] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
 POST /v0/login/github/x [token-no-whois] 404 {"error":{"code":"not_found","message":"no login \"x\""}}
@@ -300,24 +300,24 @@ POST /v0/team/machine [token-no-whois] 403 {"error":{"code":"forbidden","message
 POST /v0/team/machine [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/team/machine [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/team/machine [socket-token] 403 {"error":{"code":"forbidden","message":"machine numbers come from a team replica's daemon (its node-bound token)"}}
-POST /v0/team/machines/x/class [owner-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
-POST /v0/team/machines/x/class [guest-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
-POST /v0/team/machines/x/class [token-no-whois] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+POST /v0/team/machines/x/class [owner-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
+POST /v0/team/machines/x/class [guest-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
+POST /v0/team/machines/x/class [token-no-whois] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
 POST /v0/team/machines/x/class [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/team/machines/x/class [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
-POST /v0/team/machines/x/class [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: zm machine-class -P \u003cproject\u003e"}}
+POST /v0/team/machines/x/class [socket-token] 403 {"error":{"code":"forbidden","message":"only the project's owner, on their machine's socket, sets operator classes","hint":"run it there: potluck machine-class -P \u003cproject\u003e"}}
 POST /v0/team/ops/report [owner-token] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
 POST /v0/team/ops/report [guest-token] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
 POST /v0/team/ops/report [token-no-whois] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
 POST /v0/team/ops/report [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/team/ops/report [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/team/ops/report [socket-token] 403 {"error":{"code":"forbidden","message":"op reports come from a team replica's daemon (its node-bound token)"}}
-POST /v0/team/presence [owner-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
-POST /v0/team/presence [guest-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
-POST /v0/team/presence [token-no-whois] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
+POST /v0/team/presence [owner-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: potluck join \u003ccode\u003e"}}
+POST /v0/team/presence [guest-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: potluck join \u003ccode\u003e"}}
+POST /v0/team/presence [token-no-whois] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: potluck join \u003ccode\u003e"}}
 POST /v0/team/presence [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 POST /v0/team/presence [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
-POST /v0/team/presence [socket-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: zm join \u003ccode\u003e"}}
+POST /v0/team/presence [socket-token] 403 {"error":{"code":"forbidden","message":"presence comes from a team replica's daemon (its node-bound token)","hint":"a replica sends it by itself every 15 s once it joined: potluck join \u003ccode\u003e"}}
 POST /v0/team/project-keys/x/forget [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 POST /v0/team/project-keys/x/forget [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 POST /v0/team/project-keys/x/forget [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}

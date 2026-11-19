@@ -33,7 +33,7 @@ func LockHome(home string) (release func(), err error) {
 		if _, perr := strconv.Atoi(pid); perr != nil {
 			pid = "unknown"
 		}
-		return nil, fmt.Errorf("a zm daemon already runs for %s (pid %s); if `zm status` cannot reach it, its socket is gone: kill %s, then start again", home, pid, pid)
+		return nil, fmt.Errorf("a %s daemon already runs for %s (pid %s); if `%s` cannot reach it, its socket is gone: kill %s, then start again", Program, home, pid, Command("status"), pid)
 	}
 	_ = f.Truncate(0)
 	_, _ = f.WriteAt([]byte(strconv.Itoa(os.Getpid())+"\n"), 0)

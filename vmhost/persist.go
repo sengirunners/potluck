@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 )
 
 // Kept disks (SPEC 20 "Boxes", Kept disks; zm-eakh.12.5.23): a box acquired
@@ -225,7 +227,7 @@ func (d *drv) start(handle string, raw json.RawMessage) (any, error) {
 		}
 		if d.cfg.VM == "oci" { // oci_root.go: the container keeps the flags it was made with
 			if why := keptRootDiffers(r.Config, d.cfg); why != "" {
-				return refuse("conflict", "%s: %s cannot start as the binding now says (its disk stays kept; zm sandbox rm deletes it)", why, r.Handle)
+				return refuse("conflict", "%s: %s cannot start as the binding now says (its disk stays kept; %s deletes it)", why, r.Handle, kitconfig.PotluckCommand("sandbox rm"))
 			}
 			// docker resolves runsc-root at every start, so it is checked again.
 			if o, ok := d.vm.(ociCLI); ok && o.root && o.runtime == ociSudoRuntime {

@@ -17,6 +17,7 @@ import (
 	"github.com/sengirunners/potluck/ghapp"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/authz"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 )
 
@@ -190,7 +191,7 @@ func (s *Service) oauth(w http.ResponseWriter, r *http.Request) {
 	if area == "" {
 		area = "(the whole pool project)"
 	}
-	confirmPage(w, fmt.Sprintf("Run GitHub %s %s's jobs on zm's pool?", strings.ToLower(in.AccountType), in.Account),
+	confirmPage(w, fmt.Sprintf("Run GitHub %s %s's jobs on %s's pool?", strings.ToLower(in.AccountType), in.Account, config.Program),
 		fmt.Sprintf("%s asked to link this installation to pool area %s. Its Actions jobs labelled for the pool would then run in that area's throwaway VMs. Say yes only if you expected this.",
 			p.by, area), state)
 }
@@ -235,8 +236,8 @@ func (s *Service) confirm(w http.ResponseWriter, r *http.Request) {
 		page(w, http.StatusConflict, "Not linked", err.Error())
 		return
 	}
-	page(w, http.StatusOK, "Linked", fmt.Sprintf("GitHub %s %s now runs its pool jobs in zm's pool, area %q. You can close this tab.",
-		strings.ToLower(l.AccountType), l.Account, l.Area))
+	page(w, http.StatusOK, "Linked", fmt.Sprintf("GitHub %s %s now runs its pool jobs in %s's pool, area %q. You can close this tab.",
+		strings.ToLower(l.AccountType), l.Account, config.Program, l.Area))
 }
 
 // userToken exchanges an OAuth code for a user-to-server token.

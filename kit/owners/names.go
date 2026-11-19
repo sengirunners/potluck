@@ -25,6 +25,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"strings"
 	"time"
@@ -315,7 +316,7 @@ func (s *Service) bind(ctx context.Context, l *login, holder Account) (api.NameB
 	_ = s.d.Store.Registry().QueryRowContext(ctx, `SELECT account FROM owner_links WHERE identity = ?`, l.identity.ID).Scan(&linked)
 	if linked == "" || linked != holder.ID {
 		return api.NameBinding{}, api.Errorf(api.CodeForbidden, "GitHub @%s is not %s's linked account", holder.Login, l.identity.Name).
-			WithHint("link yours first: zm login github")
+			WithHint("link yours first: " + config.Command("login github"))
 	}
 	owner := l.bindOwnerAcc
 	switch owner.Kind {

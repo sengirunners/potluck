@@ -73,61 +73,19 @@ const EnvHuman = "POTLUCK_HUMAN"
 const EnvBoxCredential = "POTLUCK_BOX_CREDENTIAL"
 
 // UseHome points kit/config at Potluck's home, machine name, variables and
-// words. Main calls it first; a test that starts daemons in this package
-// calls it before loading any config.
+// program: kit's messages name potluck's commands, and say so of the ones
+// potluck has none of (lacks). Main calls it first; a test that starts
+// daemons in this package calls it before loading any config.
 func UseHome() {
 	config.Use(config.Names{HomeEnvs: []string{EnvHome}, HomeDirs: []string{HomeDir}, Sockets: []string{SocketName}})
 	config.MachineEnv, config.MachineSuffix = EnvMachine, MachineSuffix
 	config.HumanEnv, config.HostEnv = EnvHuman, ""
-	config.Program, config.Verbs = programName, Verbs
-}
-
-// Verbs maps zm's command words, as kit's messages name them, to potluck's
-// (config.Text rewrites kit's messages with it). An empty value is a zm
-// command potluck has none of yet.
-var Verbs = map[string]string{
-	// The same words in both.
-	"daemon": "daemon", "daemon --detach": "daemon --detach", "daemon stop": "daemon stop",
-	"join": "join", "leave": "leave", "invite": "invite", "remotes": "remotes", "forget": "forget",
-	"sandbox": "sandbox", "sandbox create": "sandbox create", "sandbox rm": "sandbox rm",
-	"sandbox exec": "sandbox exec", "sandbox ls": "sandbox ls",
-	"runners": "runners", "runners setup": "runners setup", "runners link": "runners link",
-	"runners unlink": "runners unlink", "status": "status",
-	// Other words.
-	"host share":  "host",
-	"pool host":   "host",
-	"host doctor": "doctor",
-	"host stop":   "host stop",
-	"box exec":    "sandbox exec",
-	"job run":     "run",
-	"pool create": "create",
-	// zm's alone, for now (with the subcommands kit's messages name).
-	"daemon update": "", "daemon stop --end-sessions": "",
-	"tunnel": "", "tunnel setup": "", "tunnel setup --quick": "", "tunnel status": "", "tunnel remove": "",
-	"tunnel key escrow": "", "tailnet": "", "tailnet up": "", "tailnet down": "", "peers": "",
-	"target": "", "target ls": "", "target bind": "", "target unbind": "", "machine-class": "",
-	"login": "", "login github": "", "identity": "", "identity add": "", "identity unlink": "",
-	"grant": "", "revoke": "", "token": "", "token mint": "", "token ls": "", "token revoke": "",
-	"project": "", "project use": "", "project set": "", "project why": "", "project team": "",
-	"area": "", "area add": "", "area set": "", "init": "", "tracker": "", "tracker rm": "",
-	"backup": "", "backup restore": "", "outbox": "", "inbox": "", "ls": "", "exec": "",
-	"exec --cancel": "", "task": "", "task status": "", "session": "", "session stop": "",
-	"ask": "", "ask new": "", "ask answer": "", "work": "", "work import": "", "webhooks": "", "connect": "",
-}
-
-// words writes human text built from kit's messages in potluck's words
-// (config.Text). Never for JSON (a key may be "zm") or a sandbox's output.
-type words struct{ w io.Writer }
-
-func (t words) Write(p []byte) (int, error) {
-	if _, err := io.WriteString(t.w, config.Text(string(p))); err != nil {
-		return 0, err
-	}
-	return len(p), nil
+	useProgram(Program{})
 }
 
 // nameTaken is the hint for a tailnet node whose name another node holds
-// (kit/tailnet's invite and join refusals name zm's remedies).
+// (kit/tailnet's invite and join refusals name a --machine flag and a
+// console step; potluck's remedy is its machine variable).
 func (a *app) nameTaken() string {
 	return "another node on your tailnet already has this machine's name. Give " + a.name() + " its own: " +
 		"set POTLUCK_MACHINE=<name> (or \"machine\" in $POTLUCK_HOME/config.json), restart the daemon " +
@@ -220,7 +178,7 @@ func (a *app) report(err error) int {
 		return code
 	}
 	var e *api.Error
-	if client.NotRunning(err) { // kit's words name zm's commands
+	if client.NotRunning(err) { // Potluck's hint, with the host's prefix
 		e = &api.Error{Code: api.CodeUnavailable, Message: "the " + a.name() + " daemon is not running",
 			Hint: "start it with: " + a.cmd("daemon --detach") + " (most commands start it on their own)"}
 		if a.own { // a mounted run's daemon is the host's: attach.go is not consulted
@@ -234,9 +192,6 @@ func (a *app) report(err error) int {
 		if e.Code == api.CodeConflict && strings.Contains(e.Message, "is taken on this tailnet") {
 			e.Hint = a.nameTaken()
 		}
-		x := *e // kit's words in potluck's, as text and as JSON
-		x.Message, x.Hint = config.Text(e.Message), config.Text(e.Hint)
-		e = &x
 		if a.asJSON() {
 			b, _ := json.Marshal(api.ErrorResponse{Error: e})
 			_ = json.NewEncoder(a.host.Stderr).Encode(json.RawMessage(textclean.JSON(b)))
@@ -252,7 +207,7 @@ func (a *app) report(err error) int {
 		}
 		return 1
 	}
-	fmt.Fprintln(a.host.Stderr, a.name()+":", textclean.Clean(config.Text(err.Error())))
+	fmt.Fprintln(a.host.Stderr, a.name()+":", textclean.Clean(err.Error()))
 	if strings.Contains(err.Error(), "unknown command") || strings.Contains(err.Error(), "flag") ||
 		strings.Contains(err.Error(), "arg(s)") {
 		return 2
@@ -416,7 +371,7 @@ func (a *app) printJSON(v any) error {
 
 // say prints one line (or more) for people on stdout.
 func (a *app) say(format string, args ...any) {
-	fmt.Fprintln(a.host.Stdout, strings.TrimRight(textclean.Clean(config.Text(fmt.Sprintf(format, args...))), "\n"))
+	fmt.Fprintln(a.host.Stdout, strings.TrimRight(textclean.Clean(fmt.Sprintf(format, args...)), "\n"))
 }
 
 // call is a common RunE body: build a client, run fn, print its result.

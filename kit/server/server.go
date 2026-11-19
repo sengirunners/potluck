@@ -219,7 +219,7 @@ func (dm *Daemon) middleware(next http.Handler) http.Handler {
 		api.SetHeader(w.Header(), api.HeaderProtocol, api.WireProtocol)
 		if p := api.GetHeader(r.Header, api.HeaderProtocol); p != "" && !api.SameProtocol(p, api.WireProtocol) {
 			api.WriteError(w, api.Errorf(api.CodeBadRequest, "this daemon speaks %s; the client speaks %s", api.WireProtocol, p).
-				WithHint("use the same zm version for the daemon and the CLI"))
+				WithHint("use the same "+config.Program+" version for the daemon and the CLI"))
 			return
 		}
 		r = r.WithContext(d.Authenticate(r))
@@ -316,7 +316,7 @@ func (dm *Daemon) Serve(ctx context.Context) error {
 		}
 	}()
 	_, _ = d.Events.Publish(ctx, events.Input{Type: api.EventDaemonStarted, Subject: d.Config.Machine, Data: dm.healthBody(ctx, true)})
-	d.Log.Info("zm daemon listening", "socket", sock, "machine", d.Config.Machine)
+	d.Log.Info(config.Program+" daemon listening", "socket", sock, "machine", d.Config.Machine)
 	go dm.selfCheckLoop(mctx)
 
 	select {
@@ -411,7 +411,7 @@ func ListenUnix(path string) (net.Listener, error) {
 	if _, err := os.Stat(path); err == nil {
 		if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
 			c.Close()
-			return nil, fmt.Errorf("a zm daemon is already running on %s", path)
+			return nil, fmt.Errorf("a %s daemon is already running on %s", config.Program, path)
 		}
 		_ = os.Remove(path)
 	}

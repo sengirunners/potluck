@@ -29,6 +29,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 // LaunchArg runs this binary as the launcher a launchd job starts.
@@ -87,7 +89,7 @@ func StartDetached(ctx context.Context, d Detach) (*Detached, error) {
 		}
 		// No GUI domain to take the job: start it as before, and say so
 		// where a reader of a lost session will look.
-		appendLog(d.Log, fmt.Sprintf("zm: launchd did not take the daemon's start (%v); started it directly, so force-quitting the app that ran this command ends it and its sessions", refused.err))
+		appendLog(d.Log, fmt.Sprintf("%s: launchd did not take the daemon's start (%v); started it directly, so force-quitting the app that ran this command ends it and its sessions", config.Program, refused.err))
 		p, err = startDirect(d)
 		if p != nil {
 			p.Via = "direct: " + refused.err.Error()
@@ -272,31 +274,34 @@ func launchPlist(label string, argv []string, log string) string {
 // pid file is there if a daemon was started. Caught, not ignored: an ignored
 // signal would stay ignored in the daemon across exec.
 func launchMain(args []string) int {
+	// Runs at package init, before main sets config.Program: the name is the
+	// executable this was started as.
+	name := filepath.Base(os.Args[0])
 	held := make(chan os.Signal, 1)
 	signal.Notify(held, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
 	defer signal.Stop(held)
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "zm: usage: zm "+LaunchArg+" <spec>")
+		fmt.Fprintln(os.Stderr, name+": usage: "+name+" "+LaunchArg+" <spec>")
 		return 2
 	}
 	b, err := os.ReadFile(args[0])
 	_ = os.Remove(args[0])
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "zm: launcher:", err)
+		fmt.Fprintln(os.Stderr, name+": launcher:", err)
 		return 1
 	}
 	var s launchSpec
 	if err := json.Unmarshal(b, &s); err != nil {
-		fmt.Fprintln(os.Stderr, "zm: launcher: bad spec:", err)
+		fmt.Fprintln(os.Stderr, name+": launcher: bad spec:", err)
 		return 1
 	}
 	if len(s.Argv) == 0 || s.PidFile == "" {
-		fmt.Fprintln(os.Stderr, "zm: launcher: spec has no argv or pid file")
+		fmt.Fprintln(os.Stderr, name+": launcher: spec has no argv or pid file")
 		return 1
 	}
 	p, err := startDirect(Detach{Argv: s.Argv, Env: s.Env, Dir: s.Dir, Log: s.Log})
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "zm: launcher:", err)
+		fmt.Fprintln(os.Stderr, name+": launcher:", err)
 		return 1
 	}
 	tmp := s.PidFile + ".tmp"
@@ -304,7 +309,7 @@ func launchMain(args []string) int {
 		err = os.Rename(tmp, s.PidFile)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "zm: launcher: pid file:", err)
+		fmt.Fprintln(os.Stderr, name+": launcher: pid file:", err)
 		_ = p.Signal(syscall.SIGTERM)
 		return 1
 	}

@@ -274,7 +274,7 @@ func (a *app) projectJoined(r api.JoinResponse) {
 	}
 	fmt.Fprintf(&b, "  token: %s (works only from this machine's daemon)\n", x.TokenFile)
 	for _, n := range r.Notes {
-		fmt.Fprintf(&b, "  note: %s\n", config.Text(n))
+		fmt.Fprintf(&b, "  note: %s\n", n)
 	}
 	a.say("%s", strings.TrimSuffix(b.String(), "\n"))
 	if a.host.AfterJoin != nil {
@@ -311,13 +311,13 @@ func remoteCopy(x api.Remote) string {
 		fmt.Fprintf(&b, ", outbox %d pending", v.Pending)
 		if v.Conflicts > 0 {
 			fmt.Fprintf(&b, ", %d refused", v.Conflicts)
-			if config.Has("outbox") {
-				fmt.Fprintf(&b, " (%s)", config.Cmd("outbox"))
+			if !config.Missing("outbox") {
+				fmt.Fprintf(&b, " (%s)", config.Command("outbox"))
 			}
 		}
 	}
 	if v.LastError != "" && x.LastError == "" {
-		fmt.Fprintf(&b, ": %s", config.Text(v.LastError))
+		fmt.Fprintf(&b, ": %s", v.LastError)
 	}
 	return b.String()
 }

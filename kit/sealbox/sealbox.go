@@ -69,7 +69,7 @@ var (
 // jit_config do not go to or from it. who names the side that is too old.
 func ErrNoKey(who string) *api.Error {
 	return api.Errorf(api.CodeForbidden, "secrets and jit_config go between machines only sealed to the receiving machine's key, and %s runs a Potluck (or zm) too old to seal them: update it", who).
-		WithHint("update the daemon there (potluck daemon update, or zm daemon update); calls without secrets still work")
+		WithHint("update the daemon there (potluck upgrade, or zm daemon update); calls without secrets still work")
 }
 
 // ErrOpen is every failure to open a sealed blob: one message, so a

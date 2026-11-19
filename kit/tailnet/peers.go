@@ -10,6 +10,7 @@ import (
 
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 // Peers lists the zm nodes this daemon has seen on the tailnet: nodes named
@@ -88,7 +89,7 @@ func (s *Service) probeAll(ctx context.Context, hc *http.Client, nps []NodePeer,
 			return
 		}
 		if prev, ok := found[p.Machine]; ok {
-			s.d.Log.Warn("tailnet: two nodes claim one zm machine name", "machine", p.Machine, "urls", prev.URL+" "+p.URL)
+			s.d.Log.Warn("tailnet: two nodes claim one "+config.Program+" machine name", "machine", p.Machine, "urls", prev.URL+" "+p.URL)
 			if prev.Online && !p.Online || prev.Online == p.Online && prev.URL < p.URL {
 				return
 			}

@@ -59,14 +59,14 @@ var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade"}
   Potluck knows nothing else of it.
 - **AfterJoin**, when set, is the host program's next step after `join` joined a team project that is not one of a
   pool's areas (what to do there in that program), its words to stdout. It is not called under `--json`.
-- **Report** prints an error a command returns as `potluck` does, on the host's stderr and in its words (an API
+- **Report** prints an error a command returns as `potluck` does, on the host's stderr, the message as written (an API
   error as JSON with `--json`; Potluck's hints for a daemon that is not running or a tailnet name that is taken), and returns
   the exit code: a sandbox command's own, 3 when the daemon is not running, 2 for a usage error, else 1.
 - **ExitCode** is for a host that reports errors itself: it maps an error to a sandbox command's own exit code
   (`sandbox exec`, `run`), or the code of a refusal whose output already said why. Any other error is the host's to
   report.
 
-`Commands` never calls `cli.UseHome` and never changes `config.Program` or `config.Names`: the host keeps its own
+`Commands` never calls `cli.UseHome` and never changes `config.Program`, `config.Prefix`, `config.Lacks` or `config.Names`: the host keeps its own
 home, machine record and home claim. Build the commands anew for each run of the host (they hold that run's
 state). A host can add the same command at two places, built twice with two prefixes: `supper pool sandbox` and
 `supper sandbox` are one command with two spellings.
@@ -81,12 +81,23 @@ Every top-level command of `potluck` except `ProgramCommands`: `create`, `invite
 binary, or serve that program's MCP tools, and a host has its own. A hint that names one uses the program's name
 (`supper status`).
 
-## What still goes through kit's word table
+## Kit's messages
 
-Messages from kit and the compute packages are written in zm's words and rewritten for the running program by
-`config.Text` with `config.Program` and `config.Verbs` (`kit/config/program.go`). The commands still pass their
-human output through it (`say`, the `words` writer, error reports), so a host sets `config.Program` and
-`config.Verbs` for its own words. New code names commands with the prefix, never through that table.
+Messages from kit and the compute packages (an API error's hint, a refusal from the daemon or a driver) name
+commands through `kit/config/program.go`:
+
+- `config.Command` names one of the program's own commands (kit's team, tunnel and tailnet commands, `daemon`,
+  `status`): `config.Program` and Potluck's words (`supper join <code>`).
+- `config.PotluckCommand` names one of Potluck's commands (`host`, `doctor`, `sandbox rm`, `driver pin`):
+  `config.Prefix`, or `config.Program` when the prefix is empty (`supper pool doctor`).
+
+A host sets `config.Program` to its name and `config.Prefix` to its `Host.Prefix` first in main, before it prints
+anything, builds its commands (some flag help is made while the tree is built) or starts a daemon. It sets
+`config.Lacks` when it carries only some of the commands kit names: the `potluck` program answers from its own
+command tree, so a command it has none of, such as `tunnel setup`, is named as missing. The daemon passes its prefix
+to the drivers it starts (`POTLUCK_PREFIX`, [protocol.md](protocol.md)). A daemon's messages are its program's: a
+`potluck` command using another program's daemon prints that daemon's words. Nothing rewrites a message's words on
+the way out. The commands' own hints use `Host.Prefix`.
 
 ## Not yet the host's
 

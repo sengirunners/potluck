@@ -25,7 +25,7 @@ func (a *app) sandboxCreateCmd() *cobra.Command {
 	var netOpt string
 	var vols []string
 	var df depscli.Flags
-	cmd := &cobra.Command{Use: "create [--size c2m4] [--os linux] [--on <machine-size>] [--ttl 1h] [--ref HEAD [--dirty]] [--template agent|browser] [--net off] [--persist] [--volume name:path[:rw|ro|cow]]... [--deps npm[:path]]...",
+	cmd := &cobra.Command{Use: "create [--size c2m4] [--os linux] [--on <machine-size>] [--ttl 1h] [--ref HEAD [--dirty]] [--template agent|browser] [--net off] [--persist] [--volume name:path[:rw|ro|cow]]... [--deps npm[:path]]... [--database <recipe>]",
 		Short: "Start a sandbox on the smallest shared machine size that fits (or --on); prints its id",
 		Long: `With --ref (or --dirty) the sandbox gets that commit of this checkout, sent
 as a git bundle, checked out in ~/checkout (--dir); no credential enters it.
@@ -116,6 +116,7 @@ install scripts. The files come from this directory, not from --ref.`,
 	f.StringArrayVar(&vols, "volume", nil, "name:path[:rw|ro|cow]: a named volume of yours that outlives the sandbox, mounted at path (repeatable)")
 	push.add(f)
 	df.Add(f)
+	databaseFlags(cmd, &req.Database)
 	return cmd
 }
 

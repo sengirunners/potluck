@@ -1,109 +1,88 @@
 package config
 
 import (
+	"os"
 	"regexp"
-	"slices"
-	"strings"
 )
 
-// The program a binary is, for the words people read: the name in command
-// suggestions ("run `zm host doctor`") and the verbs that differ between
-// programs. The defaults are zm's, and with them Cmd and Text return what
-// kit always printed. A program of its own sets both before it prints
-// anything (cmd/potluck: "potluck" and its verbs, cli.UseHome).
+// The program a binary is, for the words people read: the first word of
+// every command a message names, and the program a daemon's home claim and
+// machine record name (kit/server). A program built on Potluck's kit sets
+// Program (with Prefix when it mounts Potluck's commands under a word, and
+// Lacks when it carries only some of kit's commands) first in main, before
+// it prints anything, builds its commands or starts a daemon (cli.UseHome:
+// "potluck"). Messages read them when they are made, never at package init.
 var (
-	Program = "zm"
-	// Verbs maps zm's command words to this program's ("host doctor" ->
-	// "doctor"). Cmd and Text use the longest key that starts the words. A
-	// key with an empty value is a zm command this program has none of:
-	// Text names it as a command this program does not have yet.
-	Verbs map[string]string
+	// Program is the running program's name.
+	Program = "potluck"
+	// Prefix is how a person types Potluck's commands (cli.Commands: host,
+	// doctor, sandbox, ...) in the running program: "zm potluck" for a
+	// program that mounts them under its word "potluck". "" is Program
+	// alone (they are at its top level).
+	Prefix string
+	// Lacks, when set, reports whether the running program has no command
+	// of these words (subcommand names, no flags or arguments): a program
+	// that carries only some of the commands kit's messages name answers
+	// from its own command tree. Nil: it has every one.
+	Lacks func(words string) bool
 )
 
-// IsZm reports whether the program is zm (the default).
-func IsZm() bool { return Program == "zm" }
+// EnvPrefix carries the daemon's Potluck prefix (PotluckPrefix) to the
+// drivers it starts, whose messages name Potluck's commands too.
+const EnvPrefix = "POTLUCK_PREFIX"
 
-// Cmd is a command in this program's words, given zm's: Cmd("daemon
-// --detach") is "zm daemon --detach" for zm and "potluck daemon --detach"
-// for potluck. A zm command with no counterpart keeps zm's words under this
-// program's name; callers that can meet one word the sentence with Pick.
-func Cmd(zmWords string) string {
-	if IsZm() {
-		return "zm " + zmWords
+// PrefixFromEnv sets Prefix from EnvPrefix, when that holds words a
+// shell takes as they are (a driver's main calls it first; anything else
+// is ignored and the prefix stays Program).
+func PrefixFromEnv() {
+	if v := os.Getenv(EnvPrefix); ValidPrefix(v) {
+		Prefix = v
 	}
-	if v, rest, ok := verb(zmWords); ok && v != "" {
-		return Program + " " + v + rest
-	}
-	return Program + " " + zmWords
 }
 
-// Has reports whether this program has the command zm calls zmWords: always for
-// zm, and for another program unless its Verbs say it has none (an empty
-// value). A hint that sends a person to a command asks first.
-func Has(zmWords string) bool {
-	if IsZm() {
-		return true
+// ValidPrefix reports whether s is what a prefix may hold: words a shell
+// takes as they are (letters, digits, '.', '_' and '-', one space
+// between), since hints and generated scripts carry it unquoted.
+func ValidPrefix(s string) bool { return prefixWords.MatchString(s) }
+
+var prefixWords = regexp.MustCompile(`^[A-Za-z0-9._-]+( [A-Za-z0-9._-]+)*$`)
+
+// Missing reports whether the running program has no command words
+// (Lacks).
+func Missing(words string) bool { return Lacks != nil && Lacks(words) }
+
+// Command is one of the running program's own commands as a person types
+// it, in Potluck's words: Command("join", "<code>") is "potluck join
+// <code>" in the potluck program and "zm join <code>" in zm. For a command
+// the program has none of (Missing) it says so instead, without the
+// arguments, so a hint never names a command that does not exist.
+func Command(words string, args ...string) string {
+	if Missing(words) {
+		return "the " + words + " command (" + Program + " has none)"
 	}
-	v, _, ok := verb(zmWords)
-	return !ok || v != ""
+	return join(Program, words, args)
 }
 
-// Pick is zm's text for zm and other's for any other program: for a
-// sentence that has to be worded differently, not just renamed.
-func Pick(zm, other string) string {
-	if IsZm() {
-		return zm
-	}
-	return other
+// PotluckCommand is one of Potluck's commands (host, doctor, sandbox rm,
+// driver pin, ...) as a person types it in the running program:
+// PotluckPrefix and the command's words, "potluck doctor" in the potluck
+// program and "zm potluck doctor" where the prefix is "zm potluck".
+func PotluckCommand(words string, args ...string) string {
+	return join(PotluckPrefix(), words, args)
 }
 
-// verb finds the longest Verbs key that starts words (whole words only).
-func verb(words string) (to, rest string, ok bool) {
-	keys := make([]string, 0, len(Verbs))
-	for k := range Verbs {
-		keys = append(keys, k)
+// PotluckPrefix is Prefix, or Program when Prefix is empty.
+func PotluckPrefix() string {
+	if Prefix != "" {
+		return Prefix
 	}
-	slices.SortFunc(keys, func(a, b string) int { return len(b) - len(a) })
-	for _, k := range keys {
-		if r, found := strings.CutPrefix(words, k); found && (r == "" || r[0] == ' ' || r[0] == ';' || r[0] == ',' || r[0] == ')' || r[0] == '`' || r[0] == '.') {
-			return Verbs[k], r, true
-		}
-	}
-	return "", "", false
+	return Program
 }
 
-// zmCommand is "zm" as a word followed by a command's words.
-var zmCommand = regexp.MustCompile(`(^|[^-./_A-Za-z0-9$~])zm ([a-z][a-z-]*(?: [a-z][a-z-]*)*)`)
-
-// zmWord is "zm" as a word of its own: never part of zm-run-tart, ~/.zm,
-// zm_, ZM_HOME or Zm-As.
-var zmWord = regexp.MustCompile(`(^|[^-./_A-Za-z0-9$~])zm($|[^-_/.A-Za-z0-9]|\.$|\.[^A-Za-z0-9])`)
-
-// Text rewrites a message kit wrote in zm's words into this program's: each
-// "zm <verbs>" becomes this program's command (Verbs), and "zm" alone its
-// name. For zm it returns s unchanged. Names that are on the wire or on disk
-// (zm-run-tart, ~/.zm, Zm-As, ZM_SECRETS) are left as they are. A program's
-// own output calls it on what it prints (cmd/potluck: errors, hints, logs).
-func Text(s string) string {
-	if IsZm() || !strings.Contains(s, "zm") {
-		return s
-	}
-	s = zmCommand.ReplaceAllStringFunc(s, func(m string) string {
-		sub := zmCommand.FindStringSubmatch(m)
-		pre, words := sub[1], sub[2]
-		v, rest, ok := verb(words)
-		switch {
-		case !ok:
-			return m // prose ("zm has no ..."): renamed below
-		case v == "":
-			k := strings.TrimSuffix(words, rest)
-			return pre + "the " + k + " command (" + Program + " has none yet)" + rest
-		}
-		return pre + Program + " " + v + rest
-	})
-	// Twice: two words that share the character between them ("zm zm").
-	for range 2 {
-		s = zmWord.ReplaceAllString(s, "${1}"+Program+"${2}")
+func join(first, words string, args []string) string {
+	s := first + " " + words
+	for _, a := range args {
+		s += " " + a
 	}
 	return s
 }

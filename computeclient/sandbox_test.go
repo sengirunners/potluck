@@ -236,7 +236,7 @@ func TestPlaceBoxTemplate(t *testing.T) {
 		{"one known to lend it beats a smaller remote one", []computeapi.RunTargetView{remote, withAgent}, BoxWant{Template: "agent"}, "agent-c2m4", "", nil},
 		{"no template: this machine's before a smaller one on a trusted host", []computeapi.RunTargetView{remote, withAgent}, BoxWant{}, "agent-c2m4", "", nil},
 		{"none lends it", []computeapi.RunTargetView{plain}, BoxWant{Template: "agent"}, "", api.CodeUnavailable,
-			[]string{"no box run target here lends the agent template image (ghcr.io/sengirunners/potluck-box-agent): plain-c1m2", "zm host share"}},
+			[]string{"no box run target here lends the agent template image (ghcr.io/sengirunners/potluck-box-agent): plain-c1m2", "potluck host"}},
 		{"unknown template", []computeapi.RunTargetView{withAgent}, BoxWant{Template: "nope"}, "", api.CodeBadRequest, []string{`no box template "nope"`}},
 	} {
 		got, err := PlaceBox(ctx, client.WithHandler(targetsHandler(tc.targets...)), tc.want)

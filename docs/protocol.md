@@ -31,8 +31,10 @@ the resource at that deadline itself, whether or not the daemon is up.
   `runtarget.LookPath`). `<driver>` is the binding's `driver` key.
 - Each call is a new process, in its own process group, with the working directory set to the system temporary
   directory.
-- Its environment holds only `PATH`, `HOME`, `LANG`, `TERM` and `TZ` from the daemon's environment. Anything else
-  the driver needs comes from its config.
+- Its environment holds only `PATH`, `HOME`, `LANG`, `TERM` and `TZ` from the daemon's environment, and
+  `POTLUCK_PREFIX`: how a person types Potluck's commands on this machine (`potluck`, or a program's words such as
+  `supper pool`), for a hint in a refusal's message (`potluck doctor`). Anything else the driver needs comes from its
+  config.
 - It reads the whole of stdin (one JSON object), does the work, writes one JSON answer to stdout and exits 0.
 - Human text goes to stderr. The daemon throws stderr away; it never reaches logs, events or answers.
 - If the call outlives its time limit (below), fails (non-zero exit, a child holding stdout or stderr open) or its

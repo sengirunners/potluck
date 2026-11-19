@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -94,7 +95,7 @@ func (s *Service) joinMachine(req api.JoinRequest) (string, error) {
 		// Session addresses on this daemon are <machine>/<session8>; the
 		// authority accepts only those of the name it recorded.
 		return "", api.Errorf(api.CodeBadRequest, "this daemon is machine %s, not %s", cfg.Machine, machine).
-			WithHint(fmt.Sprintf("set \"machine\": %q in %s (or ZM_MACHINE=%s), restart the daemon, then zm join again", machine, filepath.Join(cfg.Home, "config.json"), machine))
+			WithHint(fmt.Sprintf("set \"machine\": %q in %s (or ZM_MACHINE=%s), restart the daemon, then %s again", machine, filepath.Join(cfg.Home, "config.json"), machine, config.Command("join")))
 	}
 	return machine, nil
 }
@@ -145,7 +146,7 @@ func (s *Service) finishJoin(ctx context.Context, req api.JoinRequest, red api.R
 	if old != nil && old.Snapshot().State == api.RemoteOK {
 		// The new token is not needed: it revokes itself.
 		_ = s.call(ctx, via, hc, http.MethodPost, base+"/v0/team/leave", red.Token, struct{}{}, nil)
-		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", red.Cap.Slug).WithHint("zm leave " + red.Cap.Slug + " first")
+		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", red.Cap.Slug).WithHint(config.Command("leave", red.Cap.Slug) + " first")
 	}
 	// Refusals that leave the code usable come before the token file: a
 	// file written for a join that is refused would be an orphan zm leave
@@ -154,10 +155,10 @@ func (s *Service) finishJoin(ctx context.Context, req api.JoinRequest, red api.R
 		if viaGitHub {
 			_ = s.call(ctx, via, hc, http.MethodPost, base+"/v0/team/leave", red.Token, struct{}{}, nil)
 			return nil, api.Errorf(api.CodeConflict, "this machine already has a project named %s (%s)", red.Cap.Slug, p.ID).
-				WithHint("rename it (zm project set " + red.Cap.Slug + " --slug <other>), then zm join " + red.Cap.Slug + " again")
+				WithHint("rename it (" + config.Command("project set", red.Cap.Slug, "--slug <other>") + "), then " + config.Command("join", red.Cap.Slug) + " again")
 		}
 		return nil, api.Errorf(api.CodeConflict, "this machine already has a project named %s (%s)", red.Cap.Slug, p.ID).
-			WithHint("rename it (zm project set " + red.Cap.Slug + " --slug <other>), then run the same zm join again: the code still works until its first use")
+			WithHint("rename it (" + config.Command("project set", red.Cap.Slug, "--slug <other>") + "), then run the same " + config.Command("join") + " again: the code still works until its first use")
 	}
 	// The id is the authority's to choose: one this machine knows belongs
 	// to the authority it first came from (project_keys.go). A refused

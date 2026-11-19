@@ -16,6 +16,7 @@ import (
 
 	"github.com/sengirunners/potluck/internal/tarsafe"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 type packed struct {
@@ -44,7 +45,7 @@ func packDir(dir string, max int64) (p packed, err error) {
 		}
 	}()
 	if within(tmp, dir) {
-		return p, api.Errorf(api.CodeBadRequest, "%s holds this machine's temporary directory, where zm writes the copy's tar: copy a directory beneath it", dir)
+		return p, api.Errorf(api.CodeBadRequest, "%s holds this machine's temporary directory, where %s writes the copy's tar: copy a directory beneath it", dir, config.Program)
 	}
 	p.path = filepath.Join(tmp, "up.tar")
 	f, err := os.OpenFile(p.path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)

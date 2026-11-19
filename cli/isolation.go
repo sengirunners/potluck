@@ -227,7 +227,7 @@ docs/isolation.md.`,
 			} else if len(bs) == 0 && partial == "" {
 				fmt.Fprintln(a.host.Stdout, "this machine lends nothing yet")
 			} else {
-				printIsolation(words{a.host.Stdout}, bs, partial, prefix(a.host.Prefix))
+				printIsolation(a.host.Stdout, bs, partial, prefix(a.host.Prefix))
 			}
 			if partial != "" {
 				fmt.Fprintf(a.host.Stderr, "%s: %s\n", a.cmd("isolation"), partial)
@@ -284,7 +284,7 @@ docs/isolation.md.`,
 					return err
 				}
 			} else {
-				w := words{a.host.Stdout}
+				w := a.host.Stdout
 				for _, c := range r.Checks {
 					state := "PASS"
 					switch {

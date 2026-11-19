@@ -15,7 +15,6 @@ import (
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/api/textclean"
 	"github.com/sengirunners/potluck/kit/client"
-	"github.com/sengirunners/potluck/kit/config"
 )
 
 // Client resolves the caller and pool for a tool call. It must preserve the
@@ -104,9 +103,9 @@ func add[In any](tb *Toolbox, name string, ann *sdk.ToolAnnotations, untrusted b
 func toolError(err error) error {
 	var e *api.Error
 	if !errors.As(err, &e) {
-		return fmt.Errorf("%s", textclean.Clean(config.Text(err.Error())))
+		return fmt.Errorf("%s", textclean.Clean(err.Error()))
 	}
-	msg := textclean.Clean(config.Text(e.Error()))
+	msg := textclean.Clean(e.Error())
 	if len(e.Data) > 0 {
 		msg += "\ndata: " + string(textclean.JSON(e.Data))
 	}

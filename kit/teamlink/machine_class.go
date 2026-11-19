@@ -24,6 +24,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"net/url"
 	"slices"
@@ -69,7 +70,7 @@ func classCaller(r *http.Request) (*authz.Subject, bool, error) {
 	replica := sub != nil && sub.Node != "" && sub.Machine != ""
 	if !replica && (sub == nil || sub.Via != authz.ViaLocal) {
 		return nil, false, api.Errorf(api.CodeForbidden, "only the project's owner, on their machine's socket, sets operator classes").
-			WithHint("run it there: zm machine-class -P <project>")
+			WithHint("run it there: " + config.Command("machine-class", "-P <project>"))
 	}
 	return sub, replica, nil
 }
@@ -305,7 +306,7 @@ func (s *Service) TrustedMachines(ctx context.Context, project string, ms []api.
 // PublicRefused is the refusal for work named onto a public machine.
 func PublicRefused(machine, doing string) error {
 	return api.Errorf(api.CodeForbidden, "%s is a public machine in this project: it %s only on trusted machines", machine, doing).
-		WithHint("if you trust whoever runs it with the project's secrets and code: zm machine-class " + machine + " trusted -P <project>")
+		WithHint("if you trust whoever runs it with the project's secrets and code: " + config.Command("machine-class", machine, "trusted -P <project>"))
 }
 
 // OwnerProject is project's ULID when it is a team project sub owns or
@@ -334,7 +335,7 @@ func OlderFor(err error, x *Remote, feature string) error {
 		var e *api.Error
 		if errors.As(err, &e) && e.Code != api.CodeNotFound {
 			return api.Errorf(api.CodeUnavailable, "the authority %s is older than %s", x.Snapshot().Authority, feature).
-				WithHint("its owner upgrades its zm daemon")
+				WithHint("its owner upgrades its " + config.Program + " daemon")
 		}
 	}
 	return err

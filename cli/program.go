@@ -5,10 +5,12 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/sengirunners/potluck/kit/client"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/server"
 	sandboxmcp "github.com/sengirunners/potluck/mcp"
 	"github.com/sengirunners/potluck/wiring"
@@ -56,7 +58,7 @@ func (e Env) JSON() bool { return e.a.asJSON() }
 // stdout.
 func (e Env) PrintJSON(v any) error { return e.a.printJSON(v) }
 
-// Say prints a line for people on stdout, in this program's words.
+// Say prints a line for people on stdout, as written.
 func (e Env) Say(format string, args ...any) { e.a.say(format, args...) }
 
 // Stdin, Stdout and Stderr are the run's streams.
@@ -67,10 +69,40 @@ func (e Env) Stderr() io.Writer { return e.a.host.Stderr }
 // MainProgram is Main for p.
 func MainProgram(p Program) int {
 	UseHome()
+	useProgram(p)
 	stampVersion()
 	ctx, stop := signalContext()
 	defer stop()
 	return RunProgram(ctx, p, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+}
+
+// useProgram makes kit's messages name p's commands (config.Program,
+// config.Lacks): a command kit names that p's tree has no path for is one
+// p lacks, and its messages say so instead of naming it. The paths are
+// read once, here: Lacks is asked from a daemon's request goroutines, and
+// walking a cobra tree sorts it in place.
+func useProgram(p Program) {
+	config.Program, config.Prefix, config.Lacks = programName, "", nil // the tree's own help asks Lacks while it is built
+	paths := commandPaths(programApp(p, nil, io.Discard, io.Discard).root())
+	config.Lacks = func(words string) bool { return !paths[strings.Join(strings.Fields(words), " ")] }
+}
+
+// commandPaths are the words of every command under root, by name and by
+// alias, hidden ones too ("host status", "host share").
+func commandPaths(root *cobra.Command) map[string]bool {
+	paths := map[string]bool{}
+	var walk func(c *cobra.Command, prefix string)
+	walk = func(c *cobra.Command, prefix string) {
+		for _, s := range c.Commands() {
+			for _, n := range append([]string{s.Name()}, s.Aliases...) {
+				w := strings.TrimSpace(prefix + " " + n)
+				paths[w] = true
+				walk(s, w)
+			}
+		}
+	}
+	walk(root, "")
+	return paths
 }
 
 // RunProgram is Run for p.

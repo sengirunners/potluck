@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	tl "github.com/sengirunners/potluck/kit/teamlink"
 	"github.com/sengirunners/potluck/runtarget/rt"
 )
@@ -74,7 +75,7 @@ func RelayRoutes() []tl.RouteRule {
 // runBindRefused answers a bind or unbind of a run target for a joined project.
 func runBindRefused(slug string) error {
 	return api.Errorf(api.CodeBadRequest, "run targets are bound on the machine that serves them, not for the joined project %s", slug).
-		WithHint("on the lending machine: zm target bind --host --share " + slug + " (or zm host share --pool " + slug + ")")
+		WithHint("on the lending machine: " + config.Command("target bind", "--host --share", slug) + " (or " + config.PotluckCommand("host", "--pool", slug) + ")")
 }
 
 // hostBind reports whether r binds a machine-level binding of this machine

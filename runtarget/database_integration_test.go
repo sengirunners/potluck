@@ -190,7 +190,7 @@ func newDatabaseDaemonFixture(t *testing.T, mode string) *databaseDaemonFixture 
 	}
 	f.recipe = database.Recipe{Name: "example-db", Image: "snapshot@sha256:" + strings.Repeat("a", 64), Manifest: string(manifest)}
 	f.setRecipes(t, []database.Recipe{f.recipe})
-	_, err = computeclient.BindRunTarget(ctx, f.owner, computeapi.BindRunTargetRequest{Target: computeapi.RunTarget{Name: "dbbox", Driver: "database-test", Kind: "box", Isolation: "ephemeral", Images: []string{refPin}, Config: map[string]string{"mode": mode, "log": f.log}}})
+	_, err = computeclient.BindRunTarget(ctx, f.owner, computeapi.BindRunTargetRequest{Target: computeapi.RunTarget{Name: "dbbox", Driver: "database-test", Kind: "box", Isolation: "ephemeral", Images: []string{refPin, f.recipe.Image}, Config: map[string]string{"mode": mode, "log": f.log}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,6 +301,75 @@ func TestDatabaseDaemonRefusesBeforeAcquire(t *testing.T) {
 		_, err := f.dm.Deps.Projects.SetSection(ctx, f.project, "databases", func(any) (any, error) { return []database.Recipe{r}, nil })
 		if err == nil {
 			t.Errorf("accepted %s", name)
+		}
+	}
+}
+
+// A binding that lends no pin of the recipe's image refuses before it records
+// the request, marked so placement asks the next binding with the same id.
+func TestDatabaseDaemonRefusesAnUnlentImage(t *testing.T) {
+	f := newDatabaseDaemonFixture(t, "")
+	ctx := context.Background()
+	other := "snapshot@sha256:" + strings.Repeat("c", 64) // the same name, another digest
+	_, err := computeclient.BindRunTarget(ctx, f.owner, computeapi.BindRunTargetRequest{Target: computeapi.RunTarget{Name: "nolend", Driver: "database-test", Kind: "box", Isolation: "ephemeral", Images: []string{refPin, other}, Config: map[string]string{"log": f.log}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := computeapi.AcquireRunTargetRequest{RequestID: "walk", Database: "example-db"}
+	_, err = computeclient.AcquireRunTarget(ctx, f.member, "nolend", req)
+	if reason, ok := computeapi.RefusedBeforeRecord(err); !ok || reason != computeapi.RefusedImage {
+		t.Fatalf("unlent image: %v (reason %q)", err, reason)
+	}
+	if calls := f.requests(t, "acquire"); len(calls) != 0 {
+		t.Fatalf("refusal reached driver: %+v", calls)
+	}
+	if _, err := computeclient.AcquireRunTarget(ctx, f.member, "dbbox", req); err != nil {
+		t.Fatalf("the same request id on a binding that lends it: %v", err)
+	}
+}
+
+// A binding another machine serves lends what its host advertises: one whose
+// advert pins other images refuses before it records anything, marked so
+// placement asks the next binding (the host's own refusal would be "driver").
+func TestDatabaseRefusesAnUnlentImageOnALentBinding(t *testing.T) {
+	rp := newRelayPairConfigured(t, nil, map[string]string{"database": "1"})
+	rp.svc.SetHostClass(api.MachineTrusted)
+	ctx := context.Background()
+	manifest, err := os.ReadFile("../database/testdata/manifest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe := database.Recipe{Name: "example-db", Image: "snapshot@sha256:" + strings.Repeat("a", 64), Manifest: string(manifest)}
+	if err := rp.svc.SetDatabaseRecipesForTest(ctx, rp.project, []database.Recipe{recipe}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = computeclient.AcquireRunTarget(ctx, rp.owner, lent, computeapi.AcquireRunTargetRequest{RequestID: "walk", Database: "example-db"})
+	if reason, ok := computeapi.RefusedBeforeRecord(err); !ok || reason != computeapi.RefusedImage {
+		t.Fatalf("unlent image on %s: %v (reason %q)", lent, err, reason)
+	}
+	if hs, err := computeclient.RunTargetHandles(ctx, rp.owner, lent, true); err != nil || len(hs) != 0 {
+		t.Fatalf("a refusal before the record left handles %+v %v", hs, err)
+	}
+	// A host whose advert pins the recipe's image, or names so many pins that
+	// the advert's cap may have cut it, is asked; one pinning others is not.
+	p, err := rp.owner.GetProject(ctx, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := make([]string, 16)
+	for i := range full {
+		full[i] = fmt.Sprintf("other%d@sha256:%s", i, strings.Repeat("d", 64))
+	}
+	for name, images := range map[string][]string{"lends it": {refPin, recipe.Image}, "at the advert cap": full, "other pins": {refPin}} {
+		ads := rp.svc.HostAdverts(ctx, rp.project)
+		ads[0].Describe.Images = images
+		if err := rp.svc.Beat(ctx, p, "other", ads); err != nil {
+			t.Fatal(err)
+		}
+		_, err := computeclient.AcquireRunTarget(ctx, rp.owner, "sandbox@other", computeapi.AcquireRunTargetRequest{RequestID: "pinned-" + strings.ReplaceAll(name, " ", "-"), Database: "example-db"})
+		reason, _ := computeapi.RefusedBeforeRecord(err)
+		if unlent := name == "other pins"; unlent != (reason == computeapi.RefusedImage) {
+			t.Errorf("%s: %v (reason %q), want refused as unlent: %v", name, err, reason, unlent)
 		}
 	}
 }
