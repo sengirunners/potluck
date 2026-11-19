@@ -2,12 +2,12 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://potluck.sh/</loc><lastmod>2026-11-18</lastmod></url>
   <url><loc>https://potluck.sh/agent-sandbox</loc><lastmod>2026-11-18</lastmod></url>
-  <url><loc>https://potluck.sh/github-actions-runner</loc><lastmod>2026-11-17</lastmod></url>
+  <url><loc>https://potluck.sh/github-actions-runner</loc><lastmod>2026-11-19</lastmod></url>
   <url><loc>https://potluck.sh/tart</loc><lastmod>2026-11-17</lastmod></url>
-  <url><loc>https://potluck.sh/blog</loc><lastmod>2026-11-18</lastmod></url>
+  <url><loc>https://potluck.sh/blog</loc><lastmod>2026-11-19</lastmod></url>
   <url><loc>https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp</loc><lastmod>2026-11-18</lastmod></url>
   <url><loc>https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines</loc><lastmod>2026-11-17</lastmod></url>
-  <url><loc>https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents</loc><lastmod>2026-11-17</lastmod></url>
+  <url><loc>https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents</loc><lastmod>2026-11-19</lastmod></url>
   <url><loc>https://potluck.sh/blog/run-coding-agents-in-a-sandbox-on-your-own-machines</loc><lastmod>2026-11-18</lastmod></url>
-  <url><loc>https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac</loc><lastmod>2026-11-17</lastmod></url>
+  <url><loc>https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac</loc><lastmod>2026-11-19</lastmod></url>
 </urlset>

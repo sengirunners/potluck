@@ -412,8 +412,9 @@ unchanged fails the same way, and what to do instead. The one known today is Sof
 a box with (`out proto udp @host port 53`; seen with Softnet 0.23.0 on macOS 15.6): Potluck needs a Softnet that
 accepts protocol and port rules ([softnet.md](softnet.md) says which one this macOS uses). Any other boot failure carries no such mark, and may pass when run again.
 
-Every start that fails (a boot, a checkout, a runner, but not a cancelled acquire) leaves a report, which its error
-names (`report: <path>`): `failed/<id>.txt` in the driver's state directory (`state_dir`, by default
+Every start that fails (a boot, a checkout, a runner, but not a cancelled acquire or the admission controller's no
+room) leaves a report, which its error names with the machine it is on (`report: <path> (on <machine>)`, since the
+error also reaches callers on other machines): `failed/<id>.txt` in the driver's state directory (`state_dir`, by default
 `~/.potluck-driver-tart`). It holds why, and the last 16 KiB of the run log (the VM layer's output) and of the
 supervisor's log, with invite links, tokens, credentials in URLs and other secrets redacted and the home directory
 written `~`. It stays after the VM and the record are gone: the 20 newest reports are kept, none older than 7 days.
@@ -581,7 +582,7 @@ An unreadable listing falls back to pulling. Conformance still runs before bindi
 ### Freeing a Mac's disk after a failed or replaced setup
 
 ```
-potluck host images [--remove [image...]]
+potluck host images [--remove [image...] | --forget-home <dir>]
 ```
 
 `potluck host images` reads Tart's list once and says, for each image and VM, what it is to Potluck, with its size
@@ -618,8 +619,13 @@ While any daemon home the record names is not running, no image is removable: it
 share there used before the record began. A daemon home whose shares all ran on a build older than the record is not
 in it: while that daemon runs, what it shares is read, but a stopped one's sizes are not, so an image it lends can look
 removable or unclaimed. Start every Potluck daemon on the Mac before a removal. A recorded home that no longer exists
-(an uninstalled program's) still keeps every image, since an unmounted disk comes back; if it is gone for good, deleting
-`potluck-pulls.json` forgets it, and every claim with it (Potluck's images are then unclaimed, removable by name).
+(an uninstalled program's) still keeps every image, since an unmounted disk comes back, and the listing names the
+command that forgets it. If it is gone for good, `potluck host images --forget-home <dir>` takes it out of the record:
+its latest share and its mark on each image, which it lists. It deletes nothing (no image, no VM, no file), and an image
+only that home used keeps Potluck's claim and is judged again by the homes still here. It refuses, changing nothing, a
+home a running daemon uses (by its machine record, read first), and, under the record's lock, a home that exists (a
+link to nothing counts as there), one whose existence cannot be read, one whose own directory is missing too or that is
+a disk's mount point (`/Volumes/<disk>`: an unmounted disk comes back), and one the record does not name.
 
 It changes nothing and starts no daemon. `--remove` runs `tart delete` on the removable images only, reading
 everything again just before each delete (an image a size began lending meanwhile is kept, and says so), then reads

@@ -63,6 +63,11 @@ func TestBuild(t *testing.T) {
 		Refused: &protocol.HostRefusal{Reason: "no room on this host now: CPU busy", At: "2026-11-14T20:00:00Z", Until: "2026-11-14T20:10:00Z"}}
 	refusing[2].Describe.Host = &protocol.HostStatus{Mode: "auto", State: "accepting",
 		Refused: &protocol.HostRefusal{Reason: "no room on this host now: an older answer", At: "2026-11-14T19:00:00Z", Until: "2026-11-14T20:30:00Z"}}
+	// A refusal whose retry time kept being pushed back (zm-eakh.12.24.18.4).
+	pushedBack := []computeapi.RunTargetView{box("c3", "", "linux", 3, 2, []string{"a", "b"}, nil), box("c1", "/var/lib/p", "linux", 1, 1, nil, nil)}
+	pushedBack[1].Describe.Host = &protocol.HostStatus{Mode: "auto", State: "accepting",
+		Refused: &protocol.HostRefusal{Reason: "no room on this host now: letting other work settle", At: "2026-11-14T20:00:00Z", Until: "2026-11-14T20:10:00Z",
+			Since: "2026-11-14T19:15:00Z", Pushed: 6}}
 	checked := func(s Status) string {
 		for _, it := range s.Menu.Items {
 			if it.Checked {
@@ -116,6 +121,9 @@ func TestBuild(t *testing.T) {
 		// sandbox: any size's driver may hold it, the newest counts.
 		{"refused by the admission controller", Facts{Cores: 12, Targets: refusing, Host: host("auto", "accepting")},
 			"Refusing new work now", "6 cores in use by 2 jobs", "no room on this host now: CPU busy (said at 12:00, retry after 12:10)", "keep", "●●●●●●○·····"},
+		{"refused, its retry time pushed back", Facts{Cores: 12, Targets: pushedBack, Host: host("auto", "accepting")},
+			"Refusing new work now", "6 cores in use by 2 jobs",
+			"no room on this host now: letting other work settle (said at 12:00, retry after 12:10); its retry time was pushed back 6 times, refusing since 11:15", "keep", "●●●●●●○·····"},
 		{"refused, and the owner's rules say no too", Facts{Cores: 12, Targets: refusing, Host: host("auto", "closed")},
 			"Paused by your lending rules", "6 cores in use by 2 jobs", "", "keep", "●●●●●●○·····"},
 	} {

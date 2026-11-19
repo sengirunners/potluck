@@ -32,7 +32,7 @@ func (s *sup) refreshBy(r record) time.Time {
 // sends (from the driver, not this process).
 func (s *sup) box(r record, bootBy time.Time, exited <-chan struct{}) int {
 	if err := s.startDatabase(r, bootBy); err != nil {
-		fail(s.st, r, err)
+		s.failStarted(r, err)
 		return 1
 	}
 	if r.Commit != "" && r.Starts == 0 { // a start finds its checkout on the kept disk
@@ -40,13 +40,13 @@ func (s *sup) box(r record, bootBy time.Time, exited <-chan struct{}) int {
 		err := s.checkout(ctx, r)
 		cancel()
 		if err != nil {
-			fail(s.st, r, err)
+			s.failStarted(r, err)
 			return 1
 		}
 	}
 	if r.JIT {
 		if err := s.startJIT(r); err != nil {
-			fail(s.st, r, err)
+			s.failStarted(r, err)
 			return 1
 		}
 	}
@@ -78,7 +78,7 @@ func (s *sup) box(r record, bootBy time.Time, exited <-chan struct{}) int {
 				s.st.warmRefused() // warm.go: no refill for a while
 			}
 			if t, lerr := s.st.load(s.id); lerr == nil {
-				fail(s.st, t, err)
+				s.failStarted(t, err)
 			}
 			return 1
 		}

@@ -2,6 +2,9 @@ package refdriver
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -56,7 +59,10 @@ func TestKillAllJoinsSupervisorExit(t *testing.T) {
 
 func TestKillAllActualSupervisorExit(t *testing.T) {
 	state := t.TempDir()
-	r := record{Handle: "box:test/cleanup", Kind: "box", State: "ready", Deadline: time.Now().Add(time.Minute)}
+	// Start set: with a zero Start the supervisor's early check
+	// (time.Since(r.Start) > early) ends the box on its first tick and saves
+	// it while superviseRecord saves the supervisor's pid (zm-k5bv).
+	r := record{Handle: "box:test/cleanup", Kind: "box", State: "ready", Start: time.Now().UTC(), Deadline: time.Now().Add(time.Minute)}
 	if err := save(state, r); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +72,9 @@ func TestKillAllActualSupervisorExit(t *testing.T) {
 		}
 	})
 	d := drv{state: state}
-	if err := d.superviseRecord(r); err != nil {
+	// With the lock held, as every acquire calls it, so the supervisor's own
+	// save cannot overwrite the pid the driver records.
+	if err := locked(state, func() error { return d.superviseRecord(r) }); err != nil {
 		t.Fatal(err)
 	}
 	r, err := load(recordFile(state, r.Handle))
@@ -100,5 +108,49 @@ func TestKillAllReportsExitFailure(t *testing.T) {
 	signalSupervisor = func(int) error { return nil }
 	if err := KillAll(state); !errors.Is(err, want) {
 		t.Fatalf("got %v, want exit failure", err)
+	}
+}
+
+// Saves of one record from two writers never leave a half-written record
+// for a reader: the supervisor and the driver both save it (zm-k5bv).
+func TestSaveConcurrentWritersNeverPublishHalfARecord(t *testing.T) {
+	state := t.TempDir()
+	r := record{Handle: "box:test/race", Kind: "box", State: "ready", Deadline: time.Now().Add(time.Minute), Dir: strings.Repeat("d", 64<<10)}
+	if err := save(state, r); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for w := 0; w < 4; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if err := save(state, r); err != nil {
+					t.Errorf("save: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < 2000; i++ {
+		if _, err := load(recordFile(state, r.Handle)); err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatalf("read %d: %v", i, err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	if t.Failed() {
+		return
+	}
+	if left, _ := filepath.Glob(filepath.Join(state, "*.tmp")); len(left) != 0 {
+		t.Fatalf("temp files left: %v", left)
 	}
 }

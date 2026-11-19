@@ -138,7 +138,10 @@ func (s *Service) callWithin(ctx context.Context, t computeapi.RunTarget, verb, 
 		return api.Errorf(api.CodeInternal, "potluck-driver-%s %s: %v", t.Driver, verb, err)
 	}
 	if !ans.OK {
-		e := api.Errorf(ans.Error.Code, "potluck-driver-%s %s: %s", t.Driver, verb, oneLine(ans.Error.Message))
+		// The driver's refusal under the binding's name, never the driver
+		// program's: the caller (a pool member, maybe) named the binding,
+		// and the program is this machine's business.
+		e := api.Errorf(ans.Error.Code, "%s: %s", t.Name, oneLine(ans.Error.Message))
 		e.Data = volumeErrorData(verb, ans.Error.Code, ans.Error.Data)
 		if verb == verbStatus && ans.Error.Code == api.CodeNotFound {
 			return rt.NoHandle(e) // the target has no such handle: the one not_found that is about the handle

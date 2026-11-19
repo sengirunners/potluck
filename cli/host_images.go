@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -27,8 +28,9 @@ var (
 
 func (a *app) hostImagesCmd() *cobra.Command {
 	var remove bool
+	var forget string
 	cmd := &cobra.Command{
-		Use:   "images [--remove [image...]]",
+		Use:   "images [--remove [image...] | --forget-home <dir>]",
 		Short: "What Tart holds on this Mac, which of it Potluck still needs, and what is safe to remove",
 		Long: `Images reads Tart's list once and says, for each image and VM, whether it
 is in use (a size this machine shares lends it, or it is a Potluck sandbox's VM),
@@ -72,9 +74,26 @@ its sizes may lend one, even an image a share there used before the record
 began. A home that has not shared since the record began (an older build's) is
 not in it: while its daemon runs, what it shares is read, but a stopped one's
 sizes are not, so an image it lends can look removable or unclaimed. Start
-every Potluck daemon on this Mac before --remove.`,
-		Example: "  " + a.cmd("host images") + "\n  " + a.cmd("host images --remove") + "\n  " + a.cmd("host images --remove <image>"),
+every Potluck daemon on this Mac before --remove.
+
+With --forget-home and a daemon home the record names that is gone for good
+(an uninstalled program's, or a temporary home that shared this Mac), it
+takes that home out of the record: its latest share and its mark on each
+image, which it lists. It deletes nothing: no image, no VM, no file. An image
+that home alone used keeps Potluck's claim and is judged again by what the
+homes still here need. It refuses, changing nothing, a home that exists, one
+whose existence cannot be read (a disk that is not mounted comes back), one a
+running daemon uses, and one the record does not name.`,
+		Example: "  " + a.cmd("host images") + "\n  " + a.cmd("host images --remove") + "\n  " + a.cmd("host images --remove <image>") +
+			"\n  " + a.cmd("host images --forget-home <dir>"),
 		RunE: func(cmd *cobra.Command, names []string) error {
+			forgetting := cmd.Flags().Changed("forget-home")
+			if forgetting && strings.TrimSpace(forget) == "" {
+				return exitWith{2, errors.New("--forget-home needs the home's directory, as the listing names it")}
+			}
+			if forgetting && (remove || len(names) > 0) {
+				return exitWith{2, errors.New("--forget-home goes alone: forget the home first, then " + a.cmd("host images --remove"))}
+			}
 			if len(names) > 0 && !remove {
 				return errors.New("image names go with --remove: " + a.cmd("host images --remove <image>..."))
 			}
@@ -84,12 +103,50 @@ every Potluck daemon on this Mac before --remove.`,
 				return err
 			}
 			r := detectHost(cmd.Context(), dir)
+			if forgetting {
+				return a.forgetTartHome(cmd.Context(), r.TartDir, forget)
+			}
 			read := func(ctx context.Context) (hostprobe.Served, error) { return a.servedTargets(ctx, dir) }
 			return a.hostImages(cmd.Context(), hostImagesRunner, r, read, remove, names...)
 		},
 	}
 	cmd.Flags().BoolVar(&remove, "remove", false, "delete the removable images (only those), or the named ones, each removable or unclaimed")
+	cmd.Flags().StringVar(&forget, "forget-home", "", "take a daemon home that is gone for good out of the record of Tart's images (deletes nothing)")
 	return cmd
+}
+
+// forgetTartHome is host images --forget-home: home leaves the record of
+// Tart's images (hostprobe.ForgetTartHome) unless it exists or a running
+// daemon uses it; it says exactly what was forgotten.
+func (a *app) forgetTartHome(ctx context.Context, tartDir, home string) error {
+	if abs, err := filepath.Abs(home); err == nil {
+		home = abs
+	}
+	live, err := daemonrecord.Live(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("this machine's daemon records cannot be read (%v), so whether a daemon runs on %s is unknown: nothing forgotten", err, home)
+	}
+	var running []string
+	for _, x := range live {
+		running = append(running, x.Home)
+	}
+	f, err := hostprobe.ForgetTartHome(tartDir, home, running)
+	if err != nil {
+		return err
+	}
+	if a.asJSON() {
+		return a.printJSON(f)
+	}
+	shared := ""
+	if !f.Shared.IsZero() {
+		shared = ", whose latest share started " + f.Shared.Local().Format("Jan 2 15:04")
+	}
+	a.say("forgot %s%s, from the record of Tart's images in %s", f.Home, shared, tartDir)
+	if len(f.Images) > 0 {
+		a.say("its mark is off: %s", strings.Join(f.Images, ", "))
+	}
+	a.say("Nothing was deleted. %s says what is removable now.", a.cmd("host images"))
+	return nil
 }
 
 // servedTargets is every binding this machine serves, in every pool and

@@ -276,13 +276,21 @@ func keepUnproven(image, why string, tags map[string][]string, rec tartPullRecor
 	case len(unread) > 0:
 		var gone []string
 		for _, h := range unread {
-			if _, err := os.Stat(h); errors.Is(err, fs.ErrNotExist) {
+			if _, err := os.Lstat(h); errors.Is(err, fs.ErrNotExist) {
 				gone = append(gone, h)
 			}
 		}
 		if len(gone) == len(unread) {
-			return TartRetained, fmt.Sprintf("%s; but this Mac was shared from %s, which no longer exists here, and Potluck cannot tell whether it is gone for good (an unmounted disk comes back): kept (if it is gone for good, deleting %s in Tart's directory forgets it, and every claim with it: Potluck's images are then unclaimed, removable by name)",
-				why, strings.Join(unread, ", "), TartPullsFile), false
+			var forget []string
+			for _, h := range gone {
+				if ok, whyNot := homeGone(h); ok {
+					forget = append(forget, ForgetHomeCommand(h))
+				} else {
+					forget = append(forget, "not "+h+": "+whyNot)
+				}
+			}
+			return TartRetained, fmt.Sprintf("%s; but this Mac was shared from %s, which no longer exists here, and Potluck cannot tell whether it is gone for good (an unmounted disk comes back): kept (if it is gone for good, %s forgets it and deletes nothing)",
+				why, strings.Join(unread, ", "), strings.Join(forget, "; then ")), false
 		}
 		return TartRetained, fmt.Sprintf("%s; but this Mac was shared from %s, whose Potluck daemon is not running here, so a size there may lend it: kept (start that daemon and run this again)",
 			why, strings.Join(unread, ", ")), false
@@ -534,12 +542,13 @@ func RemoveTartImages(ctx context.Context, run Runner, r Report, read BindingsRe
 // used it stay: a stopped daemon's sizes may still lend it once it is back.
 // A failed write only leaves claims a later removal drops.
 func forgetGone(tartDir string, held map[string]bool) {
-	editTartPulls(tartDir, func(rec *tartPullRecord) {
+	editTartPulls(tartDir, func(rec *tartPullRecord) error {
 		for im, u := range rec.Images {
 			if !held[im] && !u.Pulled.IsZero() {
 				u.Pulled = time.Time{}
 				rec.Images[im] = u
 			}
 		}
+		return nil
 	})
 }

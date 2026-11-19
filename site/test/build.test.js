@@ -364,6 +364,26 @@ test("every potluck.sh page links to mezze.sh in its footer, and every one but t
   }
 });
 
+// Potluck is Sengi's: every page credits it with a link search engines follow, and three pages
+// link the Sengi page that answers the same question.
+test("every potluck.sh page links sengi.run with a followed link, and the cost answers link Sengi's pages", () => {
+  const pages = [...walk(PUBLIC).filter((f) => f.endsWith(".html"))];
+  assert.ok(pages.length >= 8, "found the built pages");
+  for (const f of pages) {
+    const links = [...readFileSync(join(PUBLIC, f), "utf8").matchAll(/<a\b[^>]*href="https:\/\/sengi\.run[^"]*"[^>]*>/g)].map((m) => m[0]);
+    assert.ok(links.length, `${f}: links sengi.run`);
+    for (const a of links) assert.doesNotMatch(a, /\brel=/, `${f}: ${a} carries no rel, so the link is followed`);
+    if (!UNLISTED.has(f)) assert.match(readFileSync(join(PUBLIC, f), "utf8").match(/<header[\s\S]*?<\/header>/)?.[0] ?? "", /<a class="sec" href="https:\/\/sengi\.run">Sengi runners<\/a>/, `${f}: header link`);
+  }
+  const home = readFileSync(join(PUBLIC, "index.html"), "utf8");
+  assert.ok(home.indexOf('href="https://sengi.run">Try Sengi</a>') < home.indexOf('id="rules"'), "the home page offers Sengi right after the cost comparison");
+  for (const [f, href] of [["github-actions-runner.html", "/alternatives/github-hosted-runners"],
+    ["blog/self-hosted-github-actions-runner-on-your-mac.html", "/blog/github-actions-runner-options-cost"],
+    ["blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.html", "/blog/github-actions-billing-explained"]]) {
+    assert.ok(readFileSync(join(PUBLIC, f), "utf8").includes(`<a href="https://sengi.run${href}">`), `${f} links ${href}`);
+  }
+});
+
 test("the coding-agent pages say what Mezze adds, and llms.txt and llms-full.txt link to it", () => {
   for (const f of ["agent-sandbox.html", "blog/give-your-ai-agent-a-sandbox-over-mcp.html", "blog/run-coding-agents-in-a-sandbox-on-your-own-machines.html"]) {
     assert.match(readFileSync(join(PUBLIC, f), "utf8"), /<a href="https:\/\/mezze\.sh\/">Mezze for teams of coding agents<\/a>, a separate product/, f);

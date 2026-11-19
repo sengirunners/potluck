@@ -13,7 +13,7 @@ data_sources:
   - "Potluck README, docs/ci-pr.md, docs/ci-doctor.md, docs/daemon.md (GitHub runner broker)"
   - "GitHub Docs, Actions billing and runner pricing, read 2026-11-17"
 date: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-19
 summary: "Every GitHub Actions job gets a fresh VM on one of your team's idle Macs or Linux boxes, and the VM is thrown away when the job ends. Free and open source (Apache-2.0)."
 ---
 
@@ -86,7 +86,8 @@ back to (for example a tunnel). Serving jobs afterwards does not need it: with n
 Potluck is free. GitHub does not charge for minutes on self-hosted runners; its billing docs list self-hosted runners
 as free (read November 17, 2026). On a private repository, after your plan's included minutes, GitHub's standard
 macOS runner costs $0.062 a minute and its 2-core Linux runner $0.006 a minute (GitHub's runner price list, read
-November 17, 2026). On your own machines you pay for the electricity.
+November 17, 2026). On your own machines you pay for the electricity. For Linux jobs no machine of yours is free to
+take, Sengi, the company that makes Potluck, runs [hosted Linux runners for GitHub Actions](https://sengi.run/alternatives/github-hosted-runners).
 
 The machine that runs a job's VM can read everything in it, secrets included, so lend and use machines only among
 people you trust with that.

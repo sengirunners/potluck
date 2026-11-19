@@ -34,10 +34,19 @@ type HostStatus struct {
 // reason is the controller's own words, which the host's owner set up; it
 // goes with the advert to the pools the host shares with, as the switch's
 // state does.
+//
+// Since and Pushed say how long it has gone on: Since is when the first of
+// an unbroken run of refusals was given (unset: At, or a host on a build
+// without it), Pushed how many times the run's promised retry time came and
+// a refusal then named a later one (asks before it never count). A Pushed
+// that keeps growing means "not while that work lasts", not "a few
+// minutes". Both are additions: a reader on an older build ignores them.
 type HostRefusal struct {
 	Reason string `json:"reason"`
 	At     string `json:"at"`
 	Until  string `json:"until"`
+	Since  string `json:"since,omitempty"`
+	Pushed int    `json:"pushed,omitempty"`
 }
 
 // MaxRefusalReason bounds a refusal's reason, in bytes.
@@ -45,20 +54,25 @@ const MaxRefusalReason = 400
 
 // Valid says whether r is a refusal a reader may show: a reason of plain
 // text within MaxRefusalReason (a controller's words, carried to other
-// machines), and both times RFC 3339 UTC to the second, Until not before At.
+// machines), both times RFC 3339 UTC to the second, Until not before At,
+// and Since, when set, of the same form and not after At; Pushed not below 0.
 func (r HostRefusal) Valid() bool {
-	if r.Reason == "" || len(r.Reason) > MaxRefusalReason || !plainText(r.Reason) {
+	if r.Reason == "" || len(r.Reason) > MaxRefusalReason || !plainText(r.Reason) || r.Pushed < 0 {
 		return false
 	}
-	var ts [2]time.Time
-	for i, t := range []string{r.At, r.Until} {
+	since := r.Since
+	if since == "" {
+		since = r.At
+	}
+	var ts [3]time.Time
+	for i, t := range []string{r.At, r.Until, since} {
 		v, err := time.Parse(time.RFC3339, t)
 		if err != nil || t != v.UTC().Format(time.RFC3339) { // UTC to the second, so text order is time order
 			return false
 		}
 		ts[i] = v
 	}
-	return !ts[1].Before(ts[0])
+	return !ts[1].Before(ts[0]) && !ts[2].After(ts[0])
 }
 
 // RefusalReason makes s a reason Valid accepts: control characters and

@@ -252,6 +252,12 @@ func TestAdmissionThroughTheDriver(t *testing.T) {
 	if bz, ok := noRoomData(err); !ok || bz.Why != "CI jobs are queued" || bz.RetryS != 30 {
 		t.Errorf("no room's data: %+v %v", bz, ok)
 	}
+	// Its words are the controller's answer alone: no "the run did not
+	// start", and no report path, which would be a file on this machine
+	// shown to a caller on another (zm-9xzw.14).
+	if e := (refusal{}); !errors.As(err, &e) || e.msg != "no room on this host now: CI jobs are queued (retry in 30 s)" {
+		t.Errorf("no room's words: %v", err)
+	}
 	if ctl.live() != 0 {
 		t.Fatal("a refused acquire holds a lease")
 	}
@@ -378,6 +384,61 @@ func TestAdmissionRefusalExpires(t *testing.T) {
 	st.clearRefusal("http://ctl/a", now.Add(time.Second))
 	if r := st.refusedNow("http://ctl/a", now); r != nil {
 		t.Fatalf("cleared: %+v", r)
+	}
+}
+
+// A refusal while the last one stands, or soon after its retry time,
+// continues its run: since stays at the first. A push is counted only when
+// the promised retry time came and a refusal then named a later one, never
+// for asks before it, however often (zm-eakh.12.24.18.4). A grant ends the
+// run; a refusal long after the last starts a new one.
+func TestAdmissionRefusalPushedBack(t *testing.T) {
+	st := store{dir: t.TempDir()}
+	url := "http://ctl/a"
+	t0 := time.Date(2026, 11, 19, 18, 50, 0, 0, time.UTC)
+	settle := func(at time.Time, retry int) {
+		st.recordRefusal(url, noRoom{reason: "letting other work settle", retry: retry}, at)
+	}
+	settle(t0, 600)
+	if r := st.refusedNow(url, t0); r == nil || r.Since != "" || r.Pushed != 0 || !r.Valid() {
+		t.Fatalf("the first refusal: %+v", r)
+	}
+	for s := 10; s < 600; s += 10 { // a retry loop every 10 s, each told 600 s again
+		settle(t0.Add(time.Duration(s)*time.Second), 600)
+	}
+	if r := st.refusedNow(url, t0.Add(590*time.Second)); r == nil || r.Pushed != 0 || r.Since != "2026-11-19T18:50:00Z" || r.Until != "2026-11-19T19:09:50Z" {
+		t.Fatalf("asks before the promised time: %+v", r)
+	}
+	settle(t0.Add(600*time.Second), 600)  // the promised time came: refused, ten minutes on
+	settle(t0.Add(610*time.Second), 600)  // an ask before the new promise: not counted
+	settle(t0.Add(1200*time.Second), 300) // the new promise came: refused again
+	r := st.refusedNow(url, t0.Add(1201*time.Second))
+	if r == nil || r.Pushed != 2 || r.Since != "2026-11-19T18:50:00Z" || r.Until != "2026-11-19T19:15:00Z" || !r.Valid() {
+		t.Fatalf("pushed back twice: %+v", r)
+	}
+	st.clearRefusal(url, t0.Add(1300*time.Second))
+	settle(t0.Add(1400*time.Second), 600)
+	if r := st.refusedNow(url, t0.Add(1400*time.Second)); r == nil || r.Pushed != 0 || r.Since != "" {
+		t.Fatalf("after a grant: %+v", r)
+	}
+	settle(t0.Add(3*time.Hour), 600)
+	if r := st.refusedNow(url, t0.Add(3*time.Hour)); r == nil || r.Pushed != 0 || r.Since != "" {
+		t.Fatalf("long after the last: %+v", r)
+	}
+}
+
+// A refusal kept by a build without since and due continues as a run from
+// its own time and retry time.
+func TestAdmissionRefusalFromAnOlderBuild(t *testing.T) {
+	st := store{dir: t.TempDir()}
+	t0 := time.Date(2026, 11, 19, 18, 50, 0, 0, time.UTC)
+	old := `{"http://ctl/a":{"reason":"busy","retry_s":60,"at":"2026-11-19T18:50:00Z"}}`
+	if err := os.WriteFile(st.refusalFile(), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st.recordRefusal("http://ctl/a", noRoom{reason: "busy", retry: 60}, t0.Add(time.Minute))
+	if r := st.refusedNow("http://ctl/a", t0.Add(time.Minute)); r == nil || r.Pushed != 1 || r.Since != "2026-11-19T18:50:00Z" || !r.Valid() {
+		t.Fatalf("after an older build's refusal: %+v", r)
 	}
 }
 

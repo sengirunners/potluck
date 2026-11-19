@@ -183,7 +183,7 @@ refuses a binding whose `describe` lacks one (`runtarget.describeOf`). Everythin
 | `cancel` | `request_id` | `cancelled` (bool), `state` (as `progress` answers after the call) |
 | `renew` | `ttl_s` | `expires_at` |
 | `setup` | `dry_run` (bool) | `notes`? (array of strings) |
-| `exec` | `argv` (array of strings), `stdin`?, `timeout_s`?, `cwd`?, `secrets`? (`{"NAME": "value"}`), `encoding`? (`"base64"`) | `exit`, `stdout`, `stderr`, `truncated` (bool), `encoding`? |
+| `exec` | `argv` (array of strings), `stdin`?, `timeout_s`?, `cwd`?, `secrets`? (`{"NAME": "value"}`), `encoding`? (`"base64"`) | `exit`, `stdout`, `stderr`, `truncated` (bool), `encoding`?, `timed_out`? (bool), `timeout_s`? |
 | `spawn` | exec's `argv`, `stdin`?, `cwd`?, `secrets`?, `encoding`?, plus `request_id`, `timeout_s`?, `pty`? (`{"rows", "cols", "term"?}`) | `pid` (a string) |
 | `output` | `pid`, `stdout_from`?, `stderr_from`?, `max_bytes`?, `wait_s`?, `encoding`? | `stdout`, `stderr`, `stdout_next`, `stderr_next`, `dropped_stdout`?, `dropped_stderr`?, `running` (bool), `exit`?, `encoding`? |
 | `signal` | `pid`, `signal` (`"TERM"`, `"INT"` or `"KILL"`) | `sent` (bool) |
@@ -250,7 +250,7 @@ less (`kind`, the required verbs, and a box's `size.name`).
 | `warm` | no | a driver that keeps booted boxes: `{"target", "ready"}` |
 | `shelf` | with capability `shelf`: `path` | `{"path", "bytes", "files"}`: where a box finds the package shelf, and its size (see [The package shelf](#the-package-shelf)) |
 | `runners` | no | a driver that starts a GitHub runner: a list with one entry per image, what that image's newest box's runner refresh found and did, below. Not checked by the suite |
-| `host` | no | a driver with a host switch: `{"mode", "state", "until"?, "drain_since"?, "drain_deadline"?, "drain_cut"?, "refused"?}` (`protocol.HostStatus`); `refused` is `{"reason", "at", "until"}`, the host's admission controller's last "no room" answer while it stands; the daemon passes it through. Not checked by the suite |
+| `host` | no | a driver with a host switch: `{"mode", "state", "until"?, "drain_since"?, "drain_deadline"?, "drain_cut"?, "refused"?}` (`protocol.HostStatus`); `refused` is `{"reason", "at", "until", "since"?, "pushed"?}`, the host's admission controller's last "no room" answer while it stands (`since`: when an unbroken run of refusals began, a refusal within 2 minutes of the last one's `until` continuing it; `pushed`: how many times the run's promised `until` came and a refusal then named a later one; asks before it never count); the daemon passes it through. Not checked by the suite |
 | `serve` | no | an optional serve mode (unverified: neither the daemon nor the suite uses it) |
 
 A box must also list `exec` and describe `isolation: "ephemeral"` and `credentials: false`. The daemon uses the
@@ -522,7 +522,11 @@ A box runs whatever its holder sends, so it is untrusted code by construction.
 - It runs as one user, with `HOME` set to a directory that user can write and `TMPDIR` (or `/tmp`) writable.
 - `cwd` is a path in the box; a relative one is resolved against the default (the checkout, else `HOME`).
 - `timeout_s` defaults to 30; past 600 is `bad_request`; it is cut to `expires_at`. A timeout kills the command and
-  its whole process group and answers `exit: 124`. A child left holding the output never delays the answer.
+  its whole process group and answers `exit: 124`, with `timed_out: true` and the `timeout_s` it ran under (a
+  command that exits 124 by itself before then has no `timed_out`; a driver may leave both out). A child left
+  holding the output never delays the answer.
+- When the box itself ends under the command (killed for memory, a signal), `exec` is `conflict` and its words say
+  why, as `status`'s `why` does for the lost box: "the box was killed: out of memory (limit 2048 MB)".
 - `stdout` and `stderr` keep their first 1 MiB each, cut by bytes, invalid UTF-8 replaced; `truncated` says one was
   cut.
 - On a box that is not `ready`, or past `expires_at`, `exec` is `conflict`.

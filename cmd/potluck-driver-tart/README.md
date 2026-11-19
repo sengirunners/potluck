@@ -334,7 +334,11 @@ A `409` is also kept in the state directory (`admission-refused.json`, by admiss
 controller, not per size: a refused request for one size shows as the host refusing, a grant of any size clears it,
 and a grant through another state directory on the same controller does not. While it stands, describe's `host`
 block carries it as `refused` (`reason`, `at`, `until`; control characters become spaces), so `potluck host status`
-and the menu bar item say the host is refusing new work and why, although the host switch says accepting. The
+and the menu bar item say the host is refusing new work and why, although the host switch says accepting. A refusal
+given while the last one stands, or within two minutes of its `until`, continues that run: `since` is when the run
+began and `pushed` how many times its promised `until` came and a refusal then named a later one (asks before it,
+however many, do not count), so a reader can tell "a few minutes"
+from "not while that work lasts" (`host status`: "its retry time was pushed back 6 times, refusing since 11:15"). The
 binding's advert carries the same block to the pools the host shares with, though nothing on the pool side shows it
 yet. The reason is the controller's own words, as its owner set it up: keep it free of anything the pools should not
 read. It only reports: every acquire still asks the controller.

@@ -185,7 +185,7 @@ Source: https://potluck.sh/github-actions-runner
 
 # Self-hosted GitHub Actions runner with a fresh VM for every job
 
-Updated 2026-11-17. https://potluck.sh/github-actions-runner
+Updated 2026-11-19. https://potluck.sh/github-actions-runner
 
 A self-hosted runner that lives on one machine for months collects state: caches, half-installed tools, files a
 job left behind, and anything a bad dependency dropped there. Potluck gives every job a fresh machine instead, on
@@ -256,7 +256,8 @@ back to (for example a tunnel). Serving jobs afterwards does not need it: with n
 Potluck is free. GitHub does not charge for minutes on self-hosted runners; its billing docs list self-hosted runners
 as free (read November 17, 2026). On a private repository, after your plan's included minutes, GitHub's standard
 macOS runner costs $0.062 a minute and its 2-core Linux runner $0.006 a minute (GitHub's runner price list, read
-November 17, 2026). On your own machines you pay for the electricity.
+November 17, 2026). On your own machines you pay for the electricity. For Linux jobs no machine of yours is free to
+take, Sengi, the company that makes Potluck, runs [hosted Linux runners for GitHub Actions](https://sengi.run/alternatives/github-hosted-runners).
 
 The machine that runs a job's VM can read everything in it, secrets included, so lend and use machines only among
 people you trust with that.
@@ -482,7 +483,7 @@ Source: https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-a
 
 # How to pool your team's spare Macs and Linux boxes for builds and coding agents
 
-Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
+Published 2026-11-16, updated 2026-11-19. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
 
 A pool is a group of machines that a team or friends lend to each other for builds and coding agents. With Potluck, one machine runs the pool, other people join with one-time invite codes, and each job runs in a fresh VM or sandbox on whichever machine is free. A machine's owner chooses how much to share and can wind it down or stop it with one command.
 
@@ -616,7 +617,9 @@ No. Potluck runs a team's own builds, GitHub Actions jobs and coding agents on m
 
 ### Does it cost anything?
 
-Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power.
+Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power. Jobs on
+a pool's machines use none of GitHub's minutes; [how GitHub bills Actions minutes](https://sengi.run/blog/github-actions-billing-explained)
+explains what they would cost on GitHub's runners.
 
 Code and docs: [github.com/sengirunners/potluck](https://github.com/sengirunners/potluck)
 
@@ -770,7 +773,7 @@ Source: https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac
 
 # How to run a self-hosted GitHub Actions runner on your own Mac, with a fresh VM for each job
 
-Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac
+Published 2026-11-16, updated 2026-11-19. https://potluck.sh/blog/self-hosted-github-actions-runner-on-your-mac
 
 You can run GitHub Actions jobs on a Mac you own by registering it as a self-hosted runner, but a plain runner runs every job directly on that Mac, so jobs share its files, its keychain and each other's leftovers. Potluck runs each job in its own fresh VM on your Mac or Mac mini and deletes the VM when the job ends. It is open source (Apache-2.0), and you set it up with a handful of commands.
 
@@ -917,6 +920,8 @@ Yes, if a Linux box with Docker and Kata or gVisor joins the pool. A job that na
 
 ### What does it cost?
 
-Potluck is open source under Apache-2.0 and has no price. The Mac and its power are the costs.
+Potluck is open source under Apache-2.0 and has no price. The Mac and its power are the costs. Sengi, the company
+that makes Potluck, compares [what hosted GitHub Actions runners cost](https://sengi.run/blog/github-actions-runner-options-cost)
+for the Linux jobs you would rather not host yourself.
 
 Code and docs: [github.com/sengirunners/potluck](https://github.com/sengirunners/potluck)

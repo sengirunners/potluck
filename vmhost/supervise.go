@@ -208,12 +208,12 @@ func (s *sup) run(r record) int {
 		if h, ok := s.vm.(keptBootHinter); ok && keep {
 			err = h.KeptBootErr(err) // oci_persist.go: a runsc that refuses the root's annotation
 		}
-		fail(s.st, r, err)
+		s.failStarted(r, err)
 		return 1
 	}
 	if v, ok := s.vm.(volumer); ok && len(r.Volumes) > 0 { // volume.go: the guest's user writes its rw and cow mounts
 		if err := v.OwnMounts(r.Image, r.VM, r.mounts()); err != nil {
-			fail(s.st, r, err)
+			s.failStarted(r, err)
 			return 1
 		}
 	}
@@ -222,7 +222,7 @@ func (s *sup) run(r record) int {
 		err := s.guest(ctx, nil, "closing the guest's logins", lc.CloseLogin()...)
 		cancel()
 		if err != nil {
-			fail(s.st, r, err)
+			s.failStarted(r, err)
 			return 1
 		}
 	}
@@ -230,11 +230,11 @@ func (s *sup) run(r record) int {
 		return 0
 	}
 	if err := s.adm.gone(); err != nil {
-		fail(s.st, r, err)
+		s.failStarted(r, err)
 		return 1
 	}
 	if err := s.refusesNew(); err != nil {
-		fail(s.st, r, err)
+		s.failStarted(r, err)
 		return 1
 	}
 	if (r.Kind != "box" || r.Commit != "") && !s.phase(r, "checkout") {
@@ -245,7 +245,7 @@ func (s *sup) run(r record) int {
 	}
 	job, err := s.start(r, bootBy)
 	if err != nil {
-		fail(s.st, r, err)
+		s.failStarted(r, err)
 		return 1
 	}
 	done := make(chan int, 1)
@@ -320,15 +320,26 @@ func (s *sup) watch(done <-chan int, exited <-chan struct{}) int {
 			if s.vmAlive(exited) {
 				s.end(stEnded, &code, "")
 			} else {
-				s.end(stLost, nil, "the VM stopped under the run")
+				why := "the VM stopped under the run"
+				if w, named := boxEnd(s.vm, s.name); named { // before finish destroys it
+					why += ": " + w
+				}
+				s.end(stLost, nil, why)
 			}
 			return 0
 		case <-boxGone:
-			if s.persistent() { // the guest shut itself down: its disk is kept
-				s.stopKept("the box shut itself down")
+			why, named := boxEnd(s.vm, s.name) // before finish destroys it
+			if s.persistent() {                // the guest shut itself down (or was killed): its disk is kept
+				if !named {
+					why = "the box shut itself down"
+				}
+				s.stopKept(why)
 				return 0
 			}
-			s.end(stLost, nil, "the VM stopped")
+			if !named {
+				why = "the VM stopped"
+			}
+			s.end(stLost, nil, why)
 			return 0
 		case <-tick.C:
 		}
@@ -421,14 +432,25 @@ func (s *sup) end(state string, exit *int, why string) {
 	}
 }
 
-// fail records a start's failure. Unless its acquire was cancelled, the
-// failure keeps a report (failreport.go) that its words name, since the
-// record and its logs go once acquire answers it.
+// failStarted is fail for a start whose VM booted: when the VM ended under
+// the start, its layer's words of why (boxEnd: out of memory, a signal) lead
+// the failure and its report, not only what the guest command answered.
+func (s *sup) failStarted(r record, err error) {
+	if why, named := boxEnd(s.vm, s.name); named {
+		err = fmt.Errorf("%s: %w", why, err)
+	}
+	fail(s.st, r, err)
+}
+
+// fail records a start's failure. Unless its acquire was cancelled or the
+// admission controller had no room, the failure keeps a report
+// (failreport.go) that its words name, since the record and its logs go
+// once acquire answers it.
 func fail(st store, r record, err error) {
 	why := err.Error()
-	if !errors.Is(err, errAcquireCancelled) {
+	if !errors.Is(err, errAcquireCancelled) && !errors.As(err, new(noRoom)) { // a no room's words are the controller's whole answer
 		if p := st.keepFailure(r, why); p != "" {
-			why += "; report: " + p
+			why += "; report: " + p + reportOn()
 		}
 	}
 	fmt.Fprintln(os.Stderr, "potluck-driver-tart:", r.Handle, why)

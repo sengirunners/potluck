@@ -3,6 +3,7 @@ package computeapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/sengirunners/potluck/kit/api"
 )
@@ -33,6 +34,26 @@ const (
 	RefusedImage       = "image"       // the binding lends no pin of the image the acquire needs (a database recipe's)
 	RefusedNoRoom      = "no_room"     // the binding is only full for now (RunTargetDescribe.FullNow, protocol.ReasonNoRoom): asking again later may get the box
 )
+
+// NoRoomWords is a RefusedNoRoom refusal as a caller reads it, said from
+// its fields: "<on> has no room now: <why>; it says to ask again in 600 s".
+// The daemon that marks the refusal makes it the refusal's message, so no
+// reader shows a driver's or a host's own text for it (a driver program's
+// name, a path on the host).
+func (r AcquireRefused) NoRoomWords() string {
+	on, why := r.On, r.Why
+	if on == "" {
+		on = "the pool"
+	}
+	if why == "" {
+		why = "no reason given"
+	}
+	s := on + " has no room now: " + why
+	if r.RetryS > 0 {
+		s += fmt.Sprintf("; it says to ask again in %d s", r.RetryS)
+	}
+	return s
+}
 
 // NoRoom says whether err is an acquire refusal whose only reason is that
 // the binding is full for now (RefusedNoRoom), and if so what it said.

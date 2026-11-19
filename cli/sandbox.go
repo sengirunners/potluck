@@ -446,6 +446,9 @@ provider (Cloudflare). A command that prints a secret sends it back readable.`,
 			if r.Truncated {
 				fmt.Fprintln(a.host.Stderr, a.name()+": output truncated at 1 MiB")
 			}
+			if r.TimedOut {
+				fmt.Fprintln(a.host.Stderr, a.name()+": "+a.execStopped(req.TimeoutS, r.TimeoutS))
+			}
 			if r.Exit != 0 {
 				return exitSilently(r.Exit)
 			}

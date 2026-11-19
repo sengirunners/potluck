@@ -54,8 +54,9 @@ type InviteRequest struct {
 	TTLSeconds  int64  `json:"ttl_seconds,omitempty"` // default 24 h
 	AllowTagged bool   `json:"allow_tagged,omitempty"`
 	// Via picks the code's transport: "tailnet" or "tunnel" (SPEC 17.11).
-	// Default: the tailnet while this machine's node runs, else the tunnel
-	// when tunnel.url is set.
+	// Default: the tunnel while its URL answers from outside as this home
+	// (a friend needs no Tailscale), else the tailnet while this machine's
+	// node runs. A transport named here that does not work now is refused.
 	Via string `json:"via,omitempty"`
 	// Class is the operator class (SPEC 8 "Operator class") the machine
 	// that redeems the code gets: trusted or public; "" leaves the default
@@ -78,6 +79,19 @@ const (
 type InviteResponse struct {
 	Invite Invite `json:"invite"`
 	Code   string `json:"code"` // potluck-<machine>:<fingerprint>:XXXX-XXXX (an older node's zm-<machine>:...), or <url>#<fingerprint>:<secret>
+	// NotUsed are the routes set up on this machine that the code does not
+	// use because they do not work now (the tunnel: its URL does not answer
+	// from outside as this home), each with why. Empty when the code uses
+	// the first route.
+	NotUsed []InviteRouteDown `json:"not_used,omitempty"`
+}
+
+// InviteRouteDown is a route an invite did not use: its via, why in plain
+// words, and how to fix it.
+type InviteRouteDown struct {
+	Via    string `json:"via"`
+	Reason string `json:"reason"`
+	Hint   string `json:"hint,omitempty"`
 }
 
 // InviteList is GET /v0/invites.

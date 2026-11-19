@@ -31,11 +31,15 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/daemonrecord"
 )
 
@@ -110,7 +114,7 @@ func StartTartShare(tartDir, home string, images []string, start time.Time) erro
 	if home == "" {
 		return errors.New("no Potluck home to record")
 	}
-	return editTartPulls(tartDir, func(rec *tartPullRecord) {
+	return editTartPulls(tartDir, func(rec *tartPullRecord) error {
 		start = start.UTC()
 		rec.Shares[homeKey(rec.Shares, home)] = start
 		for _, im := range images {
@@ -121,6 +125,7 @@ func StartTartShare(tartDir, home string, images []string, start time.Time) erro
 			u.Homes[homeKey(u.Homes, home)] = start
 			rec.Images[im] = u
 		}
+		return nil
 	})
 }
 
@@ -133,7 +138,7 @@ func RecordTartPull(tartDir, image, home string, start, now time.Time) error {
 	if home == "" {
 		return errors.New("no Potluck home to record")
 	}
-	return editTartPulls(tartDir, func(rec *tartPullRecord) {
+	return editTartPulls(tartDir, func(rec *tartPullRecord) error {
 		start = start.UTC()
 		if k := homeKey(rec.Shares, home); rec.Shares[k].Before(start) {
 			rec.Shares[k] = start
@@ -147,7 +152,119 @@ func RecordTartPull(tartDir, image, home string, start, now time.Time) error {
 			u.Homes[k] = start
 		}
 		rec.Images[image] = u
+		return nil
 	})
+}
+
+// ForgottenHome is what ForgetTartHome dropped from the record.
+type ForgottenHome struct {
+	Home   string    `json:"home"`             // as the record named it
+	Shared time.Time `json:"shared,omitzero"`  // when its latest share started
+	Images []string  `json:"images,omitempty"` // the images whose mark of it was dropped
+}
+
+// ForgetTartHome drops home, a daemon home gone for good, from tartDir's
+// record: its latest share and its mark on every image, so its being
+// unread no longer keeps every image. It deletes no image, no VM and no
+// file: an image only it marked keeps its claim (Pulled), and is judged
+// again by what the homes still here need. It refuses, changing nothing,
+// a home that is not an absolute path, one that exists or whose existence
+// cannot be read, one under a directory that is missing too (an unmounted
+// disk comes back: homeGone), one a daemon in running (their homes, read by
+// the caller before this) runs on, and one the record does not name. The
+// existence check and the edit hold the record's lock, as every share's
+// write does.
+func ForgetTartHome(tartDir, home string, running []string) (ForgottenHome, error) {
+	if !filepath.IsAbs(home) {
+		return ForgottenHome{}, fmt.Errorf("%q is not an absolute path: name the home as the record does", home)
+	}
+	home = filepath.Clean(home)
+	for _, r := range running {
+		if daemonrecord.SameHome(r, home) {
+			return ForgottenHome{}, fmt.Errorf("a daemon runs on %s: it is not gone, so it is not forgotten", home)
+		}
+	}
+	var out ForgottenHome
+	err := editTartPulls(tartDir, func(rec *tartPullRecord) error {
+		var keys []string
+		for h := range rec.Shares {
+			if filepath.Clean(h) == home {
+				keys = append(keys, h)
+			}
+		}
+		for _, u := range rec.Images {
+			for h := range u.Homes {
+				if filepath.Clean(h) == home && !slices.Contains(keys, h) {
+					keys = append(keys, h)
+				}
+			}
+		}
+		if len(keys) == 0 {
+			known := slices.Sorted(maps.Keys(rec.Shares))
+			if len(known) == 0 {
+				return fmt.Errorf("the record names no home, so %s is not in it", home)
+			}
+			return fmt.Errorf("the record does not name %s (it names %s)", home, strings.Join(known, ", "))
+		}
+		for _, k := range keys {
+			if ok, why := homeGone(k); !ok {
+				return errors.New(why)
+			}
+		}
+		out.Home = keys[0]
+		for _, k := range keys {
+			if t, ok := rec.Shares[k]; ok && t.After(out.Shared) {
+				out.Shared = t
+			}
+			delete(rec.Shares, k)
+		}
+		for _, im := range slices.Sorted(maps.Keys(rec.Images)) {
+			u := rec.Images[im]
+			n := len(u.Homes)
+			for _, k := range keys {
+				delete(u.Homes, k)
+			}
+			if len(u.Homes) < n {
+				out.Images = append(out.Images, im)
+				rec.Images[im] = u
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
+// homeGone says whether home is gone in the way ForgetTartHome accepts: the
+// name itself is missing (a link to nothing is still there) while the
+// directory that held it is there, and it is not a volume's mount point.
+// Otherwise why not, in plain words: a home under a disk that is not
+// mounted is missing too, and comes back with the disk.
+func homeGone(home string) (bool, string) {
+	home = filepath.Clean(home)
+	_, err := os.Lstat(home)
+	switch {
+	case err == nil:
+		return false, home + " exists: a home that is still here is never forgotten (start its daemon instead, so what it shares is read)"
+	case !errors.Is(err, fs.ErrNotExist):
+		return false, fmt.Sprintf("whether %s exists cannot be read (%v): it is not forgotten", home, err)
+	}
+	parent := filepath.Dir(home)
+	if filepath.Dir(parent) == parent || filepath.Clean(parent) == "/Volumes" {
+		return false, home + " is where a disk mounts: it comes back with the disk, so it is not forgotten"
+	}
+	if st, err := os.Stat(parent); err != nil || !st.IsDir() {
+		return false, fmt.Sprintf("%s is missing too (a disk that is not mounted?): %s may come back with it, so it is not forgotten", parent, home)
+	}
+	return true, ""
+}
+
+// ForgetHomeCommand is the command that forgets home, for a person to copy.
+func ForgetHomeCommand(home string) string {
+	q := home
+	if strings.Trim(home, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@%+=:,./-_") != "" {
+		q = "'" + strings.ReplaceAll(home, "'", `'\''`) + "'"
+	}
+	return config.PotluckCommand("host images", "--forget-home "+q)
 }
 
 // lockTartPulls takes the record's lock in tartDir (it makes no directory),
@@ -174,7 +291,9 @@ func lockTartPulls(tartDir string) (unlock func(), err error) {
 	return func() { lock.Close() }, nil
 }
 
-func editTartPulls(tartDir string, edit func(*tartPullRecord)) error {
+// editTartPulls applies edit to the record under its lock and writes it;
+// an error from edit writes nothing.
+func editTartPulls(tartDir string, edit func(*tartPullRecord) error) error {
 	unlock, err := lockTartPulls(tartDir)
 	if err != nil {
 		return err
@@ -184,7 +303,9 @@ func editTartPulls(tartDir string, edit func(*tartPullRecord)) error {
 	if err != nil {
 		return err
 	}
-	edit(&rec)
+	if err := edit(&rec); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return err

@@ -2,6 +2,7 @@ package teamlink
 
 import (
 	"context"
+	"errors"
 	"github.com/sengirunners/potluck/kit/config"
 	"net/http"
 	"slices"
@@ -168,9 +169,12 @@ func (s *Service) handleInvite(r *http.Request) (any, error) {
 		}
 	}
 	in := project.InviteInput{InviteRequest: req}
-	// The code names a transport (core.TeamTransport.Invite). Without a
-	// via, each registered transport in turn (the tailnet first), skipping
-	// one that is not serving here now (unavailable).
+	// The code names a transport (core.TeamTransport.Invite), checked to
+	// work now before anything is made: a refused one makes no invite, so
+	// nothing here can make two. Without a via, each registered transport
+	// in turn (the tunnel first: a friend needs no Tailscale), skipping one
+	// that is not serving here now (unavailable); one set up but not working
+	// (core.RouteDown) is reported in the answer's NotUsed.
 	ts := s.d.Transports()
 	if via := strings.TrimSpace(req.Via); via != "" {
 		t := s.d.Transport(via)
@@ -183,29 +187,53 @@ func (s *Service) handleInvite(r *http.Request) (any, error) {
 		}
 		ts = []core.TeamTransport{t}
 	}
-	var first error
+	var refused []*api.Error
+	var down []api.InviteRouteDown
 	for _, t := range ts {
 		it, err := t.Invite(r.Context())
 		if err == nil {
 			in.Authority, in.Host, in.Node, in.Fingerprint, in.URL = it.Authority, it.Host, it.Node, it.Fingerprint, it.URL
-			return s.d.Projects.CreateInvite(r.Context(), sub, in)
+			resp, err := s.d.Projects.CreateInvite(r.Context(), sub, in)
+			if err != nil {
+				return nil, err
+			}
+			resp.NotUsed = down
+			return resp, nil
 		}
-		if first == nil {
-			first = err
-		}
-		if !api.IsCode(err, api.CodeUnavailable) {
+		var ae *api.Error
+		if !errors.As(err, &ae) || ae.Code != api.CodeUnavailable {
 			return nil, err
+		}
+		if cerr := r.Context().Err(); cerr != nil {
+			return nil, cerr // the caller is gone: no code for nobody, from the next route
+		}
+		refused = append(refused, ae)
+		if rd := (core.RouteDown{}); errors.As(err, &rd) {
+			down = append(down, api.InviteRouteDown{Via: t.Via(), Reason: ae.Message, Hint: ae.Hint})
 		}
 	}
 	// None serves here: the project's own refusals (solo, a bad role) come
-	// first, then the first transport's reason.
+	// first, then every transport's reason.
 	if _, err := s.d.Projects.CreateInvite(r.Context(), sub, in); err != nil && !api.IsCode(err, api.CodeUnavailable) {
 		return nil, err
 	}
-	if first == nil {
-		first = api.Errorf(api.CodeUnavailable, "this daemon has no team transport")
+	switch len(refused) {
+	case 0:
+		return nil, api.Errorf(api.CodeUnavailable, "this daemon has no team transport")
+	case 1:
+		return nil, refused[0]
 	}
-	return nil, first
+	msgs := make([]string, len(refused))
+	for i, e := range refused {
+		msgs[i] = e.Message
+	}
+	out := api.Errorf(api.CodeUnavailable, "no route for an invite works on this machine now: %s", strings.Join(msgs, "; and "))
+	for _, e := range refused {
+		if e.Hint != "" {
+			return nil, out.WithHint(e.Hint)
+		}
+	}
+	return nil, out
 }
 
 // inviter is who makes an invite into project ref. On this machine's

@@ -56,10 +56,12 @@ type TeamTransport interface {
 
 	// ---- the home's side ----
 
-	// Invite is what an invite made on this machine names. An error with
-	// code unavailable means this transport is not serving here now (an
-	// invite without a via then tries the next transport); any other error
-	// is the answer.
+	// Invite is what an invite made on this machine names, checked to work
+	// now. An error with code unavailable means this transport is not
+	// serving here now (an invite without a via then tries the next
+	// transport); a RouteDown among them is one set up here that does not
+	// work now, which the invite's answer reports. Any other error is the
+	// answer. It sends nothing of the invite anywhere and makes nothing.
 	Invite(ctx context.Context) (InviteTarget, error)
 	// RateKey is the redemption rate-limit bucket of a caller of this
 	// transport (each transport has its own budget).
@@ -130,6 +132,15 @@ type JoinTarget struct {
 	Secret      string // the code's secret (never stored)
 	Code        string // the code as given (never stored)
 }
+
+// RouteDown is an Invite refusal (code unavailable) of a transport that is
+// set up on this machine but does not work now (the tunnel: its URL does
+// not answer from outside as this home). A transport that is not set up
+// here refuses with a plain api error instead.
+type RouteDown struct{ Err *api.Error }
+
+func (e RouteDown) Error() string { return e.Err.Error() }
+func (e RouteDown) Unwrap() error { return e.Err }
 
 // InviteTarget is what a new invite names (project.InviteInput).
 type InviteTarget struct {

@@ -29,12 +29,39 @@ const (
 	maxRefusalHold = 24 * time.Hour
 )
 
-// noRoomSeen is one controller's answer as stored.
+// noRoomSeen is one controller's answer as stored. Since, Due and Pushed
+// are the run of refusals it belongs to: when the first of them was given,
+// the retry time the run last promised, and how many times that time came
+// and a refusal then named a later one.
 type noRoomSeen struct {
 	Reason string    `json:"reason"`
 	RetryS int       `json:"retry_s,omitempty"`
 	At     time.Time `json:"at"`
+	Since  time.Time `json:"since,omitzero"`
+	Due    time.Time `json:"due,omitzero"`
+	Pushed int       `json:"pushed,omitempty"`
 }
+
+// until is when r stops standing: its retry time (refusalHold with none).
+func (r noRoomSeen) until() time.Time {
+	hold := refusalHold
+	if r.RetryS > 0 {
+		hold = time.Duration(min(r.RetryS, int(maxRefusalHold/time.Second))) * time.Second
+	}
+	return r.At.Add(hold)
+}
+
+// A refusal given within runGrace after the last one's retry time is the
+// same run of refusals: a caller asks again at the retry time, and the
+// answer then is the one that says whether the room came. The promised
+// time was pushed back when a refusal asked within pushedBy of it, or
+// after, names a time pushedBy or more past it. Refusals asked before it
+// (other callers, a retry loop) never count, however much they move the
+// time on: one push per promise at most.
+const (
+	runGrace = 2 * time.Minute
+	pushedBy = 5 * time.Second
+)
 
 func (s store) refusalFile() string { return filepath.Join(s.dir, "admission-refused.json") }
 
@@ -90,9 +117,24 @@ func (s store) changeRefusals(f func(map[string]noRoomSeen)) {
 }
 
 // recordRefusal keeps the controller at url's "no room" answer.
+// A refusal while an earlier one still stands (or within runGrace of its
+// retry time) continues that run: its Since stays, and Pushed counts each
+// promised retry time that came and was moved later.
 func (s store) recordRefusal(url string, e noRoom, now time.Time) {
 	s.changeRefusals(func(m map[string]noRoomSeen) {
-		m[url] = noRoomSeen{Reason: e.reason, RetryS: max(e.retry, 0), At: now.UTC()}
+		r := noRoomSeen{Reason: e.reason, RetryS: max(e.retry, 0), At: now.UTC(), Since: now.UTC()}
+		r.Due = r.until()
+		if prev, ok := m[url]; ok && !prev.At.After(r.At) && r.At.Before(prev.until().Add(runGrace)) {
+			r.Since, r.Due, r.Pushed = prev.Since, prev.Due, max(prev.Pushed, 0)
+			if r.Since.IsZero() { // kept by a build without them
+				r.Since, r.Due = prev.At, prev.until()
+			}
+			if !r.At.Before(r.Due.Add(-pushedBy)) && r.until().Sub(r.Due) >= pushedBy {
+				r.Pushed++
+				r.Due = r.until()
+			}
+		}
+		m[url] = r
 	})
 }
 
@@ -121,16 +163,15 @@ func (s store) refusedNow(url string, now time.Time) *protocol.HostRefusal {
 	if !ok || r.Reason == "" {
 		return nil
 	}
-	hold := refusalHold
-	if r.RetryS > 0 {
-		hold = time.Duration(min(r.RetryS, int(maxRefusalHold/time.Second))) * time.Second
-	}
-	until := r.At.Add(hold)
+	until := r.until()
 	if !now.Before(until) {
 		return nil
 	}
 	reason := protocol.RefusalReason(noRoom{reason: r.Reason}.Error())
-	out := &protocol.HostRefusal{Reason: reason, At: r.At.UTC().Format(time.RFC3339), Until: until.UTC().Format(time.RFC3339)}
+	out := &protocol.HostRefusal{Reason: reason, At: r.At.UTC().Format(time.RFC3339), Until: until.UTC().Format(time.RFC3339), Pushed: max(r.Pushed, 0)}
+	if !r.Since.IsZero() && r.Since.Before(r.At.Truncate(time.Second)) {
+		out.Since = r.Since.UTC().Format(time.RFC3339)
+	}
 	if !out.Valid() {
 		return nil
 	}

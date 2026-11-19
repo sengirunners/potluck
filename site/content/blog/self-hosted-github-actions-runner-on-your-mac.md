@@ -15,7 +15,7 @@ data_sources:
 drafted: 2026-11-16
 model: claude-sonnet-5-5
 date: 2026-11-16
-updated: 2026-11-17
+updated: 2026-11-19
 summary: "A plain self-hosted runner runs every job on your Mac itself. Potluck gives each GitHub Actions job its own fresh VM on your Mac and deletes it when the job ends."
 ---
 
@@ -164,6 +164,8 @@ Yes, if a Linux box with Docker and Kata or gVisor joins the pool. A job that na
 
 ### What does it cost?
 
-Potluck is open source under Apache-2.0 and has no price. The Mac and its power are the costs.
+Potluck is open source under Apache-2.0 and has no price. The Mac and its power are the costs. Sengi, the company
+that makes Potluck, compares [what hosted GitHub Actions runners cost](https://sengi.run/blog/github-actions-runner-options-cost)
+for the Linux jobs you would rather not host yourself.
 
 Code and docs: [github.com/sengirunners/potluck](https://github.com/sengirunners/potluck)

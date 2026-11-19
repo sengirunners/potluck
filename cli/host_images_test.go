@@ -329,3 +329,114 @@ func TestHostRecordsItsTartPulls(t *testing.T) {
 		t.Fatalf("record after a share on %s:\n%s", m.home, b)
 	}
 }
+
+// A home the record names that is gone for good keeps every image until
+// host images --forget-home takes it out, which the listing names. It
+// forgets only a home that does not exist, that no running daemon uses and
+// that the record names, refusing anything else with the record unchanged;
+// it deletes nothing, says what it forgot, and the image only that home
+// used is then judged by the homes still here.
+func TestHostImagesForgetHome(t *testing.T) {
+	tahoe, err := hostprobe.DefaultImage("tart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.MkdirTemp("", "pl") // a short path: the socket's name has a length limit
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	t.Setenv(EnvHome, home)
+	t.Setenv("HOME", home)
+	records := filepath.Join(home, "daemons")
+	t.Setenv(daemonrecord.EnvDir, records)
+	tartDir := filepath.Join(home, ".tart")
+	gone := filepath.Join(home, "gone")
+	for _, d := range []string{tartDir, gone} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().Add(-time.Hour)
+	if err := hostprobe.StartTartShare(tartDir, home, nil, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostprobe.StartTartShare(tartDir, gone, []string{tahoe.Image}, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostprobe.RecordTartPull(tartDir, tahoe.Image, gone, at, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostprobe.StartTartShare(tartDir, gone, nil, at.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	f := &tartOnly{images: []string{tahoe.Image}}
+	oldDetect, oldRunner := detectHost, hostImagesRunner
+	t.Cleanup(func() { detectHost, hostImagesRunner = oldDetect, oldRunner })
+	detectHost = func(context.Context, string) hostprobe.Report {
+		return hostprobe.Report{OS: "darwin", Arch: "arm64", MacOS: "15.6", TartDir: tartDir, TartFreeGB: 40,
+			Layers: []hostprobe.Layer{{Name: "tart", Available: true, CLI: "/fake/tart"}}}
+	}
+	hostImagesRunner = f
+	(&imagesDaemon{}).serve(t, filepath.Join(home, SocketName))
+	run := func(args ...string) (string, int) {
+		t.Helper()
+		var out bytes.Buffer
+		code := Run(context.Background(), append([]string{"host", "images"}, args...), strings.NewReader(""), &out, &out)
+		return out.String(), code
+	}
+	record := func() string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(tartDir, hostprobe.TartPullsFile))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	refused := func(why string, args ...string) {
+		t.Helper()
+		before := record()
+		out, code := run(args...)
+		if code == 0 || !strings.Contains(out, why) || record() != before || len(f.deleted) != 0 {
+			t.Fatalf("%v: exit %d, deleted %v, want refused with %q and the record unchanged:\n%s", args, code, f.deleted, why, out)
+		}
+	}
+
+	// Still there: never forgotten.
+	refused("exists: a home that is still here is never forgotten", "--forget-home", gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	out, code := run()
+	if code != 0 || !strings.Contains(out, "which no longer exists here") || !strings.Contains(out, programName+" host images --forget-home "+gone) {
+		t.Fatalf("gone home: exit %d, want the forget command named:\n%s", code, out)
+	}
+	refused("does not name", "--forget-home", filepath.Join(home, "never"))
+	refused("goes alone", "--forget-home", gone, "--remove")
+
+	// A running daemon uses it (its record answers): not gone.
+	sock := filepath.Join(home, "other.sock")
+	(&imagesDaemon{}).serve(t, sock)
+	if _, err := daemonrecord.Write(context.Background(), records, daemonrecord.Record{Program: "zm", Home: gone, Socket: sock,
+		PID: os.Getpid(), Protocol: api.WireProtocol}); err != nil {
+		t.Fatal(err)
+	}
+	refused("a daemon runs on", "--forget-home", gone)
+	if err := os.RemoveAll(records); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code = run("--forget-home", gone)
+	for _, want := range []string{"forgot " + gone + ", whose latest share started", "its mark is off: " + tahoe.Image, "Nothing was deleted."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("no %q in:\n%s", want, out)
+		}
+	}
+	if code != 0 || len(f.deleted) != 0 || strings.Contains(record(), gone) {
+		t.Fatalf("forget: exit %d, deleted %v, record:\n%s\n%s", code, f.deleted, record(), out)
+	}
+	if out, _ := run(); !strings.Contains(out, "removable:\n  "+tahoe.Image) {
+		t.Fatalf("after forgetting, the image only the gone home used is removable:\n%s", out)
+	}
+	refused("does not name", "--forget-home", gone)
+}

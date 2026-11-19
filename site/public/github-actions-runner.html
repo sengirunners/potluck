@@ -16,7 +16,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Self-hosted GitHub Actions runner with a fresh VM for every job">
 <meta property="article:published_time" content="2026-11-17">
-<meta property="article:modified_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-19">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Self-hosted GitHub Actions runner, a fresh VM per job | Potluck">
 <meta name="twitter:description" content="Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.">
@@ -25,7 +25,7 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="generator" content="potluck.sh build from content/pages/github-actions-runner.md">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://potluck.sh/github-actions-runner#article","mainEntityOfPage":"https://potluck.sh/github-actions-runner","url":"https://potluck.sh/github-actions-runner","headline":"Self-hosted GitHub Actions runner with a fresh VM for every job","description":"Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.","datePublished":"2026-11-17","dateModified":"2026-11-17","inLanguage":"en","keywords":"github self hosted runner, github actions self hosted runner, ephemeral self hosted runner, self hosted runner fresh vm per job, github actions macos runner","image":"https://potluck.sh/og/github-actions-runner.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"about":{"@id":"https://potluck.sh/#software"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Self-hosted GitHub Actions runner with a fresh VM for every job","item":"https://potluck.sh/github-actions-runner"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://potluck.sh/github-actions-runner#article","mainEntityOfPage":"https://potluck.sh/github-actions-runner","url":"https://potluck.sh/github-actions-runner","headline":"Self-hosted GitHub Actions runner with a fresh VM for every job","description":"Run GitHub Actions jobs on your team's idle Macs and Linux boxes, each job in a fresh VM or sandbox thrown away after it. Runs from forks are refused unless you allow them on a private repository. Free and open source.","datePublished":"2026-11-17","dateModified":"2026-11-19","inLanguage":"en","keywords":"github self hosted runner, github actions self hosted runner, ephemeral self hosted runner, self hosted runner fresh vm per job, github actions macos runner","image":"https://potluck.sh/og/github-actions-runner.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"about":{"@id":"https://potluck.sh/#software"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Self-hosted GitHub Actions runner with a fresh VM for every job","item":"https://potluck.sh/github-actions-runner"}]}]}</script>
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
 <link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
@@ -41,6 +41,7 @@
   <nav aria-label="Main">
     <a href="/blog">Blog</a>
     <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
     <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
     <a class="btn line" href="/#install">Install</a>
   </nav>
@@ -49,7 +50,7 @@
 <article class="post">
   <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a></nav>
   <h1>Self-hosted GitHub Actions runner with a fresh VM for every job</h1>
-  <p class="meta">Updated <time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <p class="meta">Updated <time datetime="2026-11-19">November 19, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
   <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
 <p>Every GitHub Actions job gets a fresh VM on one of your team's idle Macs or Linux boxes, and the VM is thrown away when the job ends. Free and open source (Apache-2.0).</p>
   </aside>
@@ -83,7 +84,7 @@ potluck ci doctor &lt;owner/repo&gt;      # 17 read-only checks, each failure wi
 </code></pre>
 <p>Creating the GitHub App and linking its installation need a public https address that GitHub can send your browser back to (for example a tunnel). Serving jobs afterwards does not need it: with no public address the broker asks GitHub itself, every 15 seconds. The details are in <a href="https://github.com/sengirunners/potluck/blob/main/docs/daemon.md#github-runner-broker">docs/daemon.md</a> and <a href="https://github.com/sengirunners/potluck/blob/main/docs/ci-doctor.md">docs/ci-doctor.md</a>.</p>
 <h2 id="what-it-costs">What it costs</h2>
-<p>Potluck is free. GitHub does not charge for minutes on self-hosted runners; its billing docs list self-hosted runners as free (read November 17, 2026). On a private repository, after your plan's included minutes, GitHub's standard macOS runner costs $0.062 a minute and its 2-core Linux runner $0.006 a minute (GitHub's runner price list, read November 17, 2026). On your own machines you pay for the electricity.</p>
+<p>Potluck is free. GitHub does not charge for minutes on self-hosted runners; its billing docs list self-hosted runners as free (read November 17, 2026). On a private repository, after your plan's included minutes, GitHub's standard macOS runner costs $0.062 a minute and its 2-core Linux runner $0.006 a minute (GitHub's runner price list, read November 17, 2026). On your own machines you pay for the electricity. For Linux jobs no machine of yours is free to take, Sengi, the company that makes Potluck, runs <a href="https://sengi.run/alternatives/github-hosted-runners">hosted Linux runners for GitHub Actions</a>.</p>
 <p>The machine that runs a job's VM can read everything in it, secrets included, so lend and use machines only among people you trust with that.</p>
 <p>On a Mac, Potluck uses Tart: <a href="/tart">what Tart is and what Potluck adds</a>.</p>
   </div>

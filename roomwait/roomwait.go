@@ -50,7 +50,7 @@ func (f *Full) Error() string {
 	if f.Err != nil {
 		return f.Err.Error()
 	}
-	return cmp.Or(f.Where, "the pool") + " has no room now: " + cmp.Or(f.Why, "no reason given")
+	return computeapi.AcquireRefused{On: f.Where, Why: f.Why, RetryS: int(f.Retry / time.Second)}.NoRoomWords()
 }
 
 func (f *Full) Unwrap() error { return f.Err }

@@ -472,12 +472,27 @@ func save(state string, r record) error {
 	if err != nil {
 		return err
 	}
+	// A temp file of its own per write: the driver and a box's supervisor
+	// (another process) save the same record, and with one shared temp name
+	// one writer's rename published the file while the other was still
+	// writing into it, so a reader saw half a record (zm-k5bv).
 	p := recordFile(state, r.Handle)
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.CreateTemp(state, filepath.Base(p)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	tmp := f.Name()
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, p)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 func records(state string) []record {
@@ -953,7 +968,8 @@ func (d *drv) start(r record) error {
 	return d.superviseRecord(r)
 }
 
-// superviseRecord starts a saved record's detached supervisor.
+// superviseRecord starts a saved record's detached supervisor. The state lock is
+// held: the supervisor saves the record too, and the lock keeps the pid saved here.
 func (d *drv) superviseRecord(r record) error {
 	self, err := os.Executable()
 	if err != nil {

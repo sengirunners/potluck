@@ -15,8 +15,9 @@ import (
 )
 
 // fakeOCI is a container CLI with no containers: a container is a directory
-// under $FAKE_OCI/c holding its create argv and an "up" file while started,
-// and exec runs on the host. It speaks just what ociCLI says.
+// under $FAKE_OCI/c holding its create argv, an "up" file while started and,
+// when a test writes one, the "inspect" JSON that container inspect answers;
+// exec runs on the host. It speaks just what ociCLI says.
 const fakeOCI = `#!/bin/sh
 d=$FAKE_OCI; echo "$*" >> "$d/calls"
 case "$1" in exec|start) ;; *) echo "WARN[0000] fake: a warning on stderr, as rootless podman prints on every command" >&2 ;; esac
@@ -38,7 +39,7 @@ container) if [ "$2 $3" = "inspect --format" ]; then [ -d "$d/c/$5" ] || exit 1
     case "$4" in *SecurityOpt*) o=null; grep -qx 'systempaths=unconfined' "$d/c/$5/args" && o='["systempaths=unconfined"]'
       printf '%s %s \n' "$o" "$(grep -A1 -x -- --network "$d/c/$5/args" | tail -n 1)"; exit 0 ;; esac
     grep '^type=volume,source=potluck-cache,' "$d/c/$5/args" | while read -r m; do case $m in *,readonly*) echo "potluck-cache /opt/potluck-cache false" ;; *) echo "potluck-cache /opt/potluck-cache true" ;; esac; done; exit 0; fi
-  [ -d "$d/c/$3" ]; exit ;;
+  [ -d "$d/c/$3" ] || exit 1; cat "$d/c/$3/inspect" 2>/dev/null; exit 0 ;;
 create) n=$3; mkdir -p "$d/c/$n"; printf '%s\n' "$@" > "$d/c/$n/args"
   for a; do case "$a" in type=volume,source=*) v=${a#type=volume,source=}; echo "${v%%,*}" >> "$d/vols" ;; esac; done; exit 0 ;;
 start) n=$3; [ -d "$d/c/$n" ] || exit 1; touch "$d/c/$n/up"; while [ -e "$d/c/$n/up" ]; do sleep 0.05; done; exit 0 ;;

@@ -137,6 +137,20 @@ func (s store) keepFailure(r record, why string) string {
 	return tilde(p)
 }
 
+// reportOn names the machine a kept report is on, after its path: a
+// refusal is read on the caller's machine too, where that path is not.
+// "" when the machine has no name to give.
+func reportOn() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	if h, _, _ = strings.Cut(h, "."); h == "" {
+		return ""
+	}
+	return " (on " + h + ")"
+}
+
 // pruneFailures keeps the failKeep newest reports, none older than keepFor.
 func (s store) pruneFailures() {
 	ps, _ := filepath.Glob(filepath.Join(s.dir, failedDir, "*.txt"))

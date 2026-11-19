@@ -295,6 +295,12 @@ func Build(f Facts) Status {
 		if at, u := clock(st.Refused.At, loc), clock(st.Refused.Until, loc); at != "" && u != "" {
 			m.Note += " (said at " + at + ", retry after " + u + ")"
 		}
+		if r := st.Refused; r.Pushed > 0 {
+			m.Note += fmt.Sprintf("; its retry time was pushed back %s", times(r.Pushed))
+			if since := clock(r.Since, loc); since != "" {
+				m.Note += ", refusing since " + since
+			}
+		}
 	case st.State == protocol.HostAccepting:
 		m.Title = fmt.Sprintf("Lending %d of %d cores", lent, f.Cores)
 	default: // auto, and the owner's schedule or idle rule says no now
@@ -405,6 +411,17 @@ func join(a, b string) string {
 		return b
 	}
 	return a + "; " + b
+}
+
+// times is n as a count of times: "once", "twice", "6 times".
+func times(n int) string {
+	switch n {
+	case 1:
+		return "once"
+	case 2:
+		return "twice"
+	}
+	return fmt.Sprintf("%d times", n)
 }
 
 // clock is an RFC 3339 time as a local HH:MM, with the date when it is not

@@ -51,9 +51,13 @@ func TestHostRefusalCleaned(t *testing.T) {
 		{Reason: "busy", At: at},
 		{Reason: "busy\x1b[2J", At: at, Until: at},
 		{Reason: "two\nlines", At: at, Until: at},
-		{Reason: "busy", At: at, Until: "2026-11-13T11:00:00Z"},      // until before at
-		{Reason: "busy", At: "2026-11-13T12:00:00.5Z", Until: at},    // not to the second
-		{Reason: "busy", At: "2026-11-13T04:00:00-08:00", Until: at}, // not UTC
+		{Reason: "busy", At: at, Until: "2026-11-13T11:00:00Z"},                 // until before at
+		{Reason: "busy", At: "2026-11-13T12:00:00.5Z", Until: at},               // not to the second
+		{Reason: "busy", At: "2026-11-13T04:00:00-08:00", Until: at},            // not UTC
+		{Reason: "busy", At: at, Until: at, Since: "2026-11-13T12:00:01Z"},      // since after at
+		{Reason: "busy", At: at, Until: at, Since: "2026-11-13T03:00:00-08:00"}, // since not UTC
+		{Reason: "busy", At: at, Until: at, Since: "earlier"},
+		{Reason: "busy", At: at, Until: at, Pushed: -1},
 	} {
 		h := HostStatus{Mode: "auto", State: "accepting", Refused: &r}
 		if h.Valid() {
@@ -62,6 +66,10 @@ func TestHostRefusalCleaned(t *testing.T) {
 		if c := CleanHost(&h); c == nil || c.Refused != nil || c.Mode != "auto" {
 			t.Errorf("%+v: CleanHost %+v, want the block without it", r, c)
 		}
+	}
+	long := HostRefusal{Reason: "busy", At: at, Until: at, Since: "2026-11-13T11:00:00Z", Pushed: 6}
+	if c := CleanHost(&HostStatus{Mode: "auto", State: "accepting", Refused: &long}); c == nil || c.Refused == nil || *c.Refused != long {
+		t.Errorf("a refusal pushed back since earlier: CleanHost %+v", c)
 	}
 	h := HostStatus{Mode: "auto", State: "accepting", Refused: &HostRefusal{Reason: "busy", At: at, Until: at}}
 	c := CleanHost(&h)

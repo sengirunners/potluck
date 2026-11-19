@@ -206,6 +206,9 @@ func (d *drv) readyBox(handle string) (record, error) {
 		return r, err
 	}
 	if r.State != stReady || time.Until(r.Deadline) <= 0 {
+		if r.Why != "" { // a lost box says why (boxEnd: out of memory, a signal)
+			return r, refuse("conflict", "%s is %s, not ready: %s", r.Handle, r.State, r.Why)
+		}
 		return r, refuse("conflict", "%s is %s, not ready", r.Handle, r.State)
 	}
 	return r, nil
@@ -261,6 +264,7 @@ func (d *drv) exec(handle string, raw json.RawMessage) (any, error) {
 	defer cancel()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.WaitDelay = 2 * time.Second // the answer never waits on a pipe something else holds
+	began := time.Now()
 	if err := cmd.Start(); err != nil {
 		return nil, refuse("unavailable", "exec in %s: %v", r.Handle, err)
 	}
@@ -280,19 +284,37 @@ func (d *drv) exec(handle string, raw json.RawMessage) (any, error) {
 			return nil, err
 		}
 	}
+	now, lerr := d.st.load(r.ID)
+	// A command the VM layer could not finish (125 and up: its CLI's own
+	// failures, a signal) may be the box itself dying under it, unless
+	// something ended it on purpose (released, expired, reclaimed: below):
+	// the layer says why (boxEnd), and the box has no answer to give.
+	if code >= 125 && (lerr != nil || now.State == stReady || now.State == stLost) {
+		if why, died := boxEnd(d.vm, r.VM); died {
+			return nil, refuse("conflict", "%s ended while the command ran: %s", r.Handle, why)
+		}
+	}
 	// The box may have ended under the command. Expired, and the command
 	// ended after expires_at: it was cut there (124). Released, reclaimed or
 	// lost: there is no answer to give. A command that ended in time keeps its
 	// own exit, whatever happened to the box after.
-	if now, err := d.st.load(r.ID); err == nil && now.State != stReady {
+	if lerr == nil && now.State != stReady {
 		switch {
 		case now.State == stExpired && ended.After(now.Deadline):
 			code = 124
 		case now.State != stExpired && !now.End.IsZero() && ended.After(now.End):
+			if now.Why != "" {
+				return nil, refuse("conflict", "%s was %s while the command ran: %s", r.Handle, now.State, now.Why)
+			}
 			return nil, refuse("conflict", "%s was %s while the command ran", r.Handle, now.State)
 		}
 	}
 	res := map[string]any{"exit": code, "stdout": out.String(), "stderr": errb.String(), "truncated": out.cut || errb.cut}
+	// Stopped at its timeout: 124 once timeout_s (as cut to expires_at) had
+	// passed. A command that exits 124 by itself before then keeps it as its own.
+	if code == 124 && ended.Sub(began) >= time.Duration(timeout)*time.Second {
+		res["timed_out"], res["timeout_s"] = true, timeout
+	}
 	if a.encoding == boxproc.Base64 {
 		res["stdout"], res["stderr"], res["encoding"] = boxproc.Encode(out.buf.Bytes(), a.encoding), boxproc.Encode(errb.buf.Bytes(), a.encoding), a.encoding
 	}

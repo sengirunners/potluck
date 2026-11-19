@@ -224,6 +224,7 @@ ${icon}
   <nav aria-label="Main">
     <a href="${BLOG.path}">Blog</a>
     ${MEZZE_NAV_LINK}
+    <a class="sec" href="${SENGI}">Sengi runners</a>
     <a class="sec" href="${REPO}">GitHub</a>
     <a class="btn line" href="/#install">Install</a>
   </nav>

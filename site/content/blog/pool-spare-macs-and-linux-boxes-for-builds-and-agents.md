@@ -15,7 +15,7 @@ data_sources:
 drafted: 2026-11-16
 model: claude-sonnet-5-5
 date: 2026-11-16
-updated: 2026-11-17
+updated: 2026-11-19
 summary: "With Potluck, one machine runs a pool, friends join with one-time codes, and work goes to whichever machine is free. Each machine's owner decides how much it shares and can take it back at any time."
 ---
 
@@ -151,6 +151,8 @@ No. Potluck runs a team's own builds, GitHub Actions jobs and coding agents on m
 
 ### Does it cost anything?
 
-Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power.
+Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power. Jobs on
+a pool's machines use none of GitHub's minutes; [how GitHub bills Actions minutes](https://sengi.run/blog/github-actions-billing-explained)
+explains what they would cost on GitHub's runners.
 
 Code and docs: [github.com/sengirunners/potluck](https://github.com/sengirunners/potluck)

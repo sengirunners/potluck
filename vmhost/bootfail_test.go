@@ -51,6 +51,11 @@ func TestABootSoftnetRefusesSaysWhyAndKeepsAReport(t *testing.T) {
 		t.Fatalf("acquire: %v, want unavailable", err)
 	}
 	words := err.Error()
+	host, _ := os.Hostname()
+	host, _, _ = strings.Cut(host, ".")
+	if !strings.HasPrefix(words, "unavailable: the box did not start: ") || !strings.HasSuffix(words, ".txt (on "+host+")") {
+		t.Errorf("a box's refusal says what did not start and names the machine its report is on (zm-9xzw.14): %s", words)
+	}
 	for _, want := range []string{"the VM exited while booting (exit 1)", "Softnet refused a network rule", "out proto udp @host port 53",
 		"[setup fault; fake layer 1.0, isolated true]", "report: "} {
 		if !strings.Contains(words, want) {

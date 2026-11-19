@@ -593,6 +593,12 @@ type RunTargetExec struct {
 	Stderr    string `json:"stderr"`
 	Truncated bool   `json:"truncated"`
 	Encoding  string `json:"encoding,omitempty"` // "base64" when asked: stdout and stderr hold the bytes exactly
+	// TimedOut says the command was stopped at its timeout (exit 124), after
+	// TimeoutS seconds: the timeout_s asked (default 30), or less when it was
+	// cut to the box's expires_at. A command that exits 124 by itself is not
+	// TimedOut. A driver that predates the field never sets it.
+	TimedOut bool `json:"timed_out,omitempty"`
+	TimeoutS int  `json:"timeout_s,omitempty"`
 }
 
 // EncodingBase64 is exec's, spawn's and output's "encoding": stdin and

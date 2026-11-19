@@ -302,7 +302,8 @@ Sandboxes and GitHub runner jobs pick a box binding by one rule (package `placem
   10 s to 2 min. Each ask is a real acquire, so the controller still counts the demand that waits. For each change
   they print one line: `<binding> has no room: <why>; asking again at 05:41:00 (waited 4m of 30m)`. They wait up to
   `--wait` (default 30m; agent-task's default is 0, so it waits only when asked; `--wait 0` fails at once). The bound or Ctrl-C ends the wait with the last
-  answer and nothing held. A hard refusal (`bad_request`, `forbidden`, an isolation refusal, a size no machine
+  answer and nothing held. The daemon that marks a no room says it from these fields, never in the driver's or
+  the host's own words: `<binding> has no room now: <why>; it says to ask again in 600 s`. A hard refusal (`bad_request`, `forbidden`, an isolation refusal, a size no machine
   offers, a spent budget) never waits, nor does a binding its owner paused, drained or closed (`potluck host set`).
 
 ## Limited tokens
@@ -909,7 +910,9 @@ commands wrap the steps above and keep no state of their own.
 - `potluck invite NAME` prints a one-time invite for a renter (a member of the team area): first a link to
   potluck.sh's join page carrying the code in its fragment (`https://potluck.sh/join#v1.<base64url of the code>`),
   which shows the one line that installs Potluck and joins, then `potluck join '<code>'` for a friend who has Potluck.
-  `--json` adds `link`. `--via tunnel` makes a code the friend uses with no Tailscale. `potluck invite NAME --host [--trust public]` prints one for a host (a guest of `hosts`; they run
+  `--json` adds `link`. Without `--via` the code is the tunnel's (the friend needs no Tailscale) while this machine's
+  tunnel URL answers from outside, signed by this home's key; otherwise the tailnet's, with a line saying why the tunnel
+  was not used. `--via tunnel` or `--via tailnet` asks for one route and is refused while it does not work. `potluck invite NAME --host [--trust public]` prints one for a host (a guest of `hosts`; they run
   `potluck host '<code>'`).
 - Each host invite carries its machine's class: `trusted` by default, `public` with `--trust public`. The machine has
   it the moment it joins.

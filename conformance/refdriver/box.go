@@ -177,7 +177,8 @@ func (d *drv) exec(req request) (any, error) {
 	_ = cmd.Wait()
 	_ = os.Remove(mark)
 	code := cmd.ProcessState.ExitCode()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	if timedOut {
 		code = 124
 	}
 	enc := a.Enc
@@ -188,6 +189,9 @@ func (d *drv) exec(req request) (any, error) {
 		"truncated": stdout.cut || stderr.cut}
 	if enc != "" {
 		res["encoding"] = enc
+	}
+	if timedOut { // the protocol's optional fact: stopped at timeout_s, not its own 124
+		res["timed_out"], res["timeout_s"] = true, a.Timeout
 	}
 	return res, nil
 }

@@ -36,7 +36,8 @@ func markRefused(e *api.Error, reason string) error {
 // the driver already made a box for (a reused id with other settings), which
 // stay unmarked so the walk stops there. A driver's no-room answer
 // (protocol.ReasonNoRoom) is marked RefusedNoRoom with its why and retry
-// time. Any other error that already carries data keeps it: a driver's
+// time, and said from them (AcquireRefused.NoRoomWords). Any other error
+// that already carries data keeps it: a driver's
 // "building" answer is the daemon's own signal (deps.go).
 func driverRefused(kind, name string, err error) error {
 	var e *api.Error
@@ -48,7 +49,10 @@ func driverRefused(kind, name string, err error) error {
 	case len(e.Data) == 0:
 		return markRefused(e, computeapi.RefusedDriver)
 	case json.Unmarshal(e.Data, &bz) == nil && bz.Reason == protocol.ReasonNoRoom:
-		return e.WithData(computeapi.AcquireRefused{Reason: computeapi.RefusedNoRoom, On: name, Why: protocol.RefusalReason(bz.Why), RetryS: min(max(bz.RetryS, 0), 3600)})
+		r := computeapi.AcquireRefused{Reason: computeapi.RefusedNoRoom, On: name, Why: protocol.RefusalReason(bz.Why), RetryS: min(max(bz.RetryS, 0), 3600)}
+		c := *e
+		c.Message = r.NoRoomWords() // the driver's words for it may name its program or a path on its machine
+		return c.WithData(r)
 	}
 	return err
 }

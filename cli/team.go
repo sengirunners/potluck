@@ -76,10 +76,32 @@ func (a *app) inviteProject(ctx context.Context, in projectInvite) error {
 	if r.Invite.Class != "" {
 		class = ", its machine " + r.Invite.Class
 	}
-	a.say("invite %s: %s as %s in %s%s, until %s\n\n  %s\n\non %s's machine (%s), as one line (all of it, quotes included):\n  %s",
-		r.Invite.ID, r.Invite.As, r.Invite.Role, where, class, r.Invite.Expires.Local().Format("Jan 2 15:04"), singleQuoted(r.Code),
+	a.say("%sinvite %s: %s as %s in %s%s, until %s\n\n  %s\n\non %s's machine (%s), as one line (all of it, quotes included):\n  %s",
+		routesDown(r), r.Invite.ID, r.Invite.As, r.Invite.Role, where, class, r.Invite.Expires.Local().Format("Jan 2 15:04"), singleQuoted(r.Code),
 		r.Invite.As, how, a.cmd("join "+singleQuoted(r.Code)))
 	return nil
+}
+
+// routesDown says which routes set up here the code does not use because
+// they do not work now (InviteResponse.NotUsed), and which route it uses
+// instead, as lines before the invite; "" when it uses the first.
+func routesDown(r api.InviteResponse) string {
+	if len(r.NotUsed) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, d := range r.NotUsed {
+		b.WriteString("not by the " + d.Via + ": " + d.Reason + "\n")
+		if d.Hint != "" {
+			b.WriteString("  to fix it: " + d.Hint + "\n")
+		}
+	}
+	if strings.HasPrefix(r.Code, "https://") || strings.HasPrefix(r.Code, "http://") {
+		b.WriteString("so this code is for the tunnel instead.\n\n")
+	} else {
+		b.WriteString("so this code is for the tailnet instead: it works only for a machine on your tailnet (or one you share this machine with).\n\n")
+	}
+	return b.String()
 }
 
 // inviteSubCmds are invite's ls and rm: the invites this machine made.

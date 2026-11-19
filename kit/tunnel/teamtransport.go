@@ -133,13 +133,12 @@ func (t teamTransport) Explain(url string, err error) error {
 		WithHint("check this machine is online and the home's cloudflared is running")
 }
 
-func (t teamTransport) Invite(context.Context) (core.InviteTarget, error) {
-	u := t.s.URL()
-	if u == "" {
-		return core.InviteTarget{}, api.Errorf(api.CodeUnavailable, "no tunnel URL is configured").
-			WithHint(`set "tunnel": {"listen": "127.0.0.1:7435", "url": "https://<host>"} in config.json, restart the daemon, and run cloudflared`)
-	}
-	fp, err := t.s.Fingerprint()
+// Invite names this daemon's tunnel URL only while it answers from outside
+// as this home (Reachable): a URL in config alone is not enough (a quick
+// tunnel's name changes when cloudflared restarts, and a code naming the
+// old one admits nobody).
+func (t teamTransport) Invite(ctx context.Context) (core.InviteTarget, error) {
+	u, fp, err := t.s.Reachable(ctx)
 	if err != nil {
 		return core.InviteTarget{}, err
 	}

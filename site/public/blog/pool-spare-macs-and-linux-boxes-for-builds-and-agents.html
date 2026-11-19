@@ -16,7 +16,7 @@
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="How to pool your team's spare Macs and Linux boxes for builds and coding agents">
 <meta property="article:published_time" content="2026-11-16">
-<meta property="article:modified_time" content="2026-11-17">
+<meta property="article:modified_time" content="2026-11-19">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Pool spare Macs and Linux boxes for builds and agents | Potluck">
 <meta name="twitter:description" content="How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.">
@@ -26,7 +26,7 @@
 <link rel="manifest" href="/site.webmanifest">
 <link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
 <link rel="alternate" type="text/markdown" href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.md">
-<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents#post","mainEntityOfPage":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","url":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","headline":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","description":"How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.","datePublished":"2026-11-16","dateModified":"2026-11-17","inLanguage":"en","keywords":"pool spare computers for builds, share idle mac with team for ci, cluster spare homelab machines and share with friends","image":"https://potluck.sh/og/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","item":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents"}]}]}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents#post","mainEntityOfPage":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","url":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents","headline":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","description":"How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.","datePublished":"2026-11-16","dateModified":"2026-11-19","inLanguage":"en","keywords":"pool spare computers for builds, share idle mac with team for ci, cluster spare homelab machines and share with friends","image":"https://potluck.sh/og/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"How to pool your team's spare Macs and Linux boxes for builds and coding agents","item":"https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents"}]}]}</script>
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
 <link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
@@ -42,6 +42,7 @@
   <nav aria-label="Main">
     <a href="/blog">Blog</a>
     <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
     <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
     <a class="btn line" href="/#install">Install</a>
   </nav>
@@ -50,7 +51,7 @@
 <article class="post">
   <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
   <h1>How to pool your team's spare Macs and Linux boxes for builds and coding agents</h1>
-  <p class="meta"><time datetime="2026-11-16">November 16, 2026</time> · updated <time datetime="2026-11-17">November 17, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <p class="meta"><time datetime="2026-11-16">November 16, 2026</time> · updated <time datetime="2026-11-19">November 19, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
   <aside class="answer" aria-label="Short answer"><p class="kicker">Short answer</p>
 <p>With Potluck, one machine runs a pool, friends join with one-time codes, and work goes to whichever machine is free. Each machine's owner decides how much it shares and can take it back at any time.</p>
   </aside>
@@ -139,7 +140,7 @@ potluck host set auto
 <h3 id="is-it-a-volunteer-computing-network">Is it a volunteer-computing network?</h3>
 <p>No. Potluck runs a team's own builds, GitHub Actions jobs and coding agents on machines the team or its invited friends already own. Nothing goes to people the pool's owner has not invited.</p>
 <h3 id="does-it-cost-anything">Does it cost anything?</h3>
-<p>Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power.</p>
+<p>Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power. Jobs on a pool's machines use none of GitHub's minutes; <a href="https://sengi.run/blog/github-actions-billing-explained">how GitHub bills Actions minutes</a> explains what they would cost on GitHub's runners.</p>
 <p>Code and docs: <a href="https://github.com/sengirunners/potluck">github.com/sengirunners/potluck</a></p>
   </div>
 <aside class="cta" aria-labelledby="cta-h">

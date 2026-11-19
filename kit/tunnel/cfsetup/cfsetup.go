@@ -132,19 +132,8 @@ type State struct {
 	Updated time.Time `json:"updated"`
 }
 
-// Answer is one outside look at the home.
-type Answer struct {
-	Status int
-	// Signed: the answer is signed, over the nonce Probe sent, by the home
-	// key with the fingerprint asked for (as a member's transport checks).
-	Signed bool
-	// OtherHome: a zm answer signed by another key, or a forged signature.
-	OtherHome  bool
-	HomeKey    string // Zm-Home-Key as sent (information only)
-	Challenge  bool   // Cloudflare answered with a challenge (Bot Fight Mode)
-	EdgeError  bool   // Cloudflare could not reach the tunnel (530, 502)
-	ServerSays string
-}
+// Answer is tunnel.Answer.
+type Answer = tunnel.Answer
 
 var hostRe = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
 

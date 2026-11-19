@@ -1,6 +1,6 @@
 # How to pool your team's spare Macs and Linux boxes for builds and coding agents
 
-Published 2026-11-16, updated 2026-11-17. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
+Published 2026-11-16, updated 2026-11-19. https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents
 
 A pool is a group of machines that a team or friends lend to each other for builds and coding agents. With Potluck, one machine runs the pool, other people join with one-time invite codes, and each job runs in a fresh VM or sandbox on whichever machine is free. A machine's owner chooses how much to share and can wind it down or stop it with one command.
 
@@ -134,6 +134,8 @@ No. Potluck runs a team's own builds, GitHub Actions jobs and coding agents on m
 
 ### Does it cost anything?
 
-Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power.
+Potluck is open source under Apache-2.0 and has no price. Each owner pays for their own machine and power. Jobs on
+a pool's machines use none of GitHub's minutes; [how GitHub bills Actions minutes](https://sengi.run/blog/github-actions-billing-explained)
+explains what they would cost on GitHub's runners.
 
 Code and docs: [github.com/sengirunners/potluck](https://github.com/sengirunners/potluck)

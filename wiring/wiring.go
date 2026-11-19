@@ -42,8 +42,8 @@ func NewKit(d *core.Deps) KitMods {
 	k := KitMods{Net: tailnet.New(d), Tun: tunnel.New(d), Own: ownersModule(d), Link: teamlink.New(d)}
 	d.Provide(teamlink.ServiceName, k.Link)
 	d.Net = k.Net.Net()
+	d.AddTransport(k.Tun.TeamTransport()) // first: its code needs no Tailscale, and it is offered only while it answers
 	d.AddTransport(tailnet.TeamTransport(d, d.Net))
-	d.AddTransport(k.Tun.TeamTransport())
 	d.GitHubLogin, d.LinkedAccount = k.Own.GitHubLogin, k.Own.LinkedAccount
 	d.Team = k.Link
 	return k

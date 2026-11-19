@@ -114,6 +114,9 @@ a group chat or a support thread.`,
 				return a.printJSON(inviteAnswer{InviteResponse: r, Link: link})
 			}
 			until := r.Invite.Expires.Local().Format("Jan 2 15:04")
+			if d := routesDown(r); d != "" {
+				a.say("%s", strings.TrimSuffix(d, "\n"))
+			}
 			if host {
 				img := ""
 				for _, im := range images {
@@ -137,7 +140,7 @@ a group chat or a support thread.`,
 	}
 	cmd.Flags().BoolVar(&host, "host", false, "the friend shares a machine with the pool")
 	cmd.Flags().StringVar(&trust, "trust", "", "with --host: trusted (default) or public; with --as: trusted or public (default: trusted for a member of the whole project, public otherwise)")
-	cmd.Flags().StringVar(&via, "via", "", "tailnet or tunnel (default: the tailnet when it runs)")
+	cmd.Flags().StringVar(&via, "via", "", "tailnet or tunnel (default: the tunnel while it answers as this machine, else the tailnet)")
 	cmd.Flags().DurationVar(&ttl, "ttl", 24*time.Hour, "how long the code works")
 	cmd.Flags().StringArrayVar(&images, "image", nil, "with --host: the image, name@sha256:<digest>, their machine shares, written into the command printed for them (repeat; default: none, so it shares the default)")
 	cmd.Flags().StringVar(&as, "as", "", "the argument is a team project (or <project>/<area>): the identity the machine joins it as (made when it redeems the code, if new)")
