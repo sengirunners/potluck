@@ -92,13 +92,18 @@ type GitHubGrantRequest struct {
 
 // GitHubGrant is a role granted to a GitHub account.
 type GitHubGrant struct {
-	Account string    `json:"account"` // "github:<numeric id>"
-	Login   string    `json:"login"`   // when granted, or last seen
-	Kind    string    `json:"kind"`    // user | org
+	Account string    `json:"account,omitempty"` // "github:<numeric id>"; empty while Queued
+	Login   string    `json:"login"`             // when granted, or last seen
+	Kind    string    `json:"kind,omitempty"`    // user | org; empty while Queued
 	Role    string    `json:"role"`
 	Project string    `json:"project"` // slug
 	Area    string    `json:"area,omitempty"`
 	Created time.Time `json:"created"`
+	// Queued: GitHub's rate limit refused the lookup of the login, so the
+	// grant is held and finishes by itself once the limit resets (RetryAt;
+	// the granter is mailed how it ended). Account is empty until it is made.
+	Queued  bool       `json:"queued,omitempty"`
+	RetryAt *time.Time `json:"retry_at,omitempty"`
 	// Ceilings are the owners' ceilings in the project on the identities
 	// this account (a user grant) is or was linked to: its joins get no
 	// more than they allow.
@@ -108,6 +113,8 @@ type GitHubGrant struct {
 // GitHubGrantList is GET /v0/grants/github.
 type GitHubGrantList struct {
 	Grants []GitHubGrant `json:"grants"`
+	// Queued are grants held for GitHub's rate limit (GitHubGrant.Queued).
+	Queued []GitHubGrant `json:"queued,omitempty"`
 }
 
 // GitHubAuthority is GET /v0/join/github: "a zm authority", nothing about

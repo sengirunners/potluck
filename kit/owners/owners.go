@@ -44,6 +44,8 @@ type Accounts interface {
 	Verify(ctx context.Context, token string) (Account, error)
 	// ByLogin is the account that holds login now (logins compare without
 	// case), or ErrNotFound when none does: a released or renamed login.
+	// A provider that refuses for its rate limit answers *RateLimited from
+	// any call here.
 	ByLogin(ctx context.Context, login string) (Account, error)
 	// ByID is the account with id, under its current login, or
 	// ErrNotFound when the provider no longer answers for it.
@@ -91,3 +93,15 @@ var (
 	ErrNotFound = errors.New("owners: no such account")
 	ErrNoView   = errors.New("owners: the authority's lookup token cannot see the org's members")
 )
+
+// RateLimited is what a driver answers when the provider refused a call for
+// its rate limit: nothing is known about the account, and asking again
+// before ResetAt (zero when the provider did not say) is refused again.
+type RateLimited struct{ ResetAt time.Time }
+
+func (e *RateLimited) Error() string {
+	if e.ResetAt.IsZero() {
+		return "owners: the provider's rate limit refused the call"
+	}
+	return "owners: the provider's rate limit refused the call until " + e.ResetAt.UTC().Format(time.RFC3339)
+}

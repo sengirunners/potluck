@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // GitHub is the fake. Its URL serves both the API and the web (device flow)
@@ -38,6 +39,8 @@ type GitHub struct {
 	failMem  bool
 	admins   map[int64]map[int64]bool // org id -> user id -> admin // /user/memberships/orgs answers 500
 	userHits int
+	limited  time.Time // until then, the lookup endpoints answer the rate limit
+	refused  int       // calls refused for the rate limit
 	next     int64
 	seq      int
 }
@@ -162,6 +165,35 @@ func (g *GitHub) UserCalls() int {
 	return g.userHits
 }
 
+// RateLimitUntil makes the lookup endpoints (by login, by id, an org's
+// members) refuse with GitHub's rate-limit answer (403, no calls remaining,
+// X-RateLimit-Reset at t, whole seconds, rounded up) until t.
+func (g *GitHub) RateLimitUntil(t time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.limited = t
+}
+
+// RateLimited counts the calls refused for the rate limit.
+func (g *GitHub) RateLimited() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.refused
+}
+
+// limitedLocked answers the rate limit when one is set; g.mu is held.
+func (g *GitHub) limitedLocked(w http.ResponseWriter) bool {
+	if !time.Now().Before(g.limited) {
+		return false
+	}
+	g.refused++
+	reset := g.limited.Add(time.Second - 1).Unix()
+	w.Header().Set("X-RateLimit-Remaining", "0")
+	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset, 10))
+	writeJSON(w, http.StatusForbidden, map[string]string{"message": "API rate limit exceeded"})
+	return true
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -189,6 +221,9 @@ func userJSON(u *User) map[string]any {
 func (g *GitHub) byLogin(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.limitedLocked(w) {
+		return
+	}
 	g.lookups++
 	for _, u := range g.users {
 		if strings.EqualFold(u.Login, r.PathValue("login")) && !g.gone[u.ID] {
@@ -202,6 +237,9 @@ func (g *GitHub) byLogin(w http.ResponseWriter, r *http.Request) {
 func (g *GitHub) byID(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.limitedLocked(w) {
+		return
+	}
 	g.lookups++
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if u := g.users[id]; u != nil && !g.gone[id] {
@@ -242,6 +280,9 @@ func (g *GitHub) membership(w http.ResponseWriter, r *http.Request) {
 func (g *GitHub) orgMember(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.limitedLocked(w) {
+		return
+	}
 	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	viewer, known := g.tokens[tok]
 	if tok != "" && !known {

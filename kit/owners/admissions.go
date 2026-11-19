@@ -221,8 +221,10 @@ func (s *Service) orgJoinsFrozen(ctx context.Context, project string) bool {
 	return time.Since(store.FromMillis(since)) >= s.OrgFailGrace
 }
 
-// Start re-checks org admissions every RecheckEvery until ctx ends.
+// Start re-checks org admissions every RecheckEvery, and works the queue of
+// rate-limited grants (grantqueue.go), until ctx ends.
 func (s *Service) Start(ctx context.Context) error {
+	go s.runGrantQueue(ctx)
 	go func() {
 		t := time.NewTicker(s.RecheckEvery)
 		defer t.Stop()

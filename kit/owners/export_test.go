@@ -3,8 +3,10 @@ package owners
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/store"
 )
 
 // SetActFault makes each act call f first and fail with its error.
@@ -42,4 +44,26 @@ func StartsLen(s *Service) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.starts)
+}
+
+// RetryAfterFor is when the grant queue asks again after GitHub named reset.
+func RetryAfterFor(s *Service, reset time.Time) time.Time {
+	return s.retryAfter(&RateLimited{ResetAt: reset})
+}
+
+// QueuedSnapshot reads the queued grant to login as a pass of the worker
+// would, and answers what that pass would do next: claim the row and make
+// the grant to acc (made false when the row has changed or gone since).
+func QueuedSnapshot(s *Service, ctx context.Context, project, area, login string, acc Account) func() (bool, error) {
+	var q queuedGrant
+	var owner int
+	var created int64
+	err := s.d.Store.Registry().QueryRowContext(ctx, `SELECT project, area, login, role, identity_id, identity_name, address, machine_owner, token_id, created
+		FROM github_grant_queue WHERE project = ? AND area = ? AND login = ?`, project, area, login).
+		Scan(&q.project, &q.area, &q.login, &q.role, &q.granter.ID, &q.granter.Name, &q.address, &owner, &q.tokenID, &created)
+	if err != nil {
+		panic(err)
+	}
+	q.machineOwner, q.created = owner != 0, store.FromMillis(created)
+	return func() (bool, error) { return s.makeQueued(ctx, q, s.d.Projects.Slug(project), acc) }
 }

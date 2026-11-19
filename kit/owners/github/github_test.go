@@ -3,6 +3,8 @@ package github_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -121,6 +123,79 @@ func TestDeviceSlowDownAndInterval(t *testing.T) {
 			}
 			if took := time.Since(start); took < time.Duration(tc.min)*time.Second {
 				t.Fatalf("took %s, want at least %ds (GitHub's pacing ignored)", took, tc.min)
+			}
+		})
+	}
+}
+
+// GitHub's rate-limit answers are told apart from other refusals, with the
+// reset the driver can read.
+func TestRateLimitedLookups(t *testing.T) {
+	gh := githubfake.New(t)
+	gh.AddUser("ana", "User")
+	drv := github.New(gh.URL, nil)
+	reset := time.Now().Add(3 * time.Second)
+	gh.RateLimitUntil(reset)
+
+	var rl *owners.RateLimited
+	if _, err := drv.ByLogin(context.Background(), "ana"); !errors.As(err, &rl) {
+		t.Fatalf("by login while limited: %v, want *owners.RateLimited", err)
+	}
+	if d := rl.ResetAt.Sub(reset); d < -time.Second || d > 2*time.Second {
+		t.Fatalf("reset %v, want about %v", rl.ResetAt, reset)
+	}
+	if _, err := drv.ByID(context.Background(), "github:1"); !errors.As(err, &rl) {
+		t.Fatalf("by id while limited: %v, want *owners.RateLimited", err)
+	}
+	if _, err := drv.OrgMember(context.Background(), "o", "ana"); errors.Is(err, owners.ErrNoView) || !errors.As(err, &rl) {
+		// no lookup token: ErrNoView comes first; the limit needs a token
+		drv.LookupToken = func(context.Context) (string, error) { return "tok", nil }
+		if _, err := drv.OrgMember(context.Background(), "o", "ana"); !errors.As(err, &rl) {
+			t.Fatalf("org member while limited: %v, want *owners.RateLimited", err)
+		}
+	}
+	gh.RateLimitUntil(time.Time{})
+	if a, err := drv.ByLogin(context.Background(), "ana"); err != nil || a.Login != "ana" {
+		t.Fatalf("after the limit: %+v, %v", a, err)
+	}
+}
+
+// The rate limit is read from 429, from a Retry-After in seconds or as a
+// date, and only from a 403 that says so: any other 403 is not one.
+func TestRateLimitAnswers(t *testing.T) {
+	date := time.Now().Add(90 * time.Second).UTC().Truncate(time.Second)
+	cases := []struct {
+		name    string
+		status  int
+		headers map[string]string
+		limited bool
+		reset   time.Time // zero: not checked
+	}{
+		{"429", 429, nil, true, time.Time{}},
+		{"403 retry-after seconds", 403, map[string]string{"Retry-After": "60"}, true, time.Now().Add(60 * time.Second)},
+		{"403 retry-after date", 403, map[string]string{"Retry-After": date.Format(http.TimeFormat)}, true, date},
+		{"403 none remaining", 403, map[string]string{"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": strconv.FormatInt(date.Unix(), 10)}, true, date},
+		{"403 calls remaining", 403, map[string]string{"X-RateLimit-Remaining": "12"}, false, time.Time{}},
+		{"403 plain", 403, nil, false, time.Time{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				for k, v := range c.headers {
+					w.Header().Set(k, v)
+				}
+				w.WriteHeader(c.status)
+			}))
+			defer srv.Close()
+			_, err := github.New(srv.URL, nil).ByLogin(context.Background(), "ana")
+			var rl *owners.RateLimited
+			if got := errors.As(err, &rl); got != c.limited {
+				t.Fatalf("limited = %v (%v), want %v", got, err, c.limited)
+			}
+			if c.limited && !c.reset.IsZero() {
+				if d := rl.ResetAt.Sub(c.reset); d < -2*time.Second || d > 2*time.Second {
+					t.Fatalf("reset %v, want about %v", rl.ResetAt, c.reset)
+				}
 			}
 		})
 	}

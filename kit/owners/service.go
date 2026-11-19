@@ -91,6 +91,16 @@ type Service struct {
 	// (default 30).
 	NegTTL     time.Duration
 	MaxLookups int
+	// A grant GitHub's rate limit refused is retried by the queue
+	// (grantqueue.go): it looks for due ones every QueueEvery (default 30
+	// seconds), tries again QueueSlack after the reset GitHub named, after
+	// QueueBackoff when GitHub failed some other way (default 5 minutes),
+	// and gives up, telling the granter, QueueGiveUp after it was asked
+	// (default 24 hours).
+	QueueEvery   time.Duration
+	QueueSlack   time.Duration
+	QueueBackoff time.Duration
+	QueueGiveUp  time.Duration
 
 	// orgUntold holds the projects whose failing org checks were only
 	// logged (no notifier): logged once until the checks run again.
@@ -107,10 +117,12 @@ type Service struct {
 	startsPruned time.Time
 	keySeq       uint64                 // the last key login's start order (keylogin.go)
 	lookups      map[string][]time.Time // caller -> uncached name lookups in the last minute
+	queueWake    chan struct{}          // a grant was queued: the worker looks now
+	queueRun     sync.Mutex             // one pass over the grant queue at a time
 }
 
 // Migrations are the owners module's tables in registry.db (New adds them).
-var Migrations = slices.Concat(linkMigrations, grantMigrations, admissionMigrations, nameMigrations)
+var Migrations = slices.Concat(linkMigrations, grantMigrations, admissionMigrations, nameMigrations, grantQueueMigrations)
 
 // New is the module over acc and dev (GitHub's, in the daemon); dev nil
 // turns logins off until github.client_id is set.
@@ -120,7 +132,8 @@ func New(d *core.Deps, acc Accounts, dev Device) *Service {
 	return &Service{d: d, acc: acc, dev: dev, MaxLogins: 64, MaxLocal: 4, MaxPerOwner: 4, MaxStarts: 20, MaxTunnel: 8, MaxPerAddr: 4, MaxAddrStarts: 20, Collect: 2 * time.Minute,
 		RecheckEvery: time.Hour, DecideFloor: 1500 * time.Millisecond, OrgFailGrace: 24 * time.Hour,
 		TTL: time.Hour, Clock: time.Now, NegTTL: 10 * time.Minute, MaxLookups: 30,
-		ctx: ctx, cancel: cancel, logins: map[string]*login{}, starts: map[string][]time.Time{}, lookups: map[string][]time.Time{}}
+		QueueEvery: 30 * time.Second, QueueSlack: 2 * time.Second, QueueBackoff: 5 * time.Minute, QueueGiveUp: 24 * time.Hour,
+		ctx: ctx, cancel: cancel, logins: map[string]*login{}, starts: map[string][]time.Time{}, lookups: map[string][]time.Time{}, queueWake: make(chan struct{}, 1)}
 }
 
 // Close stops every login in flight.

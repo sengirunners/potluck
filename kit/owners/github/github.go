@@ -96,6 +96,9 @@ func (d *Driver) get(ctx context.Context, path, token string, out any) (int, err
 		return 0, fmt.Errorf("asking GitHub: %w", err)
 	}
 	defer resp.Body.Close()
+	if rl := rateLimited(resp); rl != nil {
+		return resp.StatusCode, rl
+	}
 	if resp.StatusCode != http.StatusOK {
 		return resp.StatusCode, nil
 	}
@@ -103,6 +106,29 @@ func (d *Driver) get(ctx context.Context, path, token string, out any) (int, err
 		return 0, fmt.Errorf("reading GitHub's %s: %w", path, err)
 	}
 	return resp.StatusCode, nil
+}
+
+// rateLimited is *owners.RateLimited when resp is GitHub refusing for its
+// rate limit: 429, or 403 with a Retry-After or no calls remaining. Its
+// reset is Retry-After seconds from now, else X-RateLimit-Reset (epoch
+// seconds), else unknown. Retry-After may also be an HTTP date.
+func rateLimited(resp *http.Response) *owners.RateLimited {
+	h := resp.Header
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+	case resp.StatusCode == http.StatusForbidden && (h.Get("Retry-After") != "" || h.Get("X-RateLimit-Remaining") == "0"):
+	default:
+		return nil
+	}
+	rl := &owners.RateLimited{}
+	if n, err := strconv.ParseInt(h.Get("Retry-After"), 10, 64); err == nil && n >= 0 {
+		rl.ResetAt = time.Now().Add(time.Duration(n) * time.Second)
+	} else if t, err := http.ParseTime(h.Get("Retry-After")); err == nil {
+		rl.ResetAt = t
+	} else if n, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil && n > 0 {
+		rl.ResetAt = time.Unix(n, 0)
+	}
+	return rl
 }
 
 // lookup is a user object at path: ErrNotFound on 404.
@@ -189,6 +215,9 @@ func (d *Driver) OrgMember(ctx context.Context, org, login string) (bool, error)
 		return false, fmt.Errorf("asking GitHub: %w", err)
 	}
 	resp.Body.Close()
+	if rl := rateLimited(resp); rl != nil {
+		return false, rl
+	}
 	switch resp.StatusCode {
 	case http.StatusNoContent:
 		return true, nil
