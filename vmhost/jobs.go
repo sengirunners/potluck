@@ -208,7 +208,7 @@ func Jobs(dir string, now time.Time) ([]Job, error) {
 			seen[r.Handle] = true
 			s.stamp(&r)
 			at := now
-			if r.asOf.Before(at) { // a persistent box's last beat
+			if r.asOf.Before(at) { // its last beat, or the last its files show of it (stamp)
 				at = r.asOf
 			}
 			if r.live() && r.Supervisor > 0 && gone(r.Supervisor) {

@@ -7,9 +7,12 @@
 // Only a temporary no room waits: an acquire refusal marked
 // computeapi.RefusedNoRoom (every slot in use, the host's reclaim policy
 // holding new work, its admission controller's no), or a *Full a caller
-// returns for what it read itself. Every other answer, a hard refusal among
-// them (bad_request, forbidden, an isolation refusal, a size no host
-// offers), ends the wait at once.
+// returns for what it read itself. A target not listed now
+// (computeapi.TargetNotListed) waits too, but only after an earlier ask in
+// the same wait got a no room: the target answered then, so its host is out
+// of touch for a moment. A target never seen in the wait fails at once.
+// Every other answer, a hard refusal among them (bad_request, forbidden, an
+// isolation refusal, a size no host offers), ends the wait at once.
 package roomwait
 
 import (
@@ -20,6 +23,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/kit/api"
 )
 
 // Default is how long a command waits for room unless told otherwise.
@@ -98,38 +102,65 @@ func (w Wait) Do(ctx context.Context, ask func(context.Context) error) error {
 	start := now()
 	backoff := firstAsk
 	said, saidAt := "", time.Time{}
+	// room is the last no room of this wait, as "<where> had no room: <why>"
+	// ("": none yet). Every ask of one wait names the same target, so a
+	// no room earlier means the target a later ask finds unlisted answered.
+	room := ""
 	for {
 		err := ask(ctx)
 		f, ok := Of(err)
-		if !ok || w.For <= 0 {
+		if w.For <= 0 {
 			return err
 		}
-		where, why := cmp.Or(f.Where, "the pool"), cmp.Or(f.Why, "no reason given")
+		// state is what the answer says: "<where> has no room: <why>", or
+		// a target gone from the listing; ended is the wait's last line of it.
+		var state, ended string
+		switch name, gone := computeapi.NotListed(err); {
+		case ok:
+			where, why := cmp.Or(f.Where, "the pool"), cmp.Or(f.Why, "no reason given")
+			room = where + " had no room: " + why
+			state, ended = where+" has no room: "+why, where+" still has no room: "+why
+		case gone && room != "":
+			state = name + " " + notListedNow
+			ended = state + "; before that, " + room
+			gone := api.Errorf(api.CodeUnavailable, "%s %s; before that, %s", name, notListedNow, room).
+				WithData(computeapi.TargetNotListed{Name: name})
+			if e := (*api.Error)(nil); errors.As(err, &e) {
+				gone = gone.WithHint(e.Hint) // where the targets are listed
+			}
+			err = gone
+		default:
+			return err
+		}
 		t := now()
 		waited := t.Sub(start)
 		switch {
 		case ctx.Err() != nil:
-			w.say(fmt.Sprintf("stopped waiting for room (nothing held): %s has no room: %s", where, why))
+			w.say("stopped waiting for room (nothing held): " + state)
 			return err
 		case waited >= w.For:
-			w.say(fmt.Sprintf("gave up waiting for room after %s: %s still has no room: %s", round(w.For), where, why))
+			w.say(fmt.Sprintf("gave up waiting for room after %s: %s", round(w.For), ended))
 			return err
 		}
 		next := f.Retry
-		if next <= 0 {
+		if !ok || next <= 0 {
 			next, backoff = backoff, min(2*backoff, backoffMax)
 		}
 		next = min(max(next, minAsk), maxAsk, w.For-waited) // the last ask comes at the bound
-		if line := where + ": " + why; line != said || t.Sub(saidAt) >= sayAgain {
-			w.say(fmt.Sprintf("%s has no room: %s; asking again at %s (waited %s of %s)", where, why, t.Add(next).Format("15:04:05"), round(waited), round(w.For)))
-			said, saidAt = line, t
+		if state != said || t.Sub(saidAt) >= sayAgain {
+			w.say(fmt.Sprintf("%s; asking again at %s (waited %s of %s)", state, t.Add(next).Format("15:04:05"), round(waited), round(w.For)))
+			said, saidAt = state, t
 		}
 		if sleep(ctx, next) != nil {
-			w.say(fmt.Sprintf("stopped waiting for room (nothing held): %s has no room: %s", where, why))
+			w.say("stopped waiting for room (nothing held): " + state)
 			return err
 		}
 	}
 }
+
+// notListedNow is what a target that answered earlier in a wait and is gone
+// from the listing now is: not a target that does not exist.
+const notListedNow = "is not listed now (it answered earlier in this wait; its host may be out of touch for a moment)"
 
 func (w Wait) say(line string) {
 	if w.Say != nil {

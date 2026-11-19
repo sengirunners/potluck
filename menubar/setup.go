@@ -144,7 +144,7 @@ func buildSetup(f Facts, st Status) Setup {
 	} else {
 		add("daemon", Done, "the Potluck daemon is running", "")
 	}
-	add(setupCheck(f, out.State))
+	add(setupCheck(f, out.State, st.Lending.Sizes > 0))
 	lendingCheck(&out, f, st)
 	if m := s.Menu; m != nil {
 		switch {
@@ -187,8 +187,27 @@ func buildSetup(f Facts, st Status) Setup {
 	return out
 }
 
-// setupCheck is the last host run as a check.
-func setupCheck(f Facts, state string) (id, st, detail, action string) {
+// RunAgain is how to run the last setup again (share: the command when the
+// record names none): "run again: <command>", or, after a flag this
+// machine's layer refused, "run again without --docker=true: <command
+// without it>".
+func RunAgain(r *hostsetup.Run, share string) string {
+	again := share
+	if r != nil && r.Again != "" {
+		again = r.Again
+	}
+	if b := r.Blocked(); b != nil && b.Flag != "" {
+		if b.Fix == "" {
+			return "run again without " + b.Flag + " (the layer this machine shares on does not take it): " + again
+		}
+		return "run again " + b.Fix + " (the layer this machine shares on does not take " + b.Flag + "): " + again
+	}
+	return "run again: " + again
+}
+
+// setupCheck is the last host run as a check; shares: this machine shares
+// sizes already.
+func setupCheck(f Facts, state string, shares bool) (id, st, detail, action string) {
 	r := f.Setup.Run
 	again := f.Share
 	if r != nil && r.Again != "" {
@@ -210,8 +229,15 @@ func setupCheck(f Facts, state string) (id, st, detail, action string) {
 		return "setup", Running, "setting up now: " + hostsetup.Line(c.Name, c.Result, c.Detail), ""
 	case SetupBlocked:
 		b := r.Blocked()
-		return "setup", Blocked, fmt.Sprintf("setup blocked at %s (%d of %d): %s", hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail),
-			"fix what the " + hostsetup.Label(b.Name) + " stage says, then run again: " + again
+		detail := fmt.Sprintf("setup blocked at %s (%d of %d): %s", hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail)
+		if shares {
+			detail = fmt.Sprintf("the last setup run was blocked at %s (%d of %d): %s; what was shared before still lends",
+				hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail)
+		}
+		if b.Flag != "" {
+			return "setup", Blocked, detail, RunAgain(r, f.Share)
+		}
+		return "setup", Blocked, detail, "fix what the " + hostsetup.Label(b.Name) + " stage says, then " + RunAgain(r, f.Share)
 	case SetupInterrupted:
 		at := "before its first stage"
 		if n := len(r.Stages); n > 0 {

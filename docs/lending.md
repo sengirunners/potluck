@@ -92,7 +92,13 @@ They cannot, by the design and the checks below:
   sandbox running at the same time;
 - send mail (ports 25, 465 and 587 are blocked);
 - read your files: a sandbox is started with no shared folder, window, audio or clipboard
-  (`vmhost/vm.go`: `--no-graphics --no-audio --no-clipboard`, no `--dir`), and holds none of your credentials;
+  (`vmhost/tartboot.go`: `--no-graphics --no-audio --no-clipboard`, no `--dir`), and holds none of your credentials;
+- use your USB devices (an audio interface, a drive, a phone): Apple's virtualization framework, which Tart uses,
+  has no way to hand a Mac's USB device to a virtual machine, and Tart attaches none of its own. Tart's "USB
+  accessories" are only a virtual USB keyboard and pointer it makes itself, which no one can type into on a sandbox
+  with no window; Potluck turns those off too with `--no-usb-accessories` (`vmhost/tartboot.go`) when your Tart is
+  2.38.0 or newer. An older Tart still lends, and `potluck host` warns that the sandbox keeps the virtual USB
+  keyboard and pointer;
 - keep anything on your Mac for good: a sandbox ends at its deadline and its disk is deleted. The one exception is a
   sandbox made with `--persist`, which keeps its disk while it is stopped. That is allowed only on a machine marked
   trusted. The disk stays until its holder removes the sandbox or, by default, 30 days after it was stopped, and by default at
@@ -139,6 +145,11 @@ Potluck's claim is that a sandbox cannot reach your Mac, your home network, your
 - **Tests do not start real VMs.** CI covers the Tart driver through a stand-in VM layer, so the checks that need a
   real virtual machine are run by hand. The one-machine path has been run by hand on an Apple-silicon Mac; the
   two-machine path has not.
+- **USB is read from source, not tested.** That no USB device of yours reaches a sandbox comes from Tart's source
+  (read at 2.38.0 and 2.41.1: `Sources/tart/Platform/Darwin.swift`, `keyboards` and `pointingDevices`, and
+  `Sources/tart/VM.swift`, `configureInputDevices`, are the only USB devices it configures; disks it attaches are virtio, not USB) and from Apple's
+  framework having no USB passthrough. No one has yet plugged a device into a lending Mac and looked from inside a
+  sandbox (`ioreg -p IOUSB` in a macOS sandbox, `lsusb` in a Linux one).
 - **Nothing here covers a flaw in Apple's virtualization or in Tart.** Potluck relies on both.
 
 ## Pause, leave and remove everything

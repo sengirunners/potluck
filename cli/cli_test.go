@@ -49,6 +49,14 @@ func TestMain(m *testing.M) {
 	newUpdateSchedule = func() (*updatejob.Schedule, error) {
 		return nil, errors.New("a test must give the update job its own schedule")
 	}
+	// Nor see the menu bar item installed on this machine: only a test's own
+	// directory (POTLUCK_MENUBAR_DIR, or its own menuAppDirs).
+	menuAppDirs = func() []string {
+		if d := os.Getenv("POTLUCK_MENUBAR_DIR"); d != "" {
+			return []string{d}
+		}
+		return nil
+	}
 	// A command must never start a daemon here: it would run this test binary.
 	os.Setenv(EnvNoAutostart, "1")
 	// Nor read or write this machine's host switch: one in memory stands in.

@@ -97,3 +97,49 @@ func TestSpendNeverFallsWhenAKeptBoxSupervisorDies(t *testing.T) {
 		t.Errorf("spend fell from %v to %v when the supervisor died", first, second)
 	}
 }
+
+// zm-82u4: a run whose supervisor died two days ago, swept only now, counts
+// its time to the last its files show of it (lastSeen), not to the sweep;
+// and a status read while that supervisor still ran never answered more.
+func TestSweepCountsADeadSupervisorsJobToItsLastSeen(t *testing.T) {
+	m := cfg(t)
+	now := time.Now().UTC()
+	start, seen := now.Add(-72*time.Hour), now.Add(-48*time.Hour)
+	r := put(t, m, record{ID: "r000000000003", Kind: "run", State: stRunning, Supervisor: os.Getpid(),
+		Start: start, RunStart: start, Deadline: now.Add(time.Hour)})
+	st := store{m["state_dir"]}
+	age := func() { // the record and the beat were last written at seen
+		t.Helper()
+		if err := os.WriteFile(st.beatFile(r.ID), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []string{st.file(r.ID), st.beatFile(r.ID)} {
+			if err := os.Chtimes(p, seen, seen); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	age()
+	first := spendOf(t, testDrv(t, m), r.Handle)
+	if _, err := st.update(r.ID, func(o *record) error { o.Supervisor = deadPID(t); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	age()
+	s, err := call(t, m, "status", r.Handle, nil) // its sweep ends the run
+	if err != nil || s["state"] != stLost {
+		t.Fatalf("status after the supervisor died: %v %v", s, err)
+	}
+	second := s["spend"].(map[string]any)["amount"].(float64)
+	want := seen.Sub(start).Minutes()
+	t.Logf("spend before the death %.1f min, after the sweep %.1f min (to the sweep it would be %.1f)", first, second, now.Sub(start).Minutes())
+	if second < want-1 || second > want+1 {
+		t.Errorf("spend after the sweep %.1f min, want %.1f (start to last seen)", second, want)
+	}
+	if second < first {
+		t.Errorf("spend fell from %v to %v when the supervisor died", first, second)
+	}
+	js, err := Jobs(m["state_dir"], time.Now())
+	if err != nil || len(js) != 1 || !js[0].End.Equal(seen) {
+		t.Errorf("the lender's list: %+v %v, want one job ended at %v", js, err, seen)
+	}
+}

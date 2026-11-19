@@ -573,13 +573,13 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	// held: the engine already holds this exact pin, so share takes it without a pull.
 	var held func(image string) bool
 	if o.NetMbitSet && layer.Name != "oci" { // never accepted and ignored (zm-eakh.12.53)
-		return res, fmt.Errorf("--net-mbit is for the oci layer: it caps downloads on Potluck's own network %s, which a %s box is not on (a %s box is a full VM on its layer's own network: shape that yourself)",
-			BoxNet, layer.Name, layer.Name)
+		return res, &hostsetup.OptionError{Flag: "net-mbit", Err: fmt.Errorf("--net-mbit is for the oci layer: it caps downloads on Potluck's own network %s, which a %s box is not on (a %s box is a full VM on its layer's own network: shape that yourself)",
+			BoxNet, layer.Name, layer.Name)}
 	}
 	switch layer.Name {
 	case "oci":
 		if o.Root {
-			return res, errors.New("--root is for the tart layer (a Mac's VMs): on oci, --docker gives sandboxes root and rootless Docker")
+			return res, &hostsetup.OptionError{Flag: "root", Err: errors.New("--root is for the tart layer (a Mac's VMs): on oci, --docker gives sandboxes root and rootless Docker")}
 		}
 		res.Root, res.RootFrom = false, "" // an earlier tart share's, not this layer's
 		cli, rt := layer.CLI, layer.Runtime
@@ -669,7 +669,8 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			base["softnet_path"] = layer.SoftnetPath
 		}
 		if res.Docker {
-			return res, errors.New("--docker is for the oci layer: a tart box is a full VM, whose image decides sudo and docker (--root keeps its sudo)")
+			return res, &hostsetup.OptionError{Flag: "docker", Off: "--docker=false",
+				Err: errors.New("--docker is for the oci layer: a tart box is a full VM, whose image decides sudo and docker (--root keeps its sudo)")}
 		}
 		if res.Root {
 			base["root"] = "on"

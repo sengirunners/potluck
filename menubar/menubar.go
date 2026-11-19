@@ -8,6 +8,7 @@ package menubar
 import (
 	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -90,6 +91,10 @@ type Lending struct {
 	// Unknown names the shared sizes whose driver did not answer, so their
 	// boxes are not counted.
 	Unknown []string `json:"unknown,omitempty"`
+	// DialsIgnoredBy names the shared sizes whose driver's describe does not
+	// list protocol.CapHostLend: the lender's dials do not limit their jobs
+	// (a driver from before the dials ignores them).
+	DialsIgnoredBy []string `json:"dials_ignored_by,omitempty"`
 	// minCPU and minMemory are the smallest size's: a dial's step; sizes
 	// are the sizes that answered, for the choices too small for some.
 	minCPU, minMemory int
@@ -116,6 +121,9 @@ func Lend(targets []computeapi.RunTargetView, dial vmhost.HostLend) Lending {
 			continue
 		}
 		size := t.Describe.Size
+		if !slices.Contains(t.Describe.Capabilities, protocol.CapHostLend) {
+			out.DialsIgnoredBy = append(out.DialsIgnoredBy, t.Name)
+		}
 		slots := 1
 		if s := t.Describe.Slots; s != nil && s.Total > 0 {
 			slots = s.Total
@@ -157,6 +165,19 @@ func Lend(targets []computeapi.RunTargetView, dial vmhost.HostLend) Lending {
 	}
 	out.Groups = len(order)
 	return out
+}
+
+// DialsIgnored says which shared sizes the dials do not limit
+// (Lending.DialsIgnoredBy), "" when every size that answered obeys them.
+func DialsIgnored(l Lending) string {
+	if len(l.DialsIgnoredBy) == 0 {
+		return ""
+	}
+	which := "the dials (cores, memory and disk kept free) do not limit " + strings.Join(l.DialsIgnoredBy, ", ")
+	if len(l.DialsIgnoredBy) == l.Sizes-len(l.Unknown) {
+		which = "the dials (cores, memory and disk kept free) limit no size this machine shares (" + strings.Join(l.DialsIgnoredBy, ", ") + ")"
+	}
+	return which + ": the driver the daemon runs for them does not say it obeys the dials (one from before them ignores them), so the dials do not hold their jobs until the daemon runs a driver that does"
 }
 
 // Item is one clickable line. Args, when set, are the potluck arguments a
@@ -339,6 +360,9 @@ func Build(f Facts) Status {
 	} else if n := overNote(l); n != "" && f.Daemon == "" {
 		m.Note = join(m.Note, n)
 	}
+	if n := DialsIgnored(l); n != "" && f.Daemon == "" {
+		m.Note = join(m.Note, n)
+	}
 	m.Cores = dots(f.Cores, lent, l.InUse)
 	m.Memory = memoryLine(f, l)
 	keep := st.Mode == protocol.HostAuto || st.Mode == protocol.HostOpen
@@ -377,11 +401,10 @@ func stageOf(r *hostsetup.Run) string {
 // setupNote is a blocked or cut-off setup's reason and the way on (share:
 // the command when the record names none).
 func setupNote(r *hostsetup.Run, share string) string {
-	again := cmp.Or(r.Again, share)
 	if b := r.Blocked(); b != nil {
-		return b.Detail + "; then run again: " + again
+		return b.Detail + "; then " + RunAgain(r, share)
 	}
-	return "it stopped before it finished; run again: " + again
+	return "it stopped before it finished; " + RunAgain(r, share)
 }
 
 func item(id, label, sub string, checked bool, mode string) Item {

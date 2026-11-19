@@ -10,7 +10,7 @@ import (
 	"github.com/sengirunners/potluck/vmhost"
 )
 
-const tartHelp = `--no-graphics --no-audio --no-clipboard --net-softnet --net-softnet-block --net-softnet-allow`
+const tartHelp = `--no-graphics --no-audio --no-clipboard --no-usb-accessories --net-softnet --net-softnet-block --net-softnet-allow`
 
 func softnetProbeLine(path string) string {
 	return path + " --vm-fd 0 --vm-mac-address 02:00:00:00:00:01 --allow=" + vmhost.SoftnetAllowRules() + " --block=" + vmhost.SoftnetBlockRules() + " --sudo-escalation-probing"
@@ -134,6 +134,33 @@ func TestTartRequiresRulePassthrough(t *testing.T) {
 	l, _ := report.Layer("tart")
 	if l.Available || !strings.Contains(strings.Join(l.Problems, ";"), "--net-softnet-block") {
 		t.Fatalf("accepted incompatible Tart: %+v", l)
+	}
+}
+
+// A Tart without --no-usb-accessories still lends: its USB accessories are
+// Tart's own virtual keyboard and pointer, nothing of the Mac's. Preflight
+// warns, naming the Tart that has the flag and how to get it; one with the
+// flag gets no warning.
+func TestTartWithoutUSBFlagWarnsNotRefuses(t *testing.T) {
+	run := macRunner("-rwsr-xr-x root", "")
+	run.out["/fake/tart run --help"] = ok("--net-softnet --net-softnet-block --net-softnet-allow --no-graphics --no-audio --no-clipboard")
+	report := Detect(context.Background(), run, mac(true), "/state")
+	l, _ := report.Layer("tart")
+	if !l.Available || len(l.Problems) != 0 {
+		t.Fatalf("refused a Tart that only lacks --no-usb-accessories: %+v", l)
+	}
+	w := strings.Join(l.Warnings, ";")
+	for _, want := range []string{"--no-usb-accessories", "Tart 2.38.0 or newer", "releases/latest", "none of this Mac's USB devices"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("warnings %q lack %q", w, want)
+		}
+	}
+
+	run = macRunner("-rwsr-xr-x root", "")
+	report = Detect(context.Background(), run, mac(true), "/state")
+	l, _ = report.Layer("tart")
+	if strings.Contains(strings.Join(l.Warnings, ";"), "--no-usb-accessories") {
+		t.Fatalf("warned about a Tart that has the flag: %v", l.Warnings)
 	}
 }
 

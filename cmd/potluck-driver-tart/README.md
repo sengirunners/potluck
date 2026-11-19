@@ -5,7 +5,7 @@ Built from `cmd/potluck-driver-tart`; the code is in `vmhost`. (A machine that r
 A run target ([driver protocol](../../docs/protocol.md); `kind = "run"`, `isolation = "ephemeral"`, `credentials = false`) that runs each job in a
 throwaway [Tart](https://github.com/openai/tart) VM on this Mac.
 
-Per run: an APFS clone of a base image, booted with Softnet, with no window, clipboard, audio or `--dir`, so
+Per run: an APFS clone of a base image, booted with Softnet, with no window, clipboard, audio, USB accessories (`--no-usb-accessories`, on Tart 2.38.0 or newer) or `--dir`, so
 the guest sees nothing of the host's. Softnet keeps the guest off private and link-local ranges. It would let the
 guest reach this Mac through its gateway, so the driver blocks the gateway except DNS (`--net-softnet-block=@host`), and
 outbound mail to anywhere (`out proto tcp port 25`, `465`, `587`), so a guest cannot send spam from your IP; Softnet lets

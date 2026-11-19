@@ -101,16 +101,6 @@ var softnetArgs = []string{"--net-softnet",
 func SoftnetBlockRules() string { return "@host," + softnetMailBlock }
 func SoftnetAllowRules() string { return "out proto udp @host port 53,out proto tcp @host port 53" }
 
-// TartBootArguments is the production headless boot policy; preflight checks
-// that the selected Tart understands each option before pulling an image.
-func TartBootArguments(isolated bool) []string {
-	a := []string{"--no-graphics", "--no-audio", "--no-clipboard"}
-	if isolated {
-		a = append(a, softnetArgs...)
-	}
-	return a
-}
-
 // softnetMailBlock is one block rule per mail port.
 var softnetMailBlock = func() string {
 	rs := make([]string, len(mailPorts))
@@ -128,8 +118,9 @@ var mailPorts = []int{25, 465, 587}
 // a boot that pins its build checks the build again first.
 var managedSoftnet = softnet.System
 
-// Boot runs tart run with no window, audio, clipboard or --dir, under the
-// deadman guard; isolated is Softnet.
+// Boot runs tart run with no window, audio, clipboard, USB accessories (on a
+// Tart that knows the flag) or --dir, under the deadman guard; isolated is
+// Softnet.
 func (t tartCLI) Boot(vm string, isolated bool, log io.Writer) (*exec.Cmd, io.WriteCloser, error) {
 	return t.boot(vm, isolated, log, deadman)
 }
@@ -157,7 +148,7 @@ func (t tartCLI) boot(vm string, isolated bool, log io.Writer, guard string) (*e
 			return nil, nil, fmt.Errorf("checked Softnet at %s is not executable", helper)
 		}
 	}
-	a := append([]string{"run"}, TartBootArguments(isolated)...)
+	a := append(append([]string{"run"}, TartBootArguments(isolated)...), t.hardening()...)
 	cmd := exec.Command("sh", append([]string{"-c", guard, "sh", vm, t.bin}, append(a, vm)...)...)
 	if isolated && t.softnetPath != "" {
 		// Tart resolves softnet through PATH. Use the helper preflight checked,

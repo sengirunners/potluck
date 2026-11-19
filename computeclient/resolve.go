@@ -168,7 +168,7 @@ func notFound(ts []computeapi.RunTargetView, kind, name, size string, stated fun
 	if len(near) == 0 {
 		near, list = pool, "those listed"
 	}
-	err := api.Errorf(api.CodeNotFound, "no run target %s", name)
+	err := api.Errorf(api.CodeNotFound, "no run target %s", name).WithData(computeapi.TargetNotListed{Name: name})
 	// A daemon that has just restarted lists its remote targets back over a
 	// minute (zm-c5y6c.6.3.14): a miss then reads as a miss, so say so.
 	wait := "; a machine that has just restarted takes a minute to list all of its own"

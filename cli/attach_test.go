@@ -386,7 +386,8 @@ func TestUpgradeFilesOnly(t *testing.T) {
 	}{
 		{"potluck's own home", daemonHome{cfg: cfg, existed: true}, nil, ""},
 		{"no home yet", daemonHome{cfg: cfg}, nil, "no home yet"},
-		{"another program's daemon", daemonHome{cfg: cfg, other: supper, owner: "supper", existed: true}, nil, "supper's"},
+		{"another program's daemon", daemonHome{cfg: cfg, other: supper, owner: "supper", existed: true}, nil,
+			"this machine's Potluck daemon is supper's (home /u/.supper, pid 7), and potluck's commands use it; potluck upgrade leaves that daemon and its home as they are: supper keeps them, so update supper its own way"},
 		{"another program's home", daemonHome{cfg: cfg, owner: "supper", existed: true}, nil, "supper's home"},
 		{"the rule refuses", daemonHome{}, errors.New("more than one Potluck daemon"), "more than one"},
 	} {

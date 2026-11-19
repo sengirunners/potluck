@@ -120,17 +120,24 @@ func (s store) read(id string) (record, error) {
 	return r, err
 }
 
-// stamp sets the instant r's spend counts to while it has no End: now, or,
-// for a persistent box that is up, its supervisor's last beat (never later
-// than now), which is what a stop after that supervisor died counts to
-// (persist.go stoppedAt). Stamped under the lock, it is no later than any
-// End or stop a later change stamps (also under the lock, also from now or
-// the last beat), so a reported spend never falls (zm-eakh.12.51).
+// stamp sets the instant r's spend counts to while it has no End: now, or
+// no later than what a sweep would count to if its supervisor died then.
+// For a persistent box that is up that is its supervisor's last beat
+// (persist.go stoppedAt); for any other job with a supervisor, the last its
+// files show of it (lastSeen, the End the sweep gives it). Stamped under the
+// lock, it is no later than any End or stop a later change stamps (also
+// under the lock, from now, the last beat or lastSeen, which only grow), so
+// a reported spend never falls (zm-eakh.12.51).
 func (s store) stamp(r *record) {
 	r.asOf = time.Now().UTC()
-	if r.Persist && !r.Seg.IsZero() {
+	switch {
+	case r.Persist && !r.Seg.IsZero():
 		if b := s.lastBeat(r.ID); b.Before(r.asOf) {
 			r.asOf = b
+		}
+	case !r.Persist && r.Supervisor > 0 && r.End.IsZero():
+		if seen := s.lastSeen(*r); seen.Before(r.asOf) {
+			r.asOf = seen
 		}
 	}
 }

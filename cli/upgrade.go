@@ -225,7 +225,7 @@ func filesOnlyWhy(dh daemonHome, herr error) string {
 	case herr != nil:
 		return programName + " could not tell which daemon to use (" + herr.Error() + "), so " + programName + " upgrade restarted none"
 	case dh.owner != "":
-		return dh.othersHome() + "; " + programName + " upgrade leaves that daemon and its home as they are: upgrade it with that program's command"
+		return dh.othersHome() + "; " + programName + " upgrade leaves that daemon and its home as they are: " + dh.owner + " keeps them, so update " + dh.owner + " its own way"
 	case !dh.existed:
 		return "potluck has no home yet (" + tildePath(dh.cfg.Home) + "): its first command makes one"
 	}

@@ -159,6 +159,54 @@ func TestWaitOnACallersFull(t *testing.T) {
 	}
 }
 
+// unlisted is the answer of an ask that found target name in no listing.
+func unlisted(name string) error {
+	return api.Errorf(api.CodeNotFound, "no run target %s", name).WithData(computeapi.TargetNotListed{Name: name})
+}
+
+// A target that answered no room earlier in the wait and is not listed now
+// is asked again with its own line; one never seen in the wait fails at once.
+func TestWaitAsksAgainWhileASeenTargetIsUnlisted(t *testing.T) {
+	c := &clock{t: time.Date(2026, 11, 19, 5, 0, 0, 0, time.Local)}
+	var lines []string
+	answers := []error{noRoom("h-c2m4@h", "full", 60), unlisted("h-c2m4@h"), nil}
+	asks := 0
+	if err := c.wait(30*time.Minute, &lines).Do(context.Background(), func(context.Context) error { asks++; return answers[asks-1] }); err != nil || asks != 3 {
+		t.Fatalf("err %v after %d asks, want nil after 3", err, asks)
+	}
+	if len(lines) != 2 || lines[1] != "h-c2m4@h is not listed now (it answered earlier in this wait; its host may be out of touch for a moment); asking again at 05:01:10 (waited 1m of 30m)" {
+		t.Errorf("lines %q", lines)
+	}
+
+	clk := &clock{t: time.Now()}
+	lines, asks = nil, 0
+	never := unlisted("nosuch")
+	if err := clk.wait(30*time.Minute, &lines).Do(context.Background(), func(context.Context) error { asks++; return never }); err != never || asks != 1 || len(lines) != 0 {
+		t.Errorf("never listed: %v after %d asks, lines %q; want it at once", err, asks, lines)
+	}
+}
+
+// A wait that runs out on an unlisted target says how long it waited and its
+// last reasons, never 'no run target'.
+func TestWaitEndsWhileATargetIsUnlisted(t *testing.T) {
+	c := &clock{t: time.Now()}
+	var lines []string
+	asks := 0
+	err := c.wait(5*time.Minute, &lines).Do(context.Background(), func(context.Context) error {
+		if asks++; asks == 1 {
+			return noRoom("h-c2m4@h", "uplink saturated", 0)
+		}
+		return unlisted("h-c2m4@h")
+	})
+	if n, ok := computeapi.NotListed(err); !ok || n != "h-c2m4@h" || strings.Contains(err.Error(), "no run target") ||
+		!strings.Contains(err.Error(), "h-c2m4@h is not listed now") || !strings.Contains(err.Error(), "before that, h-c2m4@h had no room: uplink saturated") {
+		t.Fatalf("err %v", err)
+	}
+	if l := lines[len(lines)-1]; !strings.HasPrefix(l, "gave up waiting for room after 5m: h-c2m4@h is not listed now") {
+		t.Errorf("last line %q", l)
+	}
+}
+
 func equal(a, b []time.Duration) bool {
 	if len(a) != len(b) {
 		return false

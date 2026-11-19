@@ -14,6 +14,10 @@ A box (a sandbox, a job, a GitHub runner) on a lent machine runs in a throwaway 
 - cannot reach another box running at the same time;
 - cannot send mail (tcp 25, 465, 587 to anywhere);
 - holds no credentials of the lender's.
+- on Tart, gets none of the lending Mac's USB devices: Apple's virtualization framework cannot pass one through and
+  Tart attaches none of its own; its virtual USB keyboard and pointer are turned off with
+  `--no-usb-accessories` on Tart 2.38.0 or newer (`vmhost/tartboot.go`). This is read from Tart's source, not yet
+  tested on a real Mac (`docs/lending.md`, "What is not proven").
 
 The block test below checks these on your machine by sample: this machine's addresses, the LAN's router,
 Tailscale's resolver (standing for the tailnet: a box that reaches it got through this machine's forward path), any

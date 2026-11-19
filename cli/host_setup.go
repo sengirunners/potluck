@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,6 +75,12 @@ func (a *app) startSetup(cmd *cobra.Command, o *hostprobe.ShareOptions, home, ar
 	}
 	again := a.cmd("host "+word) + shareFlagArgs(cmd, skip...)
 	st := hostsetup.Start(home, again, redact)
+	st.SetFlagArgs(func(name string) string {
+		if slices.Contains(skip, name) {
+			return ""
+		}
+		return givenFlagArgs(cmd, name)
+	})
 	o.Stages = st
 	if o.Progress != nil {
 		o.Progress(st.Begin(hostsetup.Preflight, "checking this machine before any download"))
@@ -96,6 +103,10 @@ func (a *app) endSetup(ctx context.Context, st *hostsetup.Tracker, err error) {
 	}
 	if b != nil {
 		fmt.Fprintln(w, hostsetup.Line(b.Name, hostsetup.Blocked, "what happened and what to do next are below"))
+		if b.Flag != "" { // the error below says why the flag was refused; this is the command that can work
+			r := st.Run()
+			fmt.Fprintf(w, "next: %s\n", menubar.RunAgain(&r, a.cmd("host")))
+		}
 		return
 	}
 	if next := menubar.Build(a.hostFacts(ctx)).Setup.Next; next != "" {

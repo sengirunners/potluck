@@ -114,3 +114,31 @@ func TestHostLend(t *testing.T) {
 		t.Errorf("all three over an unreadable file: exit %d %+v", code, ml.l)
 	}
 }
+
+// A shared size whose driver does not say it obeys the dials (the reference
+// driver lists no host-lend, as a driver from before the dials does not):
+// host lend still sets them, and both it and host status say they do not
+// hold that size's jobs.
+func TestHostLendSaysWhenTheDriverIgnoresTheDials(t *testing.T) {
+	m := soloMachine(t, "")
+	ml := useLend(t)
+	m.ok(t, "create", "trial")
+	if out := m.ok(t, "host", "trial", "--image", refPin, "--sizes", "c1m2", "--name-prefix", "solo", "--reclaim-idle-s", "0", "--no-sudo"); !strings.Contains(out, "shared solo-c1m2") {
+		t.Fatalf("host:\n%s", out)
+	}
+	const says = "the dials (cores, memory and disk kept free) limit no size this machine shares (solo-c1m2): the driver the daemon runs for them does not say it obeys the dials"
+	if out := m.ok(t, "host", "lend", "--keep-free-gb", "10"); ml.l.KeepFreeGB != 10 || !strings.Contains(out, says) {
+		t.Errorf("host lend: %+v\n%s", ml.l, out)
+	}
+	var st struct {
+		Lending struct {
+			Ignored []string `json:"dials_ignored_by"`
+		} `json:"lending"`
+		Menu struct {
+			Note string `json:"note"`
+		} `json:"menu"`
+	}
+	if err := json.Unmarshal([]byte(m.ok(t, "--json", "host", "status")), &st); err != nil || len(st.Lending.Ignored) != 1 || st.Lending.Ignored[0] != "solo-c1m2" || !strings.Contains(st.Menu.Note, says) {
+		t.Errorf("host status: %+v %v", st, err)
+	}
+}

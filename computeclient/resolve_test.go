@@ -92,6 +92,13 @@ func TestResolveRunTarget(t *testing.T) {
 			}
 		}
 	}
+	// A miss is marked not listed now, so a wait that saw the target answer
+	// asks again (roomwait).
+	if _, err := ResolveRunTarget(context.Background(), client.WithHandler(targetsHandler(view("db1", "db"))), "box", "gone@host", ""); err == nil {
+		t.Error("a miss resolved")
+	} else if n, ok := computeapi.NotListed(err); !ok || n != "gone@host" {
+		t.Errorf("a miss: %v marked %q %t, want not listed gone@host", err, n, ok)
+	}
 	// An exact name of another kind is refused, not resolved.
 	if _, err := ResolveRunTarget(context.Background(), client.WithHandler(targetsHandler(view("db1", "db"))), "box", "db1", ""); !api.IsCode(err, api.CodeBadRequest) || !strings.Contains(err.Error(), "is a db, not a box") {
 		t.Errorf("a db named: %v", err)

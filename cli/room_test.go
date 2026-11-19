@@ -151,3 +151,54 @@ func TestSandboxCreateWaitsWhileTheHostHasNoRoom(t *testing.T) {
 		t.Errorf("stderr %q", errw.String())
 	}
 }
+
+// A named target that answered no room and then drops out of the listing for
+// one ask is waited for, with its own line, not refused as missing
+// (zm-9xzw.20); one never listed in the wait is refused at once, as before.
+func TestSandboxCreateWaitsWhileANamedTargetIsBrieflyUnlisted(t *testing.T) {
+	slept := fakeRoomClock(t)
+	var errw strings.Builder
+	a := &app{host: Host{Prefix: "zm", Stdout: io.Discard, Stderr: &errw}}
+	d := &prepDaemon{fail: map[int]*api.Error{1: noRoomOn("small")}, unlisted: map[int]bool{2: true}} // std stays listed
+	req := computeapi.AcquireRunTargetRequest{RequestID: "cli-1", TTLS: 300}
+	h, _, err := a.sandboxCreate(context.Background(), client.WithHandler(d), computeclient.BoxWant{On: "small"}, req, pushFlags{}, roomWait(roomwait.Default, a.host.Stderr, a.name()))
+	if err != nil || h.Handle != "box:small/h1" || len(*slept) != 2 || !slices.Equal(d.seen(), []string{"acquire small", "acquire small"}) {
+		t.Fatalf("%+v %v, waited %v, asked %q; want a wait on the no room, one on the gap, then the box", h, err, *slept, d.seen())
+	}
+	if !strings.Contains(errw.String(), "zm: small is not listed now (it answered earlier in this wait; its host may be out of touch for a moment); asking again at ") {
+		t.Errorf("stderr %q: want a line for the gap", errw.String())
+	}
+
+	*slept, errw = nil, strings.Builder{}
+	d = &prepDaemon{onlySmall: true}
+	_, _, err = a.sandboxCreate(context.Background(), client.WithHandler(d), computeclient.BoxWant{On: "nosuch"}, req, pushFlags{}, roomWait(roomwait.Default, a.host.Stderr, a.name()))
+	if !api.IsCode(err, api.CodeNotFound) || !strings.Contains(err.Error(), "no run target nosuch") || len(*slept) != 0 || errw.Len() != 0 {
+		t.Errorf("never listed: %v, waited %v, said %q; want 'no run target' at once", err, *slept, errw.String())
+	}
+}
+
+// A wait that runs out while the named target is unlisted says how long it
+// waited and the last reason, never 'no run target'.
+func TestSandboxCreateWaitEndsWhileTheTargetIsUnlisted(t *testing.T) {
+	fakeRoomClock(t)
+	var errw strings.Builder
+	a := &app{host: Host{Prefix: "zm", Stdout: io.Discard, Stderr: &errw}}
+	unlisted := map[int]bool{}
+	for i := 2; i <= 50; i++ {
+		unlisted[i] = true
+	}
+	d := &prepDaemon{fail: map[int]*api.Error{1: noRoomOn("small")}, unlisted: unlisted}
+	req := computeapi.AcquireRunTargetRequest{RequestID: "cli-1", TTLS: 300}
+	_, _, err := a.sandboxCreate(context.Background(), client.WithHandler(d), computeclient.BoxWant{On: "small"}, req, pushFlags{}, roomWait(10*time.Minute, a.host.Stderr, a.name()))
+	if err == nil || strings.Contains(err.Error(), "no run target") || !strings.Contains(err.Error(), "small is not listed now") ||
+		!strings.Contains(err.Error(), "before that, small had no room: network busy (128/90 Mbit/s)") {
+		t.Fatalf("err %v: want the gap and the last no room, never 'no run target'", err)
+	}
+	if e := (*api.Error)(nil); !errors.As(err, &e) || !strings.Contains(e.Hint, "std") {
+		t.Errorf("err %v: want the miss's hint, naming the targets listed", err)
+	}
+	if !strings.Contains(errw.String(), "zm: gave up waiting for room after 10m: small is not listed now") ||
+		!strings.Contains(errw.String(), "; before that, small had no room: network busy (128/90 Mbit/s)\n") || strings.Contains(errw.String(), "no run target") {
+		t.Errorf("stderr %q", errw.String())
+	}
+}

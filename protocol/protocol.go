@@ -123,6 +123,12 @@ const (
 	// job its events refuse (another event's run, a fork's) is served only
 	// while the job's own event payload says the repository is private.
 	CapJITGuardPrivate = "github-jit-guard-private"
+	// CapHostLend: the driver holds the boxes it starts to the lender's
+	// dials (the cores, memory and disk kept free in the host's
+	// host-lend.json, Go package vmhost lend.go), read at every acquire. A
+	// driver without it ignores the dials (docs/menubar.md "Memory, and the
+	// dials").
+	CapHostLend = "host-lend"
 )
 
 // ShelfWants is where a box names what it wants on the shelf: a file

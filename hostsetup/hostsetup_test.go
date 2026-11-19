@@ -2,6 +2,7 @@ package hostsetup_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,5 +76,51 @@ func TestTrackerEnd(t *testing.T) {
 	}
 	if r, err := hostsetup.Read(t.TempDir()); r != nil || err != nil {
 		t.Errorf("no record: %+v %v", r, err)
+	}
+}
+
+// A flag this machine never accepts: the blocked stage names it, and the
+// command that runs the setup again leaves it out, or, when an earlier share
+// kept it, turns it off. Running the same command again would fail the same
+// way.
+func TestTrackerEndOptionError(t *testing.T) {
+	given := map[string]string{"docker": " --docker=true"}
+	refused := &hostsetup.OptionError{Flag: "docker", Off: "--docker=false", Err: errors.New("--docker is for the oci layer")}
+	for _, tc := range []struct {
+		name, again, wantAgain, wantFix string
+		failure                         error
+	}{
+		{"given", "zm potluck host pool --docker=true --linux-slots 8", "zm potluck host pool --linux-slots 8", "without --docker=true", refused},
+		{"kept from an earlier share", "potluck host pool --linux-slots 8", "potluck host pool --linux-slots 8 --docker=false", "with --docker=false", refused},
+		{"wrapped", "potluck host pool --docker=true", "potluck host pool", "without --docker=true", fmt.Errorf("share: %w", refused)},
+	} {
+		home := t.TempDir()
+		st := hostsetup.Start(home, tc.again)
+		if tc.name != "kept from an earlier share" {
+			st.SetFlagArgs(func(n string) string { return given[n] })
+		}
+		b := st.End(tc.failure)
+		r, _ := hostsetup.Read(home)
+		if b == nil || b.Flag != "--docker" || b.Fix != tc.wantFix || r.Again != tc.wantAgain || r.Blocked().Fix != tc.wantFix {
+			t.Errorf("%s: stage %+v, again %q", tc.name, b, r.Again)
+		}
+	}
+	// A flag with no way off that the command did not give: named, Again as it was.
+	st := hostsetup.Start(t.TempDir(), "potluck host pool")
+	if b := st.End(&hostsetup.OptionError{Flag: "root", Err: errors.New("--root is for the tart layer")}); b == nil || b.Flag != "--root" || b.Fix != "" || st.Run().Again != "potluck host pool" {
+		t.Errorf("no way off: %+v %q", b, st.Run().Again)
+	}
+	// A stage blocked earlier for another reason keeps its word.
+	st = hostsetup.Start(t.TempDir(), "potluck host pool --docker=true")
+	st.SetFlagArgs(func(n string) string { return given[n] })
+	st.Block(hostsetup.Preflight, "disk full")
+	if b := st.End(refused); b.Flag != "" || b.Detail != "disk full" || st.Run().Again != "potluck host pool --docker=true" {
+		t.Errorf("earlier block: %+v %q", b, st.Run().Again)
+	}
+	// Any other failure leaves both alone.
+	st = hostsetup.Start(t.TempDir(), "potluck host pool --docker=true")
+	st.SetFlagArgs(func(n string) string { return given[n] })
+	if b := st.End(errors.New("disk full")); b.Flag != "" || st.Run().Again != "potluck host pool --docker=true" {
+		t.Errorf("other failure: %+v %q", b, st.Run().Again)
 	}
 }

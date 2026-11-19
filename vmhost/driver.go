@@ -278,7 +278,8 @@ func (d *drv) describe() map[string]any {
 		}
 	}
 	if d.cfg.Kind == "box" {
-		caps = append(caps, "base64") // exec's encoding (exec.go): every box serves it
+		caps = append(caps, "base64")             // exec's encoding (exec.go): every box serves it
+		caps = append(caps, protocol.CapHostLend) // room and the disk floor read the dials at every acquire (lend.go)
 		if boxSecretsServed(os) {
 			// exec's secrets and the secrets verb (exec.go, secrets.go): only
 			// where the guest has a memory filesystem to put them in.
@@ -566,11 +567,14 @@ func (d *drv) sweep() error {
 			_ = d.st.save(r)
 			held[r.VM] = true
 		case r.live() && r.Supervisor > 0 && !alive(r.Supervisor):
+			// It ran until the last its files show of it (jobs.go lastSeen), not until
+			// this sweep, which may come days later: read before anything here writes.
+			end := d.st.lastSeen(r)
 			r.bindLayer(d.vm).Destroy(r.VM, r.RunPID)
 			if len(r.Volumes) > 0 { // what it wrote, measured detached: never under this lock (volume.go)
 				d.spawnDetached(flagMeasure, r.ID)
 			}
-			r.State, r.End, r.Why = stLost, time.Now().UTC(), "its supervisor died"
+			r.State, r.End, r.Why = stLost, end, "its supervisor died"
 			if !r.RunStart.IsZero() && time.Now().After(r.Deadline) {
 				r.State, r.Exit, r.Why = stExpired, nil, ""
 				if r.Kind != "box" {

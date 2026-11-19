@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sengirunners/potluck/menubar"
 	"github.com/sengirunners/potluck/vmhost"
 )
 
@@ -30,6 +31,9 @@ type lendAnswer struct {
 	Summary string `json:"summary"`
 	// Over is said when running jobs hold more than a dial now lends.
 	Over string `json:"over,omitempty"`
+	// Ignored is said when a shared size's driver does not obey the dials
+	// (menubar.DialsIgnored), as the running daemon describes its sizes.
+	Ignored string `json:"ignored,omitempty"`
 }
 
 func (a *app) hostLendCmd() *cobra.Command {
@@ -78,13 +82,15 @@ runs this (docs/menubar.md).`,
 					return err
 				}
 			}
-			ans := lendAnswer{HostLend: l, Summary: l.Summary(), Over: a.lendOver(cmd, l)}
+			ans := lendAnswer{HostLend: l, Summary: l.Summary(), Over: a.lendOver(cmd, l), Ignored: a.lendIgnored(cmd, l)}
 			if a.asJSON() {
 				return a.printJSON(ans)
 			}
 			a.say("%s", ans.Summary)
-			if ans.Over != "" {
-				a.say("%s", ans.Over)
+			for _, s := range []string{ans.Over, ans.Ignored} {
+				if s != "" {
+					a.say("%s", s)
+				}
 			}
 			return nil
 		},
@@ -117,6 +123,18 @@ func lendMemory(s string) (int, error) {
 		return 0, errors.New("--memory-gb " + strconv.Quote(s) + " is a number of GB, or all")
 	}
 	return int(math.Round(gb * 1024)), nil
+}
+
+// lendIgnored says which shared sizes' drivers do not obey the dials, from
+// the running daemon's description of them ("" when all do, or when no
+// daemon answers: then nothing is known of its drivers, and host status
+// says so once it runs).
+func (a *app) lendIgnored(cmd *cobra.Command, l vmhost.HostLend) string {
+	targets, running, _ := a.liveBindings(cmd.Context())
+	if !running {
+		return ""
+	}
+	return menubar.DialsIgnored(menubar.Lend(targets, l))
 }
 
 // lendOver says what running boxes hold past the dials ("" when nothing),

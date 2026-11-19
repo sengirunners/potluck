@@ -75,8 +75,33 @@ func TestSetupBlockedMenuAndChecklistAgree(t *testing.T) {
 	// While sizes from an earlier run still lend, a blocked re-run is a note.
 	f.Setup.Run = &hostsetup.Run{Started: "x", Ended: "y", Again: "potluck host trial", Stages: blocked}
 	f.Targets = []computeapi.RunTargetView{box("c2", "", "linux", 2, 2, nil, nil)}
-	if st := Build(f); st.Menu.Title != "Lending 4 of 8 cores" || !strings.Contains(st.Menu.Note, "the last setup run was blocked at validation (3 of 5)") {
+	st = Build(f)
+	if st.Menu.Title != "Lending 4 of 8 cores" || !strings.Contains(st.Menu.Note, "the last setup run was blocked at validation (3 of 5)") ||
+		!strings.Contains(st.Menu.Note, "what was shared before still lends") {
 		t.Errorf("lending, re-run blocked: %q / %q", st.Menu.Title, st.Menu.Note)
+	}
+	if c := check(st.Setup, "setup"); !strings.Contains(c.Detail, "the last setup run was blocked at validation (3 of 5): conformance failed at boot; what was shared before still lends") {
+		t.Errorf("lending, re-run blocked, checklist: %+v", c)
+	}
+}
+
+// A setup blocked by a flag the layer this machine shares on does not take: the next step is
+// the command without it (the record's Again, changed by the run), and it
+// names the flag, never the refused command again.
+func TestSetupBlockedByAFlagNamesIt(t *testing.T) {
+	base := Facts{Cores: 8, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}, Start: "potluck daemon --detach", Share: "potluck host"}
+	refused := hostsetup.Stage{Name: hostsetup.Preflight, Result: hostsetup.Blocked, Detail: "--docker is for the oci layer", Flag: "--docker", Fix: "without --docker=true"}
+	f := base
+	f.Setup.Run = &hostsetup.Run{Started: "x", Ended: "y", Again: "zm potluck host pool --linux-slots 8", Stages: []hostsetup.Stage{refused}}
+	st := Build(f)
+	want := "run again without --docker=true (the layer this machine shares on does not take --docker): zm potluck host pool --linux-slots 8"
+	if st.Setup.Next != want || st.Menu.Note != "--docker is for the oci layer; then "+want {
+		t.Errorf("next %q, note %q", st.Setup.Next, st.Menu.Note)
+	}
+	refused.Fix = ""
+	f.Setup.Run.Stages = []hostsetup.Stage{refused}
+	if got := Build(f).Setup.Next; got != "run again without --docker (the layer this machine shares on does not take it): zm potluck host pool --linux-slots 8" {
+		t.Errorf("no fix: %q", got)
 	}
 }
 

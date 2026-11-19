@@ -539,21 +539,36 @@ func joinedAtAuthority(ctx context.Context, c *client.Client, code string) []str
 func shareFlagArgs(cmd *cobra.Command, skip ...string) string {
 	var b strings.Builder
 	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if slices.Contains(skip, f.Name) {
-			return
-		}
-		vals := []string{f.Value.String()}
-		if sv, ok := f.Value.(pflag.SliceValue); ok {
-			vals = sv.GetSlice()
-		}
-		for _, v := range vals {
-			if f.Value.Type() == "bool" {
-				fmt.Fprintf(&b, " --%s=%s", f.Name, v)
-			} else {
-				fmt.Fprintf(&b, " --%s %s", f.Name, shellQuote(v))
-			}
+		if !slices.Contains(skip, f.Name) {
+			b.WriteString(flagArgs(f))
 		}
 	})
+	return b.String()
+}
+
+// givenFlagArgs is the flag name's arguments as shareFlagArgs writes them,
+// "" when this command was not given it.
+func givenFlagArgs(cmd *cobra.Command, name string) string {
+	if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+		return flagArgs(f)
+	}
+	return ""
+}
+
+// flagArgs is one flag's arguments, each with a leading space.
+func flagArgs(f *pflag.Flag) string {
+	var b strings.Builder
+	vals := []string{f.Value.String()}
+	if sv, ok := f.Value.(pflag.SliceValue); ok {
+		vals = sv.GetSlice()
+	}
+	for _, v := range vals {
+		if f.Value.Type() == "bool" {
+			fmt.Fprintf(&b, " --%s=%s", f.Name, v)
+		} else {
+			fmt.Fprintf(&b, " --%s %s", f.Name, shellQuote(v))
+		}
+	}
 	return b.String()
 }
 

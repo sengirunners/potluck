@@ -62,7 +62,30 @@ type Stage struct {
 	Result string `json:"result"`
 	Detail string `json:"detail,omitempty"`
 	At     string `json:"at"`
+	// Flag, on a blocked stage, is the flag it refused because the layer
+	// this machine shares on does not take it (an OptionError), as "--docker".
+	Flag string `json:"flag,omitempty"`
+	// Fix is how the run's Again was changed for that refusal: "without
+	// --docker=true" (the flag left out) or "with --docker=false" (turned
+	// off where an earlier share kept it); "" when it could not be.
+	Fix string `json:"fix,omitempty"`
 }
+
+// OptionError is a host run's refusal of a flag that the layer this
+// machine shares on does not take (a flag of another layer): running the
+// same command again fails the same way. The code that refuses the flag
+// returns it, so the record carries which flag, not words to match.
+type OptionError struct {
+	// Flag is the flag's name, without dashes ("docker").
+	Flag string
+	// Off is the argument that turns it off when an earlier share kept it
+	// rather than this command ("--docker=false"); "" when none does.
+	Off string
+	Err error
+}
+
+func (e *OptionError) Error() string { return e.Err.Error() }
+func (e *OptionError) Unwrap() error { return e.Err }
 
 // Run is a host run's record.
 type Run struct {
@@ -143,6 +166,21 @@ type Tracker struct {
 	// err is the first failure to write the record (the run goes on: the
 	// record serves host status, not the run).
 	err error
+	// flagArgs is a flag's arguments as they stand in Again (" --docker=true"),
+	// "" when the command does not carry it (SetFlagArgs).
+	flagArgs func(name string) string
+}
+
+// SetFlagArgs tells the tracker how each flag stands in Again (the exact
+// text Again was made with, leading space included; "" when the command does
+// not carry it), so an OptionError's flag can be left out of Again.
+func (t *Tracker) SetFlagArgs(f func(name string) string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.flagArgs = f
+	t.mu.Unlock()
 }
 
 // Err is the first failure to write the record, or nil.
@@ -192,8 +230,11 @@ func (t *Tracker) Block(stage, detail string) string {
 
 // End ends the run. A failure blocks the stage running now (or, when none
 // runs, the first stage not reached), unless a stage is blocked already;
-// with no failure a stage still running succeeded. It answers the stage
-// the run stopped at (nil when none).
+// with no failure a stage still running succeeded. A failure that is an
+// OptionError names its flag on the blocked stage, and Again changes so
+// that it no longer gives that flag: without its arguments, or, when an
+// earlier share kept it, with the argument that turns it off. It answers
+// the stage the run stopped at (nil when none).
 func (t *Tracker) End(failure error) *Stage {
 	if t == nil {
 		return nil
@@ -210,6 +251,22 @@ func (t *Tracker) End(failure error) *Stage {
 		t.Succeed(cur.Name, cur.Detail)
 	}
 	t.mu.Lock()
+	var oe *OptionError
+	if b := t.run.Blocked(); b != nil && !blocked && errors.As(failure, &oe) { // the stage this failure blocked, not an earlier one
+		b.Flag = "--" + oe.Flag
+		args := ""
+		if t.flagArgs != nil {
+			args = t.flagArgs(oe.Flag)
+		}
+		switch {
+		case args != "" && strings.Contains(t.run.Again, args):
+			t.run.Again = strings.Replace(t.run.Again, args, "", 1)
+			b.Fix = "without " + strings.TrimSpace(args)
+		case args == "" && oe.Off != "" && t.run.Again != "":
+			t.run.Again += " " + oe.Off
+			b.Fix = "with " + oe.Off
+		}
+	}
 	t.run.Ended = t.stamp()
 	b := t.run.Blocked()
 	var out *Stage

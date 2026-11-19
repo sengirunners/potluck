@@ -102,11 +102,19 @@ func (s *Service) remoteByName(ctx context.Context, projectID, name string, db *
 	return computeapi.RunTarget{}, false
 }
 
+// notAdvertised is the answer for a binding another machine serves whose
+// host has no advert now: marked TargetNotListed, as a host out of touch
+// for a moment may be back on the next ask.
+func notAdvertised(b computeapi.RunTarget) error {
+	return api.Errorf(api.CodeUnavailable, "%s advertises no run target %s now (is it running and sharing it with this project?)", b.Host, b.HostBinding).
+		WithData(computeapi.TargetNotListed{Name: RemoteName(b.HostBinding, b.Host)})
+}
+
 // remoteDescribe is a remote binding's describe: the host's last advert.
 func (s *Service) remoteDescribe(ctx context.Context, b computeapi.RunTarget) (*computeapi.RunTargetDescribe, error) {
 	ra, ok := s.advertOf(ctx, b)
 	if !ok {
-		return nil, api.Errorf(api.CodeUnavailable, "%s advertises no run target %s now (is it running and sharing it with this project?)", b.Host, b.HostBinding)
+		return nil, notAdvertised(b)
 	}
 	d := ra.Describe
 	d.Name = b.Name

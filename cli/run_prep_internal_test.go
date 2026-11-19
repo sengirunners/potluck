@@ -46,6 +46,10 @@ type prepDaemon struct {
 	releaseQuiet int
 	renews       []int             // each renew's ttl_s, answered or not
 	kept         map[string]string // request id: the request kept under it, as JSON
+	// unlisted makes the nth listing of run targets (1-based) leave out
+	// small, as an authority does while its host is out of touch for a moment.
+	unlisted map[int]bool
+	lists    int
 }
 
 func (d *prepDaemon) log(s string) { d.mu.Lock(); d.asked = append(d.asked, s); d.mu.Unlock() }
@@ -66,7 +70,14 @@ func (d *prepDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case p == "":
 		l := computeapi.RunTargetList{}
+		d.mu.Lock()
+		d.lists++
+		gone := d.unlisted[d.lists]
+		d.mu.Unlock()
 		for _, n := range []string{"small", "std"} {
+			if gone && n == "small" {
+				continue
+			}
 			if v, ok := views[n]; ok {
 				l.Targets = append(l.Targets, v)
 			}

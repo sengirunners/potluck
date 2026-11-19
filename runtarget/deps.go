@@ -434,7 +434,7 @@ func (s *Service) depsDigest(ctx context.Context, b computeapi.RunTarget, req co
 	if b.Host != "" {
 		ra, ok := s.advertOf(ctx, b)
 		if !ok {
-			return "", api.Errorf(api.CodeUnavailable, "%s advertises no run target %s now (is it running and sharing it with this project?)", b.Host, b.HostBinding)
+			return "", notAdvertised(b)
 		}
 		if req.Image != "" { // as acquireBox's boxPin refuses it: the host's driver picks by template only
 			return "", api.Errorf(api.CodeBadRequest, "run target %s names no images: on a binding another machine serves, name a template", b.Name)

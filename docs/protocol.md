@@ -282,6 +282,7 @@ Capabilities a box driver may list:
 | `github-jit-guard` | `acquire` takes `jit_guard` |
 | `github-jit-guard-run` | `jit_guard` takes `run`: one run, held for the door's ready marker |
 | `github-jit-guard-private` | `jit_guard` takes `open_if_private`: beyond `events`, any run whose event payload says the repository is private |
+| `host-lend` | the driver holds the boxes it starts to the lender's dials (cores, memory and disk kept free, the host's `host-lend.json`), read at every `acquire`; a driver without it ignores them, and `potluck host lend` and `potluck host status` say so ([menubar.md](menubar.md#memory-and-the-dials)) |
 
 The daemon refuses an argument to a driver that does not list its capability (`bad_request`), before it calls the
 driver: an older driver would take base64 text as the bytes, run a command without its secrets or terminal, or take a

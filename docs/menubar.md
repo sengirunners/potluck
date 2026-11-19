@@ -31,8 +31,8 @@ Keep lending is checked in `auto` and in `open`. The modes are the host switch's
 
 While a host run sets this Mac up and nothing is shared yet, the title says the stage, "Setting up: images (2 of
 5)", and the note its last words; a run that stopped says "Setup blocked at validation (3 of 5)" with why and the
-command that runs it again. Once sizes are shared, a later run that is blocked is a note, since what was shared
-still lends. These are the stages `potluck host` prints and `potluck host status` lists
+command that runs it again. Once sizes are shared, a later run that is blocked is a note, "the last setup run was blocked at
+preflight (1 of 5); what was shared before still lends", since what was shared still lends. After a flag this Mac's layer does not take, the command it gives leaves that flag out ([hosts.md](hosts.md#stages-and-the-setup-checklist)). These are the stages `potluck host` prints and `potluck host status` lists
 ([hosts.md](hosts.md#stages-and-the-setup-checklist)).
 
 A closed switch is a paused Mac (`potluck host pause`, or Stop now): the menu says "Paused: lending nothing" and
@@ -80,6 +80,14 @@ size's driver reads it when it starts a box (Go package `vmhost`, `lend.go`); a 
 nothing and says why, and so does the menu. A dial bounds each driver state directory (and OS) on its own; the
 sizes `potluck host` shares on a Mac all use one, and when there are more the dial's title says "each of N groups
 of sizes".
+
+A driver that obeys the dials says so: it lists the capability `host-lend` in `describe`
+([protocol.md](protocol.md#describe)). A driver from before the dials lists none and ignores the file, which happens
+where the daemon is another program's (zm's, say) built on an older Potluck: it runs that program's drivers, not the
+ones `potluck` was installed with. Then `potluck host lend` still writes the dials, and it, `host status` and the
+menu's note say which sizes they do not limit ("the dials (cores, memory and disk kept free) limit no size this
+machine shares (...)"); `host status --json` lists them as `lending.dials_ignored_by`. They hold those sizes once
+the daemon runs a driver that lists `host-lend`.
 
 ## Jobs this Mac ran
 

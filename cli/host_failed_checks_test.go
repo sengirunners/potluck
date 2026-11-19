@@ -23,11 +23,12 @@ import (
 // lend and name the flags given, which did not take effect; never that this
 // machine did not join the pool.
 func TestHostNoSizePassedSaysWhatNext(t *testing.T) {
-	oldBeat, oldRunner, oldDetect, oldDriver := teamlink.BeatEvery, shareRunner, detectHost, shareDriver
+	oldBeat, oldRunner, oldDetect, oldDriver, oldGOOS := teamlink.BeatEvery, shareRunner, detectHost, shareDriver, setupGOOS
 	t.Cleanup(func() {
-		teamlink.BeatEvery, shareRunner, detectHost, shareDriver = oldBeat, oldRunner, oldDetect, oldDriver
+		teamlink.BeatEvery, shareRunner, detectHost, shareDriver, setupGOOS = oldBeat, oldRunner, oldDetect, oldDriver, oldGOOS
 	})
 	teamlink.BeatEvery = time.Hour
+	setupGOOS = "linux" // the host below is Linux: no menu bar item to set up, on any machine the test runs on
 	var pass atomic.Bool
 	shareRunner = runnerFunc(func(_ context.Context, name string, args ...string) (hostprobe.Result, error) {
 		if strings.Contains(name, "conformance") && !pass.Load() {

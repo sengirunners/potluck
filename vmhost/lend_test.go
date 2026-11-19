@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,6 +68,10 @@ func TestLendDialsBoundNewBoxes(t *testing.T) {
 	}
 	h := a["handle"].(string)
 	waitState(t, m, h, "ready")
+	// The driver says it obeys the dials, so host lend and host status can tell.
+	if d, err := call(t, m, "describe", "", nil); err != nil || !slices.Contains(anyStrings(d["capabilities"]), protocol.CapHostLend) {
+		t.Fatalf("describe lists no %s: %v %v", protocol.CapHostLend, d["capabilities"], err)
+	}
 	for _, dial := range []HostLend{{Cores: 3}, {MemoryMB: 1536}} {
 		if _, err := SetLend(dial); err != nil {
 			t.Fatal(err)

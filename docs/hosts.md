@@ -235,8 +235,11 @@ A host run goes through five stages and says each as one line on stderr (not und
 | join | joining the pool of the invite (only once a size passed), or the pool already joined |
 | usable capacity | sharing the sizes that passed and seeing the pool list them: what the pool can use |
 
-A blocked run's error says what happened and what to do. A run that went through ends with `next:`, the one thing
-left to do. The pull and conformance command lines are diagnostics: `--show-commands` prints them.
+A blocked run's error says what happened and what to do. A run blocked by a flag the layer this machine shares on does not take (`--docker`
+on a Mac's Tart layer, `--root` on OCI, `--net-mbit` off OCI) records that flag, and the command it gives to run
+again leaves it out (or, when an earlier share kept `--docker`, adds `--docker=false`): `next: run again without
+--docker=true (the layer this machine shares on does not take --docker): potluck host <pool> ...`, never the refused command. A run that
+went through ends with `next:`, the one thing left to do. The pull and conformance command lines are diagnostics: `--show-commands` prints them.
 
 The run writes its stages to the home's `host-setup.json` as they change (never the invite code; the command that
 runs it again names it `'<invite code>'`). `potluck host status` reads that file with what else is set up and prints
@@ -250,6 +253,9 @@ the checklist, and `--json` carries it as `setup` (`state`, `stages`, `checks`, 
 - on a Mac, the menu bar item ([menubar.md](menubar.md#what-host-status-knows-of-the-app)): installed, running
   (only once the app itself has read this status), and Login Items, which Potluck cannot read;
 - the daily update (`potluck upgrade enable`), which covers Potluck alone: not the menu bar item, Tart or Softnet.
+
+Where this machine already shares sizes, a later blocked run stays in the checklist, as "the last setup run was
+blocked at <stage>: <why>; what was shared before still lends", until another host run replaces its record.
 
 `next:` is the first thing left in that order. Nothing in the checklist is done for you: it never installs the
 menu bar item, adds a login item or turns on the daily update. The menu bar item's title and note come from the

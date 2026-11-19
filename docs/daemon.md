@@ -56,7 +56,8 @@ Using another program's daemon, potluck sends every call over that daemon's sock
 home. `potluck status` says whose daemon it uses. These refuse, saying which program owns the daemon: `potluck
 daemon` (in the foreground or with `--detach`), `daemon stop`, `daemon preflight`, `driver pin`, `isolation test`
 and `host shelf`. `potluck upgrade` installs potluck's own programs and leaves the daemon, its home and its
-driver pins as they are; it does the same when potluck has no home yet, so installing potluck never makes
+driver pins as they are, and says that the program named in the daemon's machine record (zm, say) keeps them and
+updates them its own way (Potluck does not name that program's commands); it does the same when potluck has no home yet, so installing potluck never makes
 `~/.potluck`.
 
 **A home has one program.** The first daemon on a home writes its program's name into `<home>/program`; a daemon
@@ -305,6 +306,11 @@ Sandboxes and GitHub runner jobs pick a box binding by one rule (package `placem
   answer and nothing held. The daemon that marks a no room says it from these fields, never in the driver's or
   the host's own words: `<binding> has no room now: <why>; it says to ask again in 600 s`. A hard refusal (`bad_request`, `forbidden`, an isolation refusal, a size no machine
   offers, a spent budget) never waits, nor does a binding its owner paused, drained or closed (`potluck host set`).
+  A target missing from the listing (`--on` finds it in no listing, or the daemon has no advert from its host) is
+  marked `{"not_listed": "<target>"}`. After the target answered no room earlier in the same wait, that is one more
+  reason to ask again (`<target> is not listed now (...); asking again at ...`), and a bound that ends there says the
+  target is not listed now and the last no room before it, never `no run target`. A target never seen in the wait
+  still fails at once.
 
 ## Limited tokens
 

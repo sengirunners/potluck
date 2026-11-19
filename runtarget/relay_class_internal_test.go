@@ -59,6 +59,8 @@ func TestOpArgsAsksTheSwapAgain(t *testing.T) {
 	setRTOp(m, &computeapi.RunTargetOp{Binding: "b", Verb: verbExec, ID: "box:b/1"})
 	if err := s.opArgs(context.Background(), "P", m); code(err) != api.CodeUnavailable || !strings.Contains(err.Error(), "advertises no run target") {
 		t.Errorf("a host that advertises nothing: %v, want unavailable, not an older build's refusal", err)
+	} else if _, ok := computeapi.NotListed(err); !ok {
+		t.Errorf("a host that advertises nothing: %v, want it marked not listed now, so a wait asks again", err)
 	}
 }
 

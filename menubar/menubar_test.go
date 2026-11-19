@@ -16,7 +16,7 @@ func box(name, stateDir, os string, cpu, slots int, live, stopped []string) comp
 	if stateDir != "" {
 		v.Config["state_dir"] = stateDir
 	}
-	v.Describe = &computeapi.RunTargetDescribe{Size: &computeapi.RunTargetSize{Name: name, OS: os, CPU: cpu}}
+	v.Describe = &computeapi.RunTargetDescribe{Size: &computeapi.RunTargetSize{Name: name, OS: os, CPU: cpu}, Capabilities: []string{protocol.CapHostLend}}
 	if slots > 0 {
 		v.Describe.Slots = &computeapi.RunTargetSlots{OS: os, Total: slots}
 	}
@@ -239,5 +239,19 @@ func TestBuildSaysWhichSizesLendOlderImages(t *testing.T) {
 	}
 	if s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{box("c1", "", "linux", 1, 2, nil, nil)}, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}}); s.ImagesBehind != nil || strings.Contains(s.Menu.Note, "other images") {
 		t.Errorf("current pins: %q %q", s.ImagesBehind, s.Menu.Note)
+	}
+}
+
+// A size whose driver does not list host-lend is named as one the dials do
+// not limit; one that does is not.
+func TestLendDialsIgnored(t *testing.T) {
+	old := box("old", "", "linux", 2, 1, nil, nil)
+	old.Describe.Capabilities = nil
+	l := Lend([]computeapi.RunTargetView{box("new", "", "linux", 2, 1, nil, nil), old}, vmhost.HostLend{})
+	if len(l.DialsIgnoredBy) != 1 || l.DialsIgnoredBy[0] != "old" || !strings.HasPrefix(DialsIgnored(l), "the dials (cores, memory and disk kept free) do not limit old: ") {
+		t.Errorf("%+v: %q", l.DialsIgnoredBy, DialsIgnored(l))
+	}
+	if l := Lend([]computeapi.RunTargetView{box("new", "", "linux", 2, 1, nil, nil)}, vmhost.HostLend{}); DialsIgnored(l) != "" {
+		t.Errorf("every driver obeys: %q", DialsIgnored(l))
 	}
 }

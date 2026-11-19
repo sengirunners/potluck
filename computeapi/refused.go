@@ -107,3 +107,26 @@ func RequestUsedOn(err error) (string, bool) {
 	}
 	return u.Target, true
 }
+
+// TargetNotListed is the data of an answer that found no run target Name
+// listed now: the caller's resolution of --on found it in no listing, or
+// the daemon has no advert from the host that serves it. Either may be a
+// host out of touch for a moment, so a wait that saw the target answer
+// earlier asks again (roomwait); a name never listed is still a mistake.
+type TargetNotListed struct {
+	Name string `json:"not_listed"`
+}
+
+// NotListed says whether err is an answer marked TargetNotListed, and if so
+// the name it found no target for.
+func NotListed(err error) (string, bool) {
+	var e *api.Error
+	if !errors.As(err, &e) || (e.Code != api.CodeNotFound && e.Code != api.CodeUnavailable) || len(e.Data) == 0 {
+		return "", false
+	}
+	var n TargetNotListed
+	if json.Unmarshal(e.Data, &n) != nil || n.Name == "" {
+		return "", false
+	}
+	return n.Name, true
+}

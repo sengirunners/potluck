@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -88,8 +87,16 @@ func detectTartArguments(ctx context.Context, run Runner, path string, l *Layer)
 	}
 	for _, arg := range vmhost.TartBootArguments(true) {
 		flag, _, _ := strings.Cut(arg, "=")
-		if !regexp.MustCompile(`(?:^|[\s,])` + regexp.QuoteMeta(flag) + `(?:[=\s]|$)`).MatchString(res.Stdout) {
+		if !vmhost.TartHelpHas(res.Stdout, flag) {
 			l.Problems = append(l.Problems, "Tart at "+path+" lacks required run option "+flag+"; use a compatible Tart build that supports Potluck's isolation policy")
+		}
+	}
+	if len(l.Problems) > 0 {
+		return // a Tart refused above is not lent; a warning on top is noise
+	}
+	for _, h := range vmhost.TartHardeningArguments() {
+		if !vmhost.TartHelpHas(res.Stdout, h.Flag) {
+			l.Warnings = append(l.Warnings, fmt.Sprintf("Tart %s at %s has no %s (Tart %s or newer), so boxes keep %s; to drop it, %s", l.Version, path, h.Flag, h.Since, h.Without, vmhost.TartUpdateHint))
 		}
 	}
 }
