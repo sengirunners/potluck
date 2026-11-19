@@ -2,6 +2,7 @@ package menubar
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,24 @@ func TestBuildCarriesTheNewestRefusal(t *testing.T) {
 	now = func() time.Time { return time.Date(2026, 11, 14, 21, 0, 0, 0, time.UTC) }
 	if s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{older, newer}, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}}); s.Refused != nil || s.Menu.Title != "Lending 3 of 4 cores" {
 		t.Fatalf("past every until: %+v %q", s.Refused, s.Menu.Title)
+	}
+}
+
+// A size lending other pins than the daemon's build says so, and why, and
+// the menu's note says how many.
+func TestBuildSaysWhichSizesLendOlderImages(t *testing.T) {
+	behind := box("pool-c1m2", "", "linux", 1, 2, nil, nil)
+	behind.ImagesBehind = &computeapi.ImagesBehind{Lends: []string{"box@sha256:11"}, Current: []string{"box@sha256:aa"}, Why: "waiting for its box to end"}
+	s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{behind, box("pool-c2m4", "", "linux", 2, 2, nil, nil)},
+		Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}})
+	want := []string{"pool-c1m2 lends other images than this version pins (box@sha256:11, not box@sha256:aa): waiting for its box to end"}
+	if !slices.Equal(s.ImagesBehind, want) {
+		t.Errorf("lines: %q, want %q", s.ImagesBehind, want)
+	}
+	if !strings.Contains(s.Menu.Note, "1 size lends other images than this version pins") {
+		t.Errorf("note: %q", s.Menu.Note)
+	}
+	if s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{box("c1", "", "linux", 1, 2, nil, nil)}, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}}); s.ImagesBehind != nil || strings.Contains(s.Menu.Note, "other images") {
+		t.Errorf("current pins: %q %q", s.ImagesBehind, s.Menu.Note)
 	}
 }

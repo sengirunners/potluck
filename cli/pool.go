@@ -236,9 +236,10 @@ func (a *app) hostCmd() *cobra.Command {
 		Long: `Host checks this machine (a missing root step it runs with sudo at a
 terminal, which asks for your password; else, or with --no-sudo, it prints
 the one sudo line), pulls the images (without --image, Potluck's default for
-the layer) and runs a quick conformance check per size. Only when a size
-passes does it join the pool with the invite code (or take a pool this
-machine already joined, or runs) and share each size that passed; then it
+the layer; one already here at its exact digest is not pulled again) and
+runs a quick conformance check per size. Only when a size passes does it
+join the pool with the invite code (or take a pool this machine already
+joined, or runs) and share each size that passed; then it
 waits until the pool lists them. A machine that fails never joins, and its
 invite stays unspent. With no argument it shares with the only pool this
 machine is in. On a Mac a sandbox ends when you touch the keyboard or pointer
@@ -267,7 +268,7 @@ help; the invite is not.`,
 	s.add(cmd, a)
 	pastedFlags(cmd)
 	cmd.Flags().BoolVar(&yes, "yes", false, "share again where this machine already shares sizes with the pool, with no flag that changes the share (such a run otherwise only says what it would do)")
-	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostImagesCmd(), a.hostStatusCmd(), a.hostSetCmd(), a.hostPauseCmd(), a.hostResumeCmd())
+	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostImagesCmd(), a.hostStatusCmd(), a.hostJobsCmd(), a.hostSetCmd(), a.hostPauseCmd(), a.hostResumeCmd())
 	cmd.AddCommand(a.hostOldSpellings()...)
 	return cmd
 }

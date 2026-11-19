@@ -2,11 +2,13 @@ package hostprobe
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/imagepins"
 )
 
 // Named images lend alone; placement checks the binding's advertised name.
@@ -29,7 +31,7 @@ func TestShareXcode(t *testing.T) {
 				t.Fatalf("unexpected selection: %+v", res)
 			}
 			for _, s := range res.Sizes {
-				if s.Config["image_name"] != "xcode" || s.Config["runner_dir"] != c.wantRunner || (s.Config["root"] == "on") != c.wantRoot || s.Size.CPU < 2 || s.Size.MemoryMB < 4096 {
+				if s.Config["image_name"] != "xcode" || s.Config[imagepins.ImageDefaultKey] != imagepins.ImageNamed || s.Config["runner_dir"] != c.wantRunner || (s.Config["root"] == "on") != c.wantRoot || s.Size.CPU < 2 || s.Size.MemoryMB < 4096 {
 					t.Fatalf("bad binding: %+v", s)
 				}
 			}
@@ -334,5 +336,50 @@ func TestImplicitImageRequiresEarlierBindings(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "daemon unavailable") {
 			t.Fatalf("dry=%v: %v", dry, err)
 		}
+	}
+}
+
+// On oci, an image the engine already holds under its exact pin is lent
+// without a pull: the engine would ask the registry first, and a private
+// image loaded from an archive has no registry credential on the host. Any
+// other answer (another digest, a tag only, nothing, an engine error) pulls.
+func TestShareReusesOnlyAnExactOCIPin(t *testing.T) {
+	inspect := "docker image inspect --format {{json .RepoDigests}} -- " + pinA
+	for _, c := range []struct {
+		name, digests string
+		exit          int
+		reuse         bool
+	}{
+		{"exact pin", `["` + pinA + `"]`, 0, true},
+		{"exact pin among others", `["reg.example/other@sha256:` + strings.Repeat("2", 64) + `","` + pinA + `"]`, 0, true},
+		{"different digest", `["` + pinB + `"]`, 0, false},
+		{"same digest, another name", `["mirror.example/base@` + pinA[strings.Index(pinA, "sha256:"):] + `"]`, 0, false},
+		{"no digests (built here)", `[]`, 0, false},
+		{"unreadable", `not json`, 0, false},
+		{"not held", ``, 1, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := &fakeRunner{on: func(line string) (Result, bool) {
+				if line == inspect {
+					return Result{Stdout: c.digests, Exit: c.exit}, true
+				}
+				return ok("PASS"), true
+			}}
+			var said []string
+			res, err := checkOn(context.Background(), run, ShareOptions{Report: bigReport(), Images: []string{pinA}, NamePrefix: "h", Sizes: []string{"c2m4"}, Driver: "ref",
+				Progress: func(l string) { said = append(said, l) }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Contains(run.calls, inspect) {
+				t.Fatalf("the engine was never asked: %v", run.calls)
+			}
+			if pulled := slices.Contains(run.calls, "docker pull -- "+pinA); pulled == c.reuse || strings.Join(res.Images, ",") != pinA {
+				t.Fatalf("reuse=%v, calls=%v, images=%v", c.reuse, run.calls, res.Images)
+			}
+			if lines := strings.Join(said, "\n"); strings.Contains(lines, "reuse "+pinA+" (already here)") != c.reuse {
+				t.Errorf("reuse=%v, but the stages said:\n%s", c.reuse, lines)
+			}
+		})
 	}
 }

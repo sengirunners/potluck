@@ -236,8 +236,8 @@ func TestShareBindsOnlyWhatPassed(t *testing.T) {
 		len(tg.Images) != 1 || tg.Images[0] != pinA || tg.Config["memory"] != "4096" || tg.Config["vm"] != "oci" {
 		t.Errorf("binding: %+v", tg)
 	}
-	// pulls come before conformance, and the failed size was never bound
-	if len(run.calls) != 3 || !strings.HasPrefix(run.calls[0], "docker pull ") {
+	// the engine is asked for the pin, the pull comes before conformance, and the failed size was never bound
+	if len(run.calls) != 4 || !strings.HasPrefix(run.calls[0], "docker image inspect ") || !strings.HasPrefix(run.calls[1], "docker pull ") {
 		t.Errorf("calls: %v", run.calls)
 	}
 	// a second share replaces its own bindings

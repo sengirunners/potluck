@@ -215,6 +215,7 @@ func (s *Service) listHost(ctx context.Context, live bool) (any, error) {
 		if live {
 			s.addLive(ctx, &v, t.RunTarget)
 		}
+		v.ImagesBehind = s.imagesBehind(t.RunTarget) // hostimages.go
 		out.Targets = append(out.Targets, v)
 	}
 	return out, nil
@@ -341,6 +342,9 @@ func (s *Service) hostDescribed(b computeapi.RunTarget) *computeapi.RunTargetDes
 func (s *Service) HostCall(ctx context.Context, project, binding, verb, id string, args json.RawMessage) (json.RawMessage, error) {
 	if err := s.hostReady(); err != nil {
 		return nil, err
+	}
+	if verb == verbAcquire || verb == verbStart { // counted in before the binding is read: a rebind waits for it (hostimages.go)
+		defer s.images.enter(binding)()
 	}
 	b, ok := s.hostBinding(project, binding)
 	if !ok {
@@ -641,28 +645,16 @@ func (s *Service) ledgerLoad() (*ledger, error) {
 		return led, nil
 	}
 	if err == nil {
-		led.found = true
-		var top map[string]json.RawMessage
-		if err = json.Unmarshal(b, &top); err == nil {
-			if _, v2 := top["version"]; v2 {
-				err = json.Unmarshal(b, led)
-				if err == nil && led.Version != ledgerVersion {
-					err = fmt.Errorf("version %d is not this build's (%d)", led.Version, ledgerVersion)
+		var v1 bool
+		if led, v1, err = decodeLedger(b); err == nil && v1 {
+			// Once migrated, an old ledger is a restored backup: its slugs
+			// mean what host_keys.json froze, and nothing else.
+			led.current = s.host.done.Load()
+			for h, e := range led.Handles {
+				if led.current {
+					e.Project = s.oldOwner(e.Project)
+					led.Handles[h] = e
 				}
-			} else { // version 1: handle -> entry (a handle always has a colon, so never "version")
-				err = json.Unmarshal(b, &led.Handles)
-				// Once migrated, an old ledger is a restored backup: its slugs
-				// mean what host_keys.json froze, and nothing else.
-				led.current = s.host.done.Load()
-				for h, e := range led.Handles {
-					if led.current {
-						e.Project = s.oldOwner(e.Project)
-						led.Handles[h] = e
-					}
-				}
-			}
-			if led.Handles == nil {
-				led.Handles = map[string]ledgerEntry{}
 			}
 		}
 	}
@@ -672,6 +664,64 @@ func (s *Service) ledgerLoad() (*ledger, error) {
 			WithHint("the host's owner checks or restores $ZM_HOME/" + ledgerFile + " (a copy this build wrote: it also holds the projects' old key tags)")
 	}
 	return led, nil
+}
+
+// decodeLedger reads host_handles.json's bytes: version 2, or v1, the bare
+// Handles map of a build that keyed it by the project's slug (a handle
+// always has a colon, so never "version").
+func decodeLedger(b []byte) (led *ledger, v1 bool, err error) {
+	led = &ledger{Version: ledgerVersion, Handles: map[string]ledgerEntry{}, current: true, found: true}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(b, &top); err != nil {
+		return nil, false, err
+	}
+	if _, v2 := top["version"]; v2 {
+		if err := json.Unmarshal(b, led); err != nil {
+			return nil, false, err
+		}
+		if led.Version != ledgerVersion {
+			return nil, false, fmt.Errorf("version %d is not this build's (%d)", led.Version, ledgerVersion)
+		}
+	} else if err := json.Unmarshal(b, &led.Handles); err != nil {
+		return nil, true, err
+	} else {
+		v1 = true
+	}
+	if led.Handles == nil {
+		led.Handles = map[string]ledgerEntry{}
+	}
+	return led, v1, nil
+}
+
+// HostLedgerKeep is how long the ledger keeps a handle no call touched.
+const HostLedgerKeep = ledgerKeep
+
+// HostHandleProjects is, from the handle ledger in home, the id of the
+// project whose authority acquired each handle this machine's drivers
+// issued through a relay (the lender's job list names its pool from it).
+// It only reads; none is an empty map. A ledger from a build that keyed it
+// by slug names no project id: an error, so no handle is taken for one
+// started here.
+func HostHandleProjects(home string) (map[string]string, error) {
+	b, err := os.ReadFile(filepath.Join(home, ledgerFile))
+	if os.IsNotExist(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	led, v1, err := decodeLedger(b)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("%s: %w", ledgerFile, err)
+	case v1:
+		return nil, fmt.Errorf("%s is not migrated yet (the daemon does it when it starts)", ledgerFile)
+	}
+	out := map[string]string{}
+	for h, e := range led.Handles {
+		out[h] = e.Project
+	}
+	return out, nil
 }
 
 // ledgerRead is ledgerLoad under the ledger's lock.

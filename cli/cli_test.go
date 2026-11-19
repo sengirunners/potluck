@@ -248,8 +248,9 @@ func TestQuickStartAcrossTwoMachines(t *testing.T) {
 	if !strings.Contains(out, "shared lender-c1m2") || !strings.Contains(out, "shared with pool friends: lender-c1m2@lender") {
 		t.Fatalf("host:\n%s", out)
 	}
-	if len(ran) != 2 || !strings.HasPrefix(ran[0], "docker pull") || !strings.Contains(ran[1], "--only "+hostprobe.QuickGroups) ||
-		!strings.Contains(ran[1], " "+inHome+" ") {
+	// The engine is asked whether it holds the pin (it answers "PASS", which is no), then pulls.
+	if len(ran) != 3 || !strings.HasPrefix(ran[0], "docker image inspect") || !strings.HasPrefix(ran[1], "docker pull") ||
+		!strings.Contains(ran[2], "--only "+hostprobe.QuickGroups) || !strings.Contains(ran[2], " "+inHome+" ") {
 		t.Fatalf("host ran %q", ran)
 	}
 	if out := a.ok(t, "status"); !strings.Contains(out, "pool friends (owner): sandboxes on lender-c1m2@lender") {

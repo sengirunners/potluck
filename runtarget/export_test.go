@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/imagepins"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/authz"
 	"github.com/sengirunners/potluck/kit/core"
@@ -152,3 +153,19 @@ func (s *Service) SetDatabaseRecipesForTest(ctx context.Context, project string,
 	_, err := s.d.Projects.SetSection(ctx, project, "databases", func(any) (any, error) { return recipes, nil })
 	return err
 }
+
+// StartingOn counts an acquire on a host binding in, as HostCall does, until
+// the func it returns is called (hostimages.go).
+func (s *Service) StartingOn(binding string) func() { return s.images.enter(binding) }
+
+// SetImagePins replaces the pin table the host image refresh reads.
+func (s *Service) SetImagePins(f func() []imagepins.DefaultPin) { s.images.pins = f }
+
+// SetImagePull replaces the host image refresh's pull.
+func (s *Service) SetImagePull(f func(ctx context.Context, cli, image string) error) {
+	s.images.pull = f
+}
+
+// AfterListed runs f in a refresh after it last listed a binding's live
+// handles, before it re-checks the gate.
+func (s *Service) AfterListed(f func()) { s.images.listed = f }

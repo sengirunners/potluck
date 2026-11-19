@@ -214,7 +214,8 @@ potluck host ['<invite code>' | <pool>] [--image name@sha256:<64 hex>]... [--lay
 `potluck host` shares with a pool. `potluck host stop [--force]` removes every size it shared; when it removed
 some and left nothing shared, a paused host switch goes back to auto, so the next share lends at once.
 `potluck host status` shows what this machine lends and runs now, and whether it takes new work, then the setup
-checklist below; it changes no setting.
+checklist below; it changes no setting. `potluck host jobs` lists every job this machine ran, with counts and an
+electricity estimate ([menubar.md](menubar.md#jobs-this-mac-ran)).
 
 ### Stages and the setup checklist
 
@@ -224,7 +225,7 @@ A host run goes through five stages and says each as one line on stderr (not und
 | stage | what it is |
 | --- | --- |
 | preflight | everything checked before a download: the layer, the image's fit, the disk, Softnet, the admin step |
-| images | `image N of M`: each pinned image pulled, or reused when it is already here (a pull says its percentage) |
+| images | `image N of M`: each pinned image pulled, or reused when it is already here at its exact digest: on oci, when `docker image inspect --format '{{json .RepoDigests}}' <pin>` lists the pin itself. That is how a host lends a private image it loaded itself without a registry credential: `docker load` keeps the pin only on Docker's containerd image store, from an archive whose index names the pin's repository (a pull says its percentage) |
 | validation | the conformance checks, `size N of M` |
 | join | joining the pool of the invite (only once a size passed), or the pool already joined |
 | usable capacity | sharing the sizes that passed and seeing the pool list them: what the pool can use |
@@ -496,6 +497,41 @@ How pools, invites and machine classes work is in `docs/daemon.md`.
   image's OS or floor from its name.
 - A line may carry `runner_dir=PATH` (below) and `template=NAME`.
 - The pin is checked at acquire like any other.
+
+### After an update: the daemon moves a host to the new pins
+
+A binding keeps the pins it was bound with, so a host lends the images of the build that shared it until something
+rebinds it. The daemon does that itself for its own machine-level box bindings (`runtarget/hostimages.go`), at start
+(an update restarts it) and every 10 minutes after:
+
+- It moves only a binding whose images Potluck chose (`imagepins.Current`). `potluck host` records who chose them in
+  `image_default`: `true` when it lends with no `--image` or `--with`, `named` for `--with NAME`, `false` for the
+  owner's `--image`. A binding from before that key counts as Potluck's when it lends template images beside its
+  first (share adds those only without `--image`) and every one is from a repository `images.pin` publishes on its
+  layer. Each image moves to this build's pin of the same repository, in the same order; a template the binding did
+  not lend is not added. A binding with `image_default=false`, any other value share does not write, or (with no key)
+  any image Potluck does not publish is never touched.
+- It changes the images only. It leaves the binding as it is, and its view names `potluck host --yes` (with
+  `--with NAME` for a named image) for the owner to run, when what share binds from the pins would differ (the
+  binding's `runner_dir` or `image_name` is not the new pins', or a size floor is above the binding's size), when
+  this build no longer publishes one of its repositories, or when the binding is from before the key and lends one
+  image (it may be an owner's `--image` of Potluck's repository). So are a Mac's Tart bindings: their images are
+  tens of GB, pulled when the owner asks.
+- On `oci` it pulls the new images with the binding's `oci_cli`, as `potluck host` does, then asks the driver to
+  describe the binding with them and keeps the isolation check of a bind: a pull, describe or check that fails
+  keeps the old pins.
+- It rebinds only while the binding has no live handles, stopped boxes among them, and no acquire or start has come
+  in since it began listing them (an acquire counts itself in before it reads the binding), so no box is dropped and
+  none boots the old pin unseen. Warm boxes of the old pin are ended, never handed out. The next heartbeat (asked for
+  at once) advertises the new pins.
+- Until then the binding lends the pins it has. The owner's host list carries `images_behind` (what it lends, what
+  this build pins, and why: pulling, waiting for its boxes, a failed pull, or the command for its owner), and
+  `potluck host status` prints a line for each such size.
+
+Conformance does not run again for the move: the driver, layer, runtime and every config key stay as the owner's
+share checked them, and only the digests of Potluck's own images change. `potluck host` run again checks it all.
+The block test's record keys on the images, so after a move `potluck isolation` reports it out of date until the
+next `potluck host` runs it again.
 
 ### Named Mac images
 

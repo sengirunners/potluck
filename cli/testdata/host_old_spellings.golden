@@ -10,6 +10,7 @@
 .sizes[].binding string
 .sizes[].bound bool
 .sizes[].config.cpu string
+.sizes[].config.image_default string
 .sizes[].config.memory string
 .sizes[].config.oci_cli string
 .sizes[].config.oci_runtime string
@@ -34,6 +35,7 @@
 .sizes[].binding string
 .sizes[].bound bool
 .sizes[].config.cpu string
+.sizes[].config.image_default string
 .sizes[].config.memory string
 .sizes[].config.oci_cli string
 .sizes[].config.oci_runtime string

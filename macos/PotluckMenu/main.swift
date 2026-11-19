@@ -1,6 +1,7 @@
 // Potluck's menu bar item (docs/menubar.md). It draws what
 // `potluck --json host status` answers and, on a click, runs the item's
-// arguments (`potluck host set <mode>`). Every word and rule is the potluck
+// arguments (`potluck host set <mode>`), or opens a window drawn from what
+// they answer (`potluck --json host jobs`). Every word and rule is the potluck
 // command's (package menubar); this file only draws and runs.
 
 import AppKit
@@ -20,6 +21,37 @@ struct Menu: Decodable {
     let note: String?
     let cores: String
     let items: [Item]
+    let windows: [Item]?
+}
+
+/// The job window's facts (`potluck --json host jobs`, menubar.JobsView).
+struct JobDay: Decodable {
+    let label: String
+    let jobs: Int
+    let energy: String
+}
+
+struct Energy: Decodable {
+    let line: String
+    let how: String
+}
+
+struct JobLine: Decodable {
+    let when: String
+    let took: String
+    let size: String
+    let pool: String
+    let ended: String
+    let energy: String
+}
+
+struct JobsView: Decodable {
+    let title: String
+    let summary: String
+    let days: [JobDay]
+    let energy: Energy
+    let jobs: [JobLine]
+    let note: String?
 }
 
 struct Status: Decodable {
@@ -213,6 +245,16 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let args = it.args { mi.representedObject = Action(it, args) }
                 menu.addItem(mi)
             }
+            if let ws = m.windows, !ws.isEmpty {
+                menu.addItem(.separator())
+                for w in ws {
+                    let mi = NSMenuItem(title: w.label, action: #selector(openWindow(_:)), keyEquivalent: "")
+                    mi.target = self
+                    mi.toolTip = w.sub
+                    mi.representedObject = w.id
+                    menu.addItem(mi)
+                }
+            }
         } else {
             menu.addItem(line("Potluck", size: 13, bold: true))
             menu.addItem(line(problem ?? "reading…", size: 11, color: .secondaryLabelColor))
@@ -220,6 +262,20 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Potluck Menu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
+    }
+
+    var jobs: JobsWindow?
+
+    @objc func openWindow(_ mi: NSMenuItem) {
+        guard let id = mi.representedObject as? String,
+              let w = status?.menu.windows?.first(where: { $0.id == id }), let args = w.args else { return }
+        switch id {
+        case "jobs":
+            if jobs == nil { jobs = JobsWindow(args: args) }
+            jobs?.show()
+        default:
+            return // a window this build cannot draw
+        }
     }
 
     @objc func click(_ mi: NSMenuItem) {
@@ -245,6 +301,128 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.refresh()
             }
         }
+    }
+}
+
+/// The window of every job this Mac ran: the counts, the electricity
+/// estimate and how it is worked out, the days, then a row per job. All of
+/// it is the command's words; this only lays them out.
+final class JobsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    let args: [String]
+    let window: NSWindow
+    let summary = NSTextField(wrappingLabelWithString: "reading…")
+    let energy = NSTextField(wrappingLabelWithString: "")
+    let how = NSTextField(wrappingLabelWithString: "")
+    let days = NSTextField(wrappingLabelWithString: "")
+    let note = NSTextField(wrappingLabelWithString: "")
+    let table = NSTableView()
+    var rows: [JobLine] = []
+    let columns: [(String, String, CGFloat)] = [("when", "Started", 120), ("took", "Up", 80), ("size", "Size", 190),
+                                                ("pool", "Pool", 120), ("ended", "Ended", 220), ("energy", "Electricity", 90)]
+
+    init(args: [String]) {
+        self.args = args
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 560), styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+        super.init()
+        window.title = "Jobs this Mac ran"
+        window.isReleasedWhenClosed = false
+        summary.font = .boldSystemFont(ofSize: 13)
+        for f in [how, note] { f.font = .systemFont(ofSize: 11); f.textColor = .secondaryLabelColor }
+        days.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        for (id, title, width) in columns {
+            let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+            c.title = title
+            c.width = width
+            table.addTableColumn(c)
+        }
+        table.dataSource = self
+        table.delegate = self
+        table.usesAlternatingRowBackgroundColors = true
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        let refresh = NSButton(title: "Refresh", target: self, action: #selector(load))
+        let stack = NSStackView(views: [summary, energy, how, days, note, scroll, refresh])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let content = NSView()
+        content.addSubview(stack)
+        window.contentView = content
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor), stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor), stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -32),
+            scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
+        ])
+        for f in [summary, energy, how, days, note] { f.preferredMaxLayoutWidth = 820 }
+    }
+
+    func show() {
+        window.center()
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        load()
+    }
+
+    @objc func load() {
+        let args = self.args
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (code, out, err) = runPotluck(args)
+            var v: JobsView?
+            var why: String?
+            if code == 0 {
+                do { v = try JSONDecoder().decode(JobsView.self, from: out) } catch { why = "potluck host jobs: \(error.localizedDescription)" }
+            } else {
+                why = err.isEmpty ? "potluck host jobs exited \(code)" : err
+            }
+            DispatchQueue.main.async { self.draw(v, why) }
+        }
+    }
+
+    func draw(_ v: JobsView?, _ why: String?) {
+        guard let v = v else {
+            note.stringValue = "not current: " + (why ?? "no answer")
+            note.textColor = .systemRed
+            return
+        }
+        summary.stringValue = v.summary
+        energy.stringValue = v.energy.line
+        how.stringValue = v.energy.how
+        let busy = v.days.filter { $0.jobs > 0 }
+        days.stringValue = busy.isEmpty ? "No jobs in the last two weeks." :
+            "Jobs per day:\n" + busy.map { "  \($0.label.padding(toLength: 12, withPad: " ", startingAt: 0)) \($0.jobs), \($0.energy)" }.joined(separator: "\n")
+        note.stringValue = v.note ?? ""
+        note.textColor = .secondaryLabelColor
+        rows = v.jobs
+        table.reloadData()
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let id = tableColumn?.identifier.rawValue, row < rows.count else { return nil }
+        let j = rows[row]
+        let text: String
+        switch id {
+        case "when": text = j.when
+        case "took": text = j.took
+        case "size": text = j.size
+        case "pool": text = j.pool
+        case "ended": text = j.ended
+        default: text = j.energy
+        }
+        let f = (tableView.makeView(withIdentifier: NSUserInterfaceItemIdentifier("cell"), owner: nil) as? NSTextField) ?? {
+            let f = NSTextField(labelWithString: "")
+            f.identifier = NSUserInterfaceItemIdentifier("cell")
+            f.lineBreakMode = .byTruncatingTail
+            return f
+        }()
+        f.stringValue = text
+        f.toolTip = text
+        return f
     }
 }
 

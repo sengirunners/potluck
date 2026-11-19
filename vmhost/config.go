@@ -91,6 +91,20 @@ type config struct {
 
 var relDir = regexp.MustCompile(`^[A-Za-z0-9._/-]*$`)
 
+// StateDir is the state directory a binding's config names, as the driver
+// reads it: state_dir, else ~/.potluck-driver-tart (or an existing
+// ~/.zm-run-tart).
+func StateDir(m map[string]string) (string, error) {
+	if d := m["state_dir"]; d != "" {
+		return d, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return protocol.DriverStateDir(home, "tart"), nil
+}
+
 func parseConfig(m map[string]string) (config, error) {
 	c := config{Target: m["target"], Kind: m["kind"], VM: m["vm"], Image: m["image"], Tart: m["tart"], StateDir: m["state_dir"],
 		Remote: m["remote"], ScriptsDir: strings.Trim(m["scripts_dir"], "/"), Softnet: true, SoftnetPath: m["softnet_path"]}
@@ -103,13 +117,11 @@ func parseConfig(m map[string]string) (config, error) {
 	if c.Tart == "" {
 		c.Tart = "tart"
 	}
-	if c.StateDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return c, err
-		}
-		c.StateDir = protocol.DriverStateDir(home, "tart") // ~/.potluck-driver-tart, or an existing ~/.zm-run-tart
+	sd, err := StateDir(m)
+	if err != nil {
+		return c, err
 	}
+	c.StateDir = sd
 	var bad []string
 	if c.SoftnetPath != "" && (!filepath.IsAbs(c.SoftnetPath) || filepath.Base(c.SoftnetPath) != "softnet" || strings.ContainsRune(c.SoftnetPath, os.PathListSeparator)) {
 		bad = append(bad, "softnet_path must be an absolute path to an executable named softnet")

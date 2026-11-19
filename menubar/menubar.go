@@ -132,6 +132,10 @@ type Menu struct {
 	// Cores is one rune per core: '●' in use, '○' lent and free, '·' kept.
 	Cores string `json:"cores"`
 	Items []Item `json:"items"`
+	// Windows are items below the switch that each open a window: the
+	// app runs Args and draws the JSON answer as the window named by ID
+	// ("jobs": a JobsView).
+	Windows []Item `json:"windows,omitempty"`
 }
 
 // Status is `potluck host status`'s answer. Refused, when set, is the
@@ -149,6 +153,20 @@ type Status struct {
 	Background *Background `json:"background,omitempty"`
 	// Setup is the setup checklist and the one thing to do next.
 	Setup Setup `json:"setup"`
+	// ImagesBehind is a line per shared size that lends other images than
+	// the daemon's build pins, and why (computeapi.ImagesBehind).
+	ImagesBehind []string `json:"images_behind,omitempty"`
+}
+
+// imagesBehind is Status.ImagesBehind of targets.
+func imagesBehind(targets []computeapi.RunTargetView) []string {
+	var out []string
+	for _, t := range targets {
+		if b := t.ImagesBehind; b != nil {
+			out = append(out, t.Name+" lends other images than this version pins ("+strings.Join(b.Lends, ", ")+", not "+strings.Join(b.Current, ", ")+"): "+b.Why)
+		}
+	}
+	return out
 }
 
 // Refused is the newest admission refusal still standing now on any of the
@@ -247,6 +265,13 @@ func Build(f Facts) Status {
 	case f.Background != nil && f.Background.State == "running":
 		m.Note = join(m.Note, "sharing goes on in the background: "+f.Background.Last)
 	}
+	if st.ImagesBehind = imagesBehind(f.Targets); len(st.ImagesBehind) > 0 {
+		lend := " lend"
+		if len(st.ImagesBehind) == 1 {
+			lend = " lends"
+		}
+		m.Note = join(m.Note, plural(len(st.ImagesBehind), "size")+lend+" other images than this version pins (host status says why)")
+	}
 	if u := clock(st.Until, loc); u != "" && st.Mode != protocol.HostAuto {
 		m.Note = join(m.Note, "until "+u+", then back to your rules")
 	}
@@ -263,6 +288,8 @@ func Build(f Facts) Status {
 	if stop := &m.Items[2]; stop.Args != nil && l.Jobs > 0 {
 		stop.Confirm = fmt.Sprintf("End %s now? Their work is lost.", plural(l.Jobs, "running job"))
 	}
+	m.Windows = []Item{{ID: "jobs", Label: "Jobs this Mac ran…", Sub: "when, how long, counts and electricity",
+		Args: []string{"--json", "host", "jobs"}}}
 	st.Setup = buildSetup(f, st)
 	return st
 }

@@ -66,6 +66,10 @@ func (d *drv) takeWarm(key string, ttl int, a warmAcquire) (record, bool) {
 		if !r.Warm || r.State != stReady || r.Target != d.cfg.Target || !alive(r.Supervisor) {
 			continue
 		}
+		if r.Image != d.cfg.Image { // booted before a rebind moved the pin: its digest is off the binding's pins
+			d.endWarm(r, warmOffPin)
+			continue
+		}
 		if !d.warmShelfMatches(r, want) {
 			continue
 		}
@@ -99,6 +103,7 @@ func (d *drv) fillWarm() {
 	if d.cfg.Kind != "box" {
 		return
 	}
+	d.endOffPinWarm()
 	d.replaceStaleWarm()
 	n, _ := d.warmLive()
 	for ; n > d.cfg.Warm && d.preemptWarm(""); n-- { // the owner lowered warm
@@ -141,6 +146,22 @@ func (d *drv) fillWarm() {
 		}
 		r.Supervisor = pid
 		_ = d.st.save(r)
+	}
+}
+
+// warmOffPin is why a warm box booted on an image its binding no longer lends ended.
+const warmOffPin = "the binding's image changed since it booted"
+
+// endOffPinWarm ends each live warm box of this binding booted on an image
+// other than the binding's default now: a rebind moved the pin, and a box
+// handed out from the old one would boot a digest none of the binding's pins
+// name, and a pool's authority does not check a plain acquire's digest.
+// Lock held.
+func (d *drv) endOffPinWarm() {
+	for _, r := range d.st.all() {
+		if r.Warm && r.live() && r.Target == d.cfg.Target && r.Image != d.cfg.Image {
+			d.endWarm(r, warmOffPin)
+		}
 	}
 }
 

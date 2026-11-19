@@ -61,7 +61,7 @@ func earlierImage(t computeapi.RunTarget) (name string, known bool) {
 	if !known {
 		pin, known = imagepins.PinForRepository(t.Images[0])
 	}
-	if known && t.Config["image_default"] == "true" {
+	if known && t.Config[imagepins.ImageDefaultKey] == imagepins.ImageDefault {
 		return "", true
 	}
 	name = t.Config["image_name"]

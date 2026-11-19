@@ -35,6 +35,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// (teamlink started first), not at the first host call, which may come
 	// after a new join under an old slug (hostkeys.go).
 	_ = s.hostReady()
+	go s.refreshHostImagesLoop(ctx) // hostimages.go
 	go func() {
 		s.Sweep(ctx)
 		t := time.NewTicker(sweepEvery)

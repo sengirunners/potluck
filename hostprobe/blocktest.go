@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sengirunners/potluck/imagepins"
 )
 
 // The block test (potluck isolation test, docs/isolation.md) proves a box
@@ -84,7 +86,7 @@ type BlockCheck struct {
 // Check to this list.
 func bindOnly(k string) bool {
 	_, slot := OneAtATimeConfig[k]
-	return slot || k == "runner_dir" || k == "reclaim_idle_s" || k == "image_name" || k == "image_default"
+	return slot || k == "runner_dir" || k == "reclaim_idle_s" || k == "image_name" || k == imagepins.ImageDefaultKey
 }
 
 // suiteConfig is a bound box binding's config as its conformance run takes

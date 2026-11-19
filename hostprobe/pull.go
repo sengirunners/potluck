@@ -3,10 +3,12 @@ package hostprobe
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -145,4 +147,27 @@ func (l *lineWriter) flush() {
 		l.emit(l.held)
 		l.held = ""
 	}
+}
+
+// ociHeldWait bounds the look at the engine's own images before a pull.
+const ociHeldWait = 30 * time.Second
+
+// ociHolds reports whether the OCI engine already holds image, a
+// name@sha256 pin, under exactly that name and digest. Asked to pull a
+// digest it holds, the engine still asks the registry first, so a private
+// image loaded by other means (a docker load from an archive the host's
+// owner fetched) would fail to pull although nothing needs fetching. A
+// digest names the bytes, so what the engine holds under it is the image.
+func ociHolds(ctx context.Context, run Runner, cli, image string) bool {
+	ctx, cancel := context.WithTimeout(ctx, ociHeldWait)
+	defer cancel()
+	r, err := run.Run(ctx, cli, "image", "inspect", "--format", "{{json .RepoDigests}}", "--", image)
+	if err != nil || r.Exit != 0 {
+		return false
+	}
+	var digests []string
+	if json.Unmarshal([]byte(strings.TrimSpace(r.Stdout)), &digests) != nil {
+		return false
+	}
+	return slices.Contains(digests, image)
 }

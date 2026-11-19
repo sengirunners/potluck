@@ -570,6 +570,8 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		base["state_dir"] = p
 	}
 	var pull func(image string) []string
+	// held: the engine already holds this exact pin, so share takes it without a pull.
+	var held func(image string) bool
 	if o.NetMbitSet && layer.Name != "oci" { // never accepted and ignored (zm-eakh.12.53)
 		return res, fmt.Errorf("--net-mbit is for the oci layer: it caps downloads on Potluck's own network %s, which a %s box is not on (a %s box is a full VM on its layer's own network: shape that yourself)",
 			BoxNet, layer.Name, layer.Name)
@@ -658,6 +660,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			o.NetForbid = forbidForward(o, &res)
 		}
 		pull = func(im string) []string { return []string{cli, "pull", "--", im} }
+		held = func(im string) bool { return ociHolds(ctx, run, cli, im) }
 	case "tart":
 		if layer.CLI != "" {
 			base["tart"] = layer.CLI
@@ -795,8 +798,15 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 				bound[k] = v
 			}
 		}
-		if res.DefaultImage {
-			bound["image_default"] = "true"
+		// Who chose the images: the daemon moves Potluck's own pins to a
+		// newer build's (imagepins.Current), never the owner's --image.
+		switch {
+		case res.DefaultImage:
+			bound[imagepins.ImageDefaultKey] = imagepins.ImageDefault
+		case res.NamedImage != "":
+			bound[imagepins.ImageDefaultKey] = imagepins.ImageNamed
+		case len(o.Images) > 0:
+			bound[imagepins.ImageDefaultKey] = imagepins.ImageOwners
 		}
 		if p, ok := PinForImage(res.Images[0]); ok && p.Name != "" {
 			bound["image_name"] = p.Name
@@ -857,6 +867,11 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 				continue
 			}
 			listed = err == nil
+		}
+		if held != nil && held(res.Images[i]) {
+			say(o.Stages.Begin(hostsetup.Images, of+"reuse "+res.Images[i]+" (already here)"))
+			pulled, reused = append(pulled, res.Images[i]), reused+1
+			continue
 		}
 		say(o.Stages.Begin(hostsetup.Images, of+p.What))
 		pullOptions := o

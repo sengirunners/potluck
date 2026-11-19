@@ -61,6 +61,7 @@ starts the daemon.`,
 				sw += "; the host's admission controller refuses new work now (above)"
 			}
 			lines = append(lines, sw)
+			lines = append(lines, st.ImagesBehind...)
 			a.say("%s", strings.Join(lines, "\n"))
 			a.printSetup(st.Setup)
 			return nil

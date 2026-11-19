@@ -71,6 +71,8 @@ type Service struct {
 	progressCaps sync.Map // project, binding, driver, host -> capsSeen
 	// host is this machine's shared bindings (host.go).
 	host hostState
+	// images moves them to this build's image pins (hostimages.go).
+	images hostImages
 	// endMu guards ends and boxChecks, the OnEnd and OnBoxAcquire
 	// subscribers.
 	endMu     sync.Mutex

@@ -11,6 +11,8 @@ Lending 6 of 12 cores
 ✓ Keep lending
   Wind down        finish jobs, take no new ones
   Stop now         end jobs now
+─────────────
+  Jobs this Mac ran…
 ```
 
 | item | runs | what happens |
@@ -32,6 +34,39 @@ A closed switch is a paused Mac (`potluck host pause`, or Stop now): the menu sa
 Keep lending reads "Resume lending" (it runs the same `host set auto`, as `potluck host resume` does). While a
 `potluck host --detach` run goes on, the note says so with its last line; `host status --json` carries it as
 `background` (`running`, or `ended` with the last run's last line).
+
+A size that lends other images than the daemon's build pins (the daemon moves it after an update,
+[hosts.md](hosts.md#after-an-update-the-daemon-moves-a-host-to-the-new-pins)) adds a note, "1 size lends other images
+than this version pins"; `host status` prints a line per size with why, and `--json` carries them as
+`images_behind`.
+
+## Jobs this Mac ran
+
+"Jobs this Mac ran…" opens a window that lists every job this Mac's sizes have run, newest first: when it
+started, how long it was up, its size (cores and memory), the pool it came from and how it ended (finished,
+reached its time limit, ended early to give the Mac back, lost, did not start, or running). Above the list:
+
+- how many are running now, how many started in the last 12 hours, and how many in all;
+- how many started on each of the last 14 days;
+- an electricity estimate for the running jobs, the last 12 hours and all of them, with how it is worked out.
+
+The estimate is each job's cores × the hours it was up × 5 W a core (about what one busy Apple silicon core draws).
+It assumes the job kept its cores busy the whole time, so real use is likely lower, and it leaves out what the Mac
+draws anyway. A job whose size keeps the image's own core count has no estimate, and the window says how many those
+are. A job counts on the day, and in the 12 hours, it started in.
+
+The window runs `potluck --json host jobs` when it opens and on Refresh (`potluck host jobs` prints the same as
+text). That command reads each box size's state directory, from this Mac's bindings file (`run_targets.toml` in the
+home) and, when the daemon answers, from the pools this Mac runs; it needs no daemon. A driver keeps a job's record
+for a week after it ends; when it forgets the record it writes the job's line (when, how long, size, how it ended,
+never what the job was sent or printed: a start that failed keeps only the path of its redacted report) to
+`jobs.jsonl` in the state directory, which keeps about 8 MiB (some tens of thousands of jobs) and drops the oldest
+half past that. A job whose driver's supervisor is gone (say the Mac restarted) is listed as lost, counted to the
+last its files show of it, even before a daemon's sweep records that. The pool's name comes from the host's handle
+ledger (`host_handles.json`, which forgets a handle 30 days after a call last used it) and the daemon's list of
+pools, which it asks for at most 8 seconds; a job started on this Mac itself says "this Mac", and an older job the
+ledger no longer holds says "not known". The words, counts and estimate are Go package `menubar` (`BuildJobs`, with
+tests).
 
 ## Where it gets its facts
 

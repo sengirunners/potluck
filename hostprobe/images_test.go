@@ -2,7 +2,6 @@ package hostprobe
 
 import (
 	"context"
-	"github.com/sengirunners/potluck/computeclient"
 	"os"
 	"regexp"
 	"slices"
@@ -10,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/computeclient"
+	"github.com/sengirunners/potluck/imagepins"
 )
 
 // withPins swaps zm's default images for the test's.
@@ -157,6 +158,10 @@ func TestShareDefaultImagePerLayer(t *testing.T) {
 		if len(res.Images) != 1 || res.Images[0] != c.want || res.DefaultImage != c.dflt || len(res.Pulls) != 1 ||
 			strings.Join(res.Pulls[0].Command, " ") != c.pull || len(run.calls) != 0 {
 			t.Errorf("%s: images %v default %v pulls %+v", c.name, res.Images, res.DefaultImage, res.Pulls)
+		}
+		// The binding says who chose its images, so the daemon moves only Potluck's own to a newer build's pins.
+		if got, want := res.Sizes[0].Config[imagepins.ImageDefaultKey], map[bool]string{true: "true", false: "false"}[c.dflt]; got != want {
+			t.Errorf("%s: binds %s=%q, want %q", c.name, imagepins.ImageDefaultKey, got, want)
 		}
 		if conf := strings.Join(res.Sizes[0].Conformance, " "); !strings.Contains(conf, "--config images="+c.want+" ") &&
 			!strings.HasSuffix(conf, "--config images="+c.want) {

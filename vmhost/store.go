@@ -147,7 +147,10 @@ func (s store) save(r record) error {
 	return os.Rename(p+".tmp", p)
 }
 
+// remove forgets r and what it left. Lock held. A job's record leaves its
+// line in the job archive first (jobs.go), so the lender's list keeps it.
 func (s store) remove(r record) {
+	s.archive(r)
 	_ = os.Remove(s.file(r.ID))
 	_ = os.Remove(s.beatFile(r.ID)) // persist.go
 	_ = os.Remove(filepath.Join(s.dir, "logs", r.ID+".log"))

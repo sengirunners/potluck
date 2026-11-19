@@ -292,14 +292,21 @@ func (d *drv) spend(r record) map[string]any {
 	if end.IsZero() {
 		end = r.asOf
 	}
-	ms := end.Sub(r.Start).Milliseconds()
-	if r.Persist { // only its time up: a stopped box is not billed (persist.go)
-		ms = r.RanMs
-		if !r.Seg.IsZero() && end.After(r.Seg) { // as stoppedAt counts it
-			ms += end.Sub(r.Seg).Milliseconds()
-		}
+	return map[string]any{"unit": costUnit, "amount": float64(r.upMs(end)) / 60000}
+}
+
+// upMs is how many milliseconds r was up from its start to end: for a
+// persistent box only its time up, since a stopped box is not billed
+// (persist.go). The spend and the lender's job list (jobs.go) both count it.
+func (r record) upMs(end time.Time) int64 {
+	if !r.Persist {
+		return end.Sub(r.Start).Milliseconds()
 	}
-	return map[string]any{"unit": costUnit, "amount": float64(ms) / 60000}
+	ms := r.RanMs
+	if !r.Seg.IsZero() && end.After(r.Seg) { // as stoppedAt counts it
+		ms += end.Sub(r.Seg).Milliseconds()
+	}
+	return ms
 }
 
 func (d *drv) answer(r record) map[string]any {

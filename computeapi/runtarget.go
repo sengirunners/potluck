@@ -232,6 +232,21 @@ type RunTargetView struct {
 	// Stopped are the handles in Live that are stopped (a kept disk, no
 	// VM running), so they hold no cores.
 	Stopped []string `json:"stopped,omitempty"`
+	// ImagesBehind is set on a machine-level box binding that lends other
+	// digests of Potluck's own images than the daemon's build pins (the
+	// owner's list, host=1), until the daemon rebinds it.
+	ImagesBehind *ImagesBehind `json:"images_behind,omitempty"`
+}
+
+// ImagesBehind is a binding that lends other pins than its daemon's build:
+// what it lends, what this build pins, and why it still lends what it has
+// (being pulled, waiting for its boxes to end, a failed pull, or a move only
+// its owner's run of host makes: a Mac's images, or one that would change
+// more than the images).
+type ImagesBehind struct {
+	Lends   []string `json:"lends"`
+	Current []string `json:"current"`
+	Why     string   `json:"why"`
 }
 
 // RunTargetClass is an isolation class.
