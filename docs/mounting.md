@@ -15,7 +15,8 @@ type Host struct {
 	RunnersRoute func(ctx context.Context, home string, st runners.Setup) (string, error) // optional
 	Stdin  io.Reader
 	Stdout, Stderr io.Writer
-	AfterLend *AfterLend // optional
+	AfterLend *AfterLend                            // optional
+	AfterJoin func(w io.Writer, r api.JoinResponse) // optional
 }
 
 type AfterLend struct {
@@ -38,7 +39,8 @@ var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade"}
   --detach`). One exception: the commands `invite` prints for the friend who gets the code are the `potluck`
   program's (`potluck join '<code>'`), since a friend's machine needs only Potluck, with the host's spelling of
   the same command beside them, whole on one line (`supper pool join '<code>'`; `friendCmd`, `otherSpelling` in
-  `cli/pool.go`).
+  `cli/pool_members.go`). A team project's invite (`invite <project> --as <name>`) prints the host's own spelling,
+  since a member of it uses the host program there.
 - **JSON** and **Pool** read the host's own global flags. The commands define no persistent flags, so they sit
   under any parent without adding flags to it. Pool, when given, is applied to a copy of the client.
 - **Client** is the host's client for this machine's daemon and its client config, whose home the commands read and
@@ -55,6 +57,8 @@ var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade"}
   shared; never in a dry run), such as turning on its daily update. It runs once per run, its words on stdout (stderr
   under `--json`). `Skip` adds that flag to `host` (and its old spelling `host share`); given, the step does not run.
   Potluck knows nothing else of it.
+- **AfterJoin**, when set, is the host program's next step after `join` joined a team project that is not one of a
+  pool's areas (what to do there in that program), its words to stdout. It is not called under `--json`.
 - **Report** prints an error a command returns as `potluck` does, on the host's stderr and in its words (an API
   error as JSON with `--json`; Potluck's hints for a daemon that is not running or a tailnet name that is taken), and returns
   the exit code: a sandbox command's own, 3 when the daemon is not running, 2 for a usage error, else 1.
@@ -69,7 +73,7 @@ state). A host can add the same command at two places, built twice with two pref
 
 ## What a host gets
 
-Every top-level command of `potluck` except `ProgramCommands`: `create`, `invite`, `join`, `leave`, `forget`,
+Every top-level command of `potluck` except `ProgramCommands`: `create`, `invite` (with `ls`, `rm`), `join`, `leave`, `forget`,
 `remotes`, `doctor`, `isolation`, `host` (with `status`, `set`, `pause`, `resume`, `stop`, `shelf`), `ci`, `sandbox`, `usage`,
 `sealing`, `run`, `agent-task`, `agent-runner`, `runners`, `secrets` and `driver`.
 

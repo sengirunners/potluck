@@ -149,7 +149,7 @@ func pastedFlags(owner *cobra.Command) {
 // one looks like and never repeating it: only its secret (the last part,
 // what a copy of a line's end keeps), a part missing, or damage. invite is
 // the pool owner's command that prints a new one.
-func (a *app) checkInvite(arg, invite string) error {
+func (a *app) checkInvite(arg, newCode string) error {
 	s := strings.TrimSpace(arg)
 	if s == "" || !project.LooksLikeJoinCode(s) { // none: the only pool
 		return nil
@@ -176,5 +176,5 @@ func (a *app) checkInvite(arg, invite string) error {
 		why = "this invite is damaged: it has more than the 3 parts a whole one has, joined by ':'; " + whole
 	}
 	return exitWith{2, api.Errorf(api.CodeBadRequest, "%s. Nothing was downloaded or changed, and the invite is not spent %s", why, notShown).
-		WithHint("copy the whole invite again, quotes included, as one line; or ask the pool's owner for a new one: " + a.cmd(invite))}
+		WithHint("copy the whole invite again, quotes included, as one line; or ask the owner for a new one: " + newCode)}
 }

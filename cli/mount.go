@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/runners"
@@ -63,6 +64,11 @@ type Host struct {
 	// machine is lent: host runs it once a run shared at least one size
 	// (never in a dry run), such as installing the program's daily update.
 	AfterLend *AfterLend
+	// AfterJoin, when set, is the host program's next step after join
+	// joined a team project that is not one of a pool's areas (what to do
+	// there in that program, such as its work), its words to w. It is not
+	// called under --json.
+	AfterJoin func(w io.Writer, r api.JoinResponse)
 }
 
 // AfterLend is a host program's step after a host run lent this machine,

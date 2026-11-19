@@ -40,7 +40,7 @@ func TestKitMessagesInPotluckWords(t *testing.T) {
 	}
 	// Every zm-only command named in kit's messages is in Verbs (as none),
 	// so a message never names a potluck command that does not exist.
-	for _, w := range []string{"tunnel setup", "tailnet up", "token mint", "project use", "invite ls", "machine-class"} {
+	for _, w := range []string{"tunnel setup", "tailnet up", "token mint", "project use", "outbox", "machine-class"} {
 		if v, ok := Verbs[w]; !ok || v != "" {
 			t.Errorf("Verbs[%q] = %q, %v", w, v, ok)
 		}

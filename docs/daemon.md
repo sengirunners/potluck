@@ -905,7 +905,17 @@ commands wrap the steps above and keep no state of their own.
   and take secrets; a `public` host's only when named, never with secrets), and an area guest's machine with a chosen
   class is listed (it sends no machine numbers).
 - `potluck join '<link or code>'` joins; a link is read as the code inside it (`kit/project/joinlink.go`).
+- `potluck invite ls` lists the invites this machine made (live, redeemed, expired; a redeemed one's machine, and
+  whether it left); `potluck invite rm <id>` removes one (a machine that redeemed it keeps its token).
 - `potluck host` is described in `docs/hosts.md`.
+
+The same commands work on any team project, not only a pool (`cli/team.go`): `potluck invite <project>[/<area>]
+--as <name> [--role member|guest] [--trust trusted|public] [--allow-tagged]` admits a machine there as that
+identity; `potluck join <project>` joins one with no code where the program that runs it grants GitHub accounts and
+yours has a grant (Potluck alone makes none; the machine that runs it asks GitHub to admit you; `<project>/<area> --from https://<host>#<fingerprint>` joins one area over https), and
+`--path` records your checkouts of it. A pool's invite (no `--as`) into a team project that is not a pool is
+refused, since it would add a pool's area there. `potluck remotes` shows a remote's local copy when its program
+keeps one.
 
 ## Clients
 

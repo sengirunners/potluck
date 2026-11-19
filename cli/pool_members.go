@@ -1,7 +1,9 @@
 package cli
 
 // A pool's members: invite, join, leave and remotes. The pool itself (create,
-// its areas, host and host stop) is pool.go.
+// its areas, host and host stop) is pool.go; the same commands' forms for
+// any team project (invite --as, invite ls and rm, a join by name) are
+// team.go.
 
 import (
 	"context"
@@ -22,12 +24,12 @@ import (
 )
 
 func (a *app) inviteCmd() *cobra.Command {
-	var host bool
-	var trust, via string
+	var host, allowTagged bool
+	var trust, via, as, role string
 	var ttl time.Duration
 	var images []string
 	cmd := &cobra.Command{
-		Use:   "invite <name> [--host [--trust public]]",
+		Use:   "invite <name> [--host [--trust public]] | <project>[/<area>] --as <name>",
 		Short: "Print a one-time invite code for a friend: to run sandboxes, or with --host to share a machine",
 		Long: `Without --host the friend joins the pool's team and runs sandboxes on its
 machines. With --host they join to share a machine (` + a.cmd("host") + `), and see
@@ -39,11 +41,35 @@ machine cannot change it. Codes work once and expire (--ttl). Run it on the
 machine that runs the pool, or on any machine of yours that joined it if
 you own the pool there.
 
+With --as the argument is a team project, or one of its areas, instead of
+a friend's name: the code admits a machine there as the identity --as
+names, with --role (member or guest) and, with --trust, how far that
+machine is trusted (default: trusted for a member of the whole project,
+public otherwise). A pool is a team project too; its own invites are the
+form without --as.
+
 The code is a secret until it is used: send it to that friend alone, with
 the one line printed for them (the whole code, in single quotes), never to
 a group chat or a support thread.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if as != "" {
+				if host || len(images) > 0 {
+					return exitWith{2, errors.New("--as invites into a team project; --host and --image are a pool's: leave them out, or leave out --as")}
+				}
+				if role == "" {
+					role = api.RoleMember
+				}
+				switch trust {
+				case "", api.MachineTrusted, api.MachinePublic:
+				default:
+					return fmt.Errorf("--trust is trusted or public, not %q", trust)
+				}
+				return a.inviteProject(cmd.Context(), projectInvite{where: args[0], as: as, role: role, trust: trust, via: via, ttl: ttl, allowTagged: allowTagged})
+			}
+			if role != "" {
+				return exitWith{2, errors.New("--role goes with --as: a pool's invite makes a member, or with --host a machine that shares")}
+			}
 			if trust != "" && !host {
 				return errors.New("--trust goes with --host: it is how far you trust the machine they share")
 			}
@@ -64,10 +90,13 @@ a group chat or a support thread.`,
 			if err != nil {
 				return err
 			}
+			if err := a.isPool(cmd.Context(), c, args[0]); err != nil {
+				return err
+			}
 			// AddArea: a pool made before it had both areas is completed
 			// here, where the invite needs one.
 			req := api.InviteRequest{Project: c.Project, Area: TeamArea, As: args[0], Role: api.RoleMember, Via: via,
-				TTLSeconds: int64(ttl / time.Second), AddArea: true}
+				TTLSeconds: int64(ttl / time.Second), AddArea: true, AllowTagged: allowTagged}
 			if host {
 				req.Area, req.Role, req.Class = HostsArea, "guest", trust
 				if req.Class == "" {
@@ -108,11 +137,37 @@ a group chat or a support thread.`,
 		},
 	}
 	cmd.Flags().BoolVar(&host, "host", false, "the friend shares a machine with the pool")
-	cmd.Flags().StringVar(&trust, "trust", "", "with --host: trusted (default) or public")
+	cmd.Flags().StringVar(&trust, "trust", "", "with --host: trusted (default) or public; with --as: trusted or public (default: trusted for a member of the whole project, public otherwise)")
 	cmd.Flags().StringVar(&via, "via", "", "tailnet or tunnel (default: the tailnet when it runs)")
 	cmd.Flags().DurationVar(&ttl, "ttl", 24*time.Hour, "how long the code works")
 	cmd.Flags().StringArrayVar(&images, "image", nil, "with --host: the image, name@sha256:<digest>, their machine shares, written into the command printed for them (repeat; default: none, so it shares the default)")
+	cmd.Flags().StringVar(&as, "as", "", "the argument is a team project (or <project>/<area>): the identity the machine joins it as (made when it redeems the code, if new)")
+	cmd.Flags().StringVar(&role, "role", "", "with --as: member (default) or guest")
+	cmd.Flags().BoolVar(&allowTagged, "allow-tagged", false, "a tagged tailnet node (a CI or farm machine) may redeem the code")
+	cmd.AddCommand(a.inviteSubCmds()...)
 	return cmd
+}
+
+// isPool refuses a pool invite into a team project that is not a pool (it
+// has neither of a pool's areas): one that would make a pool's area there.
+// The project form (--as) is how to invite into it. A project with no
+// record yet is the invite's to make or refuse; any other error stops it.
+func (a *app) isPool(ctx context.Context, c *client.Client, name string) error {
+	p, err := c.GetProject(ctx, c.Project)
+	var e *api.Error
+	if errors.As(err, &e) && e.Code == api.CodeNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, x := range p.Areas {
+		if x.Name == TeamArea || x.Name == HostsArea {
+			return nil
+		}
+	}
+	return exitWith{2, api.Errorf(api.CodeBadRequest, "%s is a team project, not a pool (it has no %s or %s area)", p.Slug, TeamArea, HostsArea).
+		WithHint("invite a machine into it as an identity: " + a.cmd("invite "+p.Slug+" --as "+shellQuote(name)))}
 }
 
 // inviteAnswer is invite's --json: the pool's answer and, for a host with a
@@ -185,78 +240,127 @@ func tailnetStep(name, code string) string {
 }
 
 func (a *app) joinCmd() *cobra.Command {
-	var authKey string
+	var f joinFlags
 	cmd := &cobra.Command{
-		Use:   "join '<invite link or code>'",
+		Use:   "join '<invite link or code>' | <project>[/<area>]",
 		Short: "Join a pool with the invite link or code its owner sent",
 		Long: `Join takes the invite whole, as one word in single quotes, as the pool's
 owner's ` + a.cmd("invite") + ` printed it. An invite cut short or changed by a copy
 is refused before anything runs, saying what is wrong but never repeating
-it: an invite is a secret until it is used.`,
+it: an invite is a secret until it is used.
+
+A team project's name instead of an invite joins it with no code, where
+the program that runs it grants GitHub accounts and yours has a grant
+there (Potluck alone makes no such grants): that machine asks GitHub to
+admit you (open the link printed and enter the code). <project>/<area>
+with --from joins one area of it, over https too.
+
+--json prints what was joined (the remote); a join by name that needs
+you first prints that first answer instead (the machines found, or the
+code to enter). A tailnet login is waited for either way, its link on
+stderr.`,
 		Args: a.pastedArgs(1, 1, "one argument, the invite link or code in single quotes"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := a.checkInvite(args[0], "invite <you>"); err != nil {
+			req, err := a.joinRequest(args[0], f)
+			if err != nil {
 				return err
 			}
 			c, _, err := a.client()
 			if err != nil {
 				return err
 			}
-			rem, err := a.poolJoin(cmd.Context(), c, args[0], authKey)
+			r, err := a.join(cmd.Context(), c, req)
 			if err != nil {
 				return err
 			}
+			if r.Remote == nil {
+				if a.asJSON() { // a join by name waiting for a person: the first answer
+					return a.printJSON(r)
+				}
+				return errors.New("nothing joined")
+			}
+			rem := *r.Remote
 			if a.asJSON() {
 				return a.printJSON(rem)
 			}
-			if rem.Cap.Area == HostsArea {
+			switch rem.Cap.Area {
+			case HostsArea:
 				a.say("next: %s, to share this machine with %s", a.cmd("host"), rem.Project.Slug)
-				return nil
+			case TeamArea:
+				a.printPoolMachines(cmd.Context(), inPool(c, rem.Project.Slug))
+				a.say("next: %s, then %s", a.cmd("sandbox create"), a.cmd("sandbox exec <sandbox> -- uname -a"))
+			default:
+				a.projectJoined(r)
 			}
-			a.printPoolMachines(cmd.Context(), inPool(c, rem.Project.Slug))
-			a.say("next: %s, then %s", a.cmd("sandbox create"), a.cmd("sandbox exec <sandbox> -- uname -a"))
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&authKey, "auth-key", "", "a Tailscale auth key for this machine's node (else a login URL is printed); never saved")
+	f.add(cmd)
 	pastedFlags(cmd)
 	return cmd
 }
 
-// poolJoin redeems an invite code.
+// join sends req until it is done (joinUntilDone) and says what it joined.
+// Under --json a join by name answers as soon as it needs a person.
+func (a *app) join(ctx context.Context, c *client.Client, req api.JoinRequest) (api.JoinResponse, error) {
+	r, err := a.joinUntilDone(ctx, c, req)
+	var bad *api.Error
+	if errors.As(err, &bad) && bad.Code == project.ErrBadCode.Code && bad.Message == project.ErrBadCode.Message {
+		// kit's hint names only a team project's invite; a code may be a pool's.
+		return r, bad.WithHint("ask the owner for a new code: " + a.newCode())
+	}
+	if err != nil || r.Remote == nil || a.asJSON() {
+		return r, err
+	}
+	x := r.Remote
+	kind, where := "project", x.Project.Slug
+	if x.Cap.Area == TeamArea || x.Cap.Area == HostsArea {
+		kind = "pool"
+	} else if x.Cap.Area != "" {
+		where += "/" + x.Cap.Area
+	}
+	a.say("joined %s %s on %s as %s (%s), machine %s", kind, where, x.Authority, x.Identity, x.Cap.Role, x.Machine)
+	return r, nil
+}
+
+// poolJoin redeems an invite code (host's '<invite code>').
 func (a *app) poolJoin(ctx context.Context, c *client.Client, code, authKey string) (api.Remote, error) {
 	if !project.LooksLikeJoinCode(code) {
 		return api.Remote{}, fmt.Errorf("%q is not an invite code: the pool's owner prints one with %s", code, a.cmd("invite <you>"))
 	}
 	req := api.JoinRequest{Code: strings.TrimSpace(code), AuthKey: authKey, WaitMS: 10000}
 	req.Cwd, _ = os.Getwd()
-	r, err := a.joinUntilDone(ctx, c, req)
-	var bad *api.Error
-	if errors.As(err, &bad) && bad.Code == project.ErrBadCode.Code && bad.Message == project.ErrBadCode.Message {
-		// kit's hint names zm's team invite; a pool's is invite.
-		return api.Remote{}, bad.WithHint("ask the pool's owner for a new code: " + a.cmd("invite <you>"))
-	}
+	r, err := a.join(ctx, c, req)
 	if err != nil {
 		return api.Remote{}, err
 	}
 	if r.Remote == nil {
 		return api.Remote{}, errors.New("nothing joined")
 	}
-	x := r.Remote
-	if !a.asJSON() {
-		a.say("joined pool %s on %s as %s (%s), machine %s", x.Project.Slug, x.Authority, x.Identity, x.Cap.Role, x.Machine)
-	}
-	return *x, nil
+	return *r.Remote, nil
 }
 
-// joinUntilDone sends the join, waiting out a tailnet login.
+// joinUntilDone sends the join, waiting out a tailnet login and, for a
+// join by name, asking the person for the authority and GitHub's code
+// (askForJoin; with --json it answers the first such answer instead).
 func (a *app) joinUntilDone(ctx context.Context, c *client.Client, req api.JoinRequest) (api.JoinResponse, error) {
 	deadline := time.Now().Add(10 * time.Minute)
 	shown := ""
 	for {
 		r, err := c.Join(ctx, req)
-		if err != nil || r.AuthURL == "" {
+		if err != nil {
 			return r, err
+		}
+		if r.AuthURL == "" {
+			if a.asJSON() {
+				return r, nil
+			}
+			next, again, err := a.askForJoin(req, r)
+			if err != nil || !again {
+				return r, err
+			}
+			req = next
+			continue
 		}
 		if time.Now().After(deadline) {
 			return r, fmt.Errorf("no tailnet login within 10 minutes")
@@ -278,7 +382,7 @@ func (a *app) leaveCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "leave [pool]",
 		Short: "Leave a pool this machine joined (deletes its token; asks the pool's machine to revoke it)",
-		Long:  "Leave leaves the pool named (or --pool), else the only pool this machine is in.",
+		Long:  "Leave leaves the pool (or team project) named, or --pool, else the only pool this machine is in.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return call(a, cmd, func(ctx context.Context, c *client.Client) (api.LeaveResponse, error) {
@@ -309,7 +413,7 @@ func (a *app) leaveCmd() *cobra.Command {
 func (a *app) remotesCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "remotes",
-		Short: "Pools this machine joined, and the machines that run them",
+		Short: "Pools (and team projects) this machine joined, and the machines that run them",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return call(a, cmd, func(ctx context.Context, c *client.Client) ([]api.Remote, error) { return c.Remotes(ctx) },
@@ -332,8 +436,9 @@ func (a *app) remotesCmd() *cobra.Command {
 							fmt.Fprintf(&b, ": %s", config.Text(x.LastError))
 						}
 						if x.OwnerNow != "" {
-							fmt.Fprintf(&b, "\n  WARNING: the pool's machine now belongs to tailnet owner %s, not %s as when joined", x.OwnerNow, x.AuthorityOwner)
+							fmt.Fprintf(&b, "\n  WARNING: the machine that runs it now belongs to tailnet owner %s, not %s as when joined", x.OwnerNow, x.AuthorityOwner)
 						}
+						b.WriteString(remoteCopy(x))
 						b.WriteByte('\n')
 					}
 					return b.String()

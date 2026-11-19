@@ -102,7 +102,7 @@ var Verbs = map[string]string{
 	"job run":     "run",
 	"pool create": "create",
 	// zm's alone, for now (with the subcommands kit's messages name).
-	"daemon update": "", "daemon stop --end-sessions": "", "invite ls": "", "invite rm": "",
+	"daemon update": "", "daemon stop --end-sessions": "",
 	"tunnel": "", "tunnel setup": "", "tunnel setup --quick": "", "tunnel status": "", "tunnel remove": "",
 	"tunnel key escrow": "", "tailnet": "", "tailnet up": "", "tailnet down": "", "peers": "",
 	"target": "", "target ls": "", "target bind": "", "target unbind": "", "machine-class": "",
