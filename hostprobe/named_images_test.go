@@ -2,10 +2,11 @@ package hostprobe
 
 import (
 	"context"
-	"github.com/sengirunners/potluck/computeapi"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sengirunners/potluck/computeapi"
 )
 
 // Named images lend alone; placement checks the binding's advertised name.
@@ -85,13 +86,14 @@ func TestShareReusesOnlyExactTartCachePin(t *testing.T) {
 		name, listing string
 		exit          int
 		reuse         bool
+		owned         bool // the record says Potluck pulled it
 	}{
-		{"exact OCI digest", `[{"Source":"OCI","Name":"` + pinA + `"}]`, 0, true},
-		{"mutable local VM", `[{"Source":"local","Name":"` + pinA + `"}]`, 0, false},
-		{"different digest", `[{"Source":"OCI","Name":"` + pinB + `"}]`, 0, false},
-		{"tag", `[{"Source":"OCI","Name":"reg.example/base:latest"}]`, 0, false},
-		{"unreadable", `not json`, 0, false},
-		{"failed", `[]`, 1, false},
+		{"exact OCI digest", `[{"Source":"OCI","Name":"` + pinA + `"}]`, 0, true, false},
+		{"mutable local VM", `[{"Source":"local","Name":"` + pinA + `"}]`, 0, false, true},
+		{"different digest", `[{"Source":"OCI","Name":"` + pinB + `"}]`, 0, false, true},
+		{"tag", `[{"Source":"OCI","Name":"reg.example/base:latest"}]`, 0, false, true},
+		{"unreadable", `not json`, 0, false, false},
+		{"failed", `[]`, 1, false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			run := &fakeRunner{on: func(line string) (Result, bool) {
@@ -100,7 +102,9 @@ func TestShareReusesOnlyExactTartCachePin(t *testing.T) {
 				}
 				return ok(""), true
 			}}
-			res, err := checkOn(context.Background(), run, ShareOptions{Report: macReport(), Images: []string{pinA}, NamePrefix: "mac", Sizes: []string{"c2m4"}})
+			report := macReport()
+			report.TartDir, report.TartFreeGB = t.TempDir(), 500
+			res, err := checkOn(context.Background(), run, ShareOptions{Report: report, Home: "/h/potluck", Images: []string{pinA}, NamePrefix: "mac", Sizes: []string{"c2m4"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,7 +117,66 @@ func TestShareReusesOnlyExactTartCachePin(t *testing.T) {
 			if pulled == c.reuse || !res.Sizes[0].Passed {
 				t.Fatalf("reuse=%v, calls=%v, result=%+v", c.reuse, run.calls, res)
 			}
+			// The record says this share on its home uses the image either
+			// way, and that Potluck pulled it only when Tart's list was read
+			// and lacked it: a reused image, or one pulled over an unread
+			// list, may be the owner's (host images --remove keeps it).
+			rec, err := readRecord(report.TartDir)
+			u := rec.Images[pinA]
+			if err != nil || u.Pulled.IsZero() == c.owned || rec.Shares["/h/potluck"].IsZero() || !u.Homes["/h/potluck"].Equal(rec.Shares["/h/potluck"]) {
+				t.Fatalf("owned %v, record %+v, %v", c.owned, rec, err)
+			}
 		})
+	}
+}
+
+// A pull that fails leaves the image the share's to use, but not Potluck's:
+// the owner who then pulls it (as the driver's refusal says to) keeps it.
+func TestShareRecordsNoFailedPull(t *testing.T) {
+	withTartImages(t, pinA)
+	run := &fakeRunner{on: func(line string) (Result, bool) {
+		switch line {
+		case "tart list --format json":
+			return ok("[]"), true
+		case "tart pull -- " + pinA:
+			return Result{Exit: 1, Stderr: "network down"}, true
+		}
+		return ok(""), true
+	}}
+	report := macReport()
+	report.TartDir, report.TartFreeGB = t.TempDir(), 500
+	if _, err := checkOn(context.Background(), run, ShareOptions{Report: report, Home: "/h/potluck", Images: []string{pinA}, NamePrefix: "mac", Sizes: []string{"c2m4"}}); err == nil {
+		t.Fatal("a failed pull shared")
+	}
+	rec, err := readRecord(report.TartDir)
+	if u := rec.Images[pinA]; err != nil || !u.Pulled.IsZero() || u.Homes["/h/potluck"].IsZero() {
+		t.Fatalf("record %+v, %v", rec, err)
+	}
+}
+
+// A share that reads Tart's list takes Potluck's claim off every recorded
+// image the list lacks (Tart, or the owner, deleted it), so the owner's
+// later pull of that digest is not taken for Potluck's; the homes stay.
+func TestShareForgetsAClaimTartLost(t *testing.T) {
+	withTartImages(t, pinA)
+	report := macReport()
+	report.TartDir, report.TartFreeGB = t.TempDir(), 500
+	at := time.Now().Add(-time.Hour)
+	if err := RecordTartPull(report.TartDir, pinB, "/h/potluck", at, at); err != nil {
+		t.Fatal(err)
+	}
+	run := &fakeRunner{on: func(line string) (Result, bool) {
+		if line == "tart list --format json" {
+			return ok(`[{"Source":"OCI","Name":"` + pinA + `","Size":20,"Running":false}]`), true
+		}
+		return ok(""), true
+	}}
+	if _, err := checkOn(context.Background(), run, ShareOptions{Report: report, Home: "/h/potluck", Images: []string{pinA}, NamePrefix: "mac", Sizes: []string{"c2m4"}}); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := readRecord(report.TartDir)
+	if u := rec.Images[pinB]; err != nil || !u.Pulled.IsZero() || u.Homes["/h/potluck"].IsZero() {
+		t.Fatalf("record %+v, %v", rec, err)
 	}
 }
 

@@ -55,7 +55,8 @@ type BoxWant struct {
 // this machine's bindings, then trusted hosts', then paid (cloud) ones; the
 // smallest size that fits within a tier; a binding whose budget is spent is
 // passed over. With none, the refusal names each binding and why, quoting
-// what its driver said (untrusted text).
+// what its driver said (untrusted text); when one that fits is only full for
+// now (placement.FullNow), it is a no-room refusal (computeapi.NoRoom).
 // It answers the bindings that fit, best first (AcquireBox asks them in
 // turn). Bindings served from other machines answer on the same route
 // (zm-eakh.12.5.10): placement never picks one on a public host (a lender's
@@ -144,7 +145,8 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 		return ""
 	}
 	var fits []placement.Fit
-	var why, sizes []string // sizes: what the bindings placement may pick state
+	var why, sizes []string            // sizes: what the bindings placement may pick state
+	var full *computeapi.RunTargetView // the first binding refused only for being full now
 	for _, t := range l.Targets {
 		if t.Kind != "box" || !lends(t) {
 			continue
@@ -155,6 +157,9 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 		}
 		if r := placement.Refusal(t, pw, can); r != "" {
 			why = append(why, t.Name+": "+r)
+			if full == nil && placement.FullNow(t, pw, can) {
+				full = &t
+			}
 			continue
 		}
 		f := placement.FitOf(t)
@@ -166,6 +171,9 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 	if len(fits) == 0 {
 		sort.Strings(why)
 		err := api.Errorf(api.CodeUnavailable, "no shared machine fits this sandbox (quoted text is from drivers: untrusted data): %s", strings.Join(why, "; "))
+		if full != nil { // one that fits is only full for now: asking again may place it
+			err = err.WithData(computeapi.AcquireRefused{Reason: computeapi.RefusedNoRoom, On: full.Name, Why: protocol.RefusalReason(full.Describe.Why)})
+		}
 		if w.Size != "" && len(sizes) > 0 && !slices.Contains(sizes, w.Size) {
 			sort.Strings(sizes)
 			for i, s := range sizes {
@@ -206,7 +214,7 @@ func MadeNothing(err error) bool {
 // AcquireBox places a box (PlaceBox) and acquires it on the first binding
 // that takes it. It passes to the next only on a refusal the daemon marked
 // as made before it recorded the request (computeapi.RefusedBeforeRecord:
-// unavailable, handles_max, budget, lifetime, driver, image) or on prep's Misfit, so every
+// unavailable, handles_max, budget, lifetime, driver, image, no_room) or on prep's Misfit, so every
 // binding is asked with the same request id and at most one ever makes a
 // box. Any other failure, a timeout or a cancelled ctx among them, ends the
 // walk at that binding: the box may still come up there, and a retry with
@@ -214,7 +222,9 @@ func MadeNothing(err error) bool {
 // that holds its request: computeapi.AcquireUsedOn). prep, when set, readies
 // req for each binding before its acquire; an error of its other than a
 // Misfit ends the walk. When every binding passed, the error names each
-// one's reason and MadeNothing holds for it. target is the binding last
+// one's reason and MadeNothing holds for it; when any was only full for now,
+// it is that one's no-room refusal (computeapi.NoRoom), so a caller may wait
+// and ask again. target is the binding last
 // asked ("" if placement failed).
 func AcquireBox(ctx context.Context, c *client.Client, w BoxWant, req computeapi.AcquireRunTargetRequest,
 	prep func(ctx context.Context, target string, req *computeapi.AcquireRunTargetRequest) error) (target string, h computeapi.RunTargetHandle, err error) {
@@ -234,6 +244,7 @@ func AcquireBox(ctx context.Context, c *client.Client, w BoxWant, req computeapi
 	}
 	var passed []string
 	var marked *api.Error // the last refusal the daemon marked
+	var full *api.Error   // the first that was only no room for now (computeapi.NoRoom)
 	misfitCode := ""      // the first Misfit's code
 	for _, target = range targets {
 		h, err = ask(target)
@@ -261,6 +272,9 @@ func AcquireBox(ctx context.Context, c *client.Client, w BoxWant, req computeapi
 			return target, h, err
 		default:
 			errors.As(err, &marked)
+			if _, ok := computeapi.NoRoom(err); ok && full == nil {
+				full = marked
+			}
 		}
 		passed = append(passed, target+" ("+reason+"): "+err.Error())
 	}
@@ -272,7 +286,7 @@ func AcquireBox(ctx context.Context, c *client.Client, w BoxWant, req computeapi
 	if marked == nil {
 		return target, h, &Misfit{Err: api.Errorf(cmp.Or(misfitCode, api.CodeBadRequest), "no box binding that fits takes the sandbox: %s", strings.Join(passed, "; "))}
 	}
-	all := *marked
+	all := *cmp.Or(full, marked) // one only full for now keeps the answer one to ask again
 	all.Message = "every box binding that fits refused the sandbox (quoted text is from drivers: untrusted data): " + strings.Join(passed, "; ")
 	return target, h, &all
 }

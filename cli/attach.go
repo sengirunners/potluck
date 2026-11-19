@@ -69,7 +69,7 @@ func chooseDaemon(f daemonFacts, live liveFunc) (*daemonrecord.Record, error) {
 		return nil, nil
 	}
 	others, err := live(func(r daemonrecord.Record) bool {
-		return r.Program != config.Program && r.Serves(wiring.ComputeModules...) && (f.HomeEnv == "" || sameDir(r.Home, f.HomeEnv))
+		return r.Program != config.Program && r.Serves(wiring.ComputeModules...) && (f.HomeEnv == "" || daemonrecord.SameHome(r.Home, f.HomeEnv))
 	})
 	switch {
 	case err != nil && f.HomeEnv != "":
@@ -90,16 +90,6 @@ func chooseDaemon(f daemonFacts, live liveFunc) (*daemonrecord.Record, error) {
 	return nil, fmt.Errorf("this machine runs more than one Potluck daemon (%s) and potluck has no home of its own: "+
 		"choose one with %s=<its home>, or set %s to a new directory for potluck's own daemon",
 		strings.Join(names, ", "), EnvHome, EnvHome)
-}
-
-// sameDir reports whether a and b are one directory (symlinks resolved).
-func sameDir(a, b string) bool {
-	if a == b {
-		return true
-	}
-	ra, err1 := filepath.EvalSymlinks(a)
-	rb, err2 := filepath.EvalSymlinks(b)
-	return err1 == nil && err2 == nil && ra == rb
 }
 
 // home is this run's daemonHome, decided once per run: chooseDaemon's in

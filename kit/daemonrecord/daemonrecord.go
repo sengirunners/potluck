@@ -215,6 +215,17 @@ func Live(ctx context.Context, keep func(Record) bool) ([]Record, error) {
 	return out, nil
 }
 
+// SameHome reports whether a and b name one directory (symlinks resolved
+// where they resolve): how a record's home is compared with another.
+func SameHome(a, b string) bool {
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	ra, err1 := filepath.EvalSymlinks(a)
+	rb, err2 := filepath.EvalSymlinks(b)
+	return err1 == nil && err2 == nil && ra == rb
+}
+
 // probeWait bounds one record's socket probe.
 const probeWait = 2 * time.Second
 

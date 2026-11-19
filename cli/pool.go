@@ -22,6 +22,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/project"
@@ -266,23 +267,52 @@ help; the invite is not.`,
 	s.add(cmd, a)
 	pastedFlags(cmd)
 	cmd.Flags().BoolVar(&yes, "yes", false, "share again where this machine already shares sizes with the pool, with no flag that changes the share (such a run otherwise only says what it would do)")
-	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostStatusCmd(), a.hostSetCmd(), a.hostPauseCmd(), a.hostResumeCmd())
+	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostImagesCmd(), a.hostStatusCmd(), a.hostSetCmd(), a.hostPauseCmd(), a.hostResumeCmd())
 	cmd.AddCommand(a.hostOldSpellings()...)
 	return cmd
 }
 
-// noSizePassed is host's answer when every size failed its checks: what
-// happened, and what to do next in plain words. The checks run after the
-// pulls, and a pulled image stays on this machine, so a second run starts at
-// the checks; a check can fail once on a busy or just-booted machine.
-func (a *app) noSizePassed(byCode bool) error {
-	unspent := ""
-	if byCode {
-		unspent = ", and the invite is not spent"
+// noSizePassedError is host's answer when every size failed its checks:
+// what happened, and what to do next in plain words. The checks run after
+// the pulls, and a pulled image stays on this machine, so a second run
+// starts at the checks; a check can fail once on a busy or just-booted
+// machine. A run for a pool (not an invite) leaves the sizes an earlier run
+// shared bound unless Bind unbinds them (no admission keys, unfit), so it
+// says which of them still lend, read back after Bind, and then names the
+// flags given that shape the share (runHost sets them): none took effect.
+type noSizePassedError struct {
+	byCode bool
+	pool   string
+	still  []string // the sizes shared with pool after this run
+	unread string   // why still could not be read ("": it was)
+	flags  []string // runHost: the flags given that shape the share
+	p      prefix
+}
+
+func (e *noSizePassedError) Error() string {
+	var b strings.Builder
+	b.WriteString("no size passed conformance: ")
+	switch {
+	case e.byCode:
+		b.WriteString("this machine did not join the pool, and the invite is not spent")
+	case e.unread != "":
+		fmt.Fprintf(&b, "nothing new is shared with pool %s (what this machine lends there now could not be read: %s)", e.pool, e.unread)
+	case len(e.still) > 0:
+		fmt.Fprintf(&b, "nothing changed: the earlier sizes still lend to pool %s (%s)", e.pool, strings.Join(e.still, ", "))
+		if len(e.flags) > 0 {
+			fl := make([]string, len(e.flags))
+			for i, f := range e.flags {
+				fl[i] = "--" + f
+			}
+			fmt.Fprintf(&b, ", as they were: %s did not take effect", strings.Join(fl, ", "))
+		}
+	default:
+		fmt.Fprintf(&b, "this machine shares nothing with pool %s", e.pool)
 	}
-	return fmt.Errorf("no size passed conformance: this machine did not join the pool%s.\n"+
+	fmt.Fprintf(&b, ".\n"+
 		"Next: run the same %s command again. The images it pulled stay on this machine, so it starts at the checks, not the download.\n"+
-		"If the same check fails again, it is not a one-off: keep the output above, which names the check that failed.", unspent, a.cmd("host"))
+		"If the same check fails again, it is not a one-off: keep the output above, which names the check that failed.", e.p.cmd("host"))
+	return b.String()
 }
 
 // poolHost shares this machine with the pool. root, when set, runs the
@@ -316,6 +346,11 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 	if err := root(&o); err != nil {
 		return err
 	}
+	say := func(line string) {
+		if o.Progress != nil {
+			o.Progress(line)
+		}
+	}
 	// Doctor, pulls and conformance before the join: a machine that cannot
 	// share, or fails the security checks, never spends the invite.
 	stopBeat := startBeat(&o)
@@ -325,6 +360,9 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 		return err
 	}
 	byCode := sc.byCode
+	if words, ok := validationWords(res); ok { // else the error below blocks it
+		say(o.Stages.Succeed(hostsetup.Validation, words))
+	}
 	if !slices.ContainsFunc(res.Sizes, func(s hostprobe.SizeResult) bool { return s.Passed }) {
 		var nb hostprobe.Binder // shares nothing: says each size is not shared
 		no := o
@@ -333,9 +371,24 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 		}
 		res = hostprobe.Bind(ctx, nb, no, res)
 		_ = a.reportShare(res, w)
-		return a.noSizePassed(byCode)
+		e := &noSizePassedError{byCode: byCode, pool: pool, p: prefix(a.host.Prefix)}
+		if !byCode { // read back what lends now: Bind may have unbound a keyless or unfit size
+			now := o
+			now.Earlier, now.EarlierUnread = nil, ""
+			nsc, err := a.hostScope(ctx, c, arg, &now)
+			switch {
+			case err != nil:
+				e.unread = err.Error()
+			case now.EarlierUnread != "":
+				e.unread = now.EarlierUnread
+			default:
+				e.still = nsc.sharedAgain(now)
+			}
+		}
+		return e
 	}
 	if byCode {
+		say(o.Stages.Begin(hostsetup.Join, "joining the pool of your invite"))
 		rem, err := a.poolJoin(ctx, c, arg, "")
 		if err != nil {
 			if ours := joinedAtAuthority(ctx, c, arg); len(ours) > 0 && api.IsCode(err, api.CodeForbidden) {
@@ -344,9 +397,16 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 			return err
 		}
 		pool, machine = rem.Project.Slug, rem.Machine
+		say(o.Stages.Succeed(hostsetup.Join, "joined pool "+pool))
+		o.Stages.SetAgain(strings.Replace(o.Stages.Run().Again, inviteWord, pool, 1)) // the flags stay
+	} else if machine != "" {
+		say(o.Stages.Succeed(hostsetup.Join, "already in pool "+pool))
+	} else {
+		say(o.Stages.Succeed(hostsetup.Join, "pool "+pool+" runs on this machine"))
 	}
 	res = hostprobe.Bind(ctx, poolBinder(c, &o, pool, machine), o, res)
 	if err := a.reportShare(res, w); err != nil {
+		o.Stages.Block(hostsetup.Capacity, capacityWords(res, pool))
 		if after != nil && lent(res) { // a size that failed leaves the rest shared
 			after()
 		}
@@ -366,9 +426,11 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 	if a.asJSON() {
 		lw = a.host.Stderr
 	}
+	say(o.Stages.Begin(hostsetup.Capacity, "waiting for pool "+pool+" to list "+strings.Join(want, ", ")))
 	if err := awaitListed(ctx, c, pool, want, res.RunnerDir != "", lw, prefix(a.host.Prefix)); err != nil {
 		return err
 	}
+	say(o.Stages.Succeed(hostsetup.Capacity, capacityWords(res, pool)))
 	if after != nil {
 		after()
 	}
@@ -473,9 +535,12 @@ func joinedAtAuthority(ctx context.Context, c *client.Client, code string) []str
 }
 
 // shareFlagArgs renders the flags the user set as arguments to retype.
-func shareFlagArgs(cmd *cobra.Command) string {
+func shareFlagArgs(cmd *cobra.Command, skip ...string) string {
 	var b strings.Builder
 	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if slices.Contains(skip, f.Name) {
+			return
+		}
 		vals := []string{f.Value.String()}
 		if sv, ok := f.Value.(pflag.SliceValue); ok {
 			vals = sv.GetSlice()

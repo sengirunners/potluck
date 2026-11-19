@@ -119,15 +119,25 @@ func imageRoot(images []string) bool {
 	return true
 }
 
-// tartCachedImages reads Tart's OCI cache once: the digest references it
-// holds. It is the one home for that read. Tart encodes Source and Name in
-// Commands/List.swift (VMInfo):
+// tartEntry is one entry of Tart's list: a pulled OCI image (OCI) or a local
+// VM, such as a clone.
+type tartEntry struct {
+	Name    string
+	OCI     bool
+	Running bool
+	// SizeGB is what Tart says the entry takes on disk, in whole GB
+	// (10^9 bytes, rounded down); ok is false when it says nothing usable.
+	SizeGB int
+	SizeOK bool
+}
+
+// tartList reads Tart's list once. It is the one home for that read. Tart
+// encodes Source, Name, Size (allocated bytes / 10^9, a whole number) and
+// Running in Commands/List.swift (VMInfo):
 // https://github.com/cirruslabs/tart/blob/main/Sources/tart/Commands/List.swift
-// Only an OCI cache entry with the exact digest reference can replace a pull.
-// A mutable local VM or a tag with the same repository is not the pinned image.
-// An unreadable listing returns an error, and callers fall back to pulling and
-// the normal conformance checks.
-func tartCachedImages(ctx context.Context, run Runner, cli string) (map[string]bool, error) {
+// A Size that is missing or not a number leaves SizeOK false rather than
+// failing the read. An unreadable listing returns an error.
+func tartList(ctx context.Context, run Runner, cli string) ([]tartEntry, error) {
 	if run == nil {
 		return nil, errors.New("no way to run tart list")
 	}
@@ -143,24 +153,43 @@ func tartCachedImages(ctx context.Context, run Runner, cli string) (map[string]b
 	if r.Exit != 0 {
 		return nil, fmt.Errorf("tart list exited %d", r.Exit)
 	}
-	var entries []struct{ Source, Name string }
-	if err := json.Unmarshal([]byte(r.Stdout), &entries); err != nil {
+	var raw []struct {
+		Source, Name string
+		Running      bool
+		Size         json.RawMessage
+	}
+	if err := json.Unmarshal([]byte(r.Stdout), &raw); err != nil {
 		return nil, fmt.Errorf("tart list gave no JSON list: %v", err)
+	}
+	entries := make([]tartEntry, 0, len(raw))
+	for _, e := range raw {
+		t := tartEntry{Name: e.Name, OCI: strings.EqualFold(e.Source, "oci"), Running: e.Running}
+		var gb float64
+		if len(e.Size) > 0 && string(e.Size) != "null" && json.Unmarshal(e.Size, &gb) == nil && gb >= 0 {
+			t.SizeGB, t.SizeOK = int(gb), true
+		}
+		entries = append(entries, t)
+	}
+	return entries, nil
+}
+
+// tartCachedImages is the digest references Tart's OCI cache holds
+// (tartList). Only an OCI cache entry with the exact digest reference can
+// replace a pull. A mutable local VM or a tag with the same repository is not
+// the pinned image. An unreadable listing returns an error, and callers fall
+// back to pulling and the normal conformance checks.
+func tartCachedImages(ctx context.Context, run Runner, cli string) (map[string]bool, error) {
+	entries, err := tartList(ctx, run, cli)
+	if err != nil {
+		return nil, err
 	}
 	cached := map[string]bool{}
 	for _, e := range entries {
-		if strings.EqualFold(e.Source, "oci") {
+		if e.OCI {
 			cached[e.Name] = true
 		}
 	}
 	return cached, nil
-}
-
-// tartImagePresent reports whether Tart's cache holds image; an unreadable
-// cache says false.
-func tartImagePresent(ctx context.Context, run Runner, image, cli string) bool {
-	cached, err := tartCachedImages(ctx, run, cli)
-	return err == nil && cached[image]
 }
 
 // SmallLinux is the name of a layer's small Linux image in images.pin (on

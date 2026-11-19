@@ -14,6 +14,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/menubar"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/vmhost"
@@ -33,10 +34,17 @@ pools it runs) from the daemon, each with the sandboxes running on it, and the
 host switch (` + a.cmd("host set") + `). On a host that shares its room through an
 admission controller (--admission-url), it also says when the controller
 refused a sandbox for lack of room, and why, until its retry time. Lent cores are, per driver state directory,
-its slots times its largest size's cores. With --json it prints the menu
-the macOS menu bar item draws (docs/menubar.md). It never starts the daemon.`,
+its slots times its largest size's cores. Then the setup checklist: the last
+host run's stages (preflight, images, validation, join, usable capacity),
+when this machine may lend, and on a Mac the menu bar item and the daily
+update, with the one thing to do next. With --json it prints the menu
+the macOS menu bar item draws, and the checklist (docs/menubar.md). It never
+starts the daemon.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if cfg, err := a.loadClient(); err == nil {
+				noteMenuSeen(cfg.Home)
+			}
 			st := menubar.Build(a.hostFacts(cmd.Context()))
 			if a.asJSON() {
 				return a.printJSON(st)
@@ -54,6 +62,7 @@ the macOS menu bar item draws (docs/menubar.md). It never starts the daemon.`,
 			}
 			lines = append(lines, sw)
 			a.say("%s", strings.Join(lines, "\n"))
+			a.printSetup(st.Setup)
 			return nil
 		},
 	}
@@ -137,48 +146,72 @@ func (a *app) hostFacts(ctx context.Context) menubar.Facts {
 	if cfg, err := a.loadClient(); err == nil {
 		f.Background = hostBackground(cfg.Home)
 	}
+	f.Setup = a.setupFacts()
 	return f
 }
 
-// liveBindings is this machine's own bindings (machine-level ones and those
-// in pools it runs), described, with their live handles, and whether the
-// daemon answered at all. It never starts the daemon; it goes on past a
-// pool it cannot list and returns the first error.
-func (a *app) liveBindings(ctx context.Context) (out []computeapi.RunTargetView, running bool, first error) {
+// liveBindings is this machine's own bindings (servedViews), described,
+// with their live handles.
+func (a *app) liveBindings(ctx context.Context) ([]computeapi.RunTargetView, bool, error) {
+	return a.servedViews(ctx, true)
+}
+
+// servedViews is every binding this machine serves: its machine-level ones
+// and those of each pool it runs; with live, described and with their live
+// handles. running says whether the daemon answered at all. It never starts
+// the daemon; it goes on past a pool it cannot list and returns the first
+// error, so a caller that must see every binding treats any error as
+// "unknown".
+func (a *app) servedViews(ctx context.Context, live bool) (out []computeapi.RunTargetView, running bool, first error) {
 	c, err := a.readClient()
 	if err != nil {
 		return nil, false, err
 	}
+	return servedViewsOn(ctx, c, live)
+}
+
+// servedViewsOn is servedViews of the daemon c talks to.
+func servedViewsOn(ctx context.Context, c *client.Client, live bool) (out []computeapi.RunTargetView, running bool, first error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if _, err := c.Health(ctx); err != nil {
+	h, err := c.Health(ctx)
+	if err != nil {
 		return nil, false, err
 	}
-	if l, err := computeclient.HostRunTargetsLive(ctx, c); err != nil {
+	hostList, poolList := computeclient.HostRunTargets, func(ctx context.Context, c *client.Client) (computeapi.RunTargetList, error) {
+		return computeclient.RunTargets(ctx, c, false)
+	}
+	if live {
+		hostList, poolList = computeclient.HostRunTargetsLive, computeclient.RunTargetsLive
+	}
+	if l, err := hostList(ctx, c); err != nil {
 		first = err
 	} else {
-		out = ownViews(l)
+		out = ownViews(l, h.Machine)
 	}
 	ps, err := c.LocalProjects(ctx)
 	if err != nil {
 		return out, true, cmp.Or(first, err)
 	}
 	for _, p := range ps {
-		pl, err := computeclient.RunTargetsLive(ctx, inPool(c, p.Slug))
+		pl, err := poolList(ctx, inPool(c, p.Slug))
 		if err != nil {
 			first = cmp.Or(first, fmt.Errorf("pool %s: %w", p.Slug, err))
 			continue
 		}
-		out = append(out, ownViews(pl)...)
+		out = append(out, ownViews(pl, h.Machine)...)
 	}
 	return out, true, first
 }
 
-// ownViews is a list's bindings this machine serves.
-func ownViews(l computeapi.RunTargetList) []computeapi.RunTargetView {
+// ownViews is a list's bindings this machine (the daemon's machine name)
+// serves. On the wire a view's Host is the machine serving it (it hides the
+// RunTarget's own Host), and an advert of another machine's binding names
+// that binding in HostBinding.
+func ownViews(l computeapi.RunTargetList, machine string) []computeapi.RunTargetView {
 	var out []computeapi.RunTargetView
 	for _, v := range l.Targets {
-		if v.RunTarget.Host == "" {
+		if v.HostBinding == "" && v.RunTarget.Host == "" && (v.Host == "" || v.Host == machine) {
 			out = append(out, v)
 		}
 	}

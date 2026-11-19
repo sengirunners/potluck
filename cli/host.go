@@ -353,6 +353,7 @@ type shareFlags struct {
 	detach     bool
 	skipAfter  bool
 	linuxSlots int
+	wait       time.Duration // --wait: a size's check waits this long for a free slot (roomwait)
 }
 
 func (s *shareFlags) add(cmd *cobra.Command, a *app) {
@@ -379,8 +380,9 @@ func (s *shareFlags) add(cmd *cobra.Command, a *app) {
 	fl.IntVar(&s.volumeMaxGB, "volume-max-gb", 0, "oci: the most each renter's named volumes may hold on each size, in GiB, on every size this run shares (default 20; 0 turns volumes off; default: what an earlier host run set)")
 	fl.IntVar(&s.linuxSlots, "linux-slots", 0, fmt.Sprintf("how many Linux sandboxes run here at once, across every size, 1..%d: without an admission controller every size shared must fit that many times inside --share; with one it decides room and this is a ceiling. macOS stays at 2 (Apple's licence) (default: what an earlier host run set, else 2)", hostprobe.MaxLinuxSlots))
 	fl.BoolVar(&s.dryRun, "dry-run", false, "print the plan; pull, test and share nothing")
-	fl.BoolVar(&s.o.ShowCommands, "show-commands", false, "with --dry-run, also print each conformance command line (a dry run prints the pulls and the plan only)")
+	fl.BoolVar(&s.o.ShowCommands, "show-commands", false, "diagnostics: also print each image pull and conformance command line (the stages say what runs)")
 	fl.DurationVar(&s.pullTimeout, "pull-timeout", 0, "give up on an image pull after this long (default: image pin budget, else 60m; a stopped pull resumes)")
+	roomFlag(fl, &s.wait, "every slot of this machine is in use by live sandboxes, so a size cannot be checked")
 	fl.BoolVar(&s.noSudo, "no-sudo", false, "never run the root step "+a.cmd("doctor")+" prints with sudo: print it, and share without it")
 	fl.BoolVar(&o.Full, "full", false, "run the whole conformance suite on every size (minutes per size); default: the security checks once, a boot check per size")
 	fl.IntVar(&o.ReclaimIdleS, "reclaim-idle-s", 0, fmt.Sprintf("macOS: a sandbox ends when you touch the keyboard or pointer and starts only after this many idle seconds; 0 shares all the time (default: what an earlier host run chose, else %d on macOS, 0 elsewhere)", hostprobe.DefaultReclaimIdleS))
@@ -420,9 +422,11 @@ func (a *app) shareOptions(cmd *cobra.Command, s *shareFlags) (hostprobe.ShareOp
 	}
 	o.Limits, o.Sizes, o.DryRun, o.Driver = lim, s.sizes, s.dryRun, shareDriver
 	o.PullTimeout = s.pullTimeout
+	o.Wait = roomWait(s.wait, nil, "") // its lines go with the other steps (Progress)
 	o.StateDir = s.f.stateDir
 	if cfg, err := a.loadClient(); err == nil { // conformance tests the file the daemon will pin
 		o.DriverDirs = a.driverDirs(cfg)
+		o.Home = cfg.Home // the daemon the sizes bind in: Potluck's record of Tart's images names it
 	}
 	if err := s.reclaim(cmd, &o); err != nil {
 		return o, err
@@ -558,10 +562,15 @@ func printShare(w io.Writer, res hostprobe.ShareResult, p prefix) {
 		fmt.Fprintf(w, "note: %s\n", n)
 	}
 	for _, p := range res.Pulls {
-		fmt.Fprintf(w, "%s: %s\n", verb, strings.Join(p.Command, " "))
+		switch {
+		case res.ShowCommands:
+			fmt.Fprintf(w, "%s: %s\n", verb, strings.Join(p.Command, " "))
+		case res.DryRun:
+			fmt.Fprintf(w, "would %s\n", p.What)
+		}
 	}
 	for _, s := range res.Sizes {
-		if !res.DryRun || res.ShowCommands {
+		if res.ShowCommands {
 			fmt.Fprintf(w, "%s: %s\n", verb, strings.Join(s.Conformance, " "))
 		}
 		switch {

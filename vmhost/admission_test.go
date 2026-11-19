@@ -243,8 +243,14 @@ func TestAdmissionThroughTheDriver(t *testing.T) {
 		return call(t, m, "acquire", "", map[string]any{"request_id": key, "ttl_s": 60, "ref": "main",
 			"commit": repo.Commit, "script": "probe.sh", "args": []string{"sleep", "60"}})
 	}
-	if _, err := run("full"); code(err) != "unavailable" || !strings.Contains(err.Error(), "CI jobs are queued") {
+	_, err := run("full")
+	if code(err) != "unavailable" || !strings.Contains(err.Error(), "CI jobs are queued") {
 		t.Fatalf("no room: %v", err)
+	}
+	// The answer carries the controller's reason and retry time as data, so
+	// a caller waits and asks again (roomwait) instead of failing.
+	if bz, ok := noRoomData(err); !ok || bz.Why != "CI jobs are queued" || bz.RetryS != 30 {
+		t.Errorf("no room's data: %+v %v", bz, ok)
 	}
 	if ctl.live() != 0 {
 		t.Fatal("a refused acquire holds a lease")
@@ -382,4 +388,14 @@ func mustTime(t *testing.T, s string) time.Time {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// noRoomData is err's no-room answer data (protocol.ReasonNoRoom).
+func noRoomData(err error) (protocol.Busy, bool) {
+	var e refusal
+	if !errors.As(err, &e) {
+		return protocol.Busy{}, false
+	}
+	bz, ok := e.data.(protocol.Busy)
+	return bz, ok && bz.Reason == protocol.ReasonNoRoom
 }

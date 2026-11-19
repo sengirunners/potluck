@@ -195,7 +195,7 @@ func (d *drv) describe() map[string]any {
 		case err != nil:
 			why = err.Error()
 		case free == 0:
-			why = fmt.Sprintf("%s (%d in use)", NoFreeSlot(os), d.cfg.slots(os))
+			why = fmt.Sprintf("%s (%d in use)", protocol.NoFreeSlot(os), d.cfg.slots(os))
 		}
 	}
 	h := d.cfg.host() // hostmode.go

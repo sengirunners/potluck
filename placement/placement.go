@@ -119,6 +119,19 @@ func Refusal(v computeapi.RunTargetView, w Want, can func(*computeapi.RunTargetD
 	return ""
 }
 
+// FullNow says whether Refusal refuses v for w only because it is full for
+// now (computeapi.RunTargetDescribe.FullNow): with room it would take the
+// box, so asking again later may get it.
+func FullNow(v computeapi.RunTargetView, w Want, can func(*computeapi.RunTargetDescribe) string) bool {
+	if !v.Describe.FullNow() {
+		return false
+	}
+	d := *v.Describe
+	d.Available = true
+	v.Describe = &d
+	return Refusal(v, w, can) == ""
+}
+
 // Fit is one binding that can take the box, with what ranks it.
 type Fit struct {
 	Name string

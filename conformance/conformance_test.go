@@ -164,6 +164,9 @@ func TestGoodDrivers(t *testing.T) {
 		{name: "run with a slow acquire", kind: "run", edit: slowAcquire, wantRan: []string{pgInFlight, pgCancel, pgAfter}},
 		{name: "db with a slow acquire", kind: "db", edit: slowAcquire, wantRan: []string{pgInFlight, pgCancel, pgAfter}},
 		{name: "box without sealed volumes", kind: "box", edit: func(o *Options) { o.Config["seal"] = "0"; o.Only = []string{"volumes"} }, wantSkip: "sealed volumes"},
+		// A loaded host: the short-ttl build's first write lands after its deadline.
+		{name: "box whose writes near a deadline arrive late", kind: "box", edit: func(o *Options) { o.Config["exec_late_ms"] = "2500"; o.Only = []string{"volumes"} },
+			wantRan: []string{"a build volume that is not sealed is gone (release without seal, and an expired builder)"}},
 		{name: "box with warm boxes", kind: "box", edit: func(o *Options) { o.Config["warm"] = "1"; o.Only = []string{"warm", "lifecycle"} }},
 		{name: "box with a shelf", kind: "box", edit: func(o *Options) { o.Config["shelf"] = "1"; o.Only = []string{"shelf", "lifecycle"} }},
 		{name: "box with warm boxes and a shelf", kind: "box", edit: func(o *Options) {
@@ -606,6 +609,8 @@ var brokenDrivers = []struct {
 	// sealed volumes (zm-eakh.12.65.3)
 	{"box", "seal-missing-wrong-name", "volumes", "FAIL  a missing sealed volume identifies its name", nil},
 	{"box", "seal-partial-kept", "volumes", "FAIL  a build volume that is not sealed is gone", nil},
+	{"box", "seal-expired-kept", "volumes", "FAIL  a build volume that is not sealed is gone", nil},
+	{"box", "seal-expired-kept", "volumes", "FAIL  a build volume that is not sealed is gone", func(o *Options) { o.Config["exec_late_ms"] = "2500" }},
 	{"box", "seal-rw-allowed", "volumes", "FAIL  a sealed volume refuses rw and build", nil},
 	{"box", "seal-not-checked", "volumes", "FAIL  sealed is refused for a volume that is not", nil},
 	{"box", "seal-two-builders", "volumes", "FAIL  a second build waits", nil},

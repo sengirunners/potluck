@@ -380,25 +380,49 @@ func TestRecoveryChallengeCannotComeFromRoute(t *testing.T) {
 	}
 }
 
-func TestRecoveryChallengeNoTokenRedemptionKeepsHold(t *testing.T) {
-	h := recoveryHome(t, "missing")
-	fp, _ := h.Fingerprint()
-	_, c := member(t, fp)
-	challenge, _ := h.recoveryChallenge()
-	var calls atomic.Int32
-	srv := httptest.NewServer(h.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(201)
-	})))
-	t.Cleanup(srv.Close)
-	r, _ := http.NewRequest(http.MethodPost, srv.URL+"/v0/invites/redeem", nil)
-	resp, err := c.Transport.(*transport).roundTrip(r, nil, challenge)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 503 || get(resp.Header, HeaderRecovery) != "" || calls.Load() != 0 {
-		t.Fatalf("no-token redemption bypassed hold: %d, calls %d", resp.StatusCode, calls.Load())
+// A new member joins at once after a start that lost the journal: the
+// joining calls (no token) are offered the challenge and retried once, as a
+// member's writes are. Without the current challenge they stay held.
+func TestRecoveryChallengeJoinRightAfterRestart(t *testing.T) {
+	for _, path := range []string{"/v0/invites/redeem", "/v0/join/github"} {
+		t.Run(path, func(t *testing.T) {
+			h := recoveryHome(t, "missing")
+			fp, _ := h.Fingerprint()
+			_, c := member(t, fp)
+			var calls, attempts atomic.Int32
+			srv := httptest.NewServer(observeRecovery(h.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if get(r.Header, HeaderRecovery) != "" {
+					t.Error("transport challenge reached the route")
+				}
+				w.WriteHeader(http.StatusCreated)
+			})), func(recoveryRequest) { attempts.Add(1) }))
+			t.Cleanup(srv.Close)
+			if resp, b, err := do(t, legacyClient(c), "POST", srv.URL+path, "", "{}"); err != nil || resp.StatusCode != 503 || recoveryValue(resp.Header) == "" || calls.Load() != 0 {
+				t.Fatalf("a join without the challenge was not held: %v %s, calls %d", err, b, calls.Load())
+			}
+			stale := newService(t)
+			old, _ := stale.recoveryChallenge()
+			r, _ := http.NewRequest(http.MethodPost, srv.URL+path, strings.NewReader("{}"))
+			resp, err := c.Transport.(*transport).roundTrip(r, []byte("{}"), old)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != 503 || calls.Load() != 0 {
+				t.Fatalf("another process's challenge passed: %d, calls %d", resp.StatusCode, calls.Load())
+			}
+			attempts.Store(0)
+			if resp, b, err := do(t, c, "POST", srv.URL+path, "", "{}"); err != nil || resp.StatusCode != http.StatusCreated {
+				t.Fatalf("join right after the restart: %v %s", err, b)
+			}
+			if calls.Load() != 1 || attempts.Load() != 2 {
+				t.Fatalf("join: route calls %d, attempts %d (want 1, 2)", calls.Load(), attempts.Load())
+			}
+			if !h.journal.degraded() {
+				t.Fatal("a join cleared the hold")
+			}
+		})
 	}
 }
 

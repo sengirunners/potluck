@@ -20,7 +20,10 @@ import (
 
 // prepDaemon answers two box bindings, small (a lifetime cap of 10
 // minutes) and std (two hours), logging each acquire and release as
-// "<verb> <binding>"; describe runs onDescribe first.
+// "<verb> <binding>"; describe runs onDescribe first. Like the daemon
+// (runtarget acquire), it keeps a request it did not refuse as made nothing
+// and answers conflict to its request id asked again with anything else
+// different (ttl_s, self_renew).
 type prepDaemon struct {
 	mu         sync.Mutex
 	asked      []string
@@ -39,7 +42,8 @@ type prepDaemon struct {
 	// releaseQuiet answers that many releases unavailable first.
 	renewFail    map[int]*api.Error
 	releaseQuiet int
-	renews       []int // each renew's ttl_s, answered or not
+	renews       []int             // each renew's ttl_s, answered or not
+	kept         map[string]string // request id: the request kept under it, as JSON
 }
 
 func (d *prepDaemon) log(s string) { d.mu.Lock(); d.asked = append(d.asked, s); d.mu.Unlock() }
@@ -76,7 +80,19 @@ func (d *prepDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.asks = append(d.asks, req)
 		n := d.acquires
 		fail, hook := d.fail[n], d.hook[n]
+		body, _ := json.Marshal(req)
+		prev, seen := d.kept[req.RequestID]
+		if !seen && (fail == nil || !computeclient.MadeNothing(fail)) {
+			if d.kept == nil {
+				d.kept = map[string]string{}
+			}
+			d.kept[req.RequestID] = string(body)
+		}
 		d.mu.Unlock()
+		if seen && prev != string(body) {
+			api.WriteError(w, api.Errorf(api.CodeConflict, "request_id %s was used for a different acquire", req.RequestID))
+			return
+		}
 		if hook != nil {
 			hook(r)
 		}

@@ -27,19 +27,25 @@ import (
 // sameShare are host's flags that change how a run goes, not what it
 // shares: a run with only these (and the host program's AfterLend skip) is
 // a bare re-run.
-var sameShare = []string{"yes", "no-sudo", "pull-timeout", "show-commands", "detach"}
+var sameShare = []string{"yes", "no-sudo", "pull-timeout", "show-commands", "detach", "wait"}
 
 // shapesShare says whether cmd was given one of its own flags that shapes
 // the share (the program's --json and pool flags are not its own).
 func (a *app) shapesShare(cmd *cobra.Command) bool {
+	return len(a.shapingFlags(cmd)) > 0
+}
+
+// shapingFlags are the flags given that shapesShare counts, by name.
+func (a *app) shapingFlags(cmd *cobra.Command) []string {
 	same := sameShare
 	if al := a.host.AfterLend; al != nil && al.Skip != "" {
 		same = append(slices.Clone(same), al.Skip)
 	}
-	local, shaped := cmd.LocalFlags(), false
+	local := cmd.LocalFlags()
+	var shaped []string
 	cmd.Flags().Visit(func(f *pflag.Flag) {
 		if local.Lookup(f.Name) != nil && !slices.Contains(same, f.Name) {
-			shaped = true
+			shaped = append(shaped, f.Name)
 		}
 	})
 	return shaped

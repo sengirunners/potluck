@@ -2,12 +2,17 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/tailnet/tailnettest"
+	"github.com/sengirunners/potluck/menubar"
 )
 
 // A compatibility refusal reaches both command surfaces, runs no download or
@@ -37,6 +42,25 @@ func TestHostCompatibilityRefusalLeavesInviteUnspent(t *testing.T) {
 		if code == 0 || !strings.Contains(out+errs, blocker) {
 			t.Fatalf("%v: exit %d\n%s%s", args, code, out, errs)
 		}
+	}
+	// The run's record says preflight blocked it, never holds the invite,
+	// and the menu and the terminal say the same.
+	r, err := hostsetup.Read(lender.home)
+	if err != nil || r == nil || r.Blocked() == nil || r.Blocked().Name != hostsetup.Preflight || !strings.Contains(r.Blocked().Detail, blocker) ||
+		r.Again != "potluck host '<invite code>' --no-sudo=true" {
+		t.Fatalf("setup record: %+v %v", r, err)
+	}
+	if raw, _ := os.ReadFile(filepath.Join(lender.home, hostsetup.FileName)); strings.Contains(string(raw), invite[1]) {
+		t.Fatalf("the setup record holds the invite code:\n%s", raw)
+	}
+	var st menubar.Status
+	if err := json.Unmarshal([]byte(lender.ok(t, "--json", "host", "status")), &st); err != nil {
+		t.Fatal(err)
+	}
+	text := lender.ok(t, "host", "status")
+	if st.Menu.Title != "Setup blocked at preflight (1 of 5)" || !strings.HasPrefix(text, st.Menu.Title+"\n") ||
+		st.Setup.Next != "fix what the preflight stage says, then run again: potluck host '<invite code>' --no-sudo=true" || !strings.Contains(text, "\nnext: "+st.Setup.Next) {
+		t.Fatalf("host status: %+v\n%s", st.Menu, text)
 	}
 	if out := lender.ok(t, "join", invite[1]); !strings.Contains(out, "joined pool friends") {
 		t.Fatalf("invite was spent by refused host: %s", out)

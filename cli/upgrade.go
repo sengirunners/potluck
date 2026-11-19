@@ -281,7 +281,7 @@ func withoutAttachedDrivers(names []string, dir string, other *daemonrecord.Reco
 		dirs = append(dirs, filepath.Dir(other.Exe))
 	}
 	for _, d := range dirs {
-		if !sameDir(d, dir) {
+		if !daemonrecord.SameHome(d, dir) {
 			continue
 		}
 		for _, n := range names {

@@ -33,11 +33,12 @@ type Plan struct {
 // A miss fills the base on the selected host, then retries the same task
 // request. A failed fill falls back to a whole push on that host. The
 // daemon guarantees that a structured base_missing refusal made no box.
+// With no plan it only places and acquires. Either way req comes back as
+// the last acquire sent it, prep's changes included (unchanged when none
+// was sent): asked again under the same request id, the daemon answers the
+// same request only when everything else is the same too.
 func Acquire(ctx context.Context, c *client.Client, want computeclient.BoxWant, req *computeapi.AcquireRunTargetRequest,
 	prep func(context.Context, string, *computeapi.AcquireRunTargetRequest) error, plan *Plan) (string, computeapi.RunTargetHandle, error) {
-	if plan == nil {
-		return computeclient.AcquireBox(ctx, c, want, *req, prep)
-	}
 	last := *req
 	prepared := false
 	capture := func(ctx context.Context, target string, r *computeapi.AcquireRunTargetRequest) error {
@@ -47,9 +48,11 @@ func Acquire(ctx context.Context, c *client.Client, want computeclient.BoxWant, 
 				return err
 			}
 		}
-		r.Base = nil
-		if plan.Repository != nil {
-			r.Base = &computeapi.BoxBase{Repo: plan.Repository.Key}
+		if plan != nil {
+			r.Base = nil
+			if plan.Repository != nil {
+				r.Base = &computeapi.BoxBase{Repo: plan.Repository.Key}
+			}
 		}
 		last = *r
 		prepared = true
@@ -57,7 +60,7 @@ func Acquire(ctx context.Context, c *client.Client, want computeclient.BoxWant, 
 	}
 	target, h, err := computeclient.AcquireBox(ctx, c, want, *req, capture)
 	*req = last
-	if !prepared {
+	if !prepared || plan == nil {
 		return target, h, err
 	}
 	if last.Base != nil && ctx.Err() == nil && (api.IsCode(err, api.CodeBadRequest) || (api.IsCode(err, api.CodeNotFound) && !missing(err))) {

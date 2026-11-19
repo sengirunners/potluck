@@ -22,6 +22,12 @@ Lending 6 of 12 cores
 Keep lending is checked in `auto` and in `open`. The modes are the host switch's
 ([cmd/potluck-driver-tart/README.md](../cmd/potluck-driver-tart/README.md#the-host-switch-open-drain-closed-auto)).
 
+While a host run sets this Mac up and nothing is shared yet, the title says the stage, "Setting up: images (2 of
+5)", and the note its last words; a run that stopped says "Setup blocked at validation (3 of 5)" with why and the
+command that runs it again. Once sizes are shared, a later run that is blocked is a note, since what was shared
+still lends. These are the stages `potluck host` prints and `potluck host status` lists
+([hosts.md](hosts.md#stages-and-the-setup-checklist)).
+
 A closed switch is a paused Mac (`potluck host pause`, or Stop now): the menu says "Paused: lending nothing" and
 Keep lending reads "Resume lending" (it runs the same `host set auto`, as `potluck host resume` does). While a
 `potluck host --detach` run goes on, the note says so with its last line; `host status --json` carries it as
@@ -67,7 +73,16 @@ browser download) macOS runs it. If you unzip a copy you downloaded in a browser
 it in Finder and choose Open once. The installer says "not Developer ID signed" while that is true.
 
 To start it at login, add it in System Settings > General > Login Items. Quit it from its menu. To update the app,
-run the installer with `--menubar` again; `potluck upgrade` does not touch it yet.
+run the installer with `--menubar` again; `potluck upgrade` and the daily update do not touch it yet.
+
+### What host status knows of the app
+
+`potluck host status` lists the app in its setup checklist. Installed is a `Potluck Menu.app` in the last place it
+ran from, `$POTLUCK_MENUBAR_DIR`, `~/Applications` or `/Applications`. Running is only the app's own word: when the
+program that runs `host status` is the app (its parent process is `Potluck Menu.app/Contents/MacOS/PotluckMenu`),
+host status notes the app and the time in the home's `menubar-seen.json`, and the app counts as running while that
+time is under a minute old (it asks every 15 seconds). `open` exiting 0 is no proof that it shows. Potluck cannot
+read your Login Items, so the checklist says how to add it there instead of guessing.
 
 It runs `$POTLUCK_BIN`; else `potluck` from `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` or
 `~/go/bin`; else the program of the machine's Potluck daemon, from its record

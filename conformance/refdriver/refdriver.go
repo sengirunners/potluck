@@ -1310,6 +1310,9 @@ func endAtDeadline(state string, r record, bug string) {
 	if r.State != "running" && r.State != "ready" && r.State != "stopped" {
 		return
 	}
+	if bug == "seal-expired-kept" && r.Kind == "box" {
+		r.Seal = hasBuild(r) // a builder its deadline ended is sealed, as if released with seal
+	}
 	end(r, bug)
 	r.State, r.End = "expired", time.Now().UTC()
 	if r.Kind == "run" {

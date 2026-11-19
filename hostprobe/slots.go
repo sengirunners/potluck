@@ -28,7 +28,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/conformance"
-	"github.com/sengirunners/potluck/vmhost"
+	"github.com/sengirunners/potluck/protocol"
 )
 
 // MaxLinuxSlots bounds --linux-slots.
@@ -156,7 +156,7 @@ func macOSImages(layer string, images []string) bool {
 func slotsFullOS(stdout string) string {
 	first := conformance.FirstFailure(stdout)
 	for _, os := range []string{"linux", "darwin"} {
-		if strings.Contains(first, vmhost.NoFreeSlot(os)) {
+		if strings.Contains(first, protocol.NoFreeSlot(os)) {
 			return os
 		}
 	}
@@ -186,6 +186,14 @@ func keptFrom(from string) string {
 		return ""
 	}
 	return " (kept from " + from + ")"
+}
+
+// slotsFullWhy is a wait's words for every os slot taken (roomwait).
+func slotsFullWhy(os string) string {
+	if os == "darwin" {
+		return "every macOS slot is in use by running VMs"
+	}
+	return "every Linux slot is in use by live boxes"
 }
 
 // slotsFullError is a size's error when conformance found every slot taken:

@@ -5,8 +5,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/roomwait"
 )
 
 func slotsPtr(n int) *int { return &n }
@@ -248,5 +250,59 @@ func TestShareBusyHostSaysWhy(t *testing.T) {
 	o.ShelfGB, o.ShelfFill, o.VolumeMaxGB = slotsPtr(0), "off", slotsPtr(20) // past the storage keys' own refusal
 	if _, err := checkOn(context.Background(), run, o); err != nil {
 		t.Errorf("--linux-slots 2 sharing every size with unread bindings: %v", err)
+	}
+}
+
+// potluck host on a host whose slots are all in use waits for one
+// (zm-eakh.12.24.18.5): the size's check runs again once a box ends, and
+// passes; each wait is said with the other steps. Past the bound, the size
+// fails as a busy host's does; the zero Wait fails at once.
+func TestShareBusyHostWaitsForASlot(t *testing.T) {
+	full := Result{Exit: 1, Stdout: "FAIL  the target is available (nothing else can be checked if not): describe says available false: no free linux slot (2 in use)"}
+	runs, freeAfter := 0, 2
+	run := &fakeRunner{on: func(line string) (Result, bool) {
+		if strings.HasPrefix(line, testSuite+" ") {
+			if runs++; runs <= freeAfter {
+				return full, true
+			}
+		}
+		return Result{}, true
+	}}
+	now := time.Date(2026, 11, 19, 5, 0, 0, 0, time.Local)
+	var slept []time.Duration
+	var said []string
+	o := ShareOptions{Report: bigReport(), Images: []string{pinA}, NamePrefix: "h", RunnerDir: "none", Sizes: []string{"c2m4"},
+		Progress: func(l string) { said = append(said, l) },
+		Wait: roomwait.Wait{For: 30 * time.Minute, Now: func() time.Time { return now },
+			Sleep: func(_ context.Context, d time.Duration) error { slept = append(slept, d); now = now.Add(d); return nil }}}
+	bound := 0
+	binds := binderFunc(func(context.Context, computeapi.BindRunTargetRequest) (computeapi.RunTargetView, error) {
+		bound++
+		return computeapi.RunTargetView{}, nil
+	})
+	res, err := shareOn(context.Background(), run, binds, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Sizes[0].Passed || runs != 3 || len(slept) != 2 || bound != 1 {
+		t.Fatalf("passed %v after %d runs, waits %v: %q", res.Sizes[0].Passed, runs, slept, res.Sizes[0].Error)
+	}
+	if !slices.ContainsFunc(said, func(l string) bool {
+		return strings.HasPrefix(l, "h-c2m4 has no room: every Linux slot is in use by live boxes; asking again at 05:00:10 (waited 0s of 30m)")
+	}) {
+		t.Errorf("progress %q", said)
+	}
+
+	runs, freeAfter, slept = 0, 1000, nil
+	o.Wait.For = 2 * time.Minute
+	if res, err = shareOn(context.Background(), run, binderFunc(nil), o); err != nil || res.Sizes[0].Passed ||
+		!strings.Contains(res.Sizes[0].Error, "every Linux slot on this machine is in use by live boxes") {
+		t.Errorf("past the bound: %v %+v", err, res.Sizes[0])
+	}
+
+	runs, slept = 0, nil
+	o.Wait = roomwait.Wait{}
+	if res, err = shareOn(context.Background(), run, binderFunc(nil), o); err != nil || runs != 1 || len(slept) != 0 || res.Sizes[0].Passed {
+		t.Errorf("--wait 0: %v, %d runs, waits %v", err, runs, slept)
 	}
 }

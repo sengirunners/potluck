@@ -85,7 +85,9 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	// Only the door's signed, pre-dispatch refusal proves that no write
 	// ran. Never retry an ambiguous transport failure or an unverified answer.
-	if resp.StatusCode != http.StatusServiceUnavailable || req.Method == http.MethodGet || req.Method == http.MethodHead || req.Header.Get("Authorization") == "" {
+	// Without a token only the joining calls are offered a challenge.
+	if resp.StatusCode != http.StatusServiceUnavailable || req.Method == http.MethodGet || req.Method == http.MethodHead ||
+		req.Header.Get("Authorization") == "" && !tokenless(req.Method, req.URL.Path) {
 		return resp, nil
 	}
 	recovery := recoveryValue(resp.Header)

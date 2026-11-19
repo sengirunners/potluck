@@ -172,8 +172,14 @@ func (d *door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// A current challenge proves this request was signed after this
 		// process started. Missing old nonces cannot hide its replay: the
 		// normal authenticated nonce append above still has to succeed.
+		// The joining calls (redemption, the GitHub join's POSTs) are
+		// offered it too: they never had journal entries to lose, so the
+		// hold guards nothing of theirs, and without it a new member could
+		// not join for the whole window after every start with an empty
+		// journal (a hosted home starts that way each time). The challenge
+		// still keeps a request signed before this start out.
 		allowed := false
-		if r.Header.Get(api.HeaderAuthorization) != "" {
+		if r.Header.Get(api.HeaderAuthorization) != "" || tokenless(r.Method, r.URL.Path) {
 			if challenge, err := d.s.recoveryChallenge(); err == nil {
 				allowed = recoveryValue(r.Header) == challenge
 				if !allowed {

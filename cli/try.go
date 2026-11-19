@@ -23,6 +23,7 @@ import (
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/ids"
+	"github.com/sengirunners/potluck/roomwait"
 )
 
 // trialPool is the pool try makes when no --pool is given: the one the
@@ -107,7 +108,7 @@ func (a *app) try(ctx context.Context, images []string) error {
 // whenever it was made, even when an answer after that is an error.
 func (a *app) trySandbox(ctx context.Context, cp *client.Client) (err error) {
 	req := computeapi.AcquireRunTargetRequest{TTLS: int(tryTTL / time.Second), RequestID: "cli-" + strings.ToLower(ids.New())}
-	h, _, err := a.sandboxCreate(ctx, cp, computeclient.BoxWant{}, req, pushFlags{})
+	h, _, err := a.sandboxCreate(ctx, cp, computeclient.BoxWant{}, req, pushFlags{}, roomwait.Wait{}) // a try answers at once
 	if h.Handle != "" {
 		defer func() {
 			if rmErr := a.tryRemove(ctx, cp, h.Handle); rmErr != nil {

@@ -367,12 +367,6 @@ func (c config) isolation() string {
 	return "none"
 }
 
-// NoFreeSlot is the words of the driver's refusal when every slot for
-// guests of os is taken (describe's why, an acquire's or a start's
-// unavailable): potluck host finds them in conformance's output to say why
-// a run failed.
-func NoFreeSlot(os string) string { return "no free " + os + " slot" }
-
 func (c config) slots(os string) int {
 	if os == "darwin" {
 		return c.MacSlots
@@ -389,4 +383,11 @@ func (e refusal) Error() string { return e.code + ": " + e.msg }
 
 func refuse(code, format string, a ...any) error {
 	return refusal{code: code, msg: fmt.Sprintf(format, a...)}
+}
+
+// fullNow is an acquire's unavailable answer when the host is only full for
+// now (protocol.ReasonNoRoom): msg the answer's words, why what is full,
+// retryS the admission controller's retry time (0: none given).
+func fullNow(msg, why string, retryS int) error {
+	return refusal{code: "unavailable", msg: msg, data: protocol.Busy{Reason: protocol.ReasonNoRoom, RetryS: max(retryS, 0), Why: protocol.RefusalReason(why)}}
 }

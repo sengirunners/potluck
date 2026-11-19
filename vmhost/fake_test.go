@@ -17,6 +17,7 @@ import (
 
 	"github.com/sengirunners/potluck/conformance"
 	"github.com/sengirunners/potluck/conformance/refdriver"
+	"github.com/sengirunners/potluck/protocol"
 )
 
 const flagDriverTest = "-zm-run-tart-test-driver"
@@ -594,7 +595,7 @@ func TestMacOSSlotsAreCappedPerHost(t *testing.T) {
 
 // linux_slots is how many Linux boxes of the state directory run at once
 // (potluck host --linux-slots): past it an acquire is unavailable and
-// describe says so in the words potluck host reads (NoFreeSlot).
+// describe says so in the words potluck host reads (protocol.NoFreeSlot).
 func TestLinuxSlotsCapConcurrentBoxes(t *testing.T) {
 	_, repo, m := fakeBinding(t, "img")
 	m["target"], m["linux_slots"] = "t", "3"
@@ -610,11 +611,16 @@ func TestLinuxSlotsCapConcurrentBoxes(t *testing.T) {
 		}
 		handles = append(handles, a["handle"].(string))
 	}
-	if _, err := acquire("d"); code(err) != "unavailable" || !strings.Contains(err.Error(), NoFreeSlot("linux")) {
-		t.Fatalf("a fourth Linux run: %v, want unavailable: %s", err, NoFreeSlot("linux"))
+	_, err := acquire("d")
+	if code(err) != "unavailable" || !strings.Contains(err.Error(), protocol.NoFreeSlot("linux")) {
+		t.Fatalf("a fourth Linux run: %v, want unavailable: %s", err, protocol.NoFreeSlot("linux"))
+	}
+	// Marked as only full for now, so a caller waits and asks again (roomwait).
+	if bz, ok := noRoomData(err); !ok || bz.Why != protocol.NoFreeSlot("linux")+" (3 in use)" || bz.RetryS != 0 {
+		t.Errorf("a fourth Linux run's data: %+v %v, want no_room", bz, ok)
 	}
 	d, _ := call(t, m, "describe", "", nil)
-	if d["available"] != false || !strings.Contains(fmt.Sprint(d["why"]), NoFreeSlot("linux")+" (3 in use)") {
+	if d["available"] != false || !strings.Contains(fmt.Sprint(d["why"]), protocol.NoFreeSlot("linux")+" (3 in use)") {
 		t.Errorf("describe with every slot taken: %v", d)
 	}
 	for _, h := range handles {

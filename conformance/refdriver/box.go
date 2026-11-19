@@ -69,6 +69,11 @@ func (d *drv) exec(req request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Config exec_late_ms stands in for a loaded host: an exec on a box whose
+	// deadline is nearer than that arrives that much later, after it.
+	if late, left := time.Duration(atoi(d.cfg["exec_late_ms"]))*time.Millisecond, time.Until(r.Deadline); left > 0 && late > left {
+		time.Sleep(late)
+	}
 	if (r.State != "ready" || time.Now().After(r.Deadline)) && !d.is("box-exec-after-release") {
 		return nil, refuse("conflict", "%s is %s, not ready", r.Handle, r.State)
 	}

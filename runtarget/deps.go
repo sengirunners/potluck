@@ -737,13 +737,22 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 }
 
 // busyData is an unavailable driver answer's data when it is a
-// protocol.Busy for a volume being built, re-encoded; nil otherwise. Nothing
-// else from this unavailable answer reaches a caller (volume_errors.go).
+// protocol.Busy for a volume being built, or for a host only full for now
+// (its why kept as one line), re-encoded; nil otherwise. Nothing else from
+// this unavailable answer reaches a caller (volume_errors.go).
 func busyData(raw json.RawMessage) json.RawMessage {
 	var bz protocol.Busy
-	if len(raw) == 0 || json.Unmarshal(raw, &bz) != nil || bz.Reason != protocol.ReasonBuilding {
+	if len(raw) == 0 || json.Unmarshal(raw, &bz) != nil {
 		return nil
 	}
-	out, _ := json.Marshal(protocol.Busy{Reason: bz.Reason, RetryS: min(max(bz.RetryS, 0), 3600)})
+	keep := protocol.Busy{Reason: bz.Reason, RetryS: min(max(bz.RetryS, 0), 3600)}
+	switch bz.Reason {
+	case protocol.ReasonBuilding:
+	case protocol.ReasonNoRoom:
+		keep.Why = protocol.RefusalReason(bz.Why)
+	default:
+		return nil
+	}
+	out, _ := json.Marshal(keep)
 	return out
 }

@@ -173,6 +173,24 @@ type RunTargetSize struct {
 	DiskGB   int    `json:"disk_gb,omitempty"`
 }
 
+// FullNow says whether d is not available only for now: every slot is in
+// use, or the host's own reclaim policy (host mode auto) holds new work. A
+// box may be had there later by asking again (RefusedNoRoom). Any other
+// reason it is not available (paused, closed, a driver that cannot read its
+// image) is not. Full slots count only when Why is the driver's word for
+// them (protocol.NoFreeSlot): a driver may report no free slot while some
+// other reason is what keeps it unavailable, which waiting does not lift.
+func (d *RunTargetDescribe) FullNow() bool {
+	if d == nil || d.Available {
+		return false
+	}
+	if h := d.Host; h != nil && h.State != "" && h.State != protocol.HostAccepting {
+		return h.Mode == protocol.HostAuto // the reclaim policy's hold passes; the owner's switch (open, drain, closed) is theirs to lift
+	}
+	s := d.Slots
+	return s != nil && s.Total > 0 && s.Free <= 0 && strings.HasPrefix(d.Why, protocol.NoFreeSlot(s.OS))
+}
+
 // RunTargetSlots is describe's slots: how many boxes of OS may run at
 // once (Total) and how many more may start now (Free). Bindings that share
 // a driver state directory share these slots.

@@ -154,3 +154,50 @@ func TestAcquireBox(t *testing.T) {
 		t.Errorf("no box: %q %v, asked %q", target, err, asked)
 	}
 }
+
+// A pool with no room now (zm-eakh.12.24.18.5): placement passes over a
+// binding that is only full and takes another that has room; with none that
+// has room, the refusal is a no-room one naming the full binding, so the
+// caller waits (roomwait), unless the only full one would not fit anyway.
+// When every binding refused at acquire and one of them was only full, the
+// combined refusal is that one's no room.
+func TestNoRoomPlacesElsewhereThenWaits(t *testing.T) {
+	ctx := context.Background()
+	full := func(name, size string, cpu int) computeapi.RunTargetView {
+		v := boxView(name, false, "no free linux slot (8 in use)", size, "linux", cpu, 1024*cpu)
+		v.Describe.Slots = &computeapi.RunTargetSlots{OS: "linux", Total: 8}
+		return v
+	}
+	std := boxView("std", true, "", "standard", "linux", 2, 4096)
+	var asked []string
+	c := client.WithHandler(acquireHandler(&asked, nil, full("small", "small", 1), std))
+	if target, _, err := AcquireBox(ctx, c, BoxWant{OS: "linux"}, computeapi.AcquireRunTargetRequest{RequestID: "r1", TTLS: 60}, nil); err != nil || target != "std" {
+		t.Errorf("one full, one with room: %q %v, want std", target, err)
+	}
+
+	asked = nil
+	c = client.WithHandler(acquireHandler(&asked, nil, full("small", "small", 1), boxView("away", false, "closed by its owner", "standard", "linux", 2, 4096)))
+	_, _, err := AcquireBox(ctx, c, BoxWant{OS: "linux"}, computeapi.AcquireRunTargetRequest{RequestID: "r1", TTLS: 60}, nil)
+	if r, ok := computeapi.NoRoom(err); !ok || r.On != "small" || r.Why != "no free linux slot (8 in use)" || len(asked) != 0 {
+		t.Errorf("only a full one fits: %+v %v (%v), asked %q", r, ok, err, asked)
+	}
+	if !MadeNothing(err) {
+		t.Errorf("only a full one fits: not made-nothing: %v", err)
+	}
+	if _, _, err := AcquireBox(ctx, c, BoxWant{Size: "standard"}, computeapi.AcquireRunTargetRequest{RequestID: "r1", TTLS: 60}, nil); err == nil {
+		t.Error("the full one is the wrong size: placed")
+	} else if _, ok := computeapi.NoRoom(err); ok {
+		t.Errorf("the full one is the wrong size: a no room, so a wait for a box no host offers: %v", err)
+	}
+
+	asked = nil
+	noRoom := api.Errorf(api.CodeUnavailable, "no room on this host now: network busy").
+		WithData(computeapi.AcquireRefused{Reason: computeapi.RefusedNoRoom, On: "small", Why: "network busy", RetryS: 600})
+	budget := api.Errorf(api.CodeUnavailable, "budget spent").WithData(computeapi.AcquireRefused{Reason: computeapi.RefusedBudget})
+	small := boxView("small", true, "", "small", "linux", 1, 1024)
+	c = client.WithHandler(acquireHandler(&asked, map[string]*api.Error{"small": noRoom, "std": budget}, small, std))
+	_, _, err = AcquireBox(ctx, c, BoxWant{OS: "linux"}, computeapi.AcquireRunTargetRequest{RequestID: "r1", TTLS: 60}, nil)
+	if r, ok := computeapi.NoRoom(err); !ok || r.On != "small" || r.RetryS != 600 || len(asked) != 2 || !strings.Contains(err.Error(), "std (budget)") {
+		t.Errorf("no room on one, budget on the other: %+v %v (%v), asked %q", r, ok, err, asked)
+	}
+}

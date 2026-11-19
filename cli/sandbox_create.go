@@ -15,6 +15,7 @@ import (
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/ids"
 	"github.com/sengirunners/potluck/pushbase"
+	"github.com/sengirunners/potluck/roomwait"
 )
 
 func (a *app) sandboxCreateCmd() *cobra.Command {
@@ -25,10 +26,18 @@ func (a *app) sandboxCreateCmd() *cobra.Command {
 	var netOpt string
 	var vols []string
 	var df depscli.Flags
+	var wait time.Duration
 	cmd := &cobra.Command{Use: "create [--size c2m4] [--os linux] [--on <machine-size>] [--ttl 1h] [--ref HEAD [--dirty]] [--template agent|browser] [--net off] [--persist] [--volume name:path[:rw|ro|cow]]... [--deps npm[:path]]... [--database <recipe>]",
 		Short: "Start a sandbox on the smallest shared machine size that fits (or --on); prints its id",
 		Long: `With --ref (or --dirty) the sandbox gets that commit of this checkout, sent
 as a git bundle, checked out in ~/checkout (--dir); no credential enters it.
+
+While every machine that fits has no room now (every slot in use, its
+owner's reclaim policy holding new work, its admission controller saying
+no), it asks again for up to --wait (default 30m), printing why and when it
+asks next; Ctrl-C ends the wait with nothing held, and --wait 0 fails at
+once. A refusal that waiting cannot change (a size no machine offers, a
+machine that cannot isolate) fails at once.
 
 --template agent boots the coding-agent image (git, gh, Node, Go, Python, the
 Claude Code and Codex CLIs). --template browser adds sandboxed Chromium,
@@ -88,7 +97,7 @@ install scripts. The files come from this directory, not from --ref.`,
 			if req.RequestID == "" {
 				req.RequestID = "cli-" + strings.ToLower(ids.New())
 			}
-			h, res, err := a.sandboxCreate(cmd.Context(), c, want, req, push)
+			h, res, err := a.sandboxCreate(cmd.Context(), c, want, req, push, roomWait(wait, a.host.Stderr, a.name()))
 			switch {
 			case err != nil:
 				return err
@@ -114,6 +123,7 @@ install scripts. The files come from this directory, not from --ref.`,
 	f.StringVar(&netOpt, "net", "on", netUsage)
 	f.BoolVar(&req.Persist, "persist", false, "keep the sandbox's disk when it stops, for "+a.cmd("sandbox start")+" (a trusted machine whose driver keeps disks)")
 	f.StringArrayVar(&vols, "volume", nil, "name:path[:rw|ro|cow]: a named volume of yours that outlives the sandbox, mounted at path (repeatable)")
+	roomFlag(f, &wait, noRoomWhile)
 	push.add(f)
 	df.Add(f)
 	databaseFlags(cmd, &req.Database)
@@ -158,7 +168,9 @@ func netFlag(v string) (string, error) {
 // sandboxCreate places and starts a sandbox; with a ref (or --dirty) on a
 // machine that does not check out refs itself, it pushes this checkout's
 // commit into it, printing the id first (not with --json).
-func (a *app) sandboxCreate(ctx context.Context, c *client.Client, want computeclient.BoxWant, req computeapi.AcquireRunTargetRequest, push pushFlags) (computeapi.RunTargetHandle, *boxpush.Result, error) {
+// While every machine that fits has no room now, it asks again through
+// wait (roomwait).
+func (a *app) sandboxCreate(ctx context.Context, c *client.Client, want computeclient.BoxWant, req computeapi.AcquireRunTargetRequest, push pushFlags, wait roomwait.Wait) (computeapi.RunTargetHandle, *boxpush.Result, error) {
 	var h computeapi.RunTargetHandle
 	req.Template = want.Template
 	var src *boxpush.Source
@@ -197,7 +209,7 @@ func (a *app) sandboxCreate(ctx context.Context, c *client.Client, want computec
 		}
 		return prepErr
 	}
-	target, h, err := pushbase.Acquire(ctx, c, want, &req, prep, plan)
+	target, h, err := acquireRoom(ctx, wait, c, want, &req, prep, plan) // room.go
 	switch {
 	case err != nil && (target == "" || err == prepErr): // placement, or before the acquire: nothing was asked
 		return h, nil, err

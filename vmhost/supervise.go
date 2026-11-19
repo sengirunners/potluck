@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sengirunners/potluck/protocol"
 )
 
 // guestDir is the driver's working directory inside the guest: the checkout
@@ -437,6 +439,9 @@ func fail(st store, r record, err error) {
 			stopped(o, "the box did not start: "+why)
 		default:
 			o.State, o.Why, o.End = stFailed, why, time.Now().UTC()
+			if nr := (noRoom{}); errors.As(err, &nr) {
+				o.NoRoom = &protocol.Busy{Reason: protocol.ReasonNoRoom, RetryS: nr.retry, Why: nr.reason}
+			}
 		}
 		return nil
 	})

@@ -103,6 +103,9 @@ Linux boxes at once across those sizes. macOS boxes stay at two per Mac: the fla
   conformance needs free ones for its own boxes (two for its peers check): try again when one ends, or raise
   --linux-slots`, and the quick check's other sizes say `not checked: every slot was in use ...` instead of blaming
   the security checks. An earlier binding of the size stays bound as it was. On macOS the line names Apple's two.
+  Before that, the check waits for a slot to free: it runs the size's conformance again for up to `--wait` (default
+  30m; `--wait 0` gives that answer at once), with a line per change (`<binding> has no room: every Linux slot is in
+  use by live boxes; asking again at ...`).
 
 ### A machine too small for two
 
@@ -210,7 +213,41 @@ potluck host ['<invite code>' | <pool>] [--image name@sha256:<64 hex>]... [--lay
 
 `potluck host` shares with a pool. `potluck host stop [--force]` removes every size it shared; when it removed
 some and left nothing shared, a paused host switch goes back to auto, so the next share lends at once.
-`potluck host status` shows what this machine lends and runs now, and whether it takes new work; it changes nothing.
+`potluck host status` shows what this machine lends and runs now, and whether it takes new work, then the setup
+checklist below; it changes no setting.
+
+### Stages and the setup checklist
+
+A host run goes through five stages and says each as one line on stderr (not under `--json`), `[n/5] <stage>: <words>`, ending in
+`succeeded` or `blocked`:
+
+| stage | what it is |
+| --- | --- |
+| preflight | everything checked before a download: the layer, the image's fit, the disk, Softnet, the admin step |
+| images | `image N of M`: each pinned image pulled, or reused when it is already here (a pull says its percentage) |
+| validation | the conformance checks, `size N of M` |
+| join | joining the pool of the invite (only once a size passed), or the pool already joined |
+| usable capacity | sharing the sizes that passed and seeing the pool list them: what the pool can use |
+
+A blocked run's error says what happened and what to do. A run that went through ends with `next:`, the one thing
+left to do. The pull and conformance command lines are diagnostics: `--show-commands` prints them.
+
+The run writes its stages to the home's `host-setup.json` as they change (never the invite code; the command that
+runs it again names it `'<invite code>'`). `potluck host status` reads that file with what else is set up and prints
+the checklist, and `--json` carries it as `setup` (`state`, `stages`, `checks`, `next`):
+
+- Potluck's version and whether its daemon runs;
+- the last setup: none, running, succeeded, blocked at a stage, or interrupted (its record says it was still going,
+  but no run holds the lock);
+- what this machine shares now, and apart from that, when it may lend: only while you are away (after the idle
+  time, `--when away`) or any time, and whether it takes work now;
+- on a Mac, the menu bar item ([menubar.md](menubar.md#what-host-status-knows-of-the-app)): installed, running
+  (only once the app itself has read this status), and Login Items, which Potluck cannot read;
+- the daily update (`potluck upgrade enable`), which covers Potluck alone: not the menu bar item, Tart or Softnet.
+
+`next:` is the first thing left in that order. Nothing in the checklist is done for you: it never installs the
+menu bar item, adds a login item or turns on the daily update. The menu bar item's title and note come from the
+same facts, so the menu and the terminal name the same blocked stage.
 
 Run again where this machine already shares sizes with the pool (`<prefix>-<size>`: in a pool this machine runs,
 its sizes there; in a pool it joined, the machine-level sizes shared with that pool), host would pull, re-check and
@@ -500,6 +537,61 @@ Before pulling a Tart image, Potluck lists the local cache. An OCI entry with th
 exact full digest reference is reused; a tag or mutable local VM is insufficient.
 An unreadable listing falls back to pulling. Conformance still runs before binding.
 
+### Freeing a Mac's disk after a failed or replaced setup
+
+```
+potluck host images [--remove [image...]]
+```
+
+`potluck host images` reads Tart's list once and says, for each image and VM, what it is to Potluck, with its size
+on disk as Tart measured it, or an estimate from its pin's `pull_gb` where Tart gives none:
+
+- in use: a size this machine shares, in any pool it runs or at machine level, lends it (a sandbox size's images, a
+  runner's `image`), or it is a Potluck sandbox's VM (`potluck-<hash>-...`; its driver deletes it when the sandbox
+  ends, and keeps a kept sandbox's disk);
+- retained: Potluck's published image for this Mac (its macOS and architecture meet the pin's floor), which a
+  retry, or `--with` its name, lends without downloading it again; or an image that would be removable but that
+  Potluck cannot show is its own and unused (below);
+- removable: an image Potluck pulled that nothing here needs: a pin this Mac's macOS cannot lend (the Tahoe image on
+  a macOS 15 Mac) or an earlier digest of a pinned image that no size lends;
+- absent: this Mac's default image or the small Linux image, which a retry downloads, or a shared size's image that
+  Tart does not hold (its sandboxes are refused until it is pulled again), with about what the download is;
+- not Potluck's: a tag (Potluck pulls by digest) or a VM Potluck did not make: left alone.
+
+What this machine shares is read from every Potluck daemon running here: this command's, and another program's
+built on Potluck (by its machine record, `docs/daemon.md`), in every pool and at machine level.
+
+The pinned repositories (`ghcr.io/cirruslabs/macos-*-base` and others) are public, so a digest in one may be the
+owner's own. `potluck host` keeps a record, `potluck-pulls.json` in Tart's directory (`TART_HOME`, else `~/.tart`):
+when a share starts, the images it will use and the daemon home it runs on; when it pulls one, Tart's list having been
+read and lacked it, and the pull having succeeded, that the image is Potluck's. An image is removable only when the
+record says a share pulled it, every home it names had its daemon read, no home's latest share uses it (a retry there
+lends it, or that share is still running; each program built on Potluck has its own pins, so this one's say nothing of
+another's), and Tart's list holds no tag of its repository: `tart clone
+ghcr.io/cirruslabs/macos-tahoe-base:latest mine` leaves a tag and its digest, and Tart drops a tag whose digest is
+deleted. An image Potluck found already there, or pulled before it kept the record (the Tahoe image a failed setup
+pulled on a macOS 15 Mac before this record existed), and that passes every other check is retained and listed as
+unclaimed, with the command that removes it: `potluck host images --remove <image>`.
+
+While any daemon home the record names is not running, no image is removable: its sizes may lend one, even an image a
+share there used before the record began. A daemon home whose shares all ran on a build older than the record is not
+in it: while that daemon runs, what it shares is read, but a stopped one's sizes are not, so an image it lends can look
+removable or unclaimed. Start every Potluck daemon on the Mac before a removal. A recorded home that no longer exists
+(an uninstalled program's) still keeps every image, since an unmounted disk comes back; if it is gone for good, deleting
+`potluck-pulls.json` forgets it, and every claim with it (Potluck's images are then unclaimed, removable by name).
+
+It changes nothing and starts no daemon. `--remove` runs `tart delete` on the removable images only, reading
+everything again just before each delete (an image a size began lending meanwhile is kept, and says so), then reads
+Tart's list again and says for each whether it is gone, was already gone, or was not removed and what Tart said
+(then it exits 1), with the free disk before and after. With image names it deletes exactly those, each removable or
+unclaimed (naming one says it is not yours; every other check still holds, again just before its delete); when any
+named image is neither, it deletes nothing and exits 1 saying why. Each last read and its delete hold the record's
+lock, which a share takes when it starts, so a share that starts meanwhile finds the image gone and pulls it. Tart may drop its own leftovers on a delete (a tag whose
+download was already gone); those are listed as also gone. An image Tart's list no longer holds loses its claim in
+the record when a removal or a share next reads that list (the homes that used it stay). A second run removes nothing
+more. When any list of what this machine shares cannot be read (a daemon running here does not answer, or one pool's
+list fails), no image is removable; when its macOS version cannot be read, it refuses.
+
 The Cirrus Xcode image does not include Chrome. Workflows needing Chrome must
 install it until a Potluck Mac image ships it. Real-Mac acceptance is the S4 runner
 probe and worm native on a Mac lent with `--with xcode`, without `--image` or
@@ -625,6 +717,11 @@ sees still counts the check boxes.
   same scope has none, `host` unbinds exactly that binding, since its boxes take room the controller does not count,
   and says so. (Also when no size passed and nothing binds, but not for an invite code, which has not joined yet.)
   When that fails, the size's error says it is still bound WITHOUT admission.
+- When no size passes on a run for a pool, `host` reads that pool's bindings back after that unbind and says which
+  earlier sizes still lend (`nothing changed: the earlier sizes still lend to pool <pool> (...)`), naming the flags
+  given that shape the share (`--docker`, `--sizes`, ...) as not having taken effect; with none left it says this
+  machine shares nothing with the pool. A run with an invite code says the machine did not join and the invite is
+  not spent.
 
 ## potluck-driver-tart
 

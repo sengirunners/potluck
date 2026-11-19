@@ -187,7 +187,8 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 			return refuse("unavailable", "%v", err)
 		}
 		if free == 0 {
-			return refuse("unavailable", "%s (%d in use)", NoFreeSlot(os), d.cfg.slots(os))
+			why := fmt.Sprintf("%s (%d in use)", protocol.NoFreeSlot(os), d.cfg.slots(os))
+			return fullNow(why, why, 0)
 		}
 		if n := d.kept(); a.Persist && n >= d.cfg.PersistMax {
 			return refuse("unavailable", "this host keeps %d disks already (persist_max %d): rm a stopped sandbox, or create one without persist", n, d.cfg.PersistMax)
@@ -348,6 +349,9 @@ func (d *drv) waitStarted(id string) (record, error) {
 			return r, errCancelled
 		case r.State == stFailed:
 			_ = d.st.locked(func() error { d.st.remove(r); return nil })
+			if f := r.NoRoom; f != nil { // the admission controller had no room (supervise.go fail)
+				return r, fullNow("the run did not start: "+r.Why, f.Why, f.RetryS)
+			}
 			return r, refuse("unavailable", "the run did not start: %s", r.Why)
 		case r.State != stStarting:
 			return r, nil

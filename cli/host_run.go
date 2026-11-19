@@ -23,6 +23,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/menubar"
@@ -60,6 +61,7 @@ func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string, askFirst bo
 		return err
 	}
 	var c *client.Client
+	var setup *hostsetup.Tracker
 	if !o.DryRun { // a dry run never starts the daemon, nor needs the pool or the lock
 		var cfg *config.Config
 		if c, cfg, err = a.client(); err != nil {
@@ -89,10 +91,17 @@ func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string, askFirst bo
 		if s.detach {
 			return a.hostDetach(cmd, c, arg, o, s, cfg.Home, lock)
 		}
+		setup = a.startSetup(cmd, &o, cfg.Home, arg, handed >= 0)
 	}
 	err = a.poolHost(ctx, c, shareRunner, arg, o, a.host.Stdout, a.rootStep(ctx, s), a.afterLend(s, o.DryRun))
+	if setup != nil {
+		defer a.endSetup(ctx, setup, err)
+	}
 	if sc := (*spentCodeError)(nil); errors.As(err, &sc) {
 		sc.Flags = shareFlagArgs(cmd)
+	}
+	if ns := (*noSizePassedError)(nil); errors.As(err, &ns) {
+		ns.flags = a.shapingFlags(cmd)
 	}
 	if err == nil && !o.DryRun {
 		if note := a.pausedNote(); note != "" {

@@ -285,9 +285,12 @@ func (r *run) shelfShared(p string) error {
 			return err
 		}
 	}
+	if err := r.shelfLimit(a.Handle); err != nil {
+		return err
+	}
 	for _, o := range []shelfOp{
 		{"chmod and write in one command", "d", `chmod -R u+w "$1" 2>/dev/null; : > "$1/$2"`},
-		{"replace the shelf with a directory of the box's", "d", `[ "$1" = "$S" ] && mv "$1" "$1.$2" && mkdir "$1" && : > "$1/$2"`},
+		{"replace the shelf with a directory of the box's", "d", shelfReplace},
 	} {
 		if _, err := r.shelfAttempt(a.Handle, p, o, mark, files); err != nil {
 			return err
@@ -307,6 +310,31 @@ func (r *run) shelfShared(p string) error {
 		return fmt.Errorf("a box after the writer ended: %w", err)
 	}
 	return nil
+}
+
+// shelfReplace renames the shelf aside and makes a directory of the box's
+// in its place, with a file named for the mark. It must be a rename, never a
+// copy: a copy of the shelf lands in the box's own filesystem, which under
+// gVisor is box memory, so a shelf bigger than the box gets the box killed.
+// mv copies when rename(2) answers EXDEV. And under gVisor, with root,
+// rename(2) of the shelf's mount point itself fills the box's rootfs overlay
+// with the tree before it answers (Linux answers EBUSY for a mount point).
+// With the file size limit at zero both stop at the first non-empty file,
+// and a rename in place, mkdir and an empty file still work. The limit holds
+// only in the op's own sh -c. So a replace that only a copy could make is
+// left untried: a shelf a box can copy over is one it can write, which the
+// writes before this op show.
+const shelfReplace = `[ "$1" = "$S" ] && ulimit -f 0 && mv "$1" "$1.$2" && mkdir "$1" && : > "$1/$2"`
+
+// shelfLimit says box h's sh can set the file size limit shelfReplace needs.
+// A box that cannot would skip the replace unseen, since an op that fails
+// reads as a write refused.
+func (r *run) shelfLimit(h string) error {
+	res, err := r.sh(h, `ulimit -f 0`, "")
+	if err == nil && *res.Exit != 0 {
+		err = fmt.Errorf("the box's sh cannot set a file size limit (ulimit -f 0 exits %d: %s): replacing the shelf cannot be tried without copying it", *res.Exit, clip(strings.TrimSpace(*res.Stderr)))
+	}
+	return err
 }
 
 // npmBlob is a sha512's path on the shelf and in npm's cache (under

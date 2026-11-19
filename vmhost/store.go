@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -53,6 +54,7 @@ type record struct {
 	Starts                  int              // a persistent box: starts after a stop (0: the first boot, which clones)
 	Finished                int              // a persistent box: 1 + the Starts whose supervisor finished with the VM
 	State, Why              string
+	NoRoom                  *protocol.Busy // a failed start's: the admission controller had no room (Why its reason)
 	OS, VM, Image           string
 	Remote, Ref, Commit     string
 	Script                  string
@@ -235,5 +237,14 @@ func (s store) vmPrefixNew() string {
 func (s store) ownVM(name string) bool {
 	return strings.HasPrefix(name, s.vmPrefix()) || strings.HasPrefix(name, s.vmPrefixNew())
 }
+
+// potluckVMRe is the form of every state directory's VM names: either
+// prefix (vmPrefix, vmPrefixNew), whatever the directory's hash.
+var potluckVMRe = regexp.MustCompile(`^(zmrt|potluck)-[0-9a-f]{8}-`)
+
+// PotluckVMName reports whether a VM name has the form a Potluck driver
+// gives its VMs, under any state directory. Such a VM is a box's or a kept
+// box's disk, and its driver deletes it; nothing else should.
+func PotluckVMName(name string) bool { return potluckVMRe.MatchString(name) }
 
 func alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }

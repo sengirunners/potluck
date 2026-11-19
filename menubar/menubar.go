@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/protocol"
 )
 
@@ -41,6 +42,8 @@ type Facts struct {
 	// Background is a host run going on in the background, or the last
 	// one's end (nil: none).
 	Background *Background
+	// Setup is what the setup checklist is made from.
+	Setup SetupFacts
 }
 
 // Background is a host run in the background (host --detach): running
@@ -144,6 +147,8 @@ type Status struct {
 	Menu    Menu                  `json:"menu"`
 	// Background is Facts.Background.
 	Background *Background `json:"background,omitempty"`
+	// Setup is the setup checklist and the one thing to do next.
+	Setup Setup `json:"setup"`
 }
 
 // Refused is the newest admission refusal still standing now on any of the
@@ -181,6 +186,7 @@ func Build(f Facts) Status {
 		st.Mode, st.State, st.Until = f.Host.Mode, f.Host.State, f.Host.Until
 	}
 	st.Refused = Refused(f.Host, f.Targets)
+	setup := runState(f.Setup)
 	m := &st.Menu
 	lent := l.Lent
 	switch {
@@ -192,6 +198,14 @@ func Build(f Facts) Status {
 		m.Note = "start it: " + f.Start
 	case l.Sizes == 0 && f.ListErr != "":
 		m.Title = "Cannot read what this Mac lends"
+	case l.Sizes == 0 && setup == SetupRunning:
+		m.Title = "Setting up: " + stageOf(f.Setup.Run)
+		if n := len(f.Setup.Run.Stages); n > 0 {
+			m.Note = f.Setup.Run.Stages[n-1].Detail
+		}
+	case l.Sizes == 0 && (setup == SetupBlocked || setup == SetupInterrupted):
+		m.Title = "Setup blocked at " + stageOf(f.Setup.Run)
+		m.Note = setupNote(f.Setup.Run, f.Share)
 	case l.Sizes == 0:
 		m.Title = "Not lending"
 		m.Note = "share this Mac: " + f.Share
@@ -224,8 +238,14 @@ func Build(f Facts) Status {
 			m.Note = join(m.Note, "not everything shared could be read: "+f.ListErr)
 		}
 	}
-	if b := f.Background; b != nil && b.State == "running" {
-		m.Note = join(m.Note, "sharing goes on in the background: "+b.Last)
+	switch {
+	case l.Sizes == 0 && setup == SetupRunning: // the stage says it
+	case l.Sizes > 0 && setup == SetupRunning:
+		m.Note = join(m.Note, "setting up again: "+stageOf(f.Setup.Run))
+	case l.Sizes > 0 && (setup == SetupBlocked || setup == SetupInterrupted):
+		m.Note = join(m.Note, "the last setup run was blocked at "+stageOf(f.Setup.Run)+"; what was shared before still lends")
+	case f.Background != nil && f.Background.State == "running":
+		m.Note = join(m.Note, "sharing goes on in the background: "+f.Background.Last)
 	}
 	if u := clock(st.Until, loc); u != "" && st.Mode != protocol.HostAuto {
 		m.Note = join(m.Note, "until "+u+", then back to your rules")
@@ -243,7 +263,30 @@ func Build(f Facts) Status {
 	if stop := &m.Items[2]; stop.Args != nil && l.Jobs > 0 {
 		stop.Confirm = fmt.Sprintf("End %s now? Their work is lost.", plural(l.Jobs, "running job"))
 	}
+	st.Setup = buildSetup(f, st)
 	return st
+}
+
+// stageOf is the stage the run is at or stopped at, as "validation (3 of 5)".
+func stageOf(r *hostsetup.Run) string {
+	s := r.Blocked()
+	if s == nil && len(r.Stages) > 0 {
+		s = &r.Stages[len(r.Stages)-1]
+	}
+	if s == nil {
+		return hostsetup.Label(hostsetup.Order[0]) + fmt.Sprintf(" (1 of %d)", len(hostsetup.Order))
+	}
+	return fmt.Sprintf("%s (%d of %d)", hostsetup.Label(s.Name), hostsetup.Number(s.Name), len(hostsetup.Order))
+}
+
+// setupNote is a blocked or cut-off setup's reason and the way on (share:
+// the command when the record names none).
+func setupNote(r *hostsetup.Run, share string) string {
+	again := cmp.Or(r.Again, share)
+	if b := r.Blocked(); b != nil {
+		return b.Detail + "; then run again: " + again
+	}
+	return "it stopped before it finished; run again: " + again
 }
 
 func item(id, label, sub string, checked bool, mode string) Item {

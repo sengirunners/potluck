@@ -15,6 +15,12 @@ import (
 // connection) carries none: the box may still come up there.
 type AcquireRefused struct {
 	Reason string `json:"refused"`
+	// On, Why and RetryS are a RefusedNoRoom refusal's: the binding that is
+	// full, what is full in its host's words (untrusted text), and the
+	// host's admission controller's retry time in seconds (0: none given).
+	On     string `json:"on,omitempty"`
+	Why    string `json:"why,omitempty"`
+	RetryS int    `json:"retry_s,omitempty"`
 }
 
 // The rules an AcquireRefused names.
@@ -25,7 +31,22 @@ const (
 	RefusedLifetime    = "lifetime"    // ttl_s is past the binding's lifetime cap
 	RefusedDriver      = "driver"      // the binding's driver refused the acquire (no capacity, a size it cannot place)
 	RefusedImage       = "image"       // the binding lends no pin of the image the acquire needs (a database recipe's)
+	RefusedNoRoom      = "no_room"     // the binding is only full for now (RunTargetDescribe.FullNow, protocol.ReasonNoRoom): asking again later may get the box
 )
+
+// NoRoom says whether err is an acquire refusal whose only reason is that
+// the binding is full for now (RefusedNoRoom), and if so what it said.
+func NoRoom(err error) (AcquireRefused, bool) {
+	var e *api.Error
+	if !errors.As(err, &e) || e.Code != api.CodeUnavailable || len(e.Data) == 0 {
+		return AcquireRefused{}, false
+	}
+	var r AcquireRefused
+	if json.Unmarshal(e.Data, &r) != nil || r.Reason != RefusedNoRoom {
+		return AcquireRefused{}, false
+	}
+	return r, true
+}
 
 // RefusedBeforeRecord says whether err is an acquire refusal marked
 // AcquireRefused, and if so its reason.
@@ -39,7 +60,7 @@ func RefusedBeforeRecord(err error) (string, bool) {
 		return "", false
 	}
 	switch r.Reason {
-	case RefusedUnavailable, RefusedHandlesMax, RefusedBudget, RefusedLifetime, RefusedDriver, RefusedImage:
+	case RefusedUnavailable, RefusedHandlesMax, RefusedBudget, RefusedLifetime, RefusedDriver, RefusedImage, RefusedNoRoom:
 		return r.Reason, true
 	}
 	return "", false

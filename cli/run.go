@@ -56,6 +56,9 @@ type boxJobOptions struct {
 	// deps are the dependency layers the box is acquired with (depscli).
 	deps      []computeapi.BoxDeps
 	depsWaitS *int
+	// room is how long the acquire waits while every machine that fits has
+	// no room now (--wait; roomwait); 0 fails at once.
+	room time.Duration
 	// under is the project's directory in the checkout ("" its top) when a
 	// layer is mounted there by default: run's command runs there, beside it.
 	under         string
@@ -123,8 +126,9 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, in jobResult
 	// lifetime cap (0: none known), which counts from the acquire.
 	var planned, lifeCap time.Duration
 	var leased bool
+	var acquiring time.Time // when the binding that answered was asked: its lifetime cap counts from there
 	prep := func(ctx context.Context, target string, ar *computeapi.AcquireRunTargetRequest) error {
-		prepErr, leased, lifeCap = nil, false, 0
+		prepErr, leased, lifeCap, acquiring = nil, false, 0, time.Now()
 		ttl := o.timeout + jobLeaseSlack
 		v, err := computeclient.DescribeRunTarget(ctx, c, target)
 		if ctx.Err() != nil { // Ctrl-C before the acquire: nothing was asked
@@ -159,11 +163,11 @@ func boxJob(ctx context.Context, c *client.Client, o boxJobOptions, in jobResult
 		// sweep (which renews a handle whose holder session lives) does not
 		// keep the sandbox up after this process dies.
 		ar.SelfRenew = leased
-		areq.TTLS, areq.SelfRenew = ar.TTLS, ar.SelfRenew // as this binding was asked: the interrupt below asks it again, the same
 		return nil
 	}
-	acquiring := time.Now()
-	target, h, err := pushbase.Acquire(ctx, c, o.want, &areq, prep, o.base)
+	// areq comes back as the last ask sent it (ttl_s and self_renew as prep
+	// set them): the interrupt below asks it again, the same.
+	target, h, err := acquireRoom(ctx, roomWait(o.room, o.errw, o.p.name()), c, o.want, &areq, prep, o.base) // room.go
 	r.Target = target
 	if err != nil && (target == "" || err == prepErr || computeclient.MadeNothing(err)) { // nothing was made: nothing to end
 		return r.stopped(ctx, err)

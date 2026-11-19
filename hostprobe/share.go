@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"math"
 	"path/filepath"
@@ -16,9 +17,11 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/conformance"
+	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/imagepins"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
+	"github.com/sengirunners/potluck/roomwait"
 	"github.com/sengirunners/potluck/vmhost"
 )
 
@@ -56,7 +59,10 @@ type ShareOptions struct {
 	Report Report
 	// StateDir overrides the driver's state directory; empty keeps its default.
 	// Report.StateDir is only the disk-space probe path.
-	StateDir   string
+	StateDir string
+	// Home is the home of the daemon the sizes bind in, which Potluck's
+	// record of Tart's images names (tartpulls.go); "" records nothing.
+	Home       string
 	Layer      string // "" = the best available supported layer
 	Images     []string
 	With       string   // named image, selected alone instead of the default
@@ -93,7 +99,8 @@ type ShareOptions struct {
 	DriverDirs  []string
 	Conformance string // the suite's binary; default potluck-conformance, else zm-run-conformance (defaultSuite)
 	DryRun      bool
-	// ShowCommands: a dry run's text also prints each conformance command line.
+	// ShowCommands: the text also prints each pull and conformance command
+	// line (a diagnostic: the stages say what runs).
 	ShowCommands bool
 	// Full runs the whole conformance suite on every size. Without it share
 	// runs QuickGroups once, on the first size, and SizeGroups on each other
@@ -113,6 +120,14 @@ type ShareOptions struct {
 	PullTimeout time.Duration
 	// Progress, when set, hears each step in plain words.
 	Progress func(string)
+	// Stages, when set, records each stage Check and Bind reach (preflight
+	// done, each image, each size's validation, each size shared), and
+	// Progress hears its line; the caller records the rest (hostsetup).
+	Stages *hostsetup.Tracker
+	// Wait is how long a size's check waits while every slot of this
+	// machine is in use by live boxes, asking again (roomwait; its lines go
+	// to Progress unless it has its own Say). The zero Wait fails at once.
+	Wait roomwait.Wait
 	// NetAllow and NetForbid (host:port) go to each size's conformance run
 	// as --net-allow and --net-forbid; share adds --net-peers and, for each
 	// of HostAddrs (this machine's own addresses, HostAddrs()), a
@@ -200,8 +215,8 @@ type ShareResult struct {
 	Layer  string `json:"layer"`
 	Driver string `json:"driver"`
 	DryRun bool   `json:"dry_run"`
-	// ShowCommands is the dry run's text output only; the JSON always has
-	// every size's conformance_command.
+	// ShowCommands is the text output only (each pull and conformance
+	// command line); the JSON always has every size's conformance_command.
 	ShowCommands bool `json:"-"`
 	Full         bool `json:"full"`
 	// ReclaimIdleS is the reclaim policy bound (0: lent all the time).
@@ -814,14 +829,36 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		return res, nil
 	}
 
-	pulled := res.Images[:0:0]
-	for i, p := range res.Pulls {
-		if res.Layer == "tart" && tartImagePresent(ctx, run, res.Images[i], layer.CLI) {
-			say("reuse " + res.Images[i])
-			pulled = append(pulled, res.Images[i])
-			continue
+	start := time.Now()
+	if res.Layer == "tart" && o.Report.TartDir != "" && o.Home != "" {
+		// From now these are the images this home's latest share uses
+		// (tartpulls.go): host images --remove keeps them.
+		if err := StartTartShare(o.Report.TartDir, o.Home, res.Images, start); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			res.Notes = append(res.Notes, fmt.Sprintf("could not record the images this share uses (%v): host images --remove may take them for unused", err))
 		}
-		say(p.What)
+	}
+	say(o.Stages.Succeed(hostsetup.Preflight, preflightWords(res)))
+	pulled, reused := res.Images[:0:0], 0
+	forgot := false
+	for i, p := range res.Pulls {
+		of := fmt.Sprintf("image %d of %d: ", i+1, len(res.Pulls))
+		listed := false // Tart's list was read, and lacked the image
+		if res.Layer == "tart" {
+			cached, err := tartCachedImages(ctx, run, layer.CLI)
+			if err == nil && !forgot && o.Report.TartDir != "" && o.Home != "" {
+				// An image the list lacks loses Potluck's claim, so the
+				// owner's later pull of that digest is not taken for ours.
+				forgetGone(o.Report.TartDir, cached)
+				forgot = true
+			}
+			if err == nil && cached[res.Images[i]] {
+				say(o.Stages.Begin(hostsetup.Images, of+"reuse "+res.Images[i]+" (already here)"))
+				pulled, reused = append(pulled, res.Images[i]), reused+1
+				continue
+			}
+			listed = err == nil
+		}
+		say(o.Stages.Begin(hostsetup.Images, of+p.What))
 		pullOptions := o
 		if pullOptions.PullTimeout <= 0 {
 			pin, _ := PinForImage(res.Images[i])
@@ -838,6 +875,14 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			why = fmt.Sprintf("%s: exit %d: %s", p.What, r.Exit, strings.TrimSpace(r.Stderr))
 		}
 		im := res.Images[i]
+		if res.Layer == "tart" && listed && why == "" && o.Report.TartDir != "" && o.Home != "" {
+			// Tart's list was read and lacked im, and the pull succeeded:
+			// what Tart holds under that name is Potluck's (tartpulls.go).
+			// With the list unread it may have been the owner's all along.
+			if err := RecordTartPull(o.Report.TartDir, im, o.Home, start, time.Now()); err != nil {
+				res.Notes = append(res.Notes, fmt.Sprintf("could not record that Potluck pulled %s (%v): host images --remove will keep it", im, err))
+			}
+		}
 		switch tmpl, isTmpl := templates[im]; {
 		case why == "":
 			pulled = append(pulled, im)
@@ -847,12 +892,13 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			return res, errors.New(why)
 		}
 	}
-	if res.Storage != nil {
-		say("shelf volume " + vmhost.ShelfVolume)
+	if res.Storage != nil { // part of the images stage: a failure here blocks it
+		say(o.Stages.Begin(hostsetup.Images, "shelf volume "+vmhost.ShelfVolume))
 		if err := ensureShelfVolume(ctx, run, res.Storage); err != nil {
 			return res, err
 		}
 	}
+	say(o.Stages.Succeed(hostsetup.Images, imagesWords(len(pulled), reused, len(res.Pulls))))
 	if len(pulled) < len(res.Images) { // conformance and the binding take the images pulled
 		old, now := "images="+strings.Join(res.Images, ","), "images="+strings.Join(pulled, ",")
 		for i := range res.Sizes {
@@ -875,6 +921,10 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	if timeout <= 0 {
 		timeout = 15 * time.Minute
 	}
+	wait := o.Wait
+	if wait.Say == nil {
+		wait.Say = say
+	}
 	busy := false // the first size failed only because every slot was in use
 	for i := range res.Sizes {
 		sr := &res.Sizes[i]
@@ -885,10 +935,20 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			}
 			continue
 		}
-		say("conformance on " + sr.Binding)
-		cctx, cancel := context.WithTimeout(ctx, timeout)
-		r, err := run.Run(cctx, sr.Conformance[0], sr.Conformance[1:]...)
-		cancel()
+		say(o.Stages.Begin(hostsetup.Validation, fmt.Sprintf("size %d of %d: conformance on %s", i+1, len(res.Sizes), sr.Binding)))
+		var r Result
+		var err error
+		// Every slot taken by live boxes is room for now: asked again while
+		// o.Wait lasts, then the last answer is this size's as before.
+		_ = wait.Do(ctx, func(ctx context.Context) error {
+			cctx, cancel := context.WithTimeout(ctx, timeout)
+			r, err = run.Run(cctx, sr.Conformance[0], sr.Conformance[1:]...)
+			cancel()
+			if full := slotsFullOS(r.Stdout); err == nil && r.Exit != 0 && full != "" {
+				return &roomwait.Full{Where: sr.Binding, Why: slotsFullWhy(full)}
+			}
+			return nil
+		})
 		sr.Output = strings.TrimSpace(r.Stdout + "\n" + r.Stderr)
 		switch {
 		case err != nil:
@@ -955,8 +1015,8 @@ func Bind(ctx context.Context, b Binder, o ShareOptions, res ShareResult) ShareR
 		if !sr.Passed {
 			continue
 		}
-		if o.Progress != nil {
-			o.Progress("bind " + sr.Binding)
+		if line := o.Stages.Begin(hostsetup.Capacity, "share "+sr.Binding); o.Progress != nil {
+			o.Progress(line)
 		}
 		req := computeapi.BindRunTargetRequest{Replace: true, Target: computeapi.RunTarget{
 			Name: sr.Binding, Driver: res.Driver, Kind: "box", Isolation: "ephemeral", Credentials: false,

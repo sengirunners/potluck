@@ -45,6 +45,9 @@ exit code. The sandbox ends at the end, also on Ctrl-C, an error or the
 timeout (exit 124), unless --keep. A command that ends with no exit code
 (its sandbox went) fails. No command: the commit's .potluck/job.
 
+While every machine that fits has no room now, it waits for one as
+` + a.cmd("sandbox create") + ` does, for up to --wait (default 30m; 0 fails at once).
+
 --deps npm[:path] runs it beside a dependency layer of yours (node_modules
 built once from this directory's package-lock.json and package.json files,
 then reused; ` + a.cmd("sandbox create --help") + ` says more), mounted copy-on-write at
@@ -103,6 +106,7 @@ machine of another member's, name a --template, not an --image.`,
 	f.DurationVar(&o.timeout, "timeout", 30*time.Minute, "kill the command after this long (exit 124)")
 	f.BoolVar(&o.keep, "keep", false, "leave the sandbox up afterwards, for "+a.cmd("sandbox exec")+" (it ends at its lease)")
 	f.StringVar(&o.net, "net", "on", netUsage)
+	roomFlag(f, &o.room, noRoomWhile)
 	o.push.add(f)
 	o.df.Add(f)
 	databaseFlags(cmd, &o.database)

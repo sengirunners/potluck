@@ -422,6 +422,7 @@ install_menubar() {
 	fi
 	say "  open it:       open \"$mv_dest\""
 	say "  at every login: System Settings > General > Login Items > add Potluck Menu"
+	say "  is it running: potluck host status (the menu bar item counts as running once it has read that status itself)"
 }
 
 # path_setup: the startup file of the shell this person runs (macOS's zsh does not read ~/.profile) and the line that

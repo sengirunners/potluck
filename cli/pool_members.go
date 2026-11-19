@@ -189,7 +189,7 @@ func quickTunnelNote(code string) string {
 // installJoin installs Potluck and redeems code in one line (install.sh
 // --join): all a friend's machine needs.
 func installJoin(code string) string {
-	return "curl -fsSL https://potluck.sh/install.sh | sh -s -- --join " + singleQuoted(code)
+	return installScript + " --join " + singleQuoted(code)
 }
 
 // friendCmd is a command for a friend's machine, which needs only Potluck:

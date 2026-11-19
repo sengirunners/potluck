@@ -289,7 +289,7 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		return nil, api.Errorf(api.CodeForbidden, "%s now, so it makes no box", eff.CannotIsolate("potluck-driver-"+b.Driver))
 	}
 	if !d.Available && !seen {
-		return nil, markRefused(api.Errorf(api.CodeUnavailable, "run target %s is not available: %s", b.Name, oneLine(d.Why)), computeapi.RefusedUnavailable)
+		return nil, notAvailable(b, d) // refused.go
 	}
 	if !d.Available && prev.Handle == "" { // a request still being made here: retried here, never elsewhere
 		return nil, api.Errorf(api.CodeUnavailable, "run target %s is not available: %s", b.Name, oneLine(d.Why))
@@ -410,7 +410,7 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		if !seen {
 			// A refusal made nothing: forget the request so the key is free.
 			if derr := deleteAcquiring(actx, db, b.Name, req.RequestID); derr == nil {
-				err = driverRefused(b.Kind, err) // refused.go: nothing kept, so the caller may ask another binding
+				err = driverRefused(b.Kind, b.Name, err) // refused.go: nothing kept, so the caller may ask another binding
 			}
 		}
 		return nil, err

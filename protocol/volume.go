@@ -59,11 +59,27 @@ type VolumeMissing struct {
 // live box is building the volume.
 const ReasonBuilding = "building"
 
+// ReasonNoRoom is the reason in an unavailable acquire answer's data when
+// the host is only full for now: every slot is in use, or its admission
+// controller has no room now. Nothing was made; the same request may be
+// asked again. Why is what is full, in the host's words; RetryS the
+// controller's retry time (0: none given).
+const ReasonNoRoom = "no_room"
+
+// NoFreeSlot is the words a box driver's describe why starts with when
+// every slot for guests of os is in use (its acquire's and start's
+// unavailable say them too). The daemon counts a describe that is not
+// available only for that as full for now (computeapi
+// RunTargetDescribe.FullNow); potluck host finds them in conformance's
+// output to say why a run failed.
+func NoFreeSlot(os string) string { return "no free " + os + " slot" }
+
 // Busy is an unavailable answer's data: why, and the seconds to wait before
-// asking again.
+// asking again. Why is only a no_room answer's (ReasonNoRoom).
 type Busy struct {
 	Reason string `json:"reason"`
 	RetryS int    `json:"retry_s"`
+	Why    string `json:"why,omitempty"`
 }
 
 // KeepMax is how many paths a release's keep may name.

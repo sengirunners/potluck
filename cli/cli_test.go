@@ -651,8 +651,8 @@ func TestTailnetNameBesideZm(t *testing.T) {
 	}
 }
 
-// A dry run prints the plan, not each conformance command line, unless
-// --show-commands asks; a real run prints them.
+// Neither a dry run nor a real run prints the pull and conformance command
+// lines unless --show-commands asks: the stages say what runs.
 func TestPrintShareDryRunHidesConformanceLines(t *testing.T) {
 	res := hostprobe.ShareResult{Layer: "tart", DryRun: true, Sizes: []hostprobe.SizeResult{{Binding: "h-c1m2", Conformance: []string{"potluck-conformance", "tart"}}}}
 	var b strings.Builder
@@ -667,9 +667,16 @@ func TestPrintShareDryRunHidesConformanceLines(t *testing.T) {
 		t.Errorf("--show-commands:\n%s", b.String())
 	}
 	res.DryRun, res.ShowCommands = false, false
+	res.Pulls = []hostprobe.Step{{What: "pull img", Command: []string{"tart", "pull", "img"}}}
 	b.Reset()
 	printShare(&b, res, programName)
-	if !strings.Contains(b.String(), "ran: potluck-conformance tart") {
-		t.Errorf("real run:\n%s", b.String())
+	if out := b.String(); strings.Contains(out, "potluck-conformance") || strings.Contains(out, "tart pull") {
+		t.Errorf("real run:\n%s", out)
+	}
+	res.ShowCommands = true
+	b.Reset()
+	printShare(&b, res, programName)
+	if out := b.String(); !strings.Contains(out, "ran: potluck-conformance tart") || !strings.Contains(out, "ran: tart pull img") {
+		t.Errorf("real run, --show-commands:\n%s", out)
 	}
 }

@@ -135,16 +135,8 @@ func (r *run) sealUnsealedGone(owner, released, expired string) error {
 		return err
 	}
 
-	ttl := r.shortTTL()
-	b, e, err := r.acquireVolWith(owner, expired, protocol.VolumeBuild, false, ttl)
+	b, exp, err := r.expiringBuild(owner, expired, "partial-"+r.tag)
 	defer r.endHeld(b)
-	if err = must(e, err); err != nil {
-		return fmt.Errorf("build with a short ttl: %v", err)
-	}
-	if code, err := r.volWrite(b.Handle, "partial-"+r.tag); err != nil || code != 0 {
-		return fmt.Errorf("a build volume took no write: exit %d %v", code, err)
-	}
-	exp, err := wireTime(b.ExpiresAt)
 	if err != nil {
 		return err
 	}
@@ -156,6 +148,54 @@ func (r *run) sealUnsealedGone(owner, released, expired string) error {
 		return err
 	}
 	return r.freshBuild(owner, expired, "an expired build")
+}
+
+// expiringTries bounds expiringBuild's attempts: its last ttl is the short
+// ttl times 2^(expiringTries-1), at most longTTL.
+const expiringTries = 4
+
+// expiringBuild acquires a build box for name with the short ttl and writes v
+// into its volume, answering the box and its expires_at. The deadline runs
+// from acquire, so on a loaded host the write can arrive after it. That is the
+// setup losing a race, not the driver failing, only when the write came back
+// at or past expires_at and the box then reads expired by the deadline and
+// grace; then the build is made again (same name: the expired one must have
+// left nothing) with twice the ttl. A write refused before expires_at, or a
+// box that does not expire, fails.
+func (r *run) expiringBuild(owner, name, v string) (held, time.Time, error) {
+	ttl := r.shortTTL()
+	for try := 1; ; try++ {
+		b, e, err := r.acquireVolWith(owner, name, protocol.VolumeBuild, false, ttl)
+		if err = must(e, err); err != nil {
+			r.endHeld(b)
+			if try > 1 {
+				return held{}, time.Time{}, fmt.Errorf("a build with a %d s ttl, after an expired build of that name: %v", ttl, err)
+			}
+			return held{}, time.Time{}, fmt.Errorf("build with a short ttl: %v", err)
+		}
+		exp, err := wireTime(b.ExpiresAt)
+		if err != nil {
+			r.endHeld(b)
+			return held{}, time.Time{}, err
+		}
+		code, err := r.volWrite(b.Handle, v)
+		if err == nil && code == 0 {
+			return b, exp, nil
+		}
+		failed := fmt.Errorf("a build volume took no write: exit %d %v", code, err)
+		late := !time.Now().Before(exp)
+		if late {
+			if _, perr := r.pollState(b.Handle, exp.Add(r.opt.Grace), "expired"); perr != nil {
+				late, failed = false, fmt.Errorf("%v; then, past its deadline: %v", failed, perr)
+			}
+		}
+		r.endHeld(b)
+		next := min(ttl*2, r.longTTL())
+		if !late || try == expiringTries || next <= ttl {
+			return held{}, time.Time{}, failed
+		}
+		ttl = next
+	}
 }
 
 func (r *run) sealFrozen(owner, name string) error {

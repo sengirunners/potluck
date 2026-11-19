@@ -11,6 +11,7 @@ import (
 	"time"
 
 	kitconfig "github.com/sengirunners/potluck/kit/config"
+	"github.com/sengirunners/potluck/protocol"
 )
 
 // Kept disks (SPEC 20 "Boxes", Kept disks; zm-eakh.12.5.23): a box acquired
@@ -244,7 +245,7 @@ func (d *drv) start(handle string, raw json.RawMessage) (any, error) {
 			return refuse("unavailable", "%v", err)
 		}
 		if free == 0 {
-			return refuse("unavailable", "%s (%d in use); its disk stays kept", NoFreeSlot(r.OS), d.cfg.slots(r.OS))
+			return refuse("unavailable", "%s (%d in use); its disk stays kept", protocol.NoFreeSlot(r.OS), d.cfg.slots(r.OS))
 		}
 		if err := d.diskRoom(); err != nil { // a booted box writes again
 			return err
