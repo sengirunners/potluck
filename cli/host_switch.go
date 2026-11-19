@@ -30,7 +30,9 @@ func (a *app) hostStatusCmd() *cobra.Command {
 		Short: "How many of this machine's cores are lent and in use, and whether it takes new work (the menu bar item's facts)",
 		Long: `Status reads the sizes this machine shares (with pools it joined, and in
 pools it runs) from the daemon, each with the sandboxes running on it, and the
-host switch (` + a.cmd("host set") + `). Lent cores are, per driver state directory,
+host switch (` + a.cmd("host set") + `). On a host that shares its room through an
+admission controller (--admission-url), it also says when the controller
+refused a sandbox for lack of room, and why, until its retry time. Lent cores are, per driver state directory,
 its slots times its largest size's cores. With --json it prints the menu
 the macOS menu bar item draws (docs/menubar.md). It never starts the daemon.`,
 		Args: cobra.NoArgs,
@@ -46,7 +48,11 @@ the macOS menu bar item draws (docs/menubar.md). It never starts the daemon.`,
 					lines = append(lines, s)
 				}
 			}
-			lines = append(lines, fmt.Sprintf("host switch: %s (%s)", st.Mode, st.State))
+			sw := fmt.Sprintf("host switch: %s (%s)", st.Mode, st.State)
+			if st.Refused != nil && st.State == protocol.HostAccepting {
+				sw += "; the host's admission controller refuses new work now (above)"
+			}
+			lines = append(lines, sw)
 			a.say("%s", strings.Join(lines, "\n"))
 			return nil
 		},

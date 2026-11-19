@@ -125,6 +125,9 @@ func (s *Service) boxSecretsGate(ctx context.Context, pid string, b computeapi.R
 // holder's and the authority's (door.go): a ready box on a pinned image
 // before its expiry, on a trusted host (a public host gets nothing).
 func (s *Service) boxTakesSecrets(ctx context.Context, b computeapi.RunTarget, rw row) error {
+	if baseBuilder(rw) {
+		return api.Errorf(api.CodeForbidden, "a push base builder takes no secrets")
+	}
 	switch {
 	case b.Kind != computeapi.RunTargetKindBox:
 		return api.Errorf(api.CodeBadRequest, "secrets are for a box target; %s is a %s target", b.Name, b.Kind)

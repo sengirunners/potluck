@@ -34,6 +34,14 @@ func targetsHandler(targets ...computeapi.RunTargetView) http.Handler {
 			}
 			api.WriteJSON(w, 200, computeapi.RunTargetHandles{Handles: []computeapi.RunTargetHandle{{Handle: "box:b/b1", Created: "2026-11-06T11:00:00.5Z"}}})
 		default:
+			if r.Method == http.MethodGet {
+				for _, target := range targets {
+					if r.URL.Path == "/v0/run_targets/"+target.Name {
+						api.WriteJSON(w, http.StatusOK, target)
+						return
+					}
+				}
+			}
 			api.WriteError(w, api.ErrNotImplemented(r.URL.Path))
 		}
 	})
@@ -57,6 +65,12 @@ func withSecrets(v computeapi.RunTargetView) computeapi.RunTargetView {
 	d.Verbs = []string{"describe", "acquire", "exec", "spawn", "output", "signal"}
 	d.Capabilities = []string{"secrets"}
 	v.Describe = &d
+	return v
+}
+
+func withBoxSecrets(v computeapi.RunTargetView) computeapi.RunTargetView {
+	v = withSecrets(v)
+	v.Describe.Capabilities = []string{"box-secrets"}
 	return v
 }
 
@@ -119,6 +133,10 @@ func TestPlaceBox(t *testing.T) {
 		{"a paid binding when nothing free fits", []computeapi.RunTargetView{cloud, busy}, BoxWant{}, "cloud", "", nil},
 		{"a spent budget is passed over", []computeapi.RunTargetView{capped, std}, BoxWant{}, "linux-std", "", nil},
 		{"a spent budget says so", []computeapi.RunTargetView{capped, busy}, BoxWant{}, "", api.CodeUnavailable, []string{"capped: spent 500 of its 300 vm_s this day (budget)"}},
+		{"box secrets: named public host refused", []computeapi.RunTargetView{withBoxSecrets(pub)}, BoxWant{On: "pub@lender", BoxSecrets: true}, "", api.CodeForbidden, []string{"trusted host"}},
+		{"box secrets: named unsupported binding refused", []computeapi.RunTargetView{withSecrets(small)}, BoxWant{On: "linux-small", BoxSecrets: true}, "", api.CodeUnavailable, []string{"capability box-secrets"}},
+		{"box secrets: command secrets are insufficient", []computeapi.RunTargetView{withSecrets(small), withBoxSecrets(std)}, BoxWant{BoxSecrets: true}, "linux-std", "", nil},
+		{"box secrets: sole unsupported binding refuses", []computeapi.RunTargetView{withSecrets(small)}, BoxWant{BoxSecrets: true}, "", api.CodeUnavailable, []string{"capability box-secrets"}},
 		{"secrets: only a box that spawns with them", []computeapi.RunTargetView{small, small2, withSecrets(std)}, BoxWant{Secrets: true}, "linux-std", "", nil},
 		{"secrets: the only box is asked", []computeapi.RunTargetView{small}, BoxWant{Secrets: true}, "", api.CodeUnavailable, []string{"linux-small: runs no background process with secrets"}},
 	} {
@@ -242,4 +260,29 @@ func hintOf(err error) string {
 		return e.Hint
 	}
 	return ""
+}
+
+func TestPlacementNoTargetRetainsAPIError(t *testing.T) {
+	for _, tc := range []struct {
+		targets []computeapi.RunTargetView
+		want    BoxWant
+		code    string
+	}{
+		{nil, BoxWant{}, api.CodeNotFound},
+		{[]computeapi.RunTargetView{boxView("small", true, "", "small", "linux", 1, 1024)}, BoxWant{Size: "huge"}, api.CodeUnavailable},
+	} {
+		_, err := PlaceBox(context.Background(), client.WithHandler(targetsHandler(tc.targets...)), tc.want)
+		var noTarget *NoTarget
+		if !errors.As(err, &noTarget) || !api.IsCode(err, tc.code) {
+			t.Fatalf("placement error lost type or API code: %T %v", err, err)
+		}
+	}
+	_, err := PlaceBox(context.Background(), client.WithHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(api.HeaderProtocol, api.Protocol)
+		api.WriteError(w, api.Errorf(api.CodeForbidden, "cannot list targets"))
+	})), BoxWant{})
+	var noTarget *NoTarget
+	if errors.As(err, &noTarget) || !api.IsCode(err, api.CodeForbidden) {
+		t.Fatalf("service failure misclassified: %v", err)
+	}
 }

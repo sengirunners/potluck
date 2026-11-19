@@ -2,7 +2,8 @@
 # given. zm embeds this file, so the pins update with zm. The daemon checks each box's booted digest against the
 # binding's pin at acquire and releases any other (SPEC 20 "Boxes"), so a default is checked like any --image.
 #
-# Named images use name=NAME and are lent alone with --with NAME. root=on keeps passwordless sudo
+# Named images use name=NAME and are lent alone with --with NAME. host_default=on makes a named
+# Tart image eligible as the default on hosts that meet min_host_macos; the newest compatible floor wins. root=on keeps passwordless sudo
 # inside the VM by default (--root=false overrides it). Named images are not sandbox templates.
 # One default line per layer and guest OS: layer, os, then the image pinned by digest (name@sha256:<64 hex>), or "-" when
 # zm's own image for it is not published yet (share then says so and names --image), then the image's own floor
@@ -30,12 +31,16 @@
 #   workflow FROM the potluck-box-linux image it pushes (so the runner and box tools stay), adding git, gh, Node 22
 #   with npm and corepack, Go, Python 3 with pip and venv, ripgrep, jq, build-essential and the Claude Code and Codex
 #   CLIs, each pinned. "-" until the workflow first publishes ghcr.io/sengirunners/potluck-box-agent.
-tart darwin ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on min_free_gb=60 pull_minutes=60 pull_gb=27
+# Compatibility policy: conservatively support Tahoe guests on Tahoe hosts, not on earlier hosts.
+# ARM Linux uses Tart's macOS 13 host floor. These are support floors, not a claim about every
+# possible Virtualization.framework combination; live exact-digest release checks remain required.
+# arch and min_host_macos are mandatory for lending Tart digests; unknown compatibility refuses.
+tart darwin ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on min_free_gb=60 pull_minutes=60 pull_gb=27 min_host_macos=26 arch=arm64
 # tart linux, name small-linux: Potluck's small Linux image for a Mac, what `potluck try` lends there first (docs/try.md), so a
 #   first sandbox waits for about 1 GB, not macOS's 27. cmd/potluck-driver-tart/images/tart-linux/build.sh makes it on a
 #   Mac from Cirrus Labs' Debian image (perl and git added, floor lowered to 1 vCPU and 2 GiB) and pushes it to
 #   ghcr.io/sengirunners/potluck-box-tart-linux (public); write the digest it prints here. No GitHub runner.
-tart linux ghcr.io/sengirunners/potluck-box-tart-linux@sha256:918d883297f39cb3da38d170b42c3cf1bb7876c5a8c616c136087529b8564589 name=small-linux min_cpu=1 min_memory_mb=2048 min_free_gb=10 pull_minutes=20 pull_gb=1
+tart linux ghcr.io/sengirunners/potluck-box-tart-linux@sha256:918d883297f39cb3da38d170b42c3cf1bb7876c5a8c616c136087529b8564589 name=small-linux min_cpu=1 min_memory_mb=2048 min_free_gb=10 pull_minutes=20 pull_gb=1 min_host_macos=13 arch=arm64
 oci linux ghcr.io/sengirunners/potluck-box-linux@sha256:3fb0dddcbd97ae47bb40474c57d44f44cbdab337cb34e785c16f09d2235ccf3b runner_dir=/home/runner
 oci linux ghcr.io/sengirunners/potluck-box-agent@sha256:0bd2cf0e52e9154a9a1a886a2ac44f652e5c45e599f32fe583212894cf2fb60c runner_dir=/home/runner template=agent
 # Built by box-images run 43289820968 from its freshly published agent/Linux chain.
@@ -44,4 +49,8 @@ oci linux ghcr.io/sengirunners/potluck-box-browser@sha256:28b009beab77de08afbc02
 # first pull downloads, for the words that warn of it.
 # Named Mac image: selected alone by --with xcode, not as a sandbox template.
 # Cirrus Xcode 26.3 (67.5 GB download, 120 GB disk); runner refreshed by the driver before each Actions job.
-tart darwin ghcr.io/cirruslabs/macos-tahoe-xcode@sha256:39980f3a654be50fab35d8ead868b25b7b5c52adb59ec2fca23073c714cac9c6 min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on name=xcode min_free_gb=200 pull_minutes=180 pull_gb=68
+tart darwin ghcr.io/cirruslabs/macos-tahoe-xcode@sha256:39980f3a654be50fab35d8ead868b25b7b5c52adb59ec2fca23073c714cac9c6 min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on name=xcode min_free_gb=200 pull_minutes=180 pull_gb=68 min_host_macos=26 arch=arm64
+# Sequoia alternative for macOS 15 hosts: upstream manifest/config inspected 2026-11-19.
+# Digest 8386ef67, arm64/darwin, cpuCountMin=2, memorySizeMin=4294967296, 25.4 GB compressed.
+# Host floor 15 is conservative Potluck policy; live exact-digest boot/isolation proof remains open.
+tart darwin ghcr.io/cirruslabs/macos-sequoia-base@sha256:8386ef670c04b38e57bd0e97fe2cde6bc0598e1bcfba0212ecba1814e659a6b1 name=sequoia host_default=on min_host_macos=15 arch=arm64 min_cpu=2 min_memory_mb=4096 runner_dir=actions-runner root=on min_free_gb=60 pull_minutes=60 pull_gb=26

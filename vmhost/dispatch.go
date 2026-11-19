@@ -30,16 +30,20 @@ func dispatch(verb, id string, args json.RawMessage, m map[string]string) (any, 
 	case protocol.VerbCancel:
 		return d.cancel(args)
 	}
+	var box record
 	if id != "" {
-		if _, err := d.find(id); err != nil {
+		var err error
+		if box, err = d.find(id); err != nil {
 			return nil, err
 		}
 	}
 	if verb == "acquire" { // progress.go: progress knows it before the sweep's lock
 		return d.acquireTracked(args, func() error { return d.prepare(verb) })
 	}
-	if err := d.prepare(verb); err != nil {
-		return nil, err
+	if !d.skipsSweep(verb, box) {
+		if err := d.prepare(verb); err != nil {
+			return nil, err
+		}
 	}
 	switch verb {
 	case "describe":
@@ -84,4 +88,23 @@ func (d *drv) prepare(verb string) error {
 		d.vm = o
 	}
 	return d.st.locked(d.sweep)
+}
+
+// skipsSweep says whether verb needs no sweep first: exec and output on a
+// ready box whose supervisor runs. The sweep takes the state lock and asks
+// the VM layer what it holds (an engine check and a list, some 0.5 s a call
+// on a Docker host), which would make every exec of a file copy wait in line
+// behind the others; it changes nothing about a box whose supervisor is
+// alive, and a box whose supervisor died still sweeps, so it answers as lost.
+// A box whose record names no engine (made before records did) sweeps too:
+// the sweep is what picks the engine for it.
+func (d *drv) skipsSweep(verb string, r record) bool {
+	if verb != "exec" && verb != "output" {
+		return false
+	}
+	if r.State != stReady || !alive(r.Supervisor) {
+		return false
+	}
+	_, oci := d.vm.(ociCLI)
+	return !oci || r.Engine != nil
 }

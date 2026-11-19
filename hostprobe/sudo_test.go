@@ -230,6 +230,7 @@ func TestShareKeptDockerSaysSoWhenNotReady(t *testing.T) {
 // runs the root group with the network targets, the result says so in plain
 // words, a re-run keeps it, --root=false turns it off, and oci refuses it.
 func TestShareTartRoot(t *testing.T) {
+	withTartImages(t, pinB)
 	o := ShareOptions{Report: macReport(), Images: []string{pinB}, NamePrefix: "h", Sizes: []string{"c2m4"}, HostAddrs: []string{"192.0.2.9"}, DryRun: true, Root: true, RootSet: true}
 	res, err := shareOn(context.Background(), &fakeRunner{}, nil, o)
 	if err != nil {

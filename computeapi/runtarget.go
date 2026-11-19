@@ -317,6 +317,8 @@ type AcquireRunTargetRequest struct {
 	// holder's when there is none. Trusted hosts only; not with persist or
 	// jit_config.
 	Deps []BoxDeps `json:"deps,omitempty"`
+	// Base asks for the holder's weekly Git push base on this binding.
+	Base *BoxBase `json:"base,omitempty"`
 	// DepsWaitS (with Deps) is how long the acquire waits while another box
 	// builds a layer it needs (default DepsWaitDefaultS). 0 waits not at
 	// all: the box comes without that layer (the answer's deps say so).
@@ -326,6 +328,36 @@ type AcquireRunTargetRequest struct {
 	// holder. A client that dies then lets the handle end at its TTL, though
 	// the session it ran under lives on. Unset keeps the sweep's renewal.
 	SelfRenew bool `json:"self_renew,omitempty"`
+}
+
+// BoxBase identifies a repository by the SHA256 of its sorted root commit IDs.
+// Fill asks for a restricted builder instead of a reader of the sealed base.
+type BoxBase struct {
+	Repo string `json:"repo"`
+	Fill bool   `json:"fill,omitempty"`
+}
+
+// BoxBaseAnswer is present when an acquire asked for a base. Hit means a
+// sealed, readonly base was mounted at Path. A fill also answers Path;
+// otherwise Why explains why the box has no base.
+type BoxBaseAnswer struct {
+	Path string `json:"path,omitempty"`
+	Hit  bool   `json:"hit"`
+	Why  string `json:"why,omitempty"`
+}
+
+// BaseMissing is the acquire refusal reason when its base is not sealed.
+const BaseMissing = "base_missing"
+
+// BaseRefusal is a push-base acquire refusal made before a box exists.
+type BaseRefusal struct {
+	Reason string `json:"reason"`
+}
+
+// ReleaseRunTargetRequest optionally seals a base builder owned by the caller.
+// The daemon chooses the files kept; ordinary handles cannot be sealed.
+type ReleaseRunTargetRequest struct {
+	Seal bool `json:"seal,omitempty"`
 }
 
 // BoxDeps is one dependency layer an acquire asks for. Kind names what is
@@ -477,6 +509,7 @@ type RunTargetHandle struct {
 	Volumes []BoxVolume `json:"volumes,omitempty"`
 	// Deps are a box's dependency layers, in acquire's answer only.
 	Deps []BoxDepsAnswer `json:"deps,omitempty"`
+	Base *BoxBaseAnswer  `json:"base,omitempty"`
 	// Started is when the box last started after a stop (its lifetime cap
 	// counts from there).
 	Started string `json:"started,omitempty"`

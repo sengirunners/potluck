@@ -132,6 +132,10 @@ type ShareOptions struct {
 	// earlier binding's value is kept.
 	ShelfGB, VolumeMaxGB *int
 	ShelfFill            string
+	// LinuxSlots (--linux-slots) is how many Linux boxes the share runs at
+	// once, bound as linux_slots on every size (slots.go). Unset (nil), an
+	// earlier binding's is kept, else the driver's default, Slots.
+	LinuxSlots *int
 	// AdmissionURL, AdmissionTokenFile and AdmissionTTLS are zm-run-tart's
 	// admission keys for a host that runs other work beside zm (admission.go):
 	// every box, conformance's too, takes a lease first. "" keeps an earlier
@@ -232,6 +236,14 @@ type ShareResult struct {
 	// RootFrom names the earlier binding it was kept from ("" for the flag).
 	Root     bool   `json:"root,omitempty"`
 	RootFrom string `json:"root_kept_from,omitempty"`
+	// LinuxSlots is the linux_slots bound on every size (0: none, the
+	// driver's default of 2); LinuxSlotsFrom names the earlier binding it was
+	// kept from ("" for the flag). LinuxSlotsByAdmission: the admission
+	// controller decides room, so the sizes did not have to fit LinuxSlots
+	// times inside the share.
+	LinuxSlots            int    `json:"linux_slots,omitempty"`
+	LinuxSlotsFrom        string `json:"linux_slots_kept_from,omitempty"`
+	LinuxSlotsByAdmission bool   `json:"linux_slots_by_admission,omitempty"`
 	// Storage is the shelf and volume keys bound on every oci size, nil when
 	// none is set (ocistorage.go).
 	Storage *OCIStorage  `json:"storage,omitempty"`
@@ -287,6 +299,9 @@ func Precheck(ctx context.Context, run Runner, o ShareOptions) error {
 	if !errors.As(err, &nr) {
 		return err
 	}
+	if l, ok := o.Report.Layer(nr.Layer); ok && l.Name == "tart" && len(l.RootSteps) == 0 {
+		return err // executable, OS and capability blockers have no root repair
+	}
 	o.Report.Layers = slices.Clone(o.Report.Layers)
 	for i := range o.Report.Layers {
 		l := &o.Report.Layers[i]
@@ -333,7 +348,7 @@ func (o ShareOptions) runnerOn(layer string) bool {
 	case len(o.Images) > 0:
 		return ImageRunnerDir(o.Images) != ""
 	}
-	p, err := selectedPin(layer, o.With)
+	p, err := selectedPin(o.Report, layer, o.With)
 	return err == nil && p.RunnerDir != ""
 }
 
@@ -447,7 +462,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	// The template images share added: a failed pull drops one, never the default.
 	templates := map[string]string{}
 	if len(res.Images) == 0 { // zm's default for the layer, pinned in images.pin
-		p, err := selectedPin(layer.Name, o.With)
+		p, err := selectedPin(o.Report, layer.Name, o.With)
 		if err != nil {
 			return res, err
 		}
@@ -503,6 +518,9 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		}
 	}
 	if layer.Name == "tart" { // before any pull: a disk too small for the images refuses here
+		if err := CheckTartImages(o.Report, res.Images); err != nil {
+			return res, err
+		}
 		note, err := tartDiskCheck(ctx, run, o.Report, res.Images)
 		if err != nil {
 			return res, err
@@ -626,6 +644,12 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		}
 		pull = func(im string) []string { return []string{cli, "pull", "--", im} }
 	case "tart":
+		if layer.CLI != "" {
+			base["tart"] = layer.CLI
+		}
+		if layer.SoftnetPath != "" {
+			base["softnet_path"] = layer.SoftnetPath
+		}
 		if res.Docker {
 			return res, errors.New("--docker is for the oci layer: a tart box is a full VM, whose image decides sudo and docker (--root keeps its sudo)")
 		}
@@ -641,10 +665,17 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		// Softnet gives every Tart box egress, so every Tart box's checks
 		// forbid the forward path: the LAN's router and the tailnet.
 		o.NetForbid = forbidForward(o, &res)
-		pull = func(im string) []string { return []string{"tart", "pull", "--", im} }
+		pull = func(im string) []string { return []string{cmp.Or(layer.CLI, "tart"), "pull", "--", im} }
 	}
 	res.RunnerDir = runner
 
+	if res.LinuxSlots, res.LinuxSlotsFrom, err = linuxSlots(o, macOSImages(layer.Name, res.Images)); err != nil {
+		return res, err
+	}
+	res.LinuxSlotsByAdmission = res.LinuxSlots > 0 && res.Admission["admission_url"] != ""
+	if !res.LinuxSlotsByAdmission {
+		o.Limits.Boxes = res.LinuxSlots // that many of the largest size may run together
+	}
 	sizes, one, err := chooseSizes(o, res.Images)
 	if err != nil {
 		return res, err
@@ -669,20 +700,38 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			if err != nil {
 				return res, err
 			}
-			if b.CPU <= cpuCap/Slots && b.MemoryMiB <= memCap/Slots {
+			if n := o.Limits.boxes(); b.CPU <= cpuCap/n && b.MemoryMiB <= memCap/n {
 				fitted = append(fitted, size)
 			} else if len(o.Sizes) > 0 {
-				return res, fmt.Errorf("size %s including host overhead does not fit the owner's limits for the required peer checks", size.Name)
+				return res, fmt.Errorf("size %s including host overhead does not fit %s inside the owner's limits (the peer checks run two; --linux-slots asks more)", size.Name, timesWord(o.Limits.boxes()))
 			}
 		}
 		sizes = fitted
 		if len(sizes) == 0 {
-			return res, fmt.Errorf("no size including host overhead fits the owner's limits for the required peer checks")
+			return res, fmt.Errorf("no size including host overhead fits %s inside the owner's limits (the peer checks run two; --linux-slots asks more)", timesWord(o.Limits.boxes()))
 		}
 		one = false
 	}
 	if res.OneAtATime = one; one {
+		if res.LinuxSlots >= Slots {
+			return res, fmt.Errorf("--linux-slots %d%s: no size fits twice inside %s, so Potluck would run one box at a time: raise --share, or pass --linux-slots 1",
+				res.LinuxSlots, keptFrom(res.LinuxSlotsFrom), o.Limits.Within())
+		}
 		res.Notes = append(res.Notes, "one box at a time: no size fits twice inside "+o.Limits.Within()+", so zm lends what fits once and runs one box at a time (--share to choose more of it)")
+	}
+	if err := slotsAlike(o, res.LinuxSlots, res.LinuxSlotsFrom, sizes); err != nil {
+		return res, err
+	}
+	if n := res.LinuxSlots; n > 0 && !one {
+		what := fmt.Sprintf("up to %d Linux boxes at once", n)
+		if n == 1 {
+			what = "one Linux box at a time"
+		}
+		how := "every size lent fits " + timesWord(o.Limits.boxes()) + " inside " + o.Limits.Within()
+		if res.LinuxSlotsByAdmission {
+			how = "the admission controller decides room for each box"
+		}
+		res.Notes = append(res.Notes, what+" on this machine, across every size: "+how+keptFrom(res.LinuxSlotsFrom))
 	}
 
 	if res.Storage, err = ociStorage(o, layer.Name, base["oci_cli"], sizes); err != nil {
@@ -706,6 +755,9 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		}
 		cfg["size"], cfg["cpu"], cfg["memory"] = s.Name, strconv.Itoa(s.CPU), strconv.Itoa(s.MemoryMB)
 		cfg["images"] = strings.Join(res.Images, ",")
+		if res.LinuxSlots > 0 { // conformance's boxes count against the same slots as the live ones; its peers check runs two
+			cfg["linux_slots"] = strconv.Itoa(max(res.LinuxSlots, Slots))
+		}
 		args := conformanceArgs(suite, suiteDriver, cfg)
 		switch {
 		case o.Full:
@@ -726,11 +778,17 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 				bound[k] = v
 			}
 		}
+		if res.DefaultImage {
+			bound["image_default"] = "true"
+		}
 		if p, ok := PinForImage(res.Images[0]); ok && p.Name != "" {
 			bound["image_name"] = p.Name
 		}
 		if o.ReclaimIdleS > 0 {
 			bound["reclaim_idle_s"] = strconv.Itoa(o.ReclaimIdleS)
+		}
+		if res.LinuxSlots > 0 {
+			bound["linux_slots"] = strconv.Itoa(res.LinuxSlots)
 		}
 		// Nor one at a time: the peers check runs two boxes at once, and two
 		// that fit once inside the default half fit inside the whole machine.
@@ -755,7 +813,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 
 	pulled := res.Images[:0:0]
 	for i, p := range res.Pulls {
-		if res.Layer == "tart" && tartImagePresent(ctx, run, res.Images[i]) {
+		if res.Layer == "tart" && tartImagePresent(ctx, run, res.Images[i], layer.CLI) {
 			say("reuse " + res.Images[i])
 			pulled = append(pulled, res.Images[i])
 			continue
@@ -814,12 +872,16 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	if timeout <= 0 {
 		timeout = 15 * time.Minute
 	}
+	busy := false // the first size failed only because every slot was in use
 	for i := range res.Sizes {
 		sr := &res.Sizes[i]
 		if !o.Full && i > 0 && !res.Sizes[0].Passed {
 			sr.Error = "not checked: the security checks failed on " + res.Sizes[0].Binding
-			if res.Sizes[0].Error == noRoomError {
+			switch {
+			case res.Sizes[0].Error == noRoomError:
 				sr.Error = "not checked: the admission controller had no room for the checks on " + res.Sizes[0].Binding + "; try again later"
+			case busy:
+				sr.Error = "not checked: every slot was in use when " + res.Sizes[0].Binding + " was checked; try again when a box ends"
 			}
 			continue
 		}
@@ -835,16 +897,31 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		case r.Exit != 0 && strings.Contains(sr.Output, noRoomText):
 			sr.Error = noRoomError
 			continue
+		case r.Exit != 0 && slotsFullOS(r.Stdout) != "":
+			total, os := Slots, slotsFullOS(r.Stdout)
+			if os == "linux" && res.LinuxSlots > 0 {
+				total = max(res.LinuxSlots, Slots) // what conformance ran with
+			}
+			sr.Error, busy = slotsFullError(os, total), i == 0
+			continue
 		case r.Exit != 0:
 			sr.Error = fmt.Sprintf("conformance failed (exit %d)", r.Exit)
-			if f := conformance.FirstFailure(r.Stdout); f != "" {
+			f := conformance.FirstFailure(r.Stdout)
+			setup, report := vmhost.StartAdvice(f) // read before the cut: the words end in them
+			if f != "" {
 				if len(f) > 400 {
-					f = f[:400] + "..."
+					f = strings.ToValidUTF8(f[:400], "") + "..."
 				}
 				sr.Error = fmt.Sprintf("conformance failed at %s (exit %d)", f, r.Exit)
 			}
-			if conformance.Late(r.Stdout) {
+			switch {
+			case setup != "": // the same every time: never "run this again"
+				sr.Error += "; running this again unchanged fails the same way: " + setup
+			case conformance.Late(r.Stdout):
 				sr.Error += "; " + busyHint
+			}
+			if report != "" && !strings.Contains(f, report) {
+				sr.Error += "; the box's report: " + report
 			}
 			continue
 		case namedNet && (o.Full || i == 0) && !strings.Contains(r.Stdout, mailPassed):
@@ -989,27 +1066,32 @@ func notReady(c Layer) error {
 }
 
 // chooseSizes is the sizes asked for (default: Lend's, every size that fits
-// twice inside the share, else, at zm's default share, once, one box at a
-// time), none below the images' own floor (ImageMinimums): a VM smaller than
-// its image allows never boots.
+// twice, or the owner's --linux-slots times, inside the share, else, at zm's
+// default share, once, one box at a time), none below the images' own floor
+// (ImageMinimums): a VM smaller than its image allows never boots.
 func chooseSizes(o ShareOptions, images []string) ([]Size, bool, error) {
 	l := Lend(o.Report, o.Limits, images)
 	minCPU, minMem := ImageMinimums(images)
 	small := func(s Size) bool { return s.CPU < minCPU || s.MemoryMB < minMem }
 	floor := fmt.Sprintf("at least %d vCPU and %d MB", minCPU, minMem)
-	auto := o.Limits.Share <= 0
-	within := "twice inside the share"
+	n := o.Limits.boxes()
+	auto := o.Limits.Share <= 0 && n == Slots // the one-at-a-time fallback (Lend)
+	times, raise := timesWord(n), "raise --share or the caps"
+	if n > Slots {
+		raise += ", or lower --linux-slots"
+	}
+	within := times + " inside the share"
 	if auto {
 		within = "inside the share, even one box at a time"
 	}
 	if len(l.Sizes) == 0 {
-		if auto && len(fitting(o.Report, o.Limits, Slots)) > 0 {
-			within = "twice inside the share"
+		if auto && len(fitting(o.Report, o.Limits, n)) > 0 {
+			within = times + " inside the share"
 		}
-		if len(fitting(o.Report, o.Limits, Slots)) == 0 && (!auto || len(fitting(o.Report, o.Limits, 1)) == 0) {
-			return nil, false, fmt.Errorf("no size fits %s: raise --share or the caps", within)
+		if len(fitting(o.Report, o.Limits, n)) == 0 && (!auto || len(fitting(o.Report, o.Limits, 1)) == 0) {
+			return nil, false, fmt.Errorf("no size fits %s: %s", within, raise)
 		}
-		return nil, false, fmt.Errorf("no size that fits %s is big enough for the image (%s): raise --share or the caps", within, floor)
+		return nil, false, fmt.Errorf("no size that fits %s is big enough for the image (%s): %s", within, floor, raise)
 	}
 	if len(o.Sizes) == 0 {
 		return l.Sizes, l.OneAtATime, nil

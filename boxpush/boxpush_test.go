@@ -870,3 +870,83 @@ func TestPushPastAStaleRefusal(t *testing.T) {
 		t.Fatalf("a push past a stale refusal mark: %v", err)
 	}
 }
+
+// Resolve names the commit (and writes a dirty one) without bundling
+// anything; the same source pushed into a box that already holds an
+// ancestor is cut against it there, so one resolve serves a fresh box and
+// a box on a base alike.
+func TestResolveThenPushSource(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 128<<10)
+	head := gitOut(t, dir, "rev-parse", "HEAD")
+	write(t, filepath.Join(dir, "v.txt"), "dirty")
+	write(t, filepath.Join(dir, "new.txt"), "untracked")
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	src, err := boxpush.Resolve(ctx, boxpush.MakeOptions{Dir: dir, Dirty: true, Untracked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.Commit != head || src.Head == head || src.Shallow != head || len(src.Untracked) != 1 || src.Untracked[0] != "new.txt" {
+		t.Fatalf("resolved: %+v (want commit %s, a dirty head on it, new.txt untracked)", src, head)
+	}
+	if left, _ := os.ReadDir(tmp); len(left) != 0 {
+		t.Fatalf("Resolve left %d files in TMPDIR; it bundles nothing", len(left))
+	}
+	// Later working-tree edits must not change the already resolved snapshot.
+	write(t, filepath.Join(dir, "v.txt"), "later tracked")
+	write(t, filepath.Join(dir, "new.txt"), "later untracked")
+	ex := boxpush.Exec(c, target, id)
+	if _, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir, Ref: "HEAD~1"}, boxpush.PushOptions{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var made []*boxpush.Bundle
+	res, err := boxpush.PushSource(ctx, ex, src, boxpush.PushOptions{}, func(b *boxpush.Bundle) { made = append(made, b) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(made) != 1 || len(res.Base) != 1 || res.Commit != src.Head || res.Bytes < 128<<10 {
+		t.Fatalf("pushed: %+v after %d bundles (want one, built on HEAD~1, carrying the new blob)", res, len(made))
+	}
+	if x := boxSh(t, c, target, id, `cd checkout && git rev-parse HEAD^ && cat v.txt new.txt`); x.Exit != 0 || x.Stdout != head+"\ndirtyuntracked" {
+		t.Fatalf("the checkout: %+v", x)
+	}
+}
+
+func TestPushAutomaticallyUsesHostBaseAndSurvivesRemoval(t *testing.T) {
+	ctx := context.Background()
+	c, target, id := refBox(t)
+	dir := repo(t, 128<<10)
+	based := gitOut(t, dir, "rev-parse", "HEAD")
+	if x := boxSh(t, c, target, id, `git clone -q --bare "`+dir+`" "$HOME/.potluck-base"`); x.Exit != 0 {
+		t.Fatal(x)
+	}
+	head := commit(t, dir, "four")
+	ex := boxpush.Exec(c, target, id)
+	result, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{}, nil)
+	if err != nil || len(result.Base) != 1 || result.Base[0] != based || result.Bytes > 16<<10 {
+		t.Fatalf("automatic base: %+v %v", result, err)
+	}
+	whole, err := boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{Dest: "without-base", NoBase: true}, nil)
+	if err != nil || len(whole.Base) != 0 {
+		t.Fatalf("base opt-out: %+v %v", whole, err)
+	}
+	// A base disappearing between discovery and checkout must retry whole.
+	head = commit(t, dir, "five")
+	removed := false
+	result, err = boxpush.MakeAndPush(ctx, ex, boxpush.MakeOptions{Dir: dir}, boxpush.PushOptions{Dest: "fresh"}, func(*boxpush.Bundle) {
+		if !removed {
+			removed = true
+			if x := boxSh(t, c, target, id, `mv "$HOME/.potluck-base" "$HOME/base-gone"`); x.Exit != 0 {
+				t.Fatal(x)
+			}
+		}
+	})
+	if err != nil || len(result.Base) != 0 || result.Commit != head {
+		t.Fatalf("removed base: %+v %v", result, err)
+	}
+	if x := boxSh(t, c, target, id, `cd fresh && git rev-parse HEAD && cat v.txt`); x.Exit != 0 || x.Stdout != head+"\nfive" {
+		t.Fatalf("checkout %+v", x)
+	}
+}

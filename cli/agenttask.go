@@ -3,8 +3,8 @@ package cli
 // potluck agent-task: run a coding agent CLI once, non-interactively, in a
 // fresh sandbox on this checkout's commit (agenttasks), and bring the
 // commits it made back as a local ref. It is potluck run's box job (place,
-// push, spawn, follow, release) with the agent's credential as the spawn's
-// secret and one more step before the release: the box's bundle of the
+// push, spawn, follow, release) with the agent's credential in the box's
+// secrets directory and one more step before the release: the box's bundle of the
 // agent's commits is copied back (boxcp) and fetched into
 // refs/potluck/agent-task/<sandbox>, never checked out or run.
 
@@ -15,8 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +27,7 @@ import (
 	"github.com/sengirunners/potluck/boxpush"
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/client"
+	"github.com/sengirunners/potluck/taskproxy"
 )
 
 // agentTaskPromptMax bounds a prompt; agentTaskLast is how many of the
@@ -44,10 +43,12 @@ const AgentTaskRefs = "refs/potluck/agent-task/"
 
 type agentTaskOptions struct {
 	jobOptions
-	adapter    agenttasks.Adapter
-	secretName string
-	secret     string // the credential's bytes; only ever the spawn's secret
-	prompt     []byte
+	adapter                   agenttasks.Adapter
+	secretName                string
+	secret                    string // the credential's bytes; sent only through the box secrets door
+	model, effort, stdoutFile string
+	prompt                    []byte
+	proxy                     taskproxy.Options
 }
 
 // agentTaskResult is --json's answer: run's, with the agent, the ref its
@@ -59,6 +60,8 @@ type agentTaskResult struct {
 	Ref     string   `json:"ref,omitempty"`
 	Commits int      `json:"commits"`
 	Last    []string `json:"last,omitempty"`
+	// Proxy records requested cooperative settings, not enforced network policy.
+	Proxy *taskproxy.Options `json:"cooperative_proxy,omitempty"`
 }
 
 func (a *app) agentTaskCmd() *cobra.Command {
@@ -82,8 +85,9 @@ sandbox ends at the end, also on Ctrl-C, an error or the timeout (exit
 124), unless --keep.
 
 The credential is yours: --secret-file is read here (else $` + strings.Join(def.Secrets, ", else $") + `)
-and sent as that one command's secret, only to trusted machines; the sandbox
-exports it for the agent alone. With none, nothing is placed: get one with
+and sent through the sandbox secrets door, only to trusted machines; the sandbox
+passes it to the agent through a file descriptor, never its environment.
+A sandbox-scope secret grant is required. With no credential, nothing is placed: get one with
 ` + "`" + def.Login + "`" + ` on your machine. The machine that runs the sandbox
 can read everything in it, the credential included (docs/agent-tasks.md).
 
@@ -93,6 +97,7 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 			"  " + a.cmd("agent-task --json --prompt-file task.md --dirty --timeout 2h"),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			o.started = time.Now()
 			o.adapter = def
 			if len(args) == 1 {
 				ad, ok := agenttasks.Lookup(args[0])
@@ -102,6 +107,12 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 				o.adapter = ad
 			}
 			var err error
+			if err = o.checkProxy(cmd); err != nil {
+				return err
+			}
+			if _, err = o.adapter.Command(o.model, o.effort); err != nil {
+				return err
+			}
 			if o.prompt, err = readPrompt(promptFile, a.host.Stdin); err != nil {
 				return err
 			}
@@ -112,13 +123,16 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 			if err != nil {
 				return err
 			}
-			o.want.Net, o.want.Secrets = computeapi.NetOn, true
+			o.want.Net, o.want.BoxSecrets = computeapi.NetOn, true
 			if o.image == "" {
 				o.want.Template = o.adapter.Template
 			}
 			o.out, o.errw, o.p = a.host.Stdout, a.host.Stderr, prefix(a.host.Prefix)
 			if a.asJSON() {
 				o.out = a.host.Stderr // stdout carries only the result
+			}
+			if err := o.requestDeps(cmd); err != nil {
+				return err
 			}
 			r, err := agentTask(cmd.Context(), c, o)
 			code := r.code()
@@ -162,6 +176,11 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 	f.StringVar(&o.ref, "ref", "", "the commit the agent starts from, in this checkout (default HEAD)")
 	f.DurationVar(&o.timeout, "timeout", time.Hour, "kill the agent after this long (exit 124)")
 	f.BoolVar(&o.keep, "keep", false, "leave the sandbox up afterwards, for "+a.cmd("sandbox exec")+" (it ends at its lease)")
+	f.StringVar(&o.model, "model", "", "the agent's model (default: the agent's own)")
+	f.StringVar(&o.effort, "effort", "", "the agent's reasoning effort (default: the agent's own)")
+	f.StringVar(&o.stdoutFile, "stdout-file", "", "write the full stdout locally to a new file with mode 0600")
+	o.addProxyFlags(cmd)
+	o.df.Add(f)
 	o.push.add(f)
 	return cmd
 }
@@ -241,38 +260,60 @@ func agentTaskDir(key string) string { return ".potluck/agent-task/" + key }
 // agentTask runs one task. The result is filled as far as it got; err is
 // set when potluck itself failed, or the agent's commits did not come back.
 func agentTask(ctx context.Context, c *client.Client, o agentTaskOptions) (res agentTaskResult, err error) {
-	start := time.Now()
+	o.timing = newJobTiming(o.started)
 	res.Agent = o.adapter.Name
-	defer func() { res.Seconds = time.Since(start).Round(time.Millisecond).Seconds() }()
+	defer func() { o.finish(&res.jobResult, err) }()
 	r := jobResult{State: "failed"}
-	b, err := o.bundle(ctx)
+	argv, err := o.adapter.CredentialCommand(o.secretName, o.model, o.effort)
+	if err != nil {
+		res.jobResult = r
+		return res, err
+	}
+	b, err := o.source(ctx)
 	if err != nil {
 		res.jobResult, err = r.stopped(ctx, err)
 		return res, err
 	}
-	defer b.Close()
+	capture, err := openTaskOutput(o.stdoutFile)
+	if err != nil {
+		res.jobResult = r
+		return res, err
+	}
+	if capture != nil {
+		defer func() { err = errors.Join(err, capture.close()) }()
+		o.out = io.MultiWriter(capture, o.out)
+		o.stdoutDropped = func(n int64) { capture.dropped += n }
+	}
 	r.Commit = b.Head
 	tail := &tailWriter{max: 16 << 10}
 	o.out = io.MultiWriter(o.out, tail)
-	var spawned time.Time // just before the spawn: the driver's timeout counts from after it
+	o.finishGrace = time.Minute
+	o.drain = o.finishGrace
+
 	o.collect = func(ctx context.Context, bx acquiredBox, r jobResult, ferr error) (jobResult, bool, error) {
-		if ferr != nil {
-			// Exit 124 before --timeout was up is the agent's own code, not
-			// the driver's kill: its commits are bundled, so bring them back.
-			if r.State != "timeout" || time.Since(spawned) >= o.timeout {
-				return r, false, ferr
-			}
-			r.State = "exited"
+		if *r.Exit == agenttasks.ExitNotStarted {
+			return r, false, ferr
 		}
-		if *r.Exit == agenttasks.ExitNotStarted { // the entry script said why; it bundled nothing
-			return r, false, nil
-		}
+		// Cancellation stops the agent, not the bounded attempt to save its work.
+		collectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		collectCtx, stop := o.untilAgain(collectCtx)
+		defer stop()
 		var err error
-		if res.Ref, res.Commits, err = bringBack(ctx, c, bx, b); err != nil {
+		var changes taskChanges
+		if changes, err = bringBack(collectCtx, c, bx, b); err != nil {
 			// The agent's work is still in the box: keep it, to copy by hand.
 			sid := sandboxID(bx.handle)
 			return r, true, fmt.Errorf("%w; the sandbox is kept so its work is not lost: %s copies it here, %s ends it (it ends at its lease; %s gives it longer)", err,
 				o.p.cmd("sandbox cp "+sid+" :"+agentTaskDir(bx.key)+"/"+agenttasks.OutDir+" ./agent-task-out"), o.p.cmd("sandbox rm "+sid), o.p.cmd("sandbox extend "+sid+" --ttl 1h"))
+		}
+		res.Ref, res.Commits = changes.ref, changes.commits
+		if r.State == "interrupted" {
+			return r, false, ferr
+		}
+		r.State = changes.state
+		if r.State == "timeout" {
+			return r, false, fmt.Errorf("the agent ran past --timeout %v (exit 124); its work was collected", o.timeout)
 		}
 		return r, false, nil
 	}
@@ -282,79 +323,30 @@ func agentTask(ctx context.Context, c *client.Client, o agentTaskOptions) (res a
 			return "", err
 		}
 		box := daemonBox{c, bx.target, bx.id}
-		missing, err := agentrunners.Missing(ctx, box, o.adapter.Binary)
+		missing, err := agentrunners.Missing(ctx, box, o.adapter.Binary, "timeout")
 		if err != nil {
 			return "", err
 		}
 		if len(missing) > 0 {
-			return "", fmt.Errorf("the sandbox has no %s on PATH: %s needs an image that ships it (the agent template's does)", o.adapter.Binary, o.adapter.About)
+			return "", fmt.Errorf("the sandbox has no %s on PATH: %s needs an image that ships it (the agent template's does)", strings.Join(missing, ", "), o.adapter.About)
 		}
 		dir := agentTaskDir(bx.key)
+		taskArgv, err := o.prepareProxy(ctx, box, dir, argv)
+		if err != nil {
+			return "", err
+		}
+		if o.proxy.Profile != "" {
+			res.Proxy = &o.proxy
+		}
 		if _, err := boxcp.WriteFile(ctx, boxpush.Exec(c, bx.target, bx.id), dir+"/prompt", o.prompt, boxcp.Options{}); err != nil {
 			return "", fmt.Errorf("write the prompt into the sandbox: %w", err)
 		}
 		fmt.Fprintf(o.errw, "%s: %s: starting %s\n", o.p.name(), sandboxID(bx.handle), o.adapter.About)
-		argv := append([]string{"sh", "-c", agenttasks.Entry, "potluck-agent-task", dir, pushed.Dir, b.Head, o.secretName}, o.adapter.Argv...)
-		spawned = time.Now()
-		return box.Spawn(ctx, argv, map[string]string{o.secretName: o.secret}, int((o.timeout+time.Second-1)/time.Second), bx.key)
+		spawnArgv := append([]string{"sh", "-c", agenttasks.Entry, "potluck-agent-task", dir, pushed.Dir, b.Head, o.secretName, strconv.FormatFloat(o.timeout.Seconds(), 'f', -1, 64)}, taskArgv...)
+		return spawnAgentTask(ctx, box, spawnArgv, o.secretName, o.secret, int((o.timeout+o.finishGrace+time.Second-1)/time.Second), bx.key)
 	})
 	res.Last = tail.lines(agentTaskLast)
 	return res, err
-}
-
-// bringBack copies the task's out directory from the box and fetches its
-// bundle into AgentTaskRefs+<box id> in b's checkout, with hooks off and
-// objects checked: answers the ref and how many commits it holds past the
-// pushed commit ("" and 0 when the agent made none).
-func bringBack(ctx context.Context, c *client.Client, bx acquiredBox, b *boxpush.Bundle) (string, int, error) {
-	tmp, err := os.MkdirTemp("", "potluck-agent-task-*")
-	if err != nil {
-		return "", 0, err
-	}
-	defer os.RemoveAll(tmp)
-	local := filepath.Join(tmp, agenttasks.OutDir)
-	if _, err := boxcp.Download(ctx, boxpush.Exec(c, bx.target, bx.id), agentTaskDir(bx.key)+"/"+agenttasks.OutDir, local, boxcp.Options{}); err != nil {
-		return "", 0, fmt.Errorf("copy the agent's commits back: %w", err)
-	}
-	if _, err := os.Stat(filepath.Join(local, agenttasks.NoChanges)); err == nil {
-		return "", 0, nil
-	}
-	// The bundle is the box's data: a regular file git checks as a bundle
-	// before fetching it. A directory there would be fetched as a repository
-	// the box built (its config read), so it is refused.
-	bundle := filepath.Join(local, agenttasks.Bundle)
-	if fi, err := os.Lstat(bundle); err != nil {
-		return "", 0, errors.New("the sandbox sent back no bundle of the agent's commits (its lines above say why)")
-	} else if !fi.Mode().IsRegular() {
-		return "", 0, fmt.Errorf("the sandbox sent back a %s as the bundle of the agent's commits, not a file: refused", fi.Mode().Type())
-	}
-	ref := AgentTaskRefs + bx.id
-	git := func(args ...string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", b.Repo, "-c", "core.hooksPath=/dev/null", "-c", "fetch.fsckObjects=true"}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		out, err := cmd.Output()
-		if err != nil {
-			return "", fmt.Errorf("git %s: %v: %s", args[0], err, strings.TrimSpace(stderr.String()))
-		}
-		return strings.TrimSpace(string(out)), nil
-	}
-	if _, err := git("bundle", "verify", "--quiet", bundle); err != nil {
-		return "", 0, fmt.Errorf("the sandbox's bundle of the agent's commits is not one git takes: %w", err)
-	}
-	if _, err := git("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", bundle, agenttasks.BundleRef+":"+ref); err != nil {
-		return "", 0, fmt.Errorf("fetch the agent's commits: %w", err)
-	}
-	n, err := git("rev-list", "--count", b.Head+".."+ref)
-	if err != nil {
-		return ref, 0, err
-	}
-	count, err := strconv.Atoi(n)
-	if err != nil {
-		return ref, 0, fmt.Errorf("count the commits at %s: git rev-list answered %q", ref, n)
-	}
-	return ref, count, nil
 }
 
 // tailWriter keeps the last max bytes written to it.

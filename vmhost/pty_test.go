@@ -105,7 +105,7 @@ func TestLayersExecTTY(t *testing.T) {
 		l    ttyLayer
 		want string
 	}{
-		{tartCLI{"tart"}, "tart exec -i -t vm sh -c x"},
+		{tartCLI{bin: "tart"}, "tart exec -i -t vm sh -c x"},
 		{ociCLI{bin: "docker"}, "docker exec -i -t vm sh -c x"},
 		{incusCLI{bin: "incus", remote: "r", project: "zm"}, "incus exec r:vm --project zm --force-interactive -- sh -c x"},
 	} {

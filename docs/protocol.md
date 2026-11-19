@@ -248,7 +248,7 @@ less (`kind`, the required verbs, and a box's `size.name`).
 | `warm` | no | a driver that keeps booted boxes: `{"target", "ready"}` |
 | `shelf` | with capability `shelf`: `path` | `{"path", "bytes", "files"}`: where a box finds the package shelf, and its size (see [The package shelf](#the-package-shelf)) |
 | `runners` | no | a driver that starts a GitHub runner: a list with one entry per image, what that image's newest box's runner refresh found and did, below. Not checked by the suite |
-| `host` | no | a driver with a host switch: `{"mode", "state", "until"?, "drain_since"?, "drain_deadline"?, "drain_cut"?}` (`protocol.HostStatus`); the daemon passes it through. Not checked by the suite |
+| `host` | no | a driver with a host switch: `{"mode", "state", "until"?, "drain_since"?, "drain_deadline"?, "drain_cut"?, "refused"?}` (`protocol.HostStatus`); `refused` is `{"reason", "at", "until"}`, the host's admission controller's last "no room" answer while it stands; the daemon passes it through. Not checked by the suite |
 | `serve` | no | an optional serve mode (unverified: neither the daemon nor the suite uses it) |
 
 A box must also list `exec` and describe `isolation: "ephemeral"` and `credentials: false`. The daemon uses the
@@ -743,6 +743,9 @@ Argument refusals (`bad_request`, above) come first. Then each volume of an acqu
 these that applies, in this order:
 
 1. `not_found`: it asks `sealed` and the volume is not sealed (also while a box is building it).
+   Optional `data: {"reason":"volume_missing", "name":"<requested volume>"}` identifies which volume
+   refused the acquire. When supplied, the name must be exactly that requested volume. Older drivers may omit
+   this detail; a daemon must not infer the missing volume from the message or from another volume's state.
 2. `conflict`: `rw` or `build` of a sealed volume.
 3. `unavailable`: another live box holds it in `build`, with `data` `{"reason": "building", "retry_s": N}`
    (`protocol.Busy`): ask again after `retry_s` seconds. Or another live box holds it in a mode the lock forbids (the

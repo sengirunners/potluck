@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -31,6 +32,7 @@ type config struct {
 	Images       []string // box: owner-set images, each pinned by digest; the first is the default
 	JITRunnerDir string   // box: where the image keeps the GitHub runner; set = the binding serves jit_config
 	Tart         string   // the tart binary
+	SoftnetPath  string   // optional absolute helper path, pinned by host preflight
 	StateDir     string
 	Remote       string // the binding repo's remote: the guest fetches commit from it
 	HostFetch    bool   // the host fetches and copies a bundle in (a local remote, or fetch=host)
@@ -90,7 +92,7 @@ var relDir = regexp.MustCompile(`^[A-Za-z0-9._/-]*$`)
 
 func parseConfig(m map[string]string) (config, error) {
 	c := config{Target: m["target"], Kind: m["kind"], VM: m["vm"], Image: m["image"], Tart: m["tart"], StateDir: m["state_dir"],
-		Remote: m["remote"], ScriptsDir: strings.Trim(m["scripts_dir"], "/"), Softnet: true}
+		Remote: m["remote"], ScriptsDir: strings.Trim(m["scripts_dir"], "/"), Softnet: true, SoftnetPath: m["softnet_path"]}
 	if c.Kind == "" {
 		c.Kind = "run"
 	}
@@ -108,6 +110,9 @@ func parseConfig(m map[string]string) (config, error) {
 		c.StateDir = protocol.DriverStateDir(home, "tart") // ~/.potluck-driver-tart, or an existing ~/.zm-run-tart
 	}
 	var bad []string
+	if c.SoftnetPath != "" && (!filepath.IsAbs(c.SoftnetPath) || filepath.Base(c.SoftnetPath) != "softnet" || strings.ContainsRune(c.SoftnetPath, os.PathListSeparator)) {
+		bad = append(bad, "softnet_path must be an absolute path to an executable named softnet")
+	}
 	ints := []struct {
 		key  string
 		into *int
@@ -360,6 +365,12 @@ func (c config) isolation() string {
 	}
 	return "none"
 }
+
+// NoFreeSlot is the words of the driver's refusal when every slot for
+// guests of os is taken (describe's why, an acquire's or a start's
+// unavailable): potluck host finds them in conformance's output to say why
+// a run failed.
+func NoFreeSlot(os string) string { return "no free " + os + " slot" }
 
 func (c config) slots(os string) int {
 	if os == "darwin" {

@@ -33,37 +33,20 @@ func TestPrecheckReadsTartsCacheLikeShare(t *testing.T) {
 	}
 }
 
-// An image with no pin never needs 0 GB by silence: a digest of a pinned
-// repository takes that pin's budget, any other image the default image's,
-// and share's notes (or the refusal) say the budget is an estimate.
-func TestShareBudgetsAnImageWithNoPin(t *testing.T) {
-	pin, err := DefaultImage("tart")
-	if err != nil {
-		t.Fatal(err)
-	}
+// Unknown digest compatibility is refused even when the disk is large or
+// unreadable; the disk budget cannot establish image host compatibility.
+func TestShareRefusesUnknownImageBeforeDiskCheck(t *testing.T) {
+	pin, _ := DefaultImage("tart")
 	repo, _, _ := strings.Cut(pin.Image, "@")
-	older := repo + "@sha256:" + strings.Repeat("0", 64)
-	other := "reg.example/other@sha256:" + strings.Repeat("1", 64)
-	for _, image := range []string{older, other} {
-		o := tartShareOptions(nil)
-		o.Report, o.Images, o.DryRun = macReportWithDisk(t, 5), []string{image}, true
-		_, err := shareOn(context.Background(), tartListing(t), nil, o)
-		if err == nil || !strings.Contains(err.Error(), "at least 60 GB") || !strings.Contains(err.Error(), "estimate") {
-			t.Errorf("%s, 5 GB free: err %v", image, err)
+	for _, image := range []string{repo + "@sha256:" + strings.Repeat("0", 64), "reg.example/other@sha256:" + strings.Repeat("1", 64)} {
+		for _, free := range []float64{5, 100} {
+			o := tartShareOptions(nil)
+			o.Report, o.Images, o.DryRun = macReportWithDisk(t, free), []string{image}, true
+			_, err := shareOn(context.Background(), neverRuns(t), nil, o)
+			if err == nil || !strings.Contains(err.Error(), "unknown host compatibility") {
+				t.Fatalf("%s: %v", image, err)
+			}
 		}
-		o.Report = macReportWithDisk(t, 100)
-		res, err := shareOn(context.Background(), tartListing(t), nil, o)
-		if err != nil || !strings.Contains(strings.Join(res.Notes, "|"), "estimate") {
-			t.Errorf("%s, 100 GB free: err %v notes %q", image, err, res.Notes)
-		}
-	}
-	// An unreadable disk names the estimate, never "about 0 GB".
-	o := tartShareOptions(nil)
-	r := Detect(context.Background(), macRunner("-rwsr-xr-x root", ""), unreadableDisk{mac(true)}, "/state")
-	o.Report, o.Images, o.DryRun = r, []string{other}, true
-	res, err := shareOn(context.Background(), neverRuns(t), nil, o)
-	if n := strings.Join(res.Notes, "|"); err != nil || strings.Contains(n, "about 0 GB") || !strings.Contains(n, "about 60 GB") || !strings.Contains(n, "estimate") {
-		t.Errorf("unreadable disk: err %v notes %q", err, res.Notes)
 	}
 }
 
@@ -83,6 +66,7 @@ func TestTartDiskBudgetsAPinnedRepositoryByTagOrName(t *testing.T) {
 // When Tart's image list cannot be read, the refusal says so, and Tart is
 // asked once however many images are lent.
 func TestShareRefusalSaysTartsListCouldNotBeRead(t *testing.T) {
+	xcode, _ := selectedPin(macReport(), "tart", "xcode")
 	pin, _ := DefaultImage("tart")
 	for name, res := range map[string]Result{
 		"exit":     {Exit: 1, Stderr: "boom"},
@@ -90,14 +74,14 @@ func TestShareRefusalSaysTartsListCouldNotBeRead(t *testing.T) {
 	} {
 		runs := 0
 		run := &fakeRunner{on: func(line string) (Result, bool) {
-			if line != "tart list --format json" {
+			if line != "/fake/tart list --format json" {
 				t.Errorf("ran %q", line)
 			}
 			runs++
 			return res, true
 		}}
 		o := tartShareOptions(nil)
-		o.Report, o.Images, o.DryRun = macReportWithDisk(t, 5), []string{pin.Image, pin.Image[:len(pin.Image)-1] + "0"}, true
+		o.Report, o.Images, o.DryRun = macReportWithDisk(t, 5), []string{pin.Image, xcode.Image}, true
 		_, err := shareOn(context.Background(), run, nil, o)
 		if err == nil || !strings.Contains(err.Error(), "image list could not be read") {
 			t.Errorf("%s: err %v", name, err)

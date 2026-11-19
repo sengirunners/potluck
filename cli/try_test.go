@@ -66,7 +66,7 @@ func TestTryRefusesJSON(t *testing.T) {
 func TestTryMacSmallImage(t *testing.T) {
 	m := soloMachine(t, "")
 	detectHost = func(context.Context, string) hostprobe.Report {
-		return hostprobe.Report{OS: "darwin", Arch: "arm64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 200,
+		return hostprobe.Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 200,
 			Layers: []hostprobe.Layer{{Name: "tart", Available: true, Supported: true, CLI: "tart"}}}
 	}
 	// The fixture's driver lends none of the image's boxes, so the run fails

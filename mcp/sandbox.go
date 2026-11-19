@@ -14,9 +14,11 @@ import (
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/ids"
+	"github.com/sengirunners/potluck/pushbase"
 )
 
 type sandboxCreateIn struct {
+	NoBase          bool   `json:"no_base,omitempty" jsonschema:"disable the host-managed repository base"`
 	On              string `json:"on,omitempty" jsonschema:"host; default: smallest that fits"`
 	Size            string `json:"size,omitempty" jsonschema:"a size the host offers"`
 	OS              string `json:"os,omitempty" jsonschema:"linux or macos"`
@@ -99,15 +101,12 @@ func SandboxTools(tb *Toolbox) {
 		if in.Dir != "" && !filepath.IsAbs(in.Dir) {
 			return nil, api.Errorf(api.CodeBadRequest, "dir must be an absolute path")
 		}
-		var b *boxpush.Bundle
-		defer func() {
-			if b != nil {
-				b.Close()
-			}
-		}()
+		var src *boxpush.Source
+		plan := &pushbase.Plan{}
 		pushing := false // the binding asked checks out no refs: this checkout's commit is pushed in
 		prep := func(ctx context.Context, target string, r *computeapi.AcquireRunTargetRequest) error {
 			pushing = false
+			plan.Repository = nil
 			if in.Ref == "" && !in.Dirty { // a box without a repo gets this checkout's commit (zm-eakh.12.5.16)
 				return nil
 			}
@@ -118,20 +117,25 @@ func SandboxTools(tb *Toolbox) {
 			case self:
 				return boxpush.SelfMisfit(target, in.Dirty, false) // the tool takes no dependency layers
 			}
-			if b == nil {
-				if b, err = boxpush.Make(ctx, boxpush.MakeOptions{Dir: in.Dir, Ref: in.Ref, Dirty: in.Dirty}); err != nil { // tracked files only
+			if src == nil {
+				if src, err = boxpush.Resolve(ctx, boxpush.MakeOptions{Dir: in.Dir, Ref: in.Ref, Dirty: in.Dirty}); err != nil { // tracked files only
 					return err
+				}
+			}
+			if !in.NoBase {
+				if repo, err := pushbase.Identify(ctx, src); err == nil {
+					plan.Repository, plan.Dir = repo, src.Repo
 				}
 			}
 			r.Ref, pushing = "", true
 			return nil
 		}
-		target, h, err := computeclient.AcquireBox(ctx, c, want, req, prep)
+		target, h, err := pushbase.Acquire(ctx, c, want, &req, prep, plan)
 		if err != nil || !pushing {
 			return h, err
 		}
 		_, id, _ := computeclient.SplitBoxHandle(h.Handle)
-		res, err := boxpush.Push(ctx, boxpush.Exec(c, target, id), b, boxpush.PushOptions{})
+		res, err := boxpush.PushSource(ctx, boxpush.Exec(c, target, id), src, boxpush.PushOptions{NoBase: in.NoBase}, nil)
 		if err != nil {
 			return nil, fmt.Errorf("%w (sandbox %s is kept; stop it or create again)", err, h.Handle)
 		}

@@ -44,8 +44,10 @@ const (
 const envHostLockFD = "POTLUCK_HOST_LOCK_FD"
 
 // runHost is host's run, and its old spelling host share's: arg is the
-// invite code or pool ("" for the only pool this machine is in).
-func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string) error {
+// invite code or pool ("" for the only pool this machine is in). With
+// askFirst, a run that would share again what this machine already shares
+// with the pool only says so (askAgain, host_again.go).
+func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string, askFirst bool) error {
 	ctx := cmd.Context()
 	handed := handedLock() // before this run starts any process
 	o, err := a.shareOptions(cmd, s)
@@ -71,6 +73,11 @@ func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string) error {
 		defer unlock()
 		if arg == "" {
 			if arg, err = a.onlyPool(ctx, c); err != nil {
+				return a.hostManyPools(err)
+			}
+		}
+		if askFirst {
+			if err := a.askAgain(ctx, c, arg, o); err != nil {
 				return err
 			}
 		}

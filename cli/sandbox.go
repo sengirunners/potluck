@@ -21,12 +21,20 @@ import (
 	"github.com/sengirunners/potluck/boxpush"
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
-	"github.com/sengirunners/potluck/depscli"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/ids"
 )
+
+// onUsage is the --on flag's help: the names it takes, and where the
+// program lists them when it has such a command.
+func (a *app) onUsage() string {
+	if config.Has("target ls") {
+		return "a shared machine: a name " + a.cmd("target ls") + " lists, or a machine name alone with --size (default: the smallest that fits)"
+	}
+	return "a shared machine: a machine name with --size, or a target's full name, <name>@<machine> (default: the smallest that fits)"
+}
 
 // sandboxID is a handle as people see it.
 func sandboxID(handle string) string { return strings.TrimPrefix(handle, "box:") }
@@ -61,210 +69,6 @@ command names it by the id sandbox create printed (sandbox ls lists them).`}
 	return sb
 }
 
-func (a *app) sandboxCreateCmd() *cobra.Command {
-	var req computeapi.AcquireRunTargetRequest
-	var want computeclient.BoxWant
-	var ttl time.Duration
-	var push pushFlags
-	var netOpt string
-	var vols []string
-	var df depscli.Flags
-	cmd := &cobra.Command{Use: "create [--size c2m4] [--os linux] [--on <machine-size>] [--ttl 1h] [--ref HEAD [--dirty]] [--template agent|browser] [--net off] [--persist] [--volume name:path[:rw|ro|cow]]... [--deps npm[:path]]...",
-		Short: "Start a sandbox on the smallest shared machine size that fits (or --on); prints its id",
-		Long: `With --ref (or --dirty) the sandbox gets that commit of this checkout, sent
-as a git bundle, checked out in ~/checkout (--dir); no credential enters it.
-
---template agent boots the coding-agent image (git, gh, Node, Go, Python, the
-Claude Code and Codex CLIs). --template browser adds sandboxed Chromium,
-Playwright and PNG screenshots. The machine must share the selected image.
-
-On a trusted machine a Linux sandbox reaches the internet through the
-machine's filtered network (never the machine, its LAN, cloud metadata or
-outbound mail); --net off makes it with no network at all. A public
-machine's sandbox has none.
-
---persist keeps the sandbox's disk when it stops (` + a.cmd("sandbox stop") + `, or
-its lease running out): ` + a.cmd("sandbox start") + ` boots the same disk on the
-same machine, for you only, until the machine's keep runs out (30 days by
-default; ` + a.cmd("sandbox ls") + ` shows when). ` + a.cmd("sandbox rm") + ` deletes it.
-Trusted machines whose driver keeps disks only.
-
---volume name:path[:mode] mounts a named volume of yours at path (relative
-to the sandbox's HOME) that outlives the sandbox: the next one that names it
-on the same machine sees what this one left. rw (the default) is one
-sandbox's at a time; ro and cow are shared by any number of yours. Trusted
-machines only; repeat for more.
-
---deps npm[:path] mounts a dependency layer of yours at path (default: the
-checkout, --dir, plus this directory's place in its repository): node_modules, built once from the package-lock.json and
-package.json files (and each workspace's package.json) of this directory,
-and its .npmrc's resolution keys (legacy-peer-deps and the like; an .npmrc
-with any other key, such as a registry or a token, is refused),
-installed by the machine in a sandbox of yours with the network and no
-secrets, and reused by your later sandboxes on that machine. ` + a.name() + ` prints
-whether it was a hit (already built) or built. The sandbox sees it
-copy-on-write: what it writes never reaches the layer or another sandbox.
-Trusted machines only. --deps-wait S waits at most S seconds while another
-sandbox builds the same layer (default 600; 0 takes the sandbox at once
-without it); --deps-scripts off builds without running dependencies'
-install scripts. The files come from this directory, not from --ref.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := a.inPool(cmd.Context())
-			if err != nil {
-				return err
-			}
-			if ttl < 0 {
-				return fmt.Errorf("--ttl must not be negative")
-			}
-			req.TTLS = int(ttl / time.Second)
-			if req.Net, err = netFlag(netOpt); err != nil {
-				return err
-			}
-			want.Net = req.Net
-			if req.Volumes, err = volumeFlags(vols); err != nil {
-				return err
-			}
-			if err := df.Request(cmd.Context(), cmd.Flags(), push.repo, push.dir, &req); err != nil {
-				return err
-			}
-			want.Volumes = len(req.Volumes) > 0 || len(req.Deps) > 0
-			if req.RequestID == "" {
-				req.RequestID = "cli-" + strings.ToLower(ids.New())
-			}
-			h, res, err := a.sandboxCreate(cmd.Context(), c, want, req, push)
-			switch {
-			case err != nil:
-				return err
-			case a.asJSON() && res != nil:
-				return a.printJSON(struct {
-					computeapi.RunTargetHandle
-					Push boxpush.Result `json:"push"`
-				}{h, *res})
-			case res != nil:
-				return nil // printed before the push
-			}
-			return a.printHandle(h, false)
-		}}
-	f := cmd.Flags()
-	f.StringVar(&want.On, "on", "", "a shared machine size, as "+a.cmd("status")+" lists it (default: the smallest that fits)")
-	f.StringVar(&want.Size, "size", "", "a size one of the pool's machines shares, as "+a.cmd("status")+" lists them (c<vCPU>m<GiB>, e.g. c2m4)")
-	f.StringVar(&want.OS, "os", "", "linux or macos")
-	f.DurationVar(&ttl, "ttl", 0, "lease length (default: the machine's)")
-	f.StringVar(&req.Ref, "ref", "", "a commit of this checkout to send in (HEAD)")
-	f.StringVar(&req.Image, "image", "", "one of the machine's images, by name (default the first)")
-	f.StringVar(&want.Template, "template", "", "an image template: "+strings.Join(computeapi.BoxTemplates(), ", ")+" (default: the machine's first image)")
-	f.StringVar(&req.RequestID, "request-id", "", "idempotency key: the same key answers the same sandbox")
-	f.StringVar(&netOpt, "net", "on", netUsage)
-	f.BoolVar(&req.Persist, "persist", false, "keep the sandbox's disk when it stops, for "+a.cmd("sandbox start")+" (a trusted machine whose driver keeps disks)")
-	f.StringArrayVar(&vols, "volume", nil, "name:path[:rw|ro|cow]: a named volume of yours that outlives the sandbox, mounted at path (repeatable)")
-	push.add(f)
-	df.Add(f)
-	return cmd
-}
-
-// volumeFlags reads --volume name:path[:mode].
-func volumeFlags(vs []string) ([]computeapi.BoxVolume, error) {
-	var out []computeapi.BoxVolume
-	for _, v := range vs {
-		parts := strings.Split(v, ":")
-		if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {
-			return nil, fmt.Errorf("--volume %q: name:path[:rw|ro|cow]", v)
-		}
-		bv := computeapi.BoxVolume{Name: parts[0], Path: parts[1], Mode: computeapi.VolumeRW}
-		if len(parts) == 3 {
-			bv.Mode = parts[2]
-		}
-		switch bv.Mode {
-		case computeapi.VolumeRW, computeapi.VolumeRO, computeapi.VolumeCOW:
-		default:
-			return nil, fmt.Errorf("--volume %q: the mode is rw, ro or cow", v)
-		}
-		out = append(out, bv)
-	}
-	return out, nil
-}
-
-const netUsage = "on: the machine's filtered network on a trusted machine (internet, never the machine or its LAN); off: no network at all"
-
-// netFlag is --net as the request's net: on is the default, sent as nothing.
-func netFlag(v string) (string, error) {
-	switch v {
-	case "", computeapi.NetOn:
-		return "", nil
-	case computeapi.NetOff:
-		return computeapi.NetOff, nil
-	}
-	return "", fmt.Errorf("--net is on or off, not %q", v)
-}
-
-// sandboxCreate places and starts a sandbox; with a ref (or --dirty) on a
-// machine that does not check out refs itself, it pushes this checkout's
-// commit into it, printing the id first (not with --json).
-func (a *app) sandboxCreate(ctx context.Context, c *client.Client, want computeclient.BoxWant, req computeapi.AcquireRunTargetRequest, push pushFlags) (computeapi.RunTargetHandle, *boxpush.Result, error) {
-	var h computeapi.RunTargetHandle
-	req.Template = want.Template
-	var b *boxpush.Bundle
-	defer func() {
-		if b != nil {
-			b.Close()
-		}
-	}()
-	ref := req.Ref // the push below clears the ref of a binding that does not check it out
-	if len(req.Deps) > 0 && (ref != "" || push.dirty) {
-		depscli.WarnMismatch(ctx, a.host.Stderr, a.name(), push.repo, ref, push.dirty, push.untracked, req.Deps)
-	}
-	pushing := false  // the binding asked checks out no refs: this checkout's commit is pushed in
-	var prepErr error // a refusal before the acquire: nothing was asked of that binding
-	prep := func(ctx context.Context, target string, r *computeapi.AcquireRunTargetRequest) error {
-		pushing, prepErr = false, nil
-		if prepErr = depscli.ImageOK(ctx, c, target, r.Image, r.Deps); prepErr != nil {
-			return prepErr
-		}
-		if ref == "" && !push.dirty {
-			return nil
-		}
-		self, err := boxpush.ChecksOutItself(ctx, c, target)
-		switch {
-		case err != nil:
-			prepErr = err
-		case self:
-			if prepErr = boxpush.SelfMisfit(target, push.dirty, len(r.Deps) > 0); prepErr != nil {
-				return prepErr
-			}
-		case !self && b == nil: // made before the sandbox, so a refusal costs nothing
-			b, prepErr = push.bundle(ctx, ref, a.host.Stderr, a.name())
-		}
-		if prepErr == nil && !self {
-			r.Ref, pushing = "", true
-		}
-		return prepErr
-	}
-	target, h, err := computeclient.AcquireBox(ctx, c, want, req, prep)
-	switch {
-	case err != nil && (target == "" || err == prepErr): // placement, or before the acquire: nothing was asked
-		return h, nil, err
-	case err != nil && computeclient.MadeNothing(err): // nothing was made: a retry needs no key
-		return h, nil, err
-	case err != nil:
-		return h, nil, retryWithKey(err, req.RequestID)
-	}
-	depscli.Print(a.host.Stderr, a.name(), req.Deps, h.Deps)
-	if !pushing {
-		return h, nil, nil
-	}
-	if !a.asJSON() {
-		_ = a.printHandle(h, false)
-	}
-	_, id, _ := computeclient.SplitBoxHandle(h.Handle)
-	res, err := push.push(ctx, c, target, id, b, a.host.Stderr, a.name())
-	if err != nil {
-		s := sandboxID(h.Handle)
-		return h, nil, fmt.Errorf("%w (the sandbox is kept: %s to resume, %s to end it)", err, a.cmd("sandbox push "+s), a.cmd("sandbox rm "+s))
-	}
-	return h, &res, nil
-}
-
 // pushFlags are the flags of a push of this checkout's code into a sandbox.
 type pushFlags struct {
 	dirty, full bool
@@ -272,31 +76,34 @@ type pushFlags struct {
 	dir         string
 	maxMiB      int
 	repo        string // the checkout ("" = the working directory)
-	base        string // push only: a git directory in the sandbox whose commits the bundle may build on
+	noBase      bool   // do not mount or discover a host history base
 }
 
 func (p *pushFlags) add(f *pflag.FlagSet) {
 	f.BoolVar(&p.dirty, "dirty", false, "also send uncommitted changes to tracked files (a second commit on HEAD; implies --ref HEAD)")
 	f.BoolVar(&p.untracked, "include-untracked", false, "with --dirty, also untracked files git does not ignore (each listed)")
 	f.BoolVar(&p.full, "full", false, "send the whole history, not one commit")
+	f.BoolVar(&p.noBase, "no-base", false, "send without a host history base")
 	f.StringVar(&p.dir, "dir", boxpush.DefaultDest, "the checkout in the sandbox (relative to its HOME)")
 	f.IntVar(&p.maxMiB, "max-mib", boxpush.DefaultMax>>20, "refuse a bundle over this many MiB")
 }
 
-// bundle makes the bundle of ref (default HEAD), listing on w every
-// untracked file it carries.
-// It reports progress on w, its lines starting with the program's name.
-func (p *pushFlags) bundle(ctx context.Context, ref string, w io.Writer, name string) (*boxpush.Bundle, error) {
+// source resolves ref (default HEAD; with --dirty the uncommitted changes
+// as a commit on it), listing on w every untracked file it carries. Nothing
+// is bundled until the sandbox has said what it holds (push).
+func (p *pushFlags) source(ctx context.Context, ref string, w io.Writer, name string) (*boxpush.Source, error) {
 	mo, err := p.makeOptions(ref)
 	if err != nil {
 		return nil, err
 	}
-	b, err := boxpush.Make(ctx, mo)
+	src, err := boxpush.Resolve(ctx, mo)
 	if err != nil {
 		return nil, err
 	}
-	sayUntracked(w, name, b)
-	return b, nil
+	for _, f := range src.Untracked {
+		fmt.Fprintf(w, "%s: sending untracked %s\n", name, f)
+	}
+	return src, nil
 }
 
 func (p *pushFlags) makeOptions(ref string) (boxpush.MakeOptions, error) {
@@ -305,54 +112,38 @@ func (p *pushFlags) makeOptions(ref string) (boxpush.MakeOptions, error) {
 		return boxpush.MakeOptions{}, fmt.Errorf("--max-mib must be positive")
 	case p.untracked && !p.dirty:
 		return boxpush.MakeOptions{}, fmt.Errorf("--include-untracked goes with --dirty")
-	case p.base != "" && p.full:
-		return boxpush.MakeOptions{}, fmt.Errorf("--base goes without --full: a whole history builds on nothing")
 	}
 	return boxpush.MakeOptions{Dir: p.repo, Ref: ref, Dirty: p.dirty, Untracked: p.untracked, Full: p.full, Max: int64(p.maxMiB) << 20}, nil
 }
 
-func sayUntracked(w io.Writer, name string, b *boxpush.Bundle) {
-	for _, f := range b.Untracked {
-		fmt.Fprintf(w, "%s: sending untracked %s\n", name, f)
-	}
-}
-
-// push sends b into the sandbox, with progress on w for a big one (its
-// lines start with the program's name).
-func (p *pushFlags) push(ctx context.Context, c *client.Client, target, id string, b *boxpush.Bundle, w io.Writer, name string) (boxpush.Result, error) {
-	o, done := p.progress(w, name, func() *boxpush.Bundle { return b })
-	res, err := boxpush.Push(ctx, boxpush.Exec(c, target, id), b, o)
+// push bundles src against what the sandbox already holds (its last push,
+// the host base) and pushes only what that lacks, with progress on w for a big one
+// (its lines start with the program's name).
+func (p *pushFlags) push(ctx context.Context, c *client.Client, target, id string, src *boxpush.Source, w io.Writer, name string) (boxpush.Result, error) {
+	o, done := p.progress(w, name, src.Head)
+	res, err := boxpush.PushSource(ctx, boxpush.Exec(c, target, id), src, o, nil)
 	done(res, err)
 	return res, err
 }
 
-// sendInto bundles ref against what the sandbox already holds (its last
-// push, --base) and pushes only what that lacks, with the lines of bundle
-// and push on w.
+// sendInto resolves ref and pushes it into the sandbox (push).
 func (p *pushFlags) sendInto(ctx context.Context, c *client.Client, target, id, ref string, w io.Writer, name string) (boxpush.Result, error) {
-	mo, err := p.makeOptions(ref)
+	src, err := p.source(ctx, ref, w, name)
 	if err != nil {
 		return boxpush.Result{}, err
 	}
-	var b *boxpush.Bundle
-	o, done := p.progress(w, name, func() *boxpush.Bundle { return b })
-	res, err := boxpush.MakeAndPush(ctx, boxpush.Exec(c, target, id), mo, o, func(made *boxpush.Bundle) {
-		b = made
-		sayUntracked(w, name, b)
-	})
-	done(res, err)
-	return res, err
+	return p.push(ctx, c, target, id, src, w, name)
 }
 
-// progress is the push's options with progress on w for a big bundle (the
-// one bundle answers when the push starts), and what to call when it ends.
-func (p *pushFlags) progress(w io.Writer, name string, bundle func() *boxpush.Bundle) (boxpush.PushOptions, func(boxpush.Result, error)) {
-	o := boxpush.PushOptions{Dest: p.dir, Base: p.base}
+// progress is the push's options with progress on w for a big bundle of
+// head, and what to call when it ends.
+func (p *pushFlags) progress(w io.Writer, name, head string) (boxpush.PushOptions, func(boxpush.Result, error)) {
+	o := boxpush.PushOptions{Dest: p.dir, NoBase: p.noBase || p.full}
 	shown := false
 	o.Progress = func(done, total int) {
 		if total > 4 {
 			shown = true
-			fmt.Fprintf(w, "\r%s: sending %s: %d/%d chunks", name, shortSHA(bundle().Head), done, total)
+			fmt.Fprintf(w, "\r%s: sending %s: %d/%d chunks", name, shortSHA(head), done, total)
 		}
 	}
 	return o, func(res boxpush.Result, err error) {
@@ -385,12 +176,12 @@ SHA-256 there, and checks it out in ~/checkout (--dir). No credential enters
 the sandbox. A push cut off resumes when run again.
 
 Only what the sandbox lacks is sent: the bundle builds on the commit an
-earlier push left in --dir, and with --base <git dir> on the commits that
-git directory in the sandbox names (a volume holding the repository, say),
-when this checkout has them and they are ancestors of the commit sent. The
-checkout then borrows the base's objects, so keep it mounted while you use
-the checkout, and use only a base you trust as much as the checkout: git
-takes its objects as they are.`,
+earlier push left in --dir, and on a host-managed base mounted for this
+repository. The checkout borrows that base's objects for its lifetime.
+Use --no-base to disable host-base discovery; --full also disables it.
+A base is private to your holder and project but can contain an older
+snapshot of this repository, including files deleted since then. See
+docs/push-base.md for its isolation and refresh rules.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, t, id, err := a.sandboxClient(cmd.Context(), args[0])
@@ -407,7 +198,6 @@ takes its objects as they are.`,
 			return nil
 		}}
 	push.add(cmd.Flags())
-	cmd.Flags().StringVar(&push.base, "base", "", "a git directory in the sandbox (relative to its HOME) whose commits the bundle may build on: only what they lack is sent")
 	return cmd
 }
 
@@ -441,7 +231,7 @@ func (a *app) sandboxLsCmd() *cobra.Command {
 			return nil
 		}}
 	cmd.Flags().BoolVar(&live, "live", false, "only sandboxes not yet ended")
-	cmd.Flags().BoolVar(&all, "all", false, "every sandbox you can see in the pool, not only your own")
+	cmd.Flags().BoolVar(&all, "all", false, "every sandbox in the pool, for its owner or an admin (a member sees only their own either way)")
 	return cmd
 }
 
@@ -872,13 +662,10 @@ against its SHA-256. A copy cut off on the way up resumes when run again.`,
 				return err
 			}
 			o := boxcp.Options{Max: int64(maxMiB) << 20}
-			o.Progress = func(done, total int) {
-				if total > 4 {
-					fmt.Fprintf(a.host.Stderr, "\r%s: %d/%d chunks", a.name(), done, total)
-				}
-			}
+			o.Progress = newCPProgress(a.host.Stderr, a.name()).Chunk
 			x := boxpush.Exec(c, t, id)
 			var res boxcp.Result
+			began := time.Now()
 			if in1 {
 				res, err = boxcp.Upload(cmd.Context(), x, args[1], p1, o)
 			} else {
@@ -897,7 +684,7 @@ against its SHA-256. A copy cut off on the way up resumes when run again.`,
 			if a.asJSON() {
 				return a.printJSON(res)
 			}
-			fmt.Fprintf(a.host.Stderr, "%s: copied %s (%d files, %.1f MiB) to %s\n", a.name(), res.Kind, res.Files, float64(res.Bytes)/(1<<20), res.To)
+			fmt.Fprintf(a.host.Stderr, "%s: copied %s (%d files, %.1f MiB) to %s%s\n", a.name(), res.Kind, res.Files, float64(res.Bytes)/(1<<20), res.To, cpTook(time.Since(began)))
 			return nil
 		}}
 	cmd.Flags().IntVar(&maxMiB, "max-mib", boxcp.DefaultMax>>20, fmt.Sprintf("refuse a copy over this many MiB (a directory as a tar; at most %d)", boxcp.HardMax>>20))

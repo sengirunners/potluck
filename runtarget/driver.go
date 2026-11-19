@@ -136,9 +136,7 @@ func (s *Service) callWithin(ctx context.Context, t computeapi.RunTarget, verb, 
 	}
 	if !ans.OK {
 		e := api.Errorf(ans.Error.Code, "potluck-driver-%s %s: %s", t.Driver, verb, oneLine(ans.Error.Message))
-		if ans.Error.Code == api.CodeUnavailable {
-			e.Data = busyData(ans.Error.Data) // the one kind of a driver's data that is passed on (deps.go reads it)
-		}
+		e.Data = volumeErrorData(verb, ans.Error.Code, ans.Error.Data)
 		if verb == verbStatus && ans.Error.Code == api.CodeNotFound {
 			return rt.NoHandle(e) // the target has no such handle: the one not_found that is about the handle
 		}

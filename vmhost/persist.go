@@ -242,7 +242,7 @@ func (d *drv) start(handle string, raw json.RawMessage) (any, error) {
 			return refuse("unavailable", "%v", err)
 		}
 		if free == 0 {
-			return refuse("unavailable", "no free %s slot (%d in use); its disk stays kept", r.OS, d.cfg.slots(r.OS))
+			return refuse("unavailable", "%s (%d in use); its disk stays kept", NoFreeSlot(r.OS), d.cfg.slots(r.OS))
 		}
 		if err := d.diskRoom(); err != nil { // a booted box writes again
 			return err

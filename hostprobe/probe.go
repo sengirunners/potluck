@@ -86,13 +86,15 @@ var LayerOrder = []string{"incus", "oci", "tart"}
 
 // Layer is one way to run a VM on this machine.
 type Layer struct {
-	Name      string `json:"name"` // incus, oci or tart
-	Available bool   `json:"available"`
-	Supported bool   `json:"supported"` // zm-run-tart can bind it today
-	Version   string `json:"version,omitempty"`
-	Isolation string `json:"isolation,omitempty"` // vm, sandboxed-kernel, or "" for none
-	CLI       string `json:"cli,omitempty"`       // oci: docker, podman or nerdctl
-	Runtime   string `json:"runtime,omitempty"`   // oci: kata or runsc, by name
+	Name           string `json:"name"` // incus, oci or tart
+	Available      bool   `json:"available"`
+	Supported      bool   `json:"supported"` // zm-run-tart can bind it today
+	Version        string `json:"version,omitempty"`
+	Isolation      string `json:"isolation,omitempty"` // vm, sandboxed-kernel, or "" for none
+	CLI            string `json:"cli,omitempty"`       // oci: docker, podman or nerdctl
+	SoftnetPath    string `json:"softnet_path,omitempty"`
+	SoftnetVersion string `json:"softnet_version,omitempty"`
+	Runtime        string `json:"runtime,omitempty"` // oci: kata or runsc, by name
 	// Runtimes is every isolating runtime this CLI can use, in preference order.
 	Runtimes []string `json:"runtimes,omitempty"`
 	Problems []string `json:"problems,omitempty"` // plain words
@@ -132,6 +134,7 @@ type Layer struct {
 // Report is Detect's answer.
 type Report struct {
 	OS         string  `json:"os"`
+	MacOS      string  `json:"macos,omitempty"` // actual product version, never inferred from the kernel
 	Arch       string  `json:"arch"`
 	Cores      int     `json:"cores"`
 	RAMMB      int64   `json:"ram_mb"`
@@ -529,18 +532,28 @@ func detectTart(ctx context.Context, run Runner, f Facts, r *Report) Layer {
 		l.Problems = []string{"tart runs on macOS"}
 		return l
 	}
-	if r.Arch != "arm64" {
-		l.Problems = append(l.Problems, "tart needs Apple silicon")
-	}
-	if res, err := run.Run(ctx, "sysctl", "-n", "kern.hv_support"); err != nil || strings.TrimSpace(res.Stdout) != "1" {
+	if res, err := runBounded(ctx, run, "sysctl", "-n", "kern.hv_support"); err != nil || res.Exit != 0 || strings.TrimSpace(res.Stdout) != "1" {
 		l.Problems = append(l.Problems, "Virtualization.framework is not available on this Mac")
 	}
-	if _, ok := f.LookPath("tart"); !ok {
+	detectMacOS(ctx, run, r, &l)
+	if path, ok := f.LookPath("tart"); !ok {
 		l.Problems = append(l.Problems, "tart is not installed: download tart.tar.gz from https://github.com/openai/tart/releases/latest, unpack it and link tart.app/Contents/MacOS/tart onto your PATH (no root needed; guide: https://tart.run/quick-start/)")
-	} else if res, err := run.Run(ctx, "tart", "--version"); err == nil && res.Exit == 0 {
-		l.Version = strings.TrimSpace(strings.SplitN(res.Stdout, "\n", 2)[0])
+	} else {
+		path = absoluteExecutable(path, &l)
+		l.CLI = path
+		if path != "" {
+			l.Version = executableVersion(ctx, run, path, "Tart", &l)
+		}
+		if l.Version != "" {
+			detectTartArguments(ctx, run, path, &l)
+		}
 	}
 	detectSoftnet(ctx, run, f, &l)
+	if p, err := HostDefaultImage(*r, "tart"); err != nil {
+		l.Warnings = append(l.Warnings, err.Error())
+	} else if p.Name == SmallLinux {
+		l.Warnings = append(l.Warnings, "the default macOS guest is not supported on this host; the host default is the small Linux image (no GitHub Actions runner)")
+	}
 	detectTartDisk(f, r, &l)
 	detectSleep(ctx, run, &l)
 	l.Available = len(l.Problems) == 0
@@ -609,7 +622,14 @@ type Limits struct {
 	Share    float64
 	MaxCores int
 	MaxRAMMB int64
+	// Boxes is how many boxes of the largest size lent must fit inside at
+	// once: the linux_slots a share binds without an admission controller
+	// (slots.go). 0, or anything up to Slots, is Slots.
+	Boxes int
 }
+
+// boxes is how many boxes of a size must fit for it to be lent.
+func (l Limits) boxes() int { return max(l.Boxes, Slots) }
 
 // DefaultShare is the owner-adjustable default.
 const DefaultShare = 0.5
@@ -617,7 +637,8 @@ const DefaultShare = 0.5
 // Slots is how many boxes zm-run-tart runs at once per guest OS on a
 // machine (its linux_slots and macos_slots, default 2; Apple's licence caps
 // macOS guests at 2 per Mac): why a size must fit twice inside the share,
-// since two boxes of the largest size lent may run at once.
+// since two boxes of the largest size lent may run at once. An owner's
+// --linux-slots raises it for Linux boxes (Limits.Boxes, slots.go).
 const Slots = 2
 
 // Fraction is the share in effect: Share, or DefaultShare when unset.
@@ -642,8 +663,9 @@ func (l Limits) Within() string {
 // the cores.
 func Sizes(r Report, share float64) []Size { return SizesWithin(r, Limits{Share: share}) }
 
-// SizesWithin is Sizes with the owner's explicit caps.
-func SizesWithin(r Report, lim Limits) []Size { return fitting(r, lim, Slots) }
+// SizesWithin is Sizes with the owner's explicit caps (and Boxes: that many
+// VMs, when more than two).
+func SizesWithin(r Report, lim Limits) []Size { return fitting(r, lim, lim.boxes()) }
 
 // Lending is what a share lends when the owner names no sizes.
 type Lending struct {
@@ -659,9 +681,10 @@ type Lending struct {
 var OneAtATimeConfig = map[string]string{"linux_slots": "1", "macos_slots": "1"}
 
 // Lend is the sizes `zm host share` lends and `zm host doctor` reports:
-// those where Slots boxes fit within the limits, none below the images'
-// floor (ImageMinimums). When no size fits twice at all and the share is
-// zm's default (lim.Share 0), it is those where one box fits, OneAtATime:
+// those where lim.boxes() boxes (Slots, or the owner's more) fit within the
+// limits, none below the images' floor (ImageMinimums). When no size fits
+// twice at all, the share is zm's default (lim.Share 0) and the owner asked
+// for no more than two at once, it is those where one box fits, OneAtATime:
 // the friend's machine still gives no more than the default share, and
 // lends something without a flag. (Not when sizes fit twice but the floor
 // rules them out: conformance's peers check runs two boxes at once, and two
@@ -669,8 +692,8 @@ var OneAtATimeConfig = map[string]string{"linux_slots": "1", "macos_slots": "1"}
 func Lend(r Report, lim Limits, images []string) Lending {
 	minCPU, minMem := ImageMinimums(images)
 	small := func(s Size) bool { return s.CPU < minCPU || s.MemoryMB < minMem }
-	twice := fitting(r, lim, Slots)
-	if len(twice) > 0 || lim.Share > 0 {
+	twice := fitting(r, lim, lim.boxes())
+	if len(twice) > 0 || lim.Share > 0 || lim.Boxes > Slots {
 		return Lending{Sizes: slices.DeleteFunc(twice, small)}
 	}
 	once := slices.DeleteFunc(fitting(r, lim, 1), small)

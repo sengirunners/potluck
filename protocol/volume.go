@@ -44,6 +44,17 @@ const (
 	VolumeBuild = "build"
 )
 
+// ReasonVolumeMissing identifies an acquire refused because a requested
+// sealed volume is absent or unsealed. Older drivers may omit this data.
+const ReasonVolumeMissing = "volume_missing"
+
+// VolumeMissing is optional not_found data naming the requested sealed volume.
+// It names no other holder's state.
+type VolumeMissing struct {
+	Reason string `json:"reason"`
+	Name   string `json:"name"`
+}
+
 // ReasonBuilding is the reason in an unavailable answer's data when another
 // live box is building the volume.
 const ReasonBuilding = "building"

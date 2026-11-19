@@ -13,6 +13,23 @@ detected at run time or given in flags (`hostprobe/`).
 - `potluck host` runs that root step itself (with sudo at a terminal), checks each size, and binds the sizes that
   passed.
 
+On a Mac, doctor and host use the same compatibility preflight. It reads the macOS product version and
+hardware architecture, resolves Tart and Softnet on PATH, pins those paths in the binding, and runs bounded executable and isolation checks.
+Softnet must parse the exact host DNS exception and outbound SMTP blocks used at boot. The probe returns
+before sudo, bootpd or vmnet setup; a version string alone is insufficient. Stock Softnet 0.23 lacks these
+rules. Newer binaries may require macOS 26 APIs. No macOS 15 compatibility helper has been validated yet;
+a backport must pass the capability probe and real-Mac isolation conformance before delivery.
+
+Each supported Tart digest carries `arch` and `min_host_macos` in `imagepins/images.pin`. These are conservative
+support floors: Tahoe guests are selected on Tahoe hosts, Sequoia on macOS 15, while the ARM Linux guest uses
+[Tart's documented macOS 13 host floor](https://tart.run/quick-start/#creating-a-linux-vm). They do not assert that every older host is technically unable to boot a newer guest. Exact-digest
+live checks on macOS 15 and 26 remain required release evidence. Unknown digests or missing compatibility
+metadata are refused before pulling, even when cached. Add verified metadata before lending a custom digest.
+On macOS 15 the default is the pinned Sequoia base. Earlier hosts fall back to the published small Linux
+image, which has no GitHub Actions runner;
+`--with xcode` is refused when its Tahoe guest is unsupported. Image CPU/RAM floors and the existing disk
+budget checks still apply before downloads, and the host redeems an invite only after conformance passes.
+
 ## What doctor reports
 
 `potluck doctor [--share 0.5] [--max-cores N] [--max-ram-mb N] [--state-dir DIR] [--json]` reports:
@@ -54,6 +71,37 @@ The sizes are `c1m2`, `c2m4`, `c2m8`, `c4m16` and `c8m32` (vCPU and GiB).
 - Two, because `potluck-driver-tart` runs two boxes at once per guest OS on a machine by default (`linux_slots`,
   `macos_slots`; Apple's licence caps macOS guests at two per Mac). It counts every live box of its state directory,
   whichever size's binding made it, so two of the largest size lent may run together.
+- `potluck host --linux-slots N` changes the Linux number (below, "How many Linux boxes at once").
+
+### How many Linux boxes at once
+
+`--linux-slots N` (1 to 256) binds `linux_slots=N` on every size `potluck host` shares, so the driver runs up to N
+Linux boxes at once across those sizes. macOS boxes stay at two per Mac: the flag is refused for macOS images.
+
+- Without an admission controller, every size lent must fit N times inside `--share` (and the caps), since N boxes
+  of the largest size may run together. With no `--sizes` that leaves the sizes that fit N times; a named size that
+  does not, or none at all, is refused (`no size fits N times inside the share: raise --share or the caps, or lower
+  --linux-slots`). N of 1 or 2 keeps the rule that two must fit.
+- With an admission controller bound (`--admission-url`, or kept from an earlier run), the controller decides room
+  for every box and fails closed (no lease, no box), so N is the owner's ceiling and the sizes fit twice, as without
+  the flag. On a large host whose controller has room, raise N to lend more than two boxes.
+- Every size of one share must carry the same N, since the driver counts every live box against each binding's own
+  number: a run whose `--sizes` leaves out a size bound with another number is refused until that size is in the run
+  or has the same number.
+- A re-run without the flag keeps the earlier bindings' number (bindings that disagree are refused until the owner
+  passes `--linux-slots`); one box at a time (below) is each run's own finding and is not kept. A run that could not
+  read those bindings is refused, `--admission-url none` included, since it would drop their number.
+- N of 2 or more on a machine where nothing fits twice inside the default share is refused, with an admission
+  controller or without: Potluck would have to run one box at a time. Pass `--linux-slots 1` or a larger `--share`.
+- A run that passes the flag but could not read the earlier bindings is refused too, unless it shares every size
+  (`--sizes c1m2,c2m4,c2m8,c4m16,c8m32`): it cannot check the sizes it leaves alone.
+- Conformance runs with `linux_slots` of N, at least two (its peers check runs two boxes), since its boxes count
+  against the same slots as the live ones.
+- So a re-run on a busy host needs free slots for conformance. When live boxes hold every one (conformance's first failure is
+  the driver's `no free linux slot`), the size stays unbound as `every Linux slot on this machine is in use by live boxes (N at once), and
+  conformance needs free ones for its own boxes (two for its peers check): try again when one ends, or raise
+  --linux-slots`, and the quick check's other sizes say `not checked: every slot was in use ...` instead of blaming
+  the security checks. An earlier binding of the size stays bound as it was. On macOS the line names Apple's two.
 
 ### A machine too small for two
 
@@ -154,13 +202,25 @@ On Linux with a container CLI but no isolating runtime, the root line installs g
 ```
 potluck host ['<invite code>' | <pool>] [--image name@sha256:<64 hex>]... [--layer] [--sizes] [--name-prefix]
   [--oci-runtime] [--oci-cli] [--oci-network] [--net-allow] [--net-forbid] [--net-mail] [--net-mbit] [--runner-dir]
-  [--docker] [--root] [--shelf-gb] [--shelf-fill] [--volume-max-gb]
+  [--docker] [--root] [--shelf-gb] [--shelf-fill] [--volume-max-gb] [--linux-slots]
   [--admission-url] [--admission-token-file] [--admission-ttl-s] [--full] [--reclaim-idle-s | --when any|away]
-  [--share] [--max-cores] [--max-ram-mb] [--state-dir] [--no-sudo] [--dry-run] [--detach]
+  [--share] [--max-cores] [--max-ram-mb] [--state-dir] [--no-sudo] [--dry-run] [--detach] [--yes]
 ```
 
 `potluck host` shares with a pool. `potluck host stop [--force]` removes every size it shared; when it removed
 some and left nothing shared, a paused host switch goes back to auto, so the next share lends at once.
+`potluck host status` shows what this machine lends and runs now, and whether it takes new work; it changes nothing.
+
+Run again where this machine already shares sizes with the pool (`<prefix>-<size>`: in a pool this machine runs,
+its sizes there; in a pool it joined, the machine-level sizes shared with that pool), host would pull, re-check and
+share them again. A bare re-run, with no flag that changes the share (none, or only `--no-sudo`, `--pull-timeout`,
+`--show-commands`, `--detach` and the host program's AfterLend skip), does none of that: it prints what this
+machine shares and the dry run's plan, changes nothing, and exits 1 with a `conflict` error asking for `--yes` (under
+`--json` stdout stays empty and the error is the answer; when the re-run would fail, the error says why instead).
+A run with a flag that says what to change (`--image`, `--with`, `--sizes`, `--docker`, `--admission-url` and the
+rest) goes ahead as before, as do a join with an invite code and the old spelling `host share`, which programs run.
+With no pool named, on a machine in more than one pool, host names them and the forms it takes: `potluck host
+<pool>` to share, `potluck host status` to look (in a program that mounts host, in its words).
 
 One host run at a time per home (`host.lock`): a second is refused, naming the first. `--detach` runs the checks,
 the admin step and a dry run of the plan here, then the same command (its flags as given, without `--detach` and
@@ -298,6 +358,22 @@ By default the check is quick:
 quick, 44 s full, before box secrets; `box-secrets` adds about 0.5 s to the quick check and `box-secrets-ops` about
 5 s per size to the full one. `--dry-run` prints the plan.
 
+### When a box does not start
+
+A box whose VM exits while it boots fails with the VM layer's own words: its exit code, the line of its output that
+says why (secrets redacted, at most 200 bytes), and in brackets the programs that ran it (on Tart: tart's version,
+Softnet's version and path, the macOS release). A cause known to come from this machine's setup is marked
+`setup fault`: the same boot fails the same way until the setup changes, so `potluck host` says running it again
+unchanged fails the same way, and what to do instead. The one known today is Softnet refusing a rule Potluck isolates
+a box with (`out proto udp @host port 53`; seen with Softnet 0.23.0 on macOS 15.6): Potluck needs a Softnet that
+accepts protocol and port rules. Any other boot failure carries no such mark, and may pass when run again.
+
+Every start that fails (a boot, a checkout, a runner, but not a cancelled acquire) leaves a report, which its error
+names (`report: <path>`): `failed/<id>.txt` in the driver's state directory (`state_dir`, by default
+`~/.potluck-driver-tart`). It holds why, and the last 16 KiB of the run log (the VM layer's output) and of the
+supervisor's log, with invite links, tokens, credentials in URLs and other secrets redacted and the home directory
+written `~`. It stays after the VM and the record are gone: the 20 newest reports are kept, none older than 7 days.
+
 ### Images in the binding
 
 The binding carries the pins as its `images` only, never also as a config key `images`. The daemon sends them to
@@ -352,7 +428,7 @@ How pools, invites and machine classes work is in `docs/daemon.md`.
 
 - One line per layer and guest OS: the layer, the OS, then a full digest, or `-` while Potluck's own image is
   unpublished. A test fails on any other.
-- `tart`: Cirrus Labs' macOS base image. `oci`: Potluck's Linux image from `cmd/potluck-driver-tart/images/linux`,
+- `tart`: Cirrus Labs' macOS base image on a compatible host, else a compatible Sequoia or small Linux image. `oci`: Potluck's Linux image from `cmd/potluck-driver-tart/images/linux`,
   built and pinned by `.github/workflows/box-images.yml`.
 - A layer with no image is refused in plain words naming `--image`.
 - A line may carry the image's floor, `min_cpu=N min_memory_mb=N` (a Tart image's `cpuCountMin` and `memorySizeMin`,

@@ -26,6 +26,17 @@ curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.s
 
 Free and open source (Apache-2.0) · macOS and Linux. Code: https://github.com/sengirunners/potluck
 
+## Got an invite code?
+
+Someone sent you a code to their pool. Install Potluck (above), then:
+
+```sh
+potluck join '<code>'
+potluck sandbox create
+```
+
+`potluck sandbox exec <id> -- uname -a` runs a command in it; `potluck sandbox rm <id>` ends it; `potluck leave` leaves the pool. A code sent for sharing your machine (`potluck invite <you> --host`) goes to `potluck host '<code>'` instead. You need only Potluck, even when the pool runs on Mezze.
+
 ## Or have your coding agent set it up
 
 Copy this prompt into Claude Code, Codex or any coding agent, and it sets Potluck up on that machine.

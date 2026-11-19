@@ -63,7 +63,10 @@ type PushOptions struct {
 	// borrows its objects (git alternates) from then on, so the base must
 	// stay in the box as long as the checkout is used, and be trusted as
 	// much as the checkout: git takes its objects as they are.
-	Base      string
+	Base string
+	// NoBase disables automatic discovery of the host-mounted push base.
+	NoBase    bool
+	autoBase  bool
 	ChunkSize int // default ChunkSize (tests use less)
 	Parallel  int // chunks in flight (default 4)
 	Retries   int // tries per call (default 4)
@@ -163,6 +166,10 @@ const shHave = ShSum + shGdir + `asked="$1"
 case "$1" in /*) dest="$1" ;; *) dest="$HOME/$1" ;; esac
 if [ -d "$dest" ]; then ( gdir && [ -f "$g/HEAD" ] && git --git-dir="$g" rev-parse -q --verify refs/zm/push ) 2>/dev/null; fi
 basedir "$2"
+if [ -z "$base" ] && [ "$3" = auto ] && [ -d "$HOME/.potluck-base/objects" ]; then
+  base=$HOME/.potluck-base
+  echo potluck-host-base
+fi
 if [ -n "$base" ] && [ -d "$base" ]; then
   { cat "$base/HEAD" "$base/packed-refs"; find "$base/refs" -type f -exec cat {} +; } 2>/dev/null | while read -r a _; do
     case "$a" in ""|*[!0-9a-f]*) ;; *) echo "$a" ;; esac
@@ -308,7 +315,7 @@ func Push(ctx context.Context, exec ExecFunc, b *Bundle, o PushOptions) (Result,
 	if err != nil {
 		return res, fmt.Errorf("checking out in the box: %w", err)
 	}
-	if x.Exit == exitBase {
+	if x.Exit == exitBase || (x.Exit == 64 && o.autoBase) {
 		return res, fmt.Errorf("%w: %w", errBaseGone, BoxErr("the box refused the bundle", x))
 	}
 	if x.Exit != 0 {
@@ -322,17 +329,27 @@ func Push(ctx context.Context, exec ExecFunc, b *Bundle, o PushOptions) (Result,
 // and the ids o.Base's HEAD and refs name. A box that cannot say answers
 // none (and an error), and a whole commit goes in.
 func Have(ctx context.Context, exec ExecFunc, o PushOptions) ([]string, error) {
+	o.NoBase = true // standalone Have names only the explicit base
+	ids, _, err := haveInBox(ctx, exec, o)
+	return ids, err
+}
+
+func haveInBox(ctx context.Context, exec ExecFunc, o PushOptions) ([]string, bool, error) {
+	auto := ""
+	if !o.NoBase && o.Base == "" {
+		auto = "auto"
+	}
 	if o.Dest == "" {
 		o.Dest = DefaultDest
 	}
 	x, err := Retry(ctx, max(o.Retries, 1), func() (computeapi.RunTargetExec, error) {
-		return exec(ctx, computeapi.ExecRunTargetRequest{Argv: Script(shHave, o.Dest, o.Base), TimeoutS: ChunkTimeoutS})
+		return exec(ctx, computeapi.ExecRunTargetRequest{Argv: Script(shHave, o.Dest, o.Base, auto), TimeoutS: ChunkTimeoutS})
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if x.Exit != 0 {
-		return nil, BoxErr("the box cannot say what it holds", x)
+		return nil, false, BoxErr("the box cannot say what it holds", x)
 	}
 	var out []string
 	for _, f := range strings.Fields(x.Stdout) {
@@ -340,32 +357,48 @@ func Have(ctx context.Context, exec ExecFunc, o PushOptions) ([]string, error) {
 			out = append(out, f)
 		}
 	}
-	return out, nil
+	return out, strings.Contains(x.Stdout, "potluck-host-base"), nil
 }
 
-// MakeAndPush asks the box what it holds (Have), bundles mo against it
-// (Make: only what the commit adds) and pushes that (Push). made, when set,
-// hears each bundle before it is sent. A bundle the box refuses for lack of
-// its base, or one built on a base that is over the limit, is made again
-// whole and pushed once more.
+// MakeAndPush resolves mo (Resolve) and pushes it (PushSource).
 func MakeAndPush(ctx context.Context, exec ExecFunc, mo MakeOptions, po PushOptions, made func(*Bundle)) (Result, error) {
-	if !mo.Full {
-		mo.Have, _ = Have(ctx, exec, po) // none: the whole commit goes in
+	s, err := Resolve(ctx, mo)
+	if err != nil {
+		return Result{}, err
 	}
-	res, err := makeAndPush(ctx, exec, mo, po, made)
+	return PushSource(ctx, exec, s, po, made)
+}
+
+// PushSource asks the box what it holds (Have), bundles s against it (only
+// what the commit adds) and pushes that (Push). made, when set, hears each
+// bundle before it is sent. A bundle the box refuses for lack of its base,
+// or one built on a base that is over the limit, is made again whole and
+// pushed once more.
+func PushSource(ctx context.Context, exec ExecFunc, s *Source, po PushOptions, made func(*Bundle)) (Result, error) {
+	var have []string
+	if !s.full {
+		var automatic bool
+		have, automatic, _ = haveInBox(ctx, exec, po) // none: the whole commit goes in
+		if automatic {
+			po.Base, po.autoBase = ".potluck-base", true
+		}
+	}
+	res, err := pushBundle(ctx, exec, s, have, po, made)
 	// A thin bundle carries the history since its base: over the limit (an old
 	// base, a churning file), the whole commit may still fit.
-	if (errors.Is(err, errBaseGone) || api.IsCode(err, api.CodeTooLarge)) && len(mo.Have) > 0 {
-		mo.Have = nil
-		res, err = makeAndPush(ctx, exec, mo, po, made)
+	if (errors.Is(err, errBaseGone) && (len(have) > 0 || po.autoBase)) || (api.IsCode(err, api.CodeTooLarge) && len(have) > 0) {
+		if po.autoBase {
+			po.Base = ""
+		}
+		res, err = pushBundle(ctx, exec, s, nil, po, made)
 	}
 	return res, err
 }
 
-func makeAndPush(ctx context.Context, exec ExecFunc, mo MakeOptions, po PushOptions, made func(*Bundle)) (Result, error) {
-	b, err := Make(ctx, mo)
+func pushBundle(ctx context.Context, exec ExecFunc, s *Source, have []string, po PushOptions, made func(*Bundle)) (Result, error) {
+	b, err := s.Bundle(ctx, have)
 	if err != nil {
-		return Result{}, err
+		return Result{Repo: s.Repo, Commit: s.Head}, err
 	}
 	defer b.Close()
 	if made != nil {

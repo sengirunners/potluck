@@ -92,7 +92,7 @@ zm ls                                      # sessions, the ones that need you fi
 
 ## Mezze and Potluck
 
-Mezze, the agent and team layer on Potluck (https://potluck.sh), runs fine on one computer with no pool. When your agents need more room, Potluck puts your team's idle Macs and Linux boxes to work as throwaway VMs and sandboxes. The same `make install` puts Potluck's drivers on your computer, so it can lend itself to a pool too.
+Mezze, the agent and team layer on Potluck (https://potluck.sh), runs fine on one computer with no pool. When your agents need more room, Potluck puts your team's idle Macs and Linux boxes to work as throwaway VMs and sandboxes. The same `make install` puts Potluck's drivers on your computer, so it can lend itself to a pool too. A friend you invite into that pool (`zm pool invite <name>`) needs only Potluck, not Mezze.
 
 ## Talk to us
 

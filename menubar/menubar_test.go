@@ -56,6 +56,11 @@ func TestBuild(t *testing.T) {
 	t.Cleanup(func() { now = time.Now })
 	lending := []computeapi.RunTargetView{box("c3", "", "linux", 3, 2, []string{"a", "b"}, nil)}
 	host := func(mode, state string) *protocol.HostStatus { return &protocol.HostStatus{Mode: mode, State: state} }
+	refusing := []computeapi.RunTargetView{box("c3", "", "linux", 3, 2, []string{"a", "b"}, nil), box("c1", "/var/lib/p", "linux", 1, 1, nil, nil), box("c2", "/var/lib/q", "linux", 0, 0, nil, nil)}
+	refusing[1].Describe.Host = &protocol.HostStatus{Mode: "auto", State: "accepting",
+		Refused: &protocol.HostRefusal{Reason: "no room on this host now: CPU busy", At: "2026-11-14T20:00:00Z", Until: "2026-11-14T20:10:00Z"}}
+	refusing[2].Describe.Host = &protocol.HostStatus{Mode: "auto", State: "accepting",
+		Refused: &protocol.HostRefusal{Reason: "no room on this host now: an older answer", At: "2026-11-14T19:00:00Z", Until: "2026-11-14T20:30:00Z"}}
 	checked := func(s Status) string {
 		for _, it := range s.Menu.Items {
 			if it.Checked {
@@ -105,6 +110,12 @@ func TestBuild(t *testing.T) {
 			"Winding down 6 of 12 cores", "6 cores in use by 2 jobs", "jobs still running are being ended", "wind", "●●●●●●······"},
 		{"no answer", Facts{Cores: 4, HostErr: "permission denied"},
 			"Held: the host switch cannot be read", "nothing running", "permission denied", "", "····"},
+		// The switch accepts, but the host's admission controller refused a
+		// sandbox: any size's driver may hold it, the newest counts.
+		{"refused by the admission controller", Facts{Cores: 12, Targets: refusing, Host: host("auto", "accepting")},
+			"Refusing new work now", "6 cores in use by 2 jobs", "no room on this host now: CPU busy (said at 12:00, retry after 12:10)", "keep", "●●●●●●○·····"},
+		{"refused, and the owner's rules say no too", Facts{Cores: 12, Targets: refusing, Host: host("auto", "closed")},
+			"Paused by your lending rules", "6 cores in use by 2 jobs", "", "keep", "●●●●●●○·····"},
 	} {
 		c.f.Loc = loc
 		c.f.Start, c.f.Share = "potluck daemon --detach", "potluck host"
@@ -172,5 +183,32 @@ func TestBuildPaused(t *testing.T) {
 	}
 	if it := s.Menu.Items[0]; it.Label != "Resume lending" || it.Checked || !slices.Equal(it.Args, []string{"host", "set", "auto"}) {
 		t.Errorf("resume item: %+v", it)
+	}
+}
+
+// Status carries the newest refusal for the JSON reader (the menu bar app).
+func TestBuildCarriesTheNewestRefusal(t *testing.T) {
+	now = func() time.Time { return time.Date(2026, 11, 14, 20, 5, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+	older := box("c1", "/a", "linux", 1, 1, nil, nil)
+	newer := box("c2", "/b", "linux", 2, 1, nil, nil)
+	older.Describe.Host = &protocol.HostStatus{Mode: "auto", State: "accepting", Refused: &protocol.HostRefusal{Reason: "old", At: "2026-11-14T19:00:00Z", Until: "2026-11-14T21:00:00Z"}}
+	newer.Describe.Host = &protocol.HostStatus{Mode: "auto", State: "accepting", Refused: &protocol.HostRefusal{Reason: "new", At: "2026-11-14T20:00:00Z", Until: "2026-11-14T20:10:00Z"}}
+	s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{older, newer}, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}})
+	if s.Refused == nil || s.Refused.Reason != "new" {
+		t.Fatalf("refused: %+v", s.Refused)
+	}
+	if s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{box("c1", "", "linux", 1, 1, nil, nil)}, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}}); s.Refused != nil {
+		t.Fatalf("no refusal: %+v", s.Refused)
+	}
+	// A cached describe past its refusal's Until: the refusal no longer stands.
+	now = func() time.Time { return time.Date(2026, 11, 14, 20, 10, 0, 0, time.UTC) }
+	s = Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{older, newer}, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}})
+	if s.Refused == nil || s.Refused.Reason != "old" {
+		t.Fatalf("past the newer one's until: %+v", s.Refused)
+	}
+	now = func() time.Time { return time.Date(2026, 11, 14, 21, 0, 0, 0, time.UTC) }
+	if s := Build(Facts{Cores: 4, Targets: []computeapi.RunTargetView{older, newer}, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}}); s.Refused != nil || s.Menu.Title != "Lending 3 of 4 cores" {
+		t.Fatalf("past every until: %+v %q", s.Refused, s.Menu.Title)
 	}
 }

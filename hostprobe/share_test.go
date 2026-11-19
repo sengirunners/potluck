@@ -281,6 +281,46 @@ func TestShareSaysATimingFailureIsABusyMachine(t *testing.T) {
 	}
 }
 
+// A box that did not boot because of this machine's setup (Softnet refusing
+// a rule, macOS 15, 2026-11-18) says running share again unchanged fails the
+// same way, never to run it again, and names the box's kept report, though
+// the failure line is longer than share quotes.
+func TestShareSaysASetupFaultFailsTheSameWay(t *testing.T) {
+	report := "~/.potluck-driver-tart/failed/r0123456789ab.txt"
+	words := func(cause, tags string) string {
+		return "FAIL  handles: acquire: refused: unavailable: the run did not start: the VM exited while booting (exit 1): " + cause +
+			strings.Repeat(" padding", 40) + `" [` + tags + `tart 2.42.0, softnet 0.23.0 at /opt/homebrew/bin/softnet, macOS 15.6]; report: ` + report + "\n"
+	}
+	for _, c := range []struct {
+		name, stdout string
+		setup        bool
+	}{
+		{"softnet refused a rule", words(`Softnet refused a network rule: "Error: invalid value 'out proto udp @host port 53'`, "setup fault; "), true},
+		{"an unknown cause", words(`"the hypervisor is busy`, ""), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := &fakeRunner{on: func(line string) (Result, bool) {
+				if strings.HasPrefix(line, "zm-run-conformance ") {
+					return Result{Exit: 1, Stdout: c.stdout}, true
+				}
+				return Result{}, true
+			}}
+			o := ShareOptions{Report: bigReport(), Images: []string{pinA}, Sizes: []string{"c2m4"}, NamePrefix: "mini", Driver: "ref"}
+			res, err := checkOn(context.Background(), run, o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := res.Sizes[0].Error
+			if got := strings.Contains(e, "running this again unchanged fails the same way: this Softnet does not accept"); got != c.setup {
+				t.Errorf("setup advice %v, want %v: %s", got, c.setup, e)
+			}
+			if !strings.HasSuffix(e, "; the box's report: "+report) || strings.Contains(e, "run this again once") {
+				t.Errorf("error: %s", e)
+			}
+		})
+	}
+}
+
 func TestMain(m *testing.M) {
 	if code, ok := refdriver.Main(); ok {
 		os.Exit(code)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,8 @@ func npmDeps(name string) computeapi.BoxDeps {
 }
 
 type depsFix struct {
+	handler http.Handler
+	svc     *runtarget.Service
 	ana, bo *client.Client
 	owner   *client.Client
 	log     string
@@ -54,7 +57,9 @@ type depsFix struct {
 
 // newDepsFix is a daemon with binding "deps" (the reference driver, every
 // request logged) and two members, ana and bo.
-func newDepsFix(t *testing.T) *depsFix {
+func newDepsFix(t *testing.T) *depsFix { return newDepsFixConfig(t, nil) }
+
+func newDepsFixConfig(t *testing.T, extra map[string]string) *depsFix {
 	t.Helper()
 	home, err := os.MkdirTemp("", "zm")
 	if err != nil {
@@ -73,7 +78,7 @@ func newDepsFix(t *testing.T) *depsFix {
 	}
 	t.Cleanup(func() { dm.Close() })
 	fix, _ := filepath.EvalSymlinks(t.TempDir())
-	f := &depsFix{state: filepath.Join(fix, "state"), log: filepath.Join(fix, "requests.log")}
+	f := &depsFix{handler: dm.Handler, state: filepath.Join(fix, "state"), log: filepath.Join(fix, "requests.log")}
 	ref, err := refdriver.Install(fix, f.state, "")
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +101,7 @@ func newDepsFix(t *testing.T) *depsFix {
 	}
 	for _, m := range dm.Modules() {
 		if s, ok := m.(*runtarget.Service); ok {
+			f.svc = s
 			s.SetLookPath(func(string) (string, error) { return wrap, nil })
 			s.SetDepsPoll(100 * time.Millisecond)
 		}
@@ -117,8 +123,12 @@ func newDepsFix(t *testing.T) *depsFix {
 		return c
 	}
 	f.ana, f.bo, f.owner = mint("ana"), mint("bo"), owner
+	conf := map[string]string{"remote": repo.Remote}
+	for k, v := range extra {
+		conf[k] = v
+	}
 	if _, err := computeclient.BindRunTarget(ctx, owner, computeapi.BindRunTargetRequest{Target: computeapi.RunTarget{Name: "deps", Driver: "ref", Kind: "box",
-		Isolation: "ephemeral", Images: []string{refPin}, Repo: repo.Remote, Branch: "main", Config: map[string]string{"remote": repo.Remote}}}); err != nil {
+		Isolation: "ephemeral", Images: []string{refPin}, Repo: repo.Remote, Branch: "main", Config: conf}}); err != nil {
 		t.Fatal(err)
 	}
 	return f

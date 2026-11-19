@@ -262,14 +262,16 @@ you own the pool there.`,
 				for _, im := range images {
 					img += " --image " + im
 				}
-				a.say("host %s (one use, until %s), on the machine they share:\n  %s\n  (or %s, then %s)\n  their machine will be %s\n%s",
-					args[0], until, a.cmd("host '"+r.Code+"'"+img), a.cmd("join '"+r.Code+"'"), a.cmd("host"+img), classMeans[req.Class], tailnetStep(args[0], r.Code))
+				a.say("host %s (one use, until %s), on the machine they share:\n  %s\n  (or %s, then %s)\n%s  their machine will be %s\n%s",
+					args[0], until, friendCmd("host '"+r.Code+"'"+img), friendCmd("join '"+r.Code+"'"), friendCmd("host"+img), a.friendNote(r.Code, "host"+img),
+					classMeans[req.Class], tailnetStep(args[0], r.Code))
 			} else if link != "" {
 				a.say("member %s (one use, until %s). Send them this link; it shows the one line that installs %s and joins:\n  %s\n"+
-					"If %s is already on their machine, this does the same:\n  %s\n%s%s",
-					args[0], until, programName, link, programName, a.cmd("join '"+r.Code+"'"), quickTunnelNote(r.Code), tailnetStep(args[0], r.Code))
+					"If %s is already on their machine, this does the same:\n  %s\n%s%s%s",
+					args[0], until, programName, link, programName, friendCmd("join '"+r.Code+"'"), a.otherSpelling(), quickTunnelNote(r.Code), tailnetStep(args[0], r.Code))
 			} else {
-				a.say("member %s (one use, until %s), on their machine:\n  %s\n%s%s", args[0], until, a.cmd("join '"+r.Code+"'"), quickTunnelNote(r.Code), tailnetStep(args[0], r.Code))
+				a.say("member %s (one use, until %s), on their machine:\n  %s\n%s%s%s", args[0], until, friendCmd("join '"+r.Code+"'"), a.friendNote(r.Code, ""),
+					quickTunnelNote(r.Code), tailnetStep(args[0], r.Code))
 			}
 			return nil
 		},
@@ -297,6 +299,37 @@ func quickTunnelNote(code string) string {
 		return ""
 	}
 	return "  (the pool's tunnel is a quick one: its address changes when cloudflared restarts, and this invite then stops working)\n"
+}
+
+// installJoin installs Potluck and redeems code in one line (install.sh
+// --join): all a friend's machine needs.
+func installJoin(code string) string {
+	return "curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '" + code + "'"
+}
+
+// friendCmd is a command for a friend's machine, which needs only Potluck:
+// the potluck program's spelling, whatever program printed the invite.
+func friendCmd(words string) string { return programName + " " + words }
+
+// friendNote is the lines under a friend's command: how to install Potluck
+// and join in one line (then the command then names, if any), and
+// otherSpelling.
+func (a *app) friendNote(code, then string) string {
+	n := "  no " + programName + " there yet: " + installJoin(code)
+	if then != "" {
+		n += ", then " + friendCmd(then)
+	}
+	return n + "\n" + a.otherSpelling()
+}
+
+// otherSpelling is the line naming this program's spelling of a friend's
+// command where it is not potluck (a friend who runs it types the same
+// words after its prefix), else "".
+func (a *app) otherSpelling() string {
+	if p := prefix(a.host.Prefix); string(p) != programName {
+		return "  (where they run " + p.name() + ": " + p.cmd("<the same words>") + ")\n"
+	}
+	return ""
 }
 
 // tailnetStep is what the pool's owner does so a friend's machine reaches
@@ -505,6 +538,7 @@ func (a *app) printPoolMachines(ctx context.Context, c *client.Client) {
 
 func (a *app) hostCmd() *cobra.Command {
 	var s shareFlags
+	var yes bool
 	cmd := &cobra.Command{
 		Use:   "host ['<invite code>' | <pool>] [--image name@sha256:<digest>] [flags]",
 		Short: "Share this machine with a pool: check it, join with the invite code (unless joined), and wait until the pool lists it",
@@ -517,17 +551,23 @@ machine already joined, or runs) and share each size that passed; then it
 waits until the pool lists them. A machine that fails never joins, and its
 invite stays unspent. With no argument it shares with the only pool this
 machine is in. On a Mac a sandbox ends when you touch the keyboard or pointer
-(--reclaim-idle-s). ` + a.cmd("host stop") + ` undoes it.`,
+(--reclaim-idle-s). ` + a.cmd("host stop") + ` undoes it.
+
+Run again where this machine already shares sizes with the pool and with no
+flag that changes the share (--image, --sizes, --docker and the like), host
+only prints what it shares and what the run would do, changes nothing, and
+asks for --yes; ` + a.cmd("host status") + ` is how to look.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := a.pool()
 			if len(args) == 1 {
 				arg = args[0]
 			}
-			return a.runHost(cmd, &s, arg)
+			return a.runHost(cmd, &s, arg, !yes && !a.shapesShare(cmd))
 		},
 	}
 	s.add(cmd, a)
+	cmd.Flags().BoolVar(&yes, "yes", false, "share again where this machine already shares sizes with the pool, with no flag that changes the share (such a run otherwise only says what it would do)")
 	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostStatusCmd(), a.hostSetCmd(), a.hostPauseCmd(), a.hostResumeCmd())
 	cmd.AddCommand(a.hostOldSpellings()...)
 	return cmd
@@ -644,6 +684,10 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 type hostScope struct {
 	pool, machine string
 	byCode        bool
+	poolID        string // a joined pool's id at its machine
+	// shared is each machine-level binding's share list (a joined pool's
+	// scope), by name.
+	shared map[string][]string
 }
 
 func (a *app) hostScope(ctx context.Context, c *client.Client, arg string, o *hostprobe.ShareOptions) (hostScope, error) {
@@ -655,7 +699,7 @@ func (a *app) hostScope(ctx context.Context, c *client.Client, arg string, o *ho
 		}
 		for _, r := range rems {
 			if r.Project.Slug == sc.pool {
-				sc.machine = r.Machine
+				sc.machine, sc.poolID = r.Machine, r.Project.ID
 			}
 		}
 		if sc.machine == "" {
@@ -675,6 +719,10 @@ func (a *app) hostScope(ctx context.Context, c *client.Client, arg string, o *ho
 		o.EarlierUnread = err.Error() // fail closed in Check
 	} else {
 		o.Earlier = targetsOf(l)
+		sc.shared = map[string][]string{}
+		for _, v := range l.Targets {
+			sc.shared[v.Name] = v.Shared
+		}
 	}
 	return sc, nil
 }

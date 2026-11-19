@@ -122,7 +122,7 @@ The sandbox's image must ship the adapter's command (claude: Claude Code).`,
 	f.DurationVar(&o.opts.Idle, "idle", 0, "end a runner no session reached in this long (0: never)")
 	f.StringArrayVar(&o.opts.Allow, "allow-tool", nil, "a tool sessions may use without asking, as the vendor names it (repeatable)")
 	f.StringArrayVar(&o.opts.Deny, "deny-tool", nil, "a tool sessions may never use (repeatable)")
-	f.StringVar(&o.want.On, "on", "", "a shared machine size, as "+a.cmd("status")+" lists it (default: the smallest that fits)")
+	f.StringVar(&o.want.On, "on", "", a.onUsage())
 	f.StringVar(&o.want.Size, "size", "", "a size the machine states")
 	f.StringVar(&o.want.OS, "os", "", "linux or macos")
 	f.StringVar(&o.image, "image", "", "one of the machine's images, by name")

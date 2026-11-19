@@ -18,9 +18,10 @@ func TestShareBindingReclaimsOnOwnerInput(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("reclaim_idle_s is macOS-only")
 	}
-	rep := Report{OS: "darwin", Arch: "arm64", Cores: 16, RAMMB: 48 << 10, FreeDiskGB: 500,
+	rep := Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 16, RAMMB: 48 << 10, FreeDiskGB: 500,
 		Layers: []Layer{{Name: "tart", Available: true, Supported: true}}}
 	pins := []string{"ghcr.io/x/ubuntu@sha256:" + strings.Repeat("a", 64)}
+	withTartImages(t, pins...)
 	res, err := shareOn(context.Background(), nil, nil, ShareOptions{Report: rep, DryRun: true, NamePrefix: "m",
 		Images: pins, Sizes: []string{"c2m4"}, ReclaimIdleS: DefaultReclaimIdleS})
 	if err != nil {

@@ -131,16 +131,42 @@ type Menu struct {
 	Items []Item `json:"items"`
 }
 
-// Status is `potluck host status`'s answer.
+// Status is `potluck host status`'s answer. Refused, when set, is the
+// host's admission controller refusing new work now (Refused), whatever the
+// switch says.
 type Status struct {
-	Mode    string  `json:"mode"`
-	State   string  `json:"state"`
-	Until   string  `json:"until,omitempty"`
-	Cores   int     `json:"cores"`
-	Lending Lending `json:"lending"`
-	Menu    Menu    `json:"menu"`
+	Mode    string                `json:"mode"`
+	State   string                `json:"state"`
+	Until   string                `json:"until,omitempty"`
+	Refused *protocol.HostRefusal `json:"refused,omitempty"`
+	Cores   int                   `json:"cores"`
+	Lending Lending               `json:"lending"`
+	Menu    Menu                  `json:"menu"`
 	// Background is Facts.Background.
 	Background *Background `json:"background,omitempty"`
+}
+
+// Refused is the newest admission refusal still standing now on any of the
+// host's shared sizes (each driver state directory keeps its own), or on
+// host. A describe may be older than now (the daemon caches it), so one
+// past its Until is dropped here.
+func Refused(host *protocol.HostStatus, targets []computeapi.RunTargetView) *protocol.HostRefusal {
+	var out *protocol.HostRefusal
+	take := func(h *protocol.HostStatus) {
+		if h = protocol.CleanHost(h); h == nil || h.Refused == nil || !h.Refused.StandsAt(now()) {
+			return
+		}
+		if out == nil || h.Refused.At > out.At { // RFC 3339 UTC: text order is time order
+			out = h.Refused
+		}
+	}
+	take(host)
+	for _, t := range targets {
+		if t.RunTarget.Host == "" && t.Describe != nil {
+			take(t.Describe.Host)
+		}
+	}
+	return out
 }
 
 // Build turns the facts into the status and its menu.
@@ -154,6 +180,7 @@ func Build(f Facts) Status {
 	if f.Host != nil {
 		st.Mode, st.State, st.Until = f.Host.Mode, f.Host.State, f.Host.Until
 	}
+	st.Refused = Refused(f.Host, f.Targets)
 	m := &st.Menu
 	lent := l.Lent
 	switch {
@@ -176,6 +203,12 @@ func Build(f Facts) Status {
 			m.Note = "jobs still running are being ended"
 		} else if d := clock(f.Host.DrainDeadline, loc); d != "" {
 			m.Note = "jobs still running end at " + d
+		}
+	case st.State == protocol.HostAccepting && st.Refused != nil:
+		m.Title = "Refusing new work now"
+		m.Note = st.Refused.Reason
+		if at, u := clock(st.Refused.At, loc), clock(st.Refused.Until, loc); at != "" && u != "" {
+			m.Note += " (said at " + at + ", retry after " + u + ")"
 		}
 	case st.State == protocol.HostAccepting:
 		m.Title = fmt.Sprintf("Lending %d of %d cores", lent, f.Cores)

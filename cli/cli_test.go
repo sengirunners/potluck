@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/conformance/refdriver"
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/hostswap"
@@ -364,6 +365,47 @@ func TestQuickStartAcrossTwoMachines(t *testing.T) {
 	if o := a.ok(t, "sandbox", "ls"); !strings.Contains(o, id+" released by=") || !strings.Contains(o, " ended=") || strings.Contains(o, "expires=") {
 		t.Fatalf("an ended sandbox in ls:\n%s", o)
 	}
+	// C, a friend who runs sandboxes (a member of the team area), sees its
+	// own sandboxes in ls and never A's, live or ended.
+	c := startMachine(t, tn, "friend", "ana@example.com")
+	mc := regexp.MustCompile(`potluck join '([^']+)'`).FindStringSubmatch(a.ok(t, "invite", "ana"))
+	if mc == nil {
+		t.Fatal("no member code for ana")
+	}
+	c.ok(t, "join", mc[1])
+	if o := c.ok(t, "sandbox", "ls"); strings.Contains(o, id) {
+		t.Fatalf("a friend sees the owner's sandbox:\n%s", o)
+	}
+	cid, _, _ := strings.Cut(strings.TrimSpace(c.ok(t, "sandbox", "create", "--ttl", "5m")), " ")
+	if o := c.ok(t, "sandbox", "ls"); !strings.Contains(o, cid+" ready by=") || strings.Contains(o, id) {
+		t.Fatalf("a friend's own sandbox in ls:\n%s", o)
+	}
+	if o := a.ok(t, "sandbox", "ls", "--all"); !strings.Contains(o, cid+" ready by=") || !strings.Contains(o, id) {
+		t.Fatalf("the owner's ls --all lacks a sandbox:\n%s", o)
+	}
+	c.ok(t, "sandbox", "rm", cid)
+	// D, another friend in the same team area, sees neither C's ended
+	// sandbox nor A's.
+	d := startMachine(t, tn, "buddy", "dee@example.com")
+	md := regexp.MustCompile(`potluck join '([^']+)'`).FindStringSubmatch(a.ok(t, "invite", "dee"))
+	if md == nil {
+		t.Fatal("no member code for dee")
+	}
+	d.ok(t, "join", md[1])
+	if o := d.ok(t, "sandbox", "ls", "--all"); strings.Contains(o, cid) || strings.Contains(o, id) {
+		t.Fatalf("a friend's ls --all shows another friend's sandbox:\n%s", o)
+	}
+	dc := client.WithHandler(d.dm.SocketHandler())
+	dc.Project = "friends"
+	ctgt, cnum, _ := strings.Cut(cid, "/")
+	cc := client.WithHandler(c.dm.SocketHandler())
+	cc.Project = "friends"
+	if _, err := computeclient.RunTargetStatus(context.Background(), cc, ctgt, cnum); err != nil {
+		t.Fatalf("a friend reads their own sandbox by id: %v", err)
+	}
+	if _, err := computeclient.RunTargetStatus(context.Background(), dc, ctgt, cnum); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("a friend reads another friend's sandbox by id: %v, want not_found", err)
+	}
 
 	// B: stop sharing, then leave.
 	if o := b.ok(t, "host", "stop"); !strings.Contains(o, "no longer shared: lender-c1m2") {
@@ -543,7 +585,7 @@ func TestHostWithXcodeDryRun(t *testing.T) {
 	oldDetect := detectHost
 	t.Cleanup(func() { detectHost = oldDetect })
 	detectHost = func(context.Context, string) hostprobe.Report {
-		return hostprobe.Report{OS: "darwin", Arch: "arm64", Cores: 16, RAMMB: 64 << 10, FreeDiskGB: 500,
+		return hostprobe.Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 16, RAMMB: 64 << 10, FreeDiskGB: 500,
 			Layers: []hostprobe.Layer{{Name: "tart", Available: true, Supported: true}}}
 	}
 	t.Setenv(EnvHome, t.TempDir())

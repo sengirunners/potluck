@@ -49,6 +49,8 @@ func (s *Service) checkVolumes(ctx context.Context, b computeapi.RunTarget, d *c
 			return api.Errorf(api.CodeBadRequest, "volume %s: a path under the box user's HOME (relative; never absolute)", v.Name)
 		case v.New:
 			return api.Errorf(api.CodeBadRequest, "volume %s: new is the answer's, not the request's", v.Name)
+		case strings.HasPrefix(v.Name, basePrefix):
+			return api.Errorf(api.CodeBadRequest, "volume %s: names starting %s are push bases, named by the daemon", v.Name, basePrefix)
 		case strings.HasPrefix(v.Name, depsPrefix): // deps.go: a layer's name is the daemon's, derived from its inputs
 			return api.Errorf(api.CodeBadRequest, "volume %s: names starting %s are dependency layers, named by the daemon (ask for one with deps)", v.Name, depsPrefix)
 		case v.Sealed:

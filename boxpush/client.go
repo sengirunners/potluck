@@ -21,16 +21,11 @@ func Exec(c *client.Client, target, id string) ExecFunc {
 // driver fetches it). Every other box, a remote one included, gets the
 // renter's code by a push.
 func ChecksOutItself(ctx context.Context, c *client.Client, target string) (bool, error) {
-	l, err := computeclient.RunTargets(ctx, c, false)
+	t, err := computeclient.FindRunTarget(ctx, c, "", target)
 	if err != nil {
 		return false, err
 	}
-	for _, t := range l.Targets {
-		if t.Name == target {
-			return t.Repo != "", nil
-		}
-	}
-	return false, api.Errorf(api.CodeNotFound, "no run target %s", target)
+	return t.Repo != "", nil
 }
 
 // SelfMisfit is the Misfit (computeclient.Misfit: nothing asked of it, the

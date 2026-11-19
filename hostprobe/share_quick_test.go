@@ -24,7 +24,7 @@ import (
 
 // macReport is a Mac with Tart ready.
 func macReport() Report {
-	return Report{OS: "darwin", Arch: "arm64", Cores: 16, RAMMB: 48 << 10, FreeDiskGB: 500, Layers: []Layer{
+	return Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 16, RAMMB: 48 << 10, FreeDiskGB: 500, Layers: []Layer{
 		{Name: "tart", Available: true, Supported: true, Isolation: "vm"},
 	}}
 }
@@ -133,6 +133,7 @@ func TestShareStopsWhenTheSecurityChecksFail(t *testing.T) {
 // keyboard or pointer ends a box as reclaimed. Conformance runs without it
 // (the owner is typing), and a non-Mac refuses it.
 func TestShareReclaimsOnOwnerInput(t *testing.T) {
+	withTartImages(t, pinA)
 	o := ShareOptions{Report: macReport(), Images: []string{pinA}, NamePrefix: "m", Sizes: []string{"c2m4"}, DryRun: true, ReclaimIdleS: DefaultReclaimIdleS}
 	res, err := shareOn(context.Background(), &fakeRunner{}, nil, o)
 	if err != nil {
@@ -236,6 +237,7 @@ func refDaemon(t *testing.T) (*client.Client, string) {
 }
 
 func TestShareQuickOnTheReferenceDriver(t *testing.T) {
+	withTartImages(t, pinA)
 	ctx := context.Background()
 	owner, drv := refDaemon(t)
 	var outs []string

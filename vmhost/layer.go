@@ -67,7 +67,7 @@ type vmInfo struct {
 
 // layers are the VM layers a binding can name with vm=. Tests add theirs.
 var layers = map[string]func(c config) vmLayer{
-	"tart": func(c config) vmLayer { return tartCLI{c.Tart} },
+	"tart": func(c config) vmLayer { return tartCLI{bin: c.Tart, softnetPath: c.SoftnetPath} },
 	"oci": func(c config) vmLayer {
 		return ociCLI{bin: c.OCICLI, runtime: c.OCIRuntime, network: c.OCINetwork, dns: c.OCIDNS, stateDir: c.StateDir, root: c.Root, docker: c.Docker, nativeBound: c.OCIHostProfile != ""}
 	},
@@ -92,7 +92,7 @@ func waitReady(l vmLayer, vm string, deadline time.Time, exited <-chan struct{})
 	for time.Now().Before(deadline) {
 		select {
 		case <-exited:
-			return fmt.Errorf("the VM exited while booting")
+			return errBootExited // the supervisor says why (diagnoseBoot)
 		default:
 		}
 		if l.Exec(vm, nil, io.Discard, io.Discard, "true").Run() == nil {

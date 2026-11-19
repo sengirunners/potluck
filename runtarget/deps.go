@@ -526,6 +526,9 @@ func (s *Service) acquireDeps(ctx context.Context, t core.Target, b computeapi.R
 			}
 			return nil, err
 		}
+		if isBaseMissing(err) {
+			return nil, err
+		}
 		if !api.IsCode(err, api.CodeNotFound) {
 			if err != nil {
 				return nil, err
@@ -728,7 +731,7 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 
 // busyData is an unavailable driver answer's data when it is a
 // protocol.Busy for a volume being built, re-encoded; nil otherwise. Nothing
-// else a driver puts in data reaches a caller.
+// else from this unavailable answer reaches a caller (volume_errors.go).
 func busyData(raw json.RawMessage) json.RawMessage {
 	var bz protocol.Busy
 	if len(raw) == 0 || json.Unmarshal(raw, &bz) != nil || bz.Reason != protocol.ReasonBuilding {

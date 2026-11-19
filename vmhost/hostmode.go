@@ -306,9 +306,11 @@ func (h hostState) hostStatus() protocol.HostStatus {
 
 // hostDescribe is describe's host: the override's mode, the state it puts the
 // host in and, during a drain, when running work is cut and how much a drain
-// has cut so far. Reasons are generic (no app names).
+// has cut so far, and the admission controller's last refusal while it
+// stands (admission_refusal.go). Reasons are generic (no app names).
 func (d *drv) hostDescribe(h hostState) protocol.HostStatus {
 	out := h.hostStatus()
+	out.Refused = d.st.refusedNow(d.cfg.AdmissionURL, time.Now())
 	if !h.since.IsZero() {
 		cut := 0
 		for _, r := range d.st.all() {

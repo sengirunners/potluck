@@ -37,8 +37,9 @@ takes inbound connections) as root through `sudo -n`, and ends the VM while port
 | `remote` | required | the repo's remote. A URL is fetched inside the guest (`--depth 1` of `commit`). A local path, or `fetch = "host"`, is fetched on the host and copied in as a bundle, so private repos need no credential in the guest. A URL with credentials and guest fetch is refused. |
 | `fetch` | `auto` | `auto`, `guest` or `host` |
 | `scripts_dir` | repo root | where script names resolve. An executable file runs directly, any other runs with `sh`. |
+| `softnet_path` | daemon PATH | absolute path to the helper named `softnet`; host preflight pins the checked executable, and Tart's boot environment resolves this helper before the daemon's PATH |
 | `network` | `softnet` | `nat` is for development only: the guest reaches the host and the LAN, so the binding describes `isolation = "none"` (on every layer: Softnet off on Tart, the fence unchecked on Incus, any `oci_network` on OCI), and Potluck refuses it as a box |
-| `linux_slots` / `macos_slots` | 2 / 2 | concurrent runs. macOS is capped at 2 per host, counting every running macOS VM. |
+| `linux_slots` / `macos_slots` | 2 / 2 | concurrent runs, counting every live box of the state directory whichever binding made it. `potluck host --linux-slots N` sets `linux_slots` on every size it shares ([docs/hosts.md](../../docs/hosts.md), "How many Linux boxes at once"). macOS is capped at 2 per host, counting every running macOS VM. A refusal past it says `no free <os> slot`. |
 | `cpu`, `memory` | the image's | per-VM CPUs and MB |
 | `ttl_max_s` | 14400 | lifetime cap since acquire |
 | `boot_timeout_s` | 90 | clone, boot and checkout must finish within this |
@@ -321,6 +322,16 @@ supervisor does every call, so the lease holds while the daemon is down, as the 
 `holder` is `zm:<target>/<run>` (the prefix is kept from before the rename), unique per run. A dead supervisor stops renewing, so its room is free within one
 TTL; a lease whose renewals fail until it lapses ends the VM too, so Potluck never runs on room the controller may have
 handed on.
+
+A `409` is also kept in the state directory (`admission-refused.json`, by admission URL) until its `retry_s` passes
+(two minutes when it gives none) or a later lease is granted to a run of the same state directory. It is kept per
+controller, not per size: a refused request for one size shows as the host refusing, a grant of any size clears it,
+and a grant through another state directory on the same controller does not. While it stands, describe's `host`
+block carries it as `refused` (`reason`, `at`, `until`; control characters become spaces), so `potluck host status`
+and the menu bar item say the host is refusing new work and why, although the host switch says accepting. The
+binding's advert carries the same block to the pools the host shares with, though nothing on the pool side shows it
+yet. The reason is the controller's own words, as its owner set it up: keep it free of anything the pools should not
+read. It only reports: every acquire still asks the controller.
 
 `potluck host` binds these keys on every size: `--admission-url URL`, `--admission-token-file PATH`
 (a 0600 file, bound as an absolute path) and `--admission-ttl-s N` (120..3600, outlasting `boot_timeout_s` by 30 s),

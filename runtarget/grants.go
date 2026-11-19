@@ -21,6 +21,9 @@ func (s *Service) secretsGranted(ctx context.Context, project string, b computea
 	if len(secrets) == 0 {
 		return nil, nil
 	}
+	if baseBuilder(rw) {
+		return nil, api.Errorf(api.CodeForbidden, "a push base builder takes no secrets")
+	}
 	n := 0
 	sizes := make(map[string]int, len(secrets))
 	for k, v := range secrets {

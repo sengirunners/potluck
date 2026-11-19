@@ -39,10 +39,13 @@ type BoxWant struct {
 	// process with secrets of its own (verb spawn, capability secrets): an
 	// agent runner's job.
 	Secrets bool
+	// BoxSecrets requires spawn and the box-scope secrets door.
+	BoxSecrets bool
 }
 
 // PlaceBox picks the box binding to acquire. A named
-// binding is taken as is (it must be a box; no size or OS with it). The
+// binding is taken as is (it must be a box; ResolveRunTarget says what a
+// name may be: a size goes with a machine name only, and no OS with a name). The
 // project's only box binding, asked for nothing, is taken without asking
 // its driver (acquire decides). Otherwise every box binding describes
 // itself and the pool's one rule (package placement) judges and ranks them:
@@ -55,8 +58,8 @@ type BoxWant struct {
 // (zm-eakh.12.5.10): placement never picks one on a public host (a lender's
 // or a stranger's machine) unless it is named.
 func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error) {
-	if w.On != "" && (w.Size != "" || w.OS != "") {
-		return nil, api.Errorf(api.CodeBadRequest, "name a box run target or ask for a size and OS, not both")
+	if w.On != "" && w.OS != "" {
+		return nil, api.Errorf(api.CodeBadRequest, "name a box run target or ask for an OS, not both")
 	}
 	tmpl := ""
 	if w.Template != "" {
@@ -64,6 +67,25 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 		if tmpl, ok = computeapi.BoxTemplateImage(w.Template); !ok {
 			return nil, api.Errorf(api.CodeBadRequest, "no box template %q (zm's: %s)", w.Template, strings.Join(computeapi.BoxTemplates(), ", "))
 		}
+	}
+	if w.On != "" {
+		t, err := ResolveRunTarget(ctx, c, "box", w.On, w.Size)
+		if err != nil {
+			return nil, err
+		}
+		if w.BoxSecrets {
+			v, err := DescribeRunTarget(ctx, c, t.Name)
+			if err != nil {
+				return nil, err
+			}
+			if v.HostClass != api.MachineTrusted {
+				return nil, api.Errorf(api.CodeForbidden, "box secrets require a trusted host")
+			}
+			if why := boxSecretsCapability(v.Describe); why != "" {
+				return nil, api.Errorf(api.CodeUnavailable, "%s: %s", t.Name, why)
+			}
+		}
+		return []string{t.Name}, nil
 	}
 	lends := func(t computeapi.RunTargetView) bool { // the template's image, any digest
 		if tmpl == "" || t.HostBinding != "" {
@@ -77,12 +99,6 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 	}
 	var boxes, public, lacking []string
 	for _, t := range l.Targets {
-		if w.On != "" && t.Name == w.On {
-			if t.Kind != "box" {
-				return nil, api.Errorf(api.CodeBadRequest, "run target %s is a %s, not a box", w.On, t.Kind)
-			}
-			return []string{w.On}, nil
-		}
 		switch {
 		case t.Kind == "box" && !lends(t):
 			lacking = append(lacking, t.Name)
@@ -93,18 +109,16 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 		}
 	}
 	switch {
-	case w.On == "" && len(boxes) == 0 && len(public) == 0 && len(lacking) > 0:
-		return nil, api.Errorf(api.CodeUnavailable, "no box run target here lends the %s template image (%s): %s", w.Template, tmpl, strings.Join(lacking, ", ")).
-			WithHint("a box's owner lends it beside the default by running zm host share again")
-	case w.On != "":
-		return nil, api.Errorf(api.CodeNotFound, "no run target %s", w.On)
+	case len(boxes) == 0 && len(public) == 0 && len(lacking) > 0:
+		return nil, &NoTarget{Err: api.Errorf(api.CodeUnavailable, "no box run target here lends the %s template image (%s): %s", w.Template, tmpl, strings.Join(lacking, ", ")).
+			WithHint("a box's owner lends it beside the default by running zm host share again")}
 	case len(boxes) == 0 && len(public) > 0:
-		return nil, api.Errorf(api.CodeUnavailable, "only public hosts serve sandboxes here (%s): placement does not pick one", strings.Join(public, ", ")).
-			WithHint("name one to use it: --on " + public[0])
+		return nil, &NoTarget{Err: api.Errorf(api.CodeUnavailable, "only public hosts serve sandboxes here (%s): placement does not pick one", strings.Join(public, ", ")).
+			WithHint("name one to use it: --on " + public[0])}
 	case len(boxes) == 0:
-		return nil, api.Errorf(api.CodeNotFound, "no machine in this pool shares sandboxes yet").
-			WithHint("on a machine to share: potluck host")
-	case len(boxes) == 1 && w.Size == "" && w.OS == "" && w.Net != computeapi.NetOff && !w.Volumes && !w.Secrets:
+		return nil, &NoTarget{Err: api.Errorf(api.CodeNotFound, "no machine in this pool shares sandboxes yet").
+			WithHint("on a machine to share: potluck host")}
+	case len(boxes) == 1 && w.Size == "" && w.OS == "" && w.Net != computeapi.NetOff && !w.Volumes && !w.Secrets && !w.BoxSecrets:
 		return boxes[:1], nil
 	}
 	if l, err = RunTargets(ctx, c, true); err != nil {
@@ -117,6 +131,8 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 			return "cannot make a box without a network (net off)"
 		case w.Volumes && !slices.Contains(d.Capabilities, computeapi.CapVolumes):
 			return "mounts no named volumes (--volume)"
+		case w.BoxSecrets && boxSecretsCapability(d) != "":
+			return boxSecretsCapability(d)
 		case w.Secrets && (!slices.Contains(d.Verbs, "spawn") || !slices.Contains(d.Capabilities, protocol.CapSecrets)):
 			return "runs no background process with secrets (verb spawn, capability secrets)"
 		}
@@ -150,11 +166,18 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 			for i, s := range sizes {
 				sizes[i] = placement.Quote(s)
 			}
-			return nil, err.WithHint(fmt.Sprintf("no box here is size %q; the sizes here: %s", w.Size, strings.Join(sizes, ", ")))
+			return nil, &NoTarget{Err: err.WithHint(fmt.Sprintf("no box here is size %q; the sizes here: %s", w.Size, strings.Join(sizes, ", ")))}
 		}
-		return nil, err
+		return nil, &NoTarget{Err: err}
 	}
 	return placement.Rank(fits), nil
+}
+
+func boxSecretsCapability(d *computeapi.RunTargetDescribe) string {
+	if d == nil || !slices.Contains(d.Verbs, "spawn") || !slices.Contains(d.Capabilities, protocol.CapBoxSecrets) {
+		return "runs no background process with box secrets (verb spawn, capability box-secrets)"
+	}
+	return ""
 }
 
 // Misfit is prep's word that a binding does not fit the request (a ttl past
@@ -279,19 +302,10 @@ func BoxHandle(ctx context.Context, c *client.Client, h string) (target, id stri
 	if target, id, err = SplitBoxHandle(h); err != nil {
 		return "", "", err
 	}
-	l, err := RunTargets(ctx, c, false)
-	if err != nil {
+	if _, err := FindRunTarget(ctx, c, "box", target); err != nil {
 		return "", "", err
 	}
-	for _, t := range l.Targets {
-		if t.Name == target {
-			if t.Kind != "box" {
-				return "", "", api.Errorf(api.CodeBadRequest, "run target %s is a %s, not a box", target, t.Kind)
-			}
-			return target, id, nil
-		}
-	}
-	return "", "", api.Errorf(api.CodeNotFound, "no run target %s", target)
+	return target, id, nil
 }
 
 // SplitBoxHandle parses box:<target>/<id> into its target and id.

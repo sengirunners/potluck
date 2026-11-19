@@ -11,10 +11,10 @@ func TestChooseFirstImage(t *testing.T) {
 		small = "ghcr.io/x/small@sha256:2222222222222222222222222222222222222222222222222222222222222222"
 		oci   = "ghcr.io/x/oci@sha256:3333333333333333333333333333333333333333333333333333333333333333"
 	)
-	macReport := ShareOptions{Report: Report{OS: "darwin", Layers: []Layer{{Name: "tart", Available: true, Supported: true}}}}
+	macReport := ShareOptions{Report: Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Layers: []Layer{{Name: "tart", Available: true, Supported: true}}}}
 	linuxReport := ShareOptions{Report: Report{OS: "linux", Layers: []Layer{{Name: "oci", Available: true, Supported: true}}}}
-	macDefault := DefaultPin{Layer: "tart", OS: "darwin", Image: mac, PullGB: 27}
-	smallPin := DefaultPin{Layer: "tart", OS: "linux", Image: small, Name: SmallLinux, PullGB: 1}
+	macDefault := DefaultPin{Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "darwin", Image: mac, PullGB: 27}
+	smallPin := DefaultPin{Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "linux", Image: small, Name: SmallLinux, PullGB: 1}
 	ociPin := DefaultPin{Layer: "oci", OS: "linux", Image: oci}
 
 	withPins(t, macDefault, smallPin, ociPin)
@@ -46,7 +46,7 @@ func TestChooseFirstImage(t *testing.T) {
 	if _, ok := ChooseFirstImage(named); ok {
 		t.Error("an owner's --image still chose")
 	}
-	if _, ok := ChooseFirstImage(ShareOptions{Report: Report{OS: "darwin", Layers: []Layer{{Name: "tart", Supported: true, Problems: []string{"no tart"}}}}}); ok {
+	if _, ok := ChooseFirstImage(ShareOptions{Report: Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Layers: []Layer{{Name: "tart", Supported: true, Problems: []string{"no tart"}}}}}); ok {
 		t.Error("a Mac with no ready layer still chose")
 	}
 }

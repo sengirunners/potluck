@@ -29,8 +29,13 @@ func mac(softnet bool) *macFacts {
 }
 
 func macRunner(softnet, pmset string) *fakeRunner {
-	out := map[string]Result{"sysctl -n kern.hv_support": ok("1\n"), "tart --version": ok("2.20.0\n"),
-		"stat -L -f %Sp %Su /fake/softnet": ok(softnet + "\n")}
+	out := map[string]Result{"sysctl -n kern.hv_support": ok("1\n"), "/fake/tart --version": ok("2.20.0\n"),
+		"/fake/tart run --help":                 ok(tartHelp),
+		"/usr/bin/sw_vers -productVersion":      ok("26.0\n"),
+		"/usr/sbin/sysctl -n hw.optional.arm64": ok("1\n"),
+		"/fake/softnet --version":               ok("0.25.0\n"),
+		softnetProbeLine("/fake/softnet"):       ok(""),
+		"stat -L -f %Sp %Su /fake/softnet":      ok(softnet + "\n")}
 	if pmset != "" {
 		out["pmset -g"] = ok(pmset)
 	}
@@ -182,12 +187,13 @@ func (s streamRunner) RunStream(ctx context.Context, w io.Writer, name string, a
 }
 
 func tartShareOptions(progress func(string)) ShareOptions {
-	return ShareOptions{Report: Report{OS: "darwin", Arch: "arm64", Cores: 10, RAMMB: 32 << 10,
+	return ShareOptions{Report: Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 10, RAMMB: 32 << 10,
 		Layers: []Layer{{Name: "tart", Available: true, Supported: true}}}, Images: []string{pinA}, Sizes: []string{"c2m4"},
 		NamePrefix: "h", Progress: progress, PullTimeout: 50 * time.Millisecond}
 }
 
 func TestPullStreamsProgressAndTimesOut(t *testing.T) {
+	withTartImages(t, pinA)
 	var lines []string
 	o := tartShareOptions(func(s string) { lines = append(lines, s) })
 	sr := streamRunner{fakeRunner: &fakeRunner{}, block: true, chunks: []string{"pulling manifest\r[=>      ] 12.5%  1 GB / 8 GB\r"}}
@@ -203,6 +209,7 @@ func TestPullStreamsProgressAndTimesOut(t *testing.T) {
 }
 
 func TestPullWithoutStreamingStillTimesOut(t *testing.T) {
+	withTartImages(t, pinA)
 	// A Runner that cannot stream: killed at the limit it reports exit -1.
 	run := &fakeRunner{on: func(line string) (Result, bool) {
 		time.Sleep(80 * time.Millisecond)
@@ -249,6 +256,7 @@ func TestExecRunnerRunStream(t *testing.T) {
 }
 
 func TestParentDeadlineIsNotAPullTimeout(t *testing.T) {
+	withTartImages(t, pinA)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	o := tartShareOptions(nil)
@@ -312,7 +320,7 @@ func tartListing(t *testing.T, cached ...string) *fakeRunner {
 		entries = append(entries, fmt.Sprintf(`{"Source":"oci","Name":%q}`, im))
 	}
 	return &fakeRunner{on: func(line string) (Result, bool) {
-		if line != "tart list --format json" {
+		if line != "/fake/tart list --format json" {
 			t.Errorf("ran %q; only the cache listing may run before the disk is checked", line)
 		}
 		return ok("[" + strings.Join(entries, ",") + "]"), true
@@ -329,6 +337,7 @@ func macReportWithDisk(t *testing.T, freeGB float64) Report {
 // dry run too, before any pull; the need is the largest min_free_gb of the
 // images' pins.
 func TestShareRefusesATooSmallTartDiskBeforeAnyPull(t *testing.T) {
+	withTartImages(t, pinA)
 	for _, c := range []struct {
 		name, with string
 		free       float64
@@ -354,6 +363,7 @@ func TestShareRefusesATooSmallTartDiskBeforeAnyPull(t *testing.T) {
 // An image Tart already has needs no pull, so a Mac with little free disk
 // still lends it; the same disk is refused for an image it must pull.
 func TestShareDoesNotRefuseACachedImage(t *testing.T) {
+	withTartImages(t, pinA)
 	pin, err := DefaultImage("tart")
 	if err != nil {
 		t.Fatal(err)
@@ -375,6 +385,7 @@ func (unreadableDisk) FreeDiskGB(string) (float64, error) { return 0, errors.New
 // A disk that cannot be read is said so, in doctor and in share's notes, and
 // is not taken for an empty one: share goes on.
 func TestTartDiskUnreadIsLoudNotRefused(t *testing.T) {
+	withTartImages(t, pinA)
 	r := Detect(context.Background(), macRunner("-rwsr-xr-x root", ""), unreadableDisk{mac(true)}, "/state")
 	l := mustLayer(t, r)
 	if r.TartDiskUnread == "" || len(l.Warnings) != 1 || !strings.Contains(l.Warnings[0], "could not read the free disk") {

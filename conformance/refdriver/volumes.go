@@ -121,7 +121,12 @@ func (d *drv) takeVolumes(a acquireArgs, all []record) ([]rvol, error) {
 				v.Dir = sealedByName(d.state, v.Name, v.Dir)
 			}
 			if !sealed(v.Dir) && !d.is("seal-not-checked") {
-				return nil, refuse("not_found", "volume %s is not sealed", v.Name)
+				name := v.Name
+				if d.is("seal-missing-wrong-name") {
+					name += "-wrong"
+				}
+				data := protocol.VolumeMissing{Reason: protocol.ReasonVolumeMissing, Name: name}
+				return nil, refusal{code: "not_found", msg: "volume " + v.Name + " is not sealed", data: data}
 			}
 		}
 		if (v.Mode == protocol.VolumeRW || v.Mode == protocol.VolumeBuild) && sealed(v.Dir) && !d.is("seal-rw-allowed") {

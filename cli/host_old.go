@@ -30,7 +30,7 @@ func (a *app) hostShareOld() *cobra.Command {
 			if arg == "" {
 				arg = a.pool()
 			}
-			return a.runHost(cmd, &s, arg)
+			return a.runHost(cmd, &s, arg, false) // programs run it: it never asks first
 		},
 	}
 	s.add(cmd, a)

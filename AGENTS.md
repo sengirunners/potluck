@@ -29,6 +29,7 @@ Go module `github.com/sengirunners/potluck`. Apache-2.0. `cmd/potluck` is the pr
 | `agenttasks/` | the agent task (`potluck agent-task`): a coding agent CLI run once in a fresh box on a pushed commit, its commits back as a local ref; adapters are data, the box's entry script; `docs/agent-tasks.md` |
 | `runtarget/`, `runners/`, `usage/`, `grants/` (secret grants), `hostprobe/`, `hostswap/` (the host's swap state: reported in its advert, gates box secrets), `computeapi/`, `computeclient/`, `boxcp/`, `boxpush/`, `wiring/`, `cmd/potluck-e2b` (`internal/e2bgateway`) | COMPUTE: boxes, sandboxes, runners, usage, wirings |
 | `placement/` | the one rule for which box binding takes a new box (sandboxes and runner jobs): tier order, refusals with reasons, ranking |
+| `pushbase/` | client-side repository identity and host base fill/retry (`docs/push-base.md`) |
 | `depscli/` | the client side of dependency layers: the `--deps` flags, the acquire's deps, the answer's line, the mismatch warning (`potluck sandbox create`, `potluck run`; zm imports it) |
 | `internal/forkguard`, `internal/workflowlint` | the fork-guarded `runs-on` rule and its edit (`potluck ci pr`, `docs/ci-pr.md`); the fork-safe workflow lint; `potluck ci doctor` reads guarded `runs-on` through forkguard |
 | `internal/layers` | the layer rule: KIT non-test code imports no COMPUTE; no dependency on zm |

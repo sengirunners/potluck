@@ -596,7 +596,47 @@ From the command line: `potluck sandbox create --persist`, then `potluck sandbox
 - `volume_project` is set by the daemon to the project.
 - `potluck sandbox create --volume name:path[:rw|ro|cow]` names them.
 - The quotas and how `potluck-driver-tart` mounts them are in `docs/hosts.md`.
-- A caller never names a volume starting `deps-`, and never asks `sealed`: those are dependency layers'.
+- A caller never names a volume starting `deps-` or `base-`, and never asks `sealed`: the daemon names
+  dependency layers and push bases itself.
+
+### Push bases
+
+A box acquire may ask for `base: {"repo":"<64 lowercase SHA256 hex>"}`. The repository key hashes the sorted
+root commit IDs of the commit being pushed. A shallow checkout must omit it. The daemon mounts the holder's
+sealed Git object store readonly at `.potluck-base`, and answers `base: {"path":".potluck-base", "hit":true}`.
+The push base and dependency layers can be mounted together; their paths cannot overlap, and together with
+ordinary volumes they count toward the eight-volume limit.
+
+The daemon names it `base-git-<40 hex>-<ISO year and week>` from the project ID, repository key and current
+UTC week. The driver isolates volumes by holder and binding. Different projects never share a name, even for
+the same identity. A new week uses a new volume; an older one remains immutable until the existing volume
+keep time or capacity policy evicts it. Forks with the same roots share a base within one holder and project.
+
+A box can read the base commit that its holder filled this week on this binding, including files deleted
+since that commit. This is more than the pushed bundle carries. A caller that does not want that exposure
+omits `base`; it then transfers its checkout without a host base. Only trusted hosts keep bases. A persistent
+box, GitHub runner, or binding without `volumes`, `volumes-seal`, `volumes-keep` and `net-off` gets an ordinary
+box with `base.hit:false` and `base.why` explaining why.
+
+A capable binding with no sealed base refuses the acquire with `not_found` and `data.reason: "base_missing"`;
+no box was made. This requires the driver's optional structured missing-volume detail. An older host or
+driver that omits it leaves its original error unchanged; clients must fall back to an acquire without a
+base rather than infer what was missing. A host that does not confirm the exact mount is refused and its box
+released.
+
+`base: {"repo":"...", "fill":true}` asks for a builder. It retains only the request ID, holder and image or
+template from the caller's settings: no ref, commit, dependencies, ordinary volumes, JIT config or kept disk.
+Its network is off, its lease is at most 900 seconds (or the shorter binding cap or requested TTL), and neither
+the holder nor the daemon renews it. It takes no command or box secrets. The builder answers the base path,
+with `hit:false`, and mounts exactly that volume in `build` mode. An unsupported fill is refused; it never
+answers an ordinary box. An already sealed base answers `conflict`; another builder answers `unavailable`
+with `data: {"reason":"building", "retry_s":...}`.
+
+The holder fills `objects/` and writes `refs/heads/base` last, then releases that builder with `{"seal":true}`. The daemon
+supplies `keep: ["objects", "refs"]`, so nothing else the builder wrote reaches readers. Only that builder's
+holder can seal it; an ordinary box cannot be sealed, and a caller cannot choose `keep`. A release without
+seal, expiry, reclaim or failure discards the unfinished volume. Clients should bound waiting and fall back
+to a full push when filling fails.
 
 ### Dependency layers
 
@@ -870,10 +910,10 @@ A program built on Potluck carries these commands in its own command tree, in it
 
 - `potluck sandbox ls` lists your own sandboxes in the pool (made from this machine's human, machine or any of its
   sessions), newest first: each with who made it (`by=`), and an ended one's end time (`ended=`) in place of
-  `expires=`. `--all` lists every one your role lets you see, so a friend in a pool sees only their own unless they ask.
+  `expires=`. `--all` lists every sandbox for the pool's machine owner or an owner or admin of the whole pool; a friend in a pool sees only their own either way (the server keeps the rest out).
 - `potluck sandbox logs -f` pages until the process exits and exits with its code, or 1 for a process that ended with
   no exit.
-- `create` places the box. `--on` takes a binding as named. Otherwise every box binding describes itself, and the
+- `create` places the box. `--on` takes a binding as named: its full name (`c2m4-box@example-host`, as the target list prints it), its own name (`c2m4-box`), a machine that shares one box, or a machine with `--size`; more than one match is refused with the names, and a miss names the closest. Otherwise every box binding describes itself, and the
   smallest available one matching `--size` and `--os` wins: fewest CPUs, then least memory, then name. With `--net
   off`, only a binding listing `net-off`.
 - A refusal names each binding and why, and, when `--size` names a size no binding placement may pick states, the
@@ -1012,7 +1052,19 @@ whole tree down in 0.7 s.
 - No argv: the commit's `.potluck/job`, run directly when committed executable, else with `sh`.
   The job lives with the code, so a commit names one job. No argv and no job file is refused before a box is made.
 - `--json` prints `{"handle", "target", "commit", "pid", "state": "exited"|"timeout"|"lost"|"interrupted"|"failed",
-  "exit"?, "error"?, "kept", "released", "seconds"}` on stdout alone (the command's output then goes to stderr).
+  "exit"?, "error"?, "error_code"?, "kept", "released", "seconds", "setup_s"?, "phases"}` on stdout alone
+  (the command's output then goes to stderr). `error_code` is the typed API error code, or `no_target` when
+  placement found no fitting shared binding; it is absent for errors without a structured code. A command's
+  nonzero exit remains in `exit`, and a missing box remains `state: "lost"`.
+- `setup_s` is wall time from command entry (local preparation included) until spawn answers; absent if no
+  process started. `phases` contains seconds for `prepare`, `acquire`, `push`, `start`, `run`, `collect`, and
+  `cleanup`. They do not overlap and sum to approximately `seconds`; zero means that phase did no work.
+  Acquire includes placement, base filling, dependency waiting/building and box startup. Optional
+  `acquire_details.base_fill` measures the base-fill attempt, including waiting and cleanup.
+  `acquire_details.deps_acquire`, when dependencies were requested, is acquire minus base fill: it includes
+  placement and box startup, not only dependency work. These details overlap acquire; do not add them to
+  the phase sum. The daemon does not expose separate dependency-build and wait timings.
+  One stderr line reports setup, phases, and total time.
 - Agents use the sandbox tools in the same order. There is no job tool, since a job outlives a tool call.
 
 ### Agent tasks

@@ -199,11 +199,14 @@ potluck host set closed       # stop now (set auto to go back to your own rules)
 potluck host pause            # stop lending for now, keeping what is shared (refused while work runs)
 potluck host resume           # lend again after a pause, a wind-down or a stop now
 potluck host stop             # stop sharing: remove every size potluck host shared from this machine
+potluck host status           # what it lends and runs now, and whether it takes new work (changes nothing)
 ```
 
 `--share` (default 0.5) sets the fraction of cores and RAM shared; on a Mac a sandbox ends when you touch the
 keyboard or pointer (`--when away`, the default there; `--when any` shares all the time), and a run again keeps
-the earlier choice. Run again with no code, `potluck host` shares with the only pool this machine is in.
+the earlier choice. Run again with no code, `potluck host` shares with the only pool this machine is in; where
+this machine already shares sizes with that pool and no flag changes the share, it only prints what it would do
+and asks for `--yes`.
 `--detach` does the checks and the admin step, then goes on in the background (`potluck host status` says how it
 goes). `potluck host --help` lists the rest.
 

@@ -84,7 +84,7 @@ type BlockCheck struct {
 // Check to this list.
 func bindOnly(k string) bool {
 	_, slot := OneAtATimeConfig[k]
-	return slot || k == "runner_dir" || k == "reclaim_idle_s" || k == "image_name"
+	return slot || k == "runner_dir" || k == "reclaim_idle_s" || k == "image_name" || k == "image_default"
 }
 
 // suiteConfig is a bound box binding's config as its conformance run takes

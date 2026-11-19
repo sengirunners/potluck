@@ -180,9 +180,22 @@ func (l dirLayer) slowBoot(vm string) {
 	}
 }
 
+// fakeBootFail, a file beside the fake VMs, makes each Boot print the file to
+// its log and exit 1, its guest never answering, as a tart run whose Softnet
+// refuses a rule does (bootfail_test.go). The VM stays for Destroy to delete.
+const fakeBootFail = "fake-boot-fail"
+
+// Components names the fake layer's programs (componentNamer).
+func (dirLayer) Components(isolated bool) string {
+	return fmt.Sprintf("fake layer 1.0, isolated %v", isolated)
+}
+
 func (l dirLayer) Boot(vm string, _ bool, log io.Writer) (*exec.Cmd, io.WriteCloser, error) {
 	l.slowBoot(vm)
 	cmd := exec.Command("sh", "-c", `echo $$ >"$1/boot"; cat >/dev/null; `+off, "sh", l.dir(vm))
+	if failing := filepath.Join(filepath.Dir(l.root), fakeBootFail); isFile(failing) {
+		cmd = exec.Command("sh", "-c", `cat "$2" >&2; exit 1`, "sh", l.dir(vm), failing) // no boot file: the guest never answers
+	}
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	held, err := cmd.StdinPipe()
@@ -191,6 +204,8 @@ func (l dirLayer) Boot(vm string, _ bool, log io.Writer) (*exec.Cmd, io.WriteClo
 	}
 	return cmd, held, cmd.Start()
 }
+
+func isFile(p string) bool { _, err := os.Stat(p); return err == nil }
 
 func (l dirLayer) running(vm string) bool {
 	b, err := os.ReadFile(filepath.Join(l.dir(vm), "boot"))
@@ -574,6 +589,41 @@ func TestMacOSSlotsAreCappedPerHost(t *testing.T) {
 	}
 	if vs, _ := (dirLayer{filepath.Join(m["state_dir"], "fakevms")}).List(); len(vs) != 0 {
 		t.Errorf("VMs left after release: %v", vs)
+	}
+}
+
+// linux_slots is how many Linux boxes of the state directory run at once
+// (potluck host --linux-slots): past it an acquire is unavailable and
+// describe says so in the words potluck host reads (NoFreeSlot).
+func TestLinuxSlotsCapConcurrentBoxes(t *testing.T) {
+	_, repo, m := fakeBinding(t, "img")
+	m["target"], m["linux_slots"] = "t", "3"
+	acquire := func(key string) (map[string]any, error) {
+		return call(t, m, "acquire", "", map[string]any{"request_id": key, "ttl_s": 60, "ref": "main",
+			"commit": repo.Commit, "script": "probe.sh", "args": []string{"sleep", "60"}})
+	}
+	var handles []string
+	for _, k := range []string{"a", "b", "c"} {
+		a, err := acquire(k)
+		if err != nil {
+			t.Fatalf("acquire %s of 3 slots: %v", k, err)
+		}
+		handles = append(handles, a["handle"].(string))
+	}
+	if _, err := acquire("d"); code(err) != "unavailable" || !strings.Contains(err.Error(), NoFreeSlot("linux")) {
+		t.Fatalf("a fourth Linux run: %v, want unavailable: %s", err, NoFreeSlot("linux"))
+	}
+	d, _ := call(t, m, "describe", "", nil)
+	if d["available"] != false || !strings.Contains(fmt.Sprint(d["why"]), NoFreeSlot("linux")+" (3 in use)") {
+		t.Errorf("describe with every slot taken: %v", d)
+	}
+	for _, h := range handles {
+		if rel, err := call(t, m, "release", h, nil); err != nil || rel["released"] != true {
+			t.Errorf("release %s: %v %v", h, rel, err)
+		}
+	}
+	if d, _ := call(t, m, "describe", "", nil); d["available"] != true {
+		t.Errorf("describe after release: %v", d)
 	}
 }
 

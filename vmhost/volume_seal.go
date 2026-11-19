@@ -64,7 +64,8 @@ func volRefusal(v volReq, m volMeta, ok bool, holders []string) error {
 	sealed := ok && m.Sealed
 	switch {
 	case v.Sealed && !sealed:
-		return refuse("not_found", "volume %s is not sealed", v.Name)
+		return refusal{code: "not_found", msg: "volume " + v.Name + " is not sealed",
+			data: protocol.VolumeMissing{Reason: protocol.ReasonVolumeMissing, Name: v.Name}}
 	case writesItself(v.Mode) && sealed:
 		return refuse("conflict", "volume %s is sealed: ro or cow only", v.Name)
 	case ok && m.Build != "": // its builder is live, or its unsealed volume is not deleted yet

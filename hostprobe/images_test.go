@@ -20,6 +20,16 @@ func withPins(t *testing.T, pins ...DefaultPin) {
 	t.Cleanup(func() { pinTable = old })
 }
 
+// withTartImages supplies compatibility facts for the tests' fake VM images.
+func withTartImages(t *testing.T, images ...string) {
+	t.Helper()
+	pins := pinTable()
+	for _, image := range images {
+		pins = append(pins, DefaultPin{Layer: "tart", OS: "linux", Image: image, Arch: "arm64", MinHostMacOS: 13, MinFreeGB: 60})
+	}
+	withPins(t, pins...)
+}
+
 // The shipped images.pin: every pin a full digest (or "-", unpublished), one
 // line for each layer share can bind, and a Mac lends macOS by default.
 func TestDefaultPins(t *testing.T) {
@@ -122,7 +132,7 @@ func TestDefaultPins(t *testing.T) {
 
 // Without --image, share takes the layer's default; --image still wins.
 func TestShareDefaultImagePerLayer(t *testing.T) {
-	withPins(t, DefaultPin{Layer: "oci", OS: "linux", Image: pinA}, DefaultPin{Layer: "tart", OS: "darwin", Image: pinB}, DefaultPin{Layer: "tart", OS: "linux", Image: pinA})
+	withPins(t, DefaultPin{Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "darwin", Image: pinB}, DefaultPin{Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "linux", Image: pinA}, DefaultPin{Layer: "oci", OS: "linux", Image: pinA})
 	ctx := context.Background()
 	for _, c := range []struct {
 		name   string
@@ -163,8 +173,8 @@ func TestShareDefaultImagePerLayer(t *testing.T) {
 func TestShareMissingDefaultSaysPassImage(t *testing.T) {
 	ctx := context.Background()
 	for name, pins := range map[string][]DefaultPin{
-		"unpublished": {{Layer: "oci", OS: "linux", Image: ""}, {Layer: "tart", OS: "darwin", Image: pinB}},
-		"no line":     {{Layer: "tart", OS: "darwin", Image: pinB}},
+		"unpublished": {{Layer: "oci", OS: "linux", Image: ""}, {Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "darwin", Image: pinB}},
+		"no line":     {{Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "darwin", Image: pinB}},
 	} {
 		withPins(t, pins...)
 		run := &fakeRunner{}
@@ -235,7 +245,8 @@ func TestShareDefaultImageCheckedAtBoot(t *testing.T) {
 // size below it is refused, for a default and an explicit --image of a pinned
 // image alike; an image images.pin does not know has no floor.
 func TestShareSizesRespectImageFloor(t *testing.T) {
-	withPins(t, DefaultPin{Layer: "tart", OS: "darwin", Image: pinB, MinCPU: 2, MinMemoryMB: 4096})
+	withPins(t, DefaultPin{Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "darwin", Image: pinB, MinCPU: 2, MinMemoryMB: 4096})
+	withTartImages(t, pinA)
 	ctx := context.Background()
 	names := func(res ShareResult) string {
 		var n []string

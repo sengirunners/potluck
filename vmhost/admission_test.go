@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sengirunners/potluck/protocol"
 )
 
 // fakeController is an admission controller keeping the contract in
@@ -247,12 +249,40 @@ func TestAdmissionThroughTheDriver(t *testing.T) {
 	if ctl.live() != 0 {
 		t.Fatal("a refused acquire holds a lease")
 	}
+	// describe reports the refusal (host status and the advert read it),
+	// standing until the controller's retry time.
+	refused := func() *protocol.HostRefusal {
+		t.Helper()
+		d, err := call(t, m, "describe", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(d["host"])
+		var h protocol.HostStatus
+		if err := json.Unmarshal(b, &h); err != nil || !h.Valid() {
+			t.Fatalf("describe's host %s: %v", b, err)
+		}
+		return h.Refused
+	}
+	r := refused()
+	if r == nil || r.Reason != "no room on this host now: CI jobs are queued" {
+		t.Fatalf("describe after a refusal: %+v", r)
+	}
+	if at, until := mustTime(t, r.At), mustTime(t, r.Until); until.Sub(at) != 30*time.Second {
+		t.Fatalf("refused at %s until %s, want the controller's 30 s", r.At, r.Until)
+	}
+	if d, _ := call(t, m, "describe", "", nil); d["available"] != true {
+		t.Fatalf("a refusal made the binding unavailable (acquire must still ask the controller): %v", d["why"])
+	}
 	ctl.mu.Lock()
 	ctl.room = 4
 	ctl.mu.Unlock()
 	a, err := run("one")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if r := refused(); r != nil {
+		t.Fatalf("a granted lease left the refusal standing: %+v", r)
 	}
 	if ctl.live() != 1 {
 		t.Fatalf("leases: %d", ctl.live())
@@ -305,4 +335,51 @@ func TestAdmissionRefusesRedirects(t *testing.T) {
 	if _, err := a.take(context.Background(), 1, 1024, "zm:t/r"); err == nil {
 		t.Fatal("a redirected take was followed")
 	}
+}
+
+// A refusal stands until the controller's retry time (two minutes when it
+// gives none), then describe no longer shows it; another controller's
+// refusal is not this binding's.
+func TestAdmissionRefusalExpires(t *testing.T) {
+	st := store{dir: t.TempDir()}
+	now := time.Now()
+	st.recordRefusal("http://ctl/a", noRoom{reason: "busy", retry: 0}, now)
+	if r := st.refusedNow("http://ctl/a", now.Add(time.Minute)); r == nil || r.Reason != "no room on this host now: busy" {
+		t.Fatalf("within two minutes: %+v", r)
+	}
+	if r := st.refusedNow("http://ctl/a", now.Add(refusalHold)); r != nil {
+		t.Fatalf("past two minutes: %+v", r)
+	}
+	// A controller's reason with a trailing newline still shows, as one line.
+	st.recordRefusal("http://ctl/c", noRoom{reason: "CPU busy\n", retry: 0}, now)
+	if r := st.refusedNow("http://ctl/c", now); r == nil || r.Reason != "no room on this host now: CPU busy" {
+		t.Fatalf("a reason ending in a newline: %+v", r)
+	}
+	if r := st.refusedNow("http://ctl/b", now); r != nil {
+		t.Fatalf("another controller's refusal: %+v", r)
+	}
+	st.recordRefusal("http://ctl/a", noRoom{reason: strings.Repeat("x", 1000), retry: 1 << 40}, now)
+	r := st.refusedNow("http://ctl/a", now.Add(23*time.Hour))
+	if r == nil || len(r.Reason) > protocol.MaxRefusalReason || mustTime(t, r.Until).Sub(mustTime(t, r.At)) != maxRefusalHold {
+		t.Fatalf("a long reason and retry are bounded: %+v", r)
+	}
+	// A lease asked for before the refusal does not clear it; one asked for
+	// after does.
+	st.clearRefusal("http://ctl/a", now.Add(-time.Second))
+	if r := st.refusedNow("http://ctl/a", now); r == nil {
+		t.Fatal("a grant asked for before the refusal cleared it")
+	}
+	st.clearRefusal("http://ctl/a", now.Add(time.Second))
+	if r := st.refusedNow("http://ctl/a", now); r != nil {
+		t.Fatalf("cleared: %+v", r)
+	}
+}
+
+func mustTime(t *testing.T, s string) time.Time {
+	t.Helper()
+	v, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }

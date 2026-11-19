@@ -14,7 +14,7 @@ import (
 )
 
 // tartCLI is the Tart VM layer: it runs the tart binary.
-type tartCLI struct{ bin string }
+type tartCLI struct{ bin, softnetPath string }
 
 func (t tartCLI) run(a ...string) (string, error) {
 	out, err := exec.Command(t.bin, a...).CombinedOutput()
@@ -91,8 +91,24 @@ wait $p; s=$?; kill $g 2>/dev/null; exit $s`
 // 0.0.0.0/0 when omitted); a rule with a port wins over one without, and
 // block wins ties. Softnet filters IPv4 only and lets no IPv6 out.
 var softnetArgs = []string{"--net-softnet",
-	"--net-softnet-block=@host," + softnetMailBlock,
-	"--net-softnet-allow=out proto udp @host port 53,out proto tcp @host port 53"}
+	"--net-softnet-block=" + SoftnetBlockRules(),
+	"--net-softnet-allow=" + SoftnetAllowRules()}
+
+// SoftnetBlockRules and SoftnetAllowRules are the isolation policy used both
+// at boot and by the host's capability preflight. Keep the probe and boot on
+// the same rules, including the host DNS exception and outbound mail blocks.
+func SoftnetBlockRules() string { return "@host," + softnetMailBlock }
+func SoftnetAllowRules() string { return "out proto udp @host port 53,out proto tcp @host port 53" }
+
+// TartBootArguments is the production headless boot policy; preflight checks
+// that the selected Tart understands each option before pulling an image.
+func TartBootArguments(isolated bool) []string {
+	a := []string{"--no-graphics", "--no-audio", "--no-clipboard"}
+	if isolated {
+		a = append(a, softnetArgs...)
+	}
+	return a
+}
 
 // softnetMailBlock is one block rule per mail port.
 var softnetMailBlock = func() string {
@@ -114,11 +130,22 @@ func (t tartCLI) Boot(vm string, isolated bool, log io.Writer) (*exec.Cmd, io.Wr
 }
 
 func (t tartCLI) boot(vm string, isolated bool, log io.Writer, guard string) (*exec.Cmd, io.WriteCloser, error) {
-	a := []string{"run", "--no-graphics", "--no-audio", "--no-clipboard"}
-	if isolated {
-		a = append(a, softnetArgs...)
+	if isolated && t.softnetPath != "" {
+		info, err := os.Stat(t.softnetPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("checked Softnet at %s is unavailable: %w", t.softnetPath, err)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+			return nil, nil, fmt.Errorf("checked Softnet at %s is not executable", t.softnetPath)
+		}
 	}
+	a := append([]string{"run"}, TartBootArguments(isolated)...)
 	cmd := exec.Command("sh", append([]string{"-c", guard, "sh", vm, t.bin}, append(a, vm)...)...)
+	if isolated && t.softnetPath != "" {
+		// Tart resolves softnet through PATH. Use the helper preflight checked,
+		// even when the daemon was started from a different shell.
+		cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(t.softnetPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	held, err := cmd.StdinPipe()
@@ -126,6 +153,47 @@ func (t tartCLI) boot(vm string, isolated bool, log io.Writer, guard string) (*e
 		return nil, nil, err
 	}
 	return cmd, held, cmd.Start()
+}
+
+// Components names what a Tart boot runs, for a failed boot's words
+// (componentNamer): tart's version, Softnet's (isolated) with its path, and
+// the macOS release. A program whose version cannot be read says so; each
+// read is bounded (2 s), so a wedged binary cannot hold the failure up.
+func (t tartCLI) Components(isolated bool) string {
+	cs := []string{"tart " + versionOf(t.bin)}
+	if isolated {
+		// The helper Boot ran is the checked one when pinned (boot puts its
+		// directory first on PATH), else the daemon's PATH one.
+		p, err := t.softnetPath, error(nil)
+		if p == "" {
+			p, err = exec.LookPath("softnet")
+		}
+		if err != nil {
+			cs = append(cs, "no softnet on PATH")
+		} else {
+			cs = append(cs, "softnet "+strings.TrimPrefix(versionOf(p), "softnet ")+" at "+tilde(p))
+		}
+	}
+	if out, err := boundedHostCommand(2*time.Second, "sw_vers", "-productVersion"); err == nil {
+		if v := strings.TrimSpace(string(out)); v != "" {
+			cs = append(cs, "macOS "+v)
+		}
+	}
+	return strings.Join(cs, ", ")
+}
+
+// versionOf is the first line bin --version prints, bounded, or "(version
+// unreadable)".
+func versionOf(bin string) string {
+	out, err := boundedHostCommand(2*time.Second, bin, "--version")
+	v, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	if err != nil || v == "" {
+		return "(version unreadable)"
+	}
+	if len(v) > 60 {
+		v = v[:60] + "..."
+	}
+	return strings.ToValidUTF8(v, "?")
 }
 
 // CloseLogin is the step run in every Tart guest once its agent answers and

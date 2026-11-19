@@ -384,7 +384,16 @@ func (a *app) onlyPool(ctx context.Context, c *client.Client) (string, error) {
 	case 0:
 		return "", errors.New("this machine is in no pool yet: " + a.cmd("create <pool>") + ", or " + a.cmd("join '<invite code>'"))
 	}
-	return "", fmt.Errorf("this machine is in more than one pool (%s): name one with --pool", strings.Join(slugs, ", "))
+	return "", &manyPoolsError{Pools: slugs}
+}
+
+// manyPoolsError is onlyPool's answer on a machine in several pools. A
+// command whose pool is an argument (potluck host <pool>) says so instead
+// of --pool.
+type manyPoolsError struct{ Pools []string }
+
+func (e *manyPoolsError) Error() string {
+	return fmt.Sprintf("this machine is in more than one pool (%s): name one with --pool", strings.Join(e.Pools, ", "))
 }
 
 // inPool is c with the pool as its project.

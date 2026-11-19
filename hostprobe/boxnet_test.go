@@ -194,7 +194,7 @@ func TestGatewayFromRoutes(t *testing.T) {
 }
 
 func ociDefaultPin(t *testing.T) {
-	withPins(t, DefaultPin{Layer: "oci", OS: "linux", Image: pinA, RunnerDir: "/home/runner"}, DefaultPin{Layer: "tart", OS: "darwin", Image: pinB, RunnerDir: "actions-runner"})
+	withPins(t, DefaultPin{Layer: "oci", OS: "linux", Image: pinA, RunnerDir: "/home/runner"}, DefaultPin{Layer: "tart", MinHostMacOS: 26, Arch: "arm64", OS: "darwin", Image: pinB, RunnerDir: "actions-runner"})
 }
 
 // withForward swaps the forward-path targets share finds.

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sengirunners/potluck/vmhost"
 )
 
 // the default pin's disk budget is the free disk Tart needs where it stores images: Potluck's
@@ -56,8 +58,31 @@ func tartDir(f Facts) string {
 func detectSoftnet(ctx context.Context, run Runner, f Facts, l *Layer) {
 	path, ok := f.LookPath("softnet")
 	if !ok {
-		l.Problems = append(l.Problems, "Softnet is not installed (Tart's isolated network needs it): download softnet.tar.gz from https://github.com/openai/softnet/releases/latest, unpack it and put softnet on your PATH, then run `zm host doctor` for the root step that makes it setuid")
+		l.Problems = append(l.Problems, "Softnet is not installed: isolated Tart boxes need a helper compatible with this macOS and Potluck's protocol/port filtering rules; stock 0.23 cannot enforce these rules. No macOS 15 compatibility build is validated yet")
 		return
+	}
+	path = absoluteExecutable(path, l)
+	if path == "" {
+		return
+	}
+	if strings.ContainsRune(path, os.PathListSeparator) {
+		l.Problems = append(l.Problems, "Softnet path "+path+" contains the PATH separator and cannot be pinned for Tart; move the helper to a path without it")
+		return
+	}
+	l.SoftnetPath = path
+	l.SoftnetVersion = executableVersion(ctx, run, path, "Softnet", l)
+	if l.SoftnetVersion == "" {
+		return
+	}
+	{
+		// Upstream parses all rules before this flag's early return, before
+		// sudo, bootpd or vmnet. No VM or network is created by this probe.
+		res, err := runBounded(ctx, run, path, "--vm-fd", "0", "--vm-mac-address", "02:00:00:00:00:01",
+			"--allow="+vmhost.SoftnetAllowRules(), "--block="+vmhost.SoftnetBlockRules(), "--sudo-escalation-probing")
+		if err != nil || res.Exit != 0 {
+			l.Problems = append(l.Problems, fmt.Sprintf("Softnet %s at %s cannot parse Potluck's required host DNS-only and SMTP-blocking isolation rules: %s; stock 0.23 is insufficient, and no macOS 15 compatibility build is validated yet. Use a supported host/helper combination that passes this probe and conformance", l.SoftnetVersion, path, commandFailure(res, err)))
+			return
+		}
 	}
 	res, err := runBounded(ctx, run, "stat", "-L", "-f", "%Sp %Su", path)
 	mode, owner, _ := strings.Cut(strings.TrimSpace(res.Stdout), " ")
@@ -69,7 +94,9 @@ func detectSoftnet(ctx context.Context, run Runner, f Facts, l *Layer) {
 		return
 	}
 	l.Problems = append(l.Problems, "Softnet is installed at "+path+" but is not setuid root (or another user can write to it), so Tart cannot start a VM's isolated network without asking for a password each time")
-	l.RootSteps = append(l.RootSteps, "chown root "+shQuote(path), "chmod u+s,go-w "+shQuote(path))
+	if len(l.Problems) == 1 { // permissions alone: root cannot repair other blockers
+		l.RootSteps = append(l.RootSteps, "chown root "+shQuote(path), "chmod u+s,go-w "+shQuote(path))
+	}
 }
 
 // detectTartDisk reports the free disk where Tart stores images (not the

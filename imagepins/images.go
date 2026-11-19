@@ -42,10 +42,14 @@ type DefaultPin struct {
 	PullMinutes         int    // pull budget; 0 uses the caller's default
 	PullGB              int    // about how many GB a first pull downloads, for the words that warn of it; 0 unknown
 	Root                bool   // keep passwordless sudo inside the VM by default
+	MinHostMacOS        int    // supported host floor for this exact Tart digest; 0 means unknown
+	Arch                string // guest architecture; empty means unknown
+	HostDefault         bool   // named alternative eligible as an OS-compatible host default
 }
 
 // ParsePins reads images.pin: "layer os image [min_cpu=N] [min_memory_mb=N]
-// [runner_dir=PATH] [template=NAME|name=NAME] [root=on] [min_free_gb=N] [pull_minutes=N] [pull_gb=N]" per line, image pinned by digest or "-",
+// [runner_dir=PATH] [template=NAME|name=NAME] [root=on] [min_free_gb=N] [pull_minutes=N] [pull_gb=N]
+// [arch=arm64|amd64] [min_host_macos=N] [host_default=on]" per line, image pinned by digest or "-",
 // with # comments and blank lines. One plain line per layer and OS, and one
 // per template name beside it.
 func ParsePins(s string) ([]DefaultPin, error) {
@@ -65,6 +69,20 @@ func ParsePins(s string) ([]DefaultPin, error) {
 		p := DefaultPin{Layer: f[0], OS: f[1], Image: f[2]}
 		for _, kv := range f[3:] {
 			k, v, _ := strings.Cut(kv, "=")
+			if k == "host_default" {
+				if v != "on" {
+					return nil, fmt.Errorf("images.pin line %d: want host_default=on", n+1)
+				}
+				p.HostDefault = true
+				continue
+			}
+			if k == "arch" {
+				if v != "arm64" && v != "amd64" {
+					return nil, fmt.Errorf("images.pin line %d: want arch=arm64 or amd64", n+1)
+				}
+				p.Arch = v
+				continue
+			}
 			if k == "root" {
 				if v != "on" {
 					return nil, fmt.Errorf("images.pin line %d: want root=on", n+1)
@@ -94,10 +112,12 @@ func ParsePins(s string) ([]DefaultPin, error) {
 				continue
 			}
 			m, err := strconv.Atoi(v)
-			if err != nil || m <= 0 || (k != "min_cpu" && k != "min_memory_mb" && k != "min_free_gb" && k != "pull_minutes" && k != "pull_gb") {
-				return nil, fmt.Errorf("images.pin line %d: %q: want min_cpu=N, min_memory_mb=N, min_free_gb=N, pull_minutes=N, pull_gb=N, runner_dir=PATH, template=NAME, name=NAME or root=on", n+1, kv)
+			if err != nil || m <= 0 || (k != "min_cpu" && k != "min_memory_mb" && k != "min_free_gb" && k != "pull_minutes" && k != "pull_gb" && k != "min_host_macos") {
+				return nil, fmt.Errorf("images.pin line %d: %q: want min_cpu=N, min_memory_mb=N, min_free_gb=N, pull_minutes=N, pull_gb=N, runner_dir=PATH, template=NAME, name=NAME, root=on, arch=arm64|amd64, min_host_macos=N or host_default=on", n+1, kv)
 			}
 			switch k {
+			case "min_host_macos":
+				p.MinHostMacOS = m
 			case "min_cpu":
 				p.MinCPU = m
 			case "min_memory_mb":
@@ -123,6 +143,9 @@ func ParsePins(s string) ([]DefaultPin, error) {
 		}
 		if p.Name != "" && p.Template != "" {
 			return nil, fmt.Errorf("images.pin line %d: name and template cannot be combined", n+1)
+		}
+		if p.HostDefault && (p.Layer != "tart" || p.Name == "" || p.MinHostMacOS == 0 || p.Arch == "") {
+			return nil, fmt.Errorf("images.pin line %d: host_default needs a named Tart image with arch and min_host_macos", n+1)
 		}
 		key := p.Layer + " " + p.OS
 		if p.Template != "" {

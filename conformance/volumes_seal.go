@@ -24,6 +24,7 @@ func (r *run) seals(owner, other, base string) {
 		r.skip("sealed volumes", "describe lists no volumes-seal capability")
 		return
 	}
+	r.add("a missing sealed volume identifies its name when it supplies volume_missing data", r.sealMissingData(owner, base+"-missing"))
 	n := 0
 	fresh := func() string { n++; return base + "-s" + strconv.Itoa(n) }
 	r.add("a build volume that is not sealed is gone (release without seal, and an expired builder)", r.sealUnsealedGone(owner, fresh(), fresh()))
@@ -348,4 +349,29 @@ func (r *run) sealAfterProcs(owner, name string) error {
 			len(strings.Fields(first)), len(strings.Fields(second)))
 	}
 	return err
+}
+
+// Missing-volume details are optional for older drivers. When supplied,
+// they identify exactly the requested volume, never an unrelated name.
+func (r *run) sealMissingData(owner, name string) error {
+	h, e, err := r.acquireVolWith(owner, name, protocol.VolumeRO, true, r.longTTL())
+	defer r.endHeld(h)
+	if err := wantCode(e, err, protocol.CodeNotFound); err != nil {
+		return err
+	}
+	if len(e.Data) == 0 {
+		return nil
+	}
+	var v protocol.VolumeMissing
+	if err := json.Unmarshal(e.Data, &v); err != nil {
+		return fmt.Errorf("missing volume data: %v", err)
+	}
+	// Other optional data is not this extension.
+	if v.Reason != protocol.ReasonVolumeMissing {
+		return nil
+	}
+	if v.Name != name {
+		return fmt.Errorf("missing volume names %q, wanted %q", v.Name, name)
+	}
+	return nil
 }

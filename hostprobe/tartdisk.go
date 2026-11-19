@@ -71,7 +71,8 @@ func tartDiskCheck(ctx context.Context, run Runner, r Report, images []string) (
 	if r.TartFreeGB >= float64(all) {
 		return estimate, nil
 	}
-	cached, listErr := tartCachedImages(ctx, run)
+	layer, _ := r.Layer("tart")
+	cached, listErr := tartCachedImages(ctx, run, layer.CLI)
 	var toPull []string
 	for _, im := range images {
 		if !cached[im] {

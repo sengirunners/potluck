@@ -277,6 +277,10 @@ func newRelayPair(t *testing.T) *relayPair { return newRelayPairWrapped(t, nil) 
 // newRelayPairWrapped is newRelayPair whose daemon runs wrap(driver) in place
 // of the host's driver (from the start, so the pin is the wrapper's).
 func newRelayPairWrapped(t *testing.T, wrap func(drv string) string) *relayPair {
+	return newRelayPairConfigured(t, wrap, nil)
+}
+
+func newRelayPairConfigured(t *testing.T, wrap func(drv string) string, extra map[string]string) *relayPair {
 	home, err := os.MkdirTemp("", "zm")
 	if err != nil {
 		t.Fatal(err)
@@ -317,8 +321,12 @@ func newRelayPairWrapped(t *testing.T, wrap func(drv string) string) *relayPair 
 	if err != nil {
 		t.Fatal(err)
 	}
+	conf := map[string]string{"image_name": "xcode"}
+	for k, v := range extra {
+		conf[k] = v
+	}
 	if _, err := computeclient.BindRunTarget(ctx, rp.owner, computeapi.BindRunTargetRequest{Host: true, Share: []string{p.ID}, Target: computeapi.RunTarget{
-		Name: "sandbox", Driver: "ref", Kind: "box", Isolation: "ephemeral", Images: []string{refPin}, Config: map[string]string{"image_name": "xcode"}}}); err != nil {
+		Name: "sandbox", Driver: "ref", Kind: "box", Isolation: "ephemeral", Images: []string{refPin}, Config: conf}}); err != nil {
 		t.Fatal(err)
 	}
 	rp.owner.Project, rp.owner.ProjectFrom = "acme", "flag"

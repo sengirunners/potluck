@@ -43,7 +43,7 @@ func TestTartBootBlocksMail(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n[ \"$1\" = run ] && printf '%s\\n' \"$@\" > "+strconv.Quote(argsFile)+"\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd, held, err := tartCLI{bin}.Boot("zmrt-x-r1", true, io.Discard)
+	cmd, held, err := tartCLI{bin: bin}.Boot("zmrt-x-r1", true, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,4 +124,56 @@ func TestIncusRefusesAnACLThatLetsMailOut(t *testing.T) {
 	}
 	held.Close()
 	_ = cmd.Wait()
+}
+
+// Tart's own PATH lookup must find the helper checked by host preflight,
+// even when the daemon's environment resolves a different softnet.
+func TestTartBootUsesPinnedSoftnet(t *testing.T) {
+	dir := t.TempDir()
+	helperDir := filepath.Join(dir, "checked")
+	if err := os.Mkdir(helperDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fallbackDir := filepath.Join(dir, "daemon-path")
+	if err := os.Mkdir(fallbackDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fallbackDir, "softnet"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fallbackDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	helper := filepath.Join(helperDir, "softnet")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	result := filepath.Join(dir, "resolved")
+	tart := filepath.Join(dir, "tart")
+	script := "#!/bin/sh\nif [ \"$1\" = run ]; then command -v softnet > " + strconv.Quote(result) + "; fi\n"
+	if err := os.WriteFile(tart, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd, held, err := (tartCLI{bin: tart, softnetPath: helper}).Boot("fake-vm", true, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	_ = held.Close()
+	b, err := os.ReadFile(result)
+	if err != nil || strings.TrimSpace(string(b)) != helper {
+		t.Fatalf("resolved %q: %v", b, err)
+	}
+	if err := os.Remove(helper); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(result); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := (tartCLI{bin: tart, softnetPath: helper}).Boot("fake-vm", true, io.Discard); err == nil {
+		t.Fatal("missing pinned helper fell back to daemon PATH")
+	}
+	if _, err := os.Stat(result); !os.IsNotExist(err) {
+		t.Fatalf("Tart ran after helper vanished: %v", err)
+	}
 }

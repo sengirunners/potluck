@@ -35,7 +35,9 @@ var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade"}
   else), since hints and generated scripts carry it unquoted. Every hint a command prints that names a Potluck command is the prefix and that command's words
   (`supper pool host stop`). The prefix's first word is the program's name: it starts the lines a command prints
   about itself (`supper: sent TERM`) and names the commands each program has of its own (`supper daemon
-  --detach`).
+  --detach`). One exception: the commands `invite` prints for the friend who gets the code are the `potluck`
+  program's (`potluck join '<code>'`), since a friend's machine needs only Potluck, with the host's spelling
+  beside them (`friendCmd`, `friendNote` in `cli/pool.go`).
 - **JSON** and **Pool** read the host's own global flags. The commands define no persistent flags, so they sit
   under any parent without adding flags to it. Pool, when given, is applied to a copy of the client.
 - **Client** is the host's client for this machine's daemon and its client config, whose home the commands read and

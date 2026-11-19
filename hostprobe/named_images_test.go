@@ -52,6 +52,9 @@ func TestNamedPinValidation(t *testing.T) {
 		"tart darwin - root=off", "tart darwin - name=xcode template=agent",
 		"tart darwin - name=xcode\ntart darwin - name=xcode",
 		"tart darwin - min_free_gb=0", "tart darwin - pull_minutes=-1",
+		"tart darwin - arch=unknown", "tart darwin - min_host_macos=0",
+		"tart darwin - host_default=on", "tart darwin - name=old host_default=on",
+		"oci linux - name=old host_default=on min_host_macos=15 arch=arm64",
 	} {
 		if _, err := ParsePins(line); err == nil {
 			t.Errorf("accepted %q", line)
@@ -63,6 +66,7 @@ func TestNamedPinValidation(t *testing.T) {
 }
 
 func TestShareReusesOnlyExactTartCachePin(t *testing.T) {
+	withTartImages(t, pinA)
 	for _, c := range []struct {
 		name, listing string
 		exit          int
@@ -101,6 +105,7 @@ func TestShareReusesOnlyExactTartCachePin(t *testing.T) {
 
 // The selected image's budgets govern its disk refusal and actual pull.
 func TestXcodeBudgetsAndRerun(t *testing.T) {
+	withTartImages(t, pinA)
 	report := macReport()
 	report.TartFreeGB = 250
 	var budget time.Duration

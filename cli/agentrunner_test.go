@@ -67,7 +67,14 @@ func (f *fakePool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			code = 0
 		}
-		api.WriteJSON(w, 200, computeapi.RunTargetOutput{Stdout: "session done\n", StdoutNext: 13, Exit: &code})
+		var req computeapi.OutputRunTargetRequest
+		if err := json.Unmarshal(b, &req); err != nil {
+			api.WriteError(w, api.Errorf(api.CodeBadRequest, "invalid output request"))
+			return
+		}
+		output := "session done\n"
+		from := min(max(req.StdoutFrom, 0), int64(len(output)))
+		api.WriteJSON(w, 200, computeapi.RunTargetOutput{Stdout: output[from:], StdoutNext: int64(len(output)), Exit: &code})
 	case "/v0/run_targets/t/handles/h1/signal":
 		api.WriteJSON(w, 200, map[string]bool{"sent": true})
 	case "/v0/run_targets/t/handles/h1/release":

@@ -10,7 +10,6 @@ package hostprobe
 // leases like a renter's (no room now fails the run, and nothing binds).
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,7 +18,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
@@ -94,17 +92,9 @@ func admissionConfig(o ShareOptions) (map[string]string, string, error) {
 // earlierAdmission is the admission keys of this share's earlier box
 // bindings on this machine (<prefix>-<size>), and the first one's name.
 func earlierAdmission(o ShareOptions) (map[string]string, string, error) {
-	ts := slices.SortedFunc(slices.Values(o.Earlier), func(a, b computeapi.RunTarget) int { return cmp.Compare(a.Name, b.Name) })
 	var got map[string]string
 	name := ""
-	for _, t := range ts {
-		size, ok := strings.CutPrefix(t.Name, o.NamePrefix+"-")
-		if !ok || t.Kind != "box" || t.Host != "" {
-			continue
-		}
-		if _, err := SizeByName(size); err != nil {
-			continue
-		}
+	for _, t := range o.Lent() {
 		if t.Config["admission_url"] == "" {
 			continue
 		}
@@ -132,12 +122,8 @@ func earlierSeen(o ShareOptions) error {
 	if o.EarlierUnread != "" {
 		return fmt.Errorf("could not read this machine's bindings (%s): %s", o.EarlierUnread, fix)
 	}
-	for _, t := range o.Earlier {
-		size, ok := strings.CutPrefix(t.Name, o.NamePrefix+"-")
-		if !ok || t.Kind != "box" || t.Host != "" {
-			continue
-		}
-		if _, err := SizeByName(size); err == nil && t.Config == nil { // every binding share makes has config: this view hides it
+	for _, t := range o.Lent() {
+		if t.Config == nil { // every binding share makes has config: this view hides it
 			return fmt.Errorf("binding %s shows no config (only the machine's owner sees it): %s", t.Name, fix)
 		}
 	}

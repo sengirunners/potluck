@@ -58,7 +58,7 @@ func TestSelectedPin(t *testing.T) {
 		{"named image", ShareOptions{Report: macReport(), With: "xcode"}, xcode.Image, "tart", true},
 		{"explicit layer", ShareOptions{Report: macReport(), Layer: "tart"}, def.Image, "tart", true},
 		{"explicit layer the report lacks", ShareOptions{Layer: "tart"}, "", "", false},
-		{"explicit layer that is not ready", ShareOptions{Report: Report{OS: "darwin", Layers: []Layer{{Name: "tart", Supported: true, Problems: []string{"no softnet"}}}}, Layer: "tart"}, "", "", false},
+		{"explicit layer that is not ready", ShareOptions{Report: Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Layers: []Layer{{Name: "tart", Supported: true, Problems: []string{"no softnet"}}}}, Layer: "tart"}, "", "", false},
 		{"own images select no pin", ShareOptions{Report: macReport(), Images: []string{pinOwn}}, "", "", false},
 		{"unknown name", ShareOptions{Report: macReport(), With: "nope"}, "", "tart", false},
 		{"no layer", ShareOptions{}, "", "", false},
@@ -87,6 +87,7 @@ func TestDiskNeedGB(t *testing.T) {
 // Check accepts what KeepEarlierImage returns: repeating the earlier choice
 // is never refused as a silent replacement.
 func TestCheckAcceptsKeptEarlierImage(t *testing.T) {
+	withTartImages(t, pinOwn)
 	def, _ := DefaultImage("tart")
 	xcode, _ := imagepins.NamedPin(DefaultPins(), "tart", "xcode")
 	for _, img := range []string{def.Image, xcode.Image, pinOwn} {

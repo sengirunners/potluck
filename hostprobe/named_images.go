@@ -12,11 +12,16 @@ import (
 )
 
 // selectedPin keeps named images separate from sandbox templates.
-func selectedPin(layer, name string) (DefaultPin, error) {
+func selectedPin(report Report, layer, name string) (DefaultPin, error) {
 	if name == "" {
-		return DefaultImage(layer)
+		return HostDefaultImage(report, layer)
 	}
 	if p, ok := imagepins.NamedPin(pinTable(), layer, name); ok {
+		if layer == "tart" {
+			if err := CheckTartImages(report, []string{p.Image}); err != nil {
+				return DefaultPin{}, err
+			}
+		}
 		return p, nil
 	}
 	return DefaultPin{}, fmt.Errorf("--with %q: no published named image for layer %s", name, layer)
@@ -36,7 +41,7 @@ func SelectedPin(o ShareOptions) (pin DefaultPin, layer string, ok bool) {
 	if err != nil {
 		return DefaultPin{}, "", false
 	}
-	pin, err = selectedPin(l.Name, o.With)
+	pin, err = selectedPin(o.Report, l.Name, o.With)
 	if err != nil {
 		return DefaultPin{}, l.Name, false
 	}
@@ -55,6 +60,9 @@ func earlierImage(t computeapi.RunTarget) (name string, known bool) {
 	pin, known := PinForImage(t.Images[0])
 	if !known {
 		pin, known = imagepins.PinForRepository(t.Images[0])
+	}
+	if known && t.Config["image_default"] == "true" {
+		return "", true
 	}
 	name = t.Config["image_name"]
 	if name == "" {
@@ -119,13 +127,16 @@ func imageRoot(images []string) bool {
 // A mutable local VM or a tag with the same repository is not the pinned image.
 // An unreadable listing returns an error, and callers fall back to pulling and
 // the normal conformance checks.
-func tartCachedImages(ctx context.Context, run Runner) (map[string]bool, error) {
+func tartCachedImages(ctx context.Context, run Runner, cli string) (map[string]bool, error) {
 	if run == nil {
 		return nil, errors.New("no way to run tart list")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	r, err := run.Run(ctx, "tart", "list", "--format", "json")
+	if cli == "" {
+		cli = "tart"
+	}
+	r, err := run.Run(ctx, cli, "list", "--format", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -147,8 +158,8 @@ func tartCachedImages(ctx context.Context, run Runner) (map[string]bool, error) 
 
 // tartImagePresent reports whether Tart's cache holds image; an unreadable
 // cache says false.
-func tartImagePresent(ctx context.Context, run Runner, image string) bool {
-	cached, err := tartCachedImages(ctx, run)
+func tartImagePresent(ctx context.Context, run Runner, image, cli string) bool {
+	cached, err := tartCachedImages(ctx, run, cli)
 	return err == nil && cached[image]
 }
 

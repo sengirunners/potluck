@@ -602,6 +602,7 @@ var brokenDrivers = []struct {
 	{"box", "volume-cow-left-in-host-tmp", "volumes", "FAIL  a plain box after a cow box (and a ro box) sees nothing of them", nil},
 	{"box", "volume-ro-sees-last-cow", "volumes", "FAIL  a later ro box sees none of an ended cow box's writes", nil},
 	// sealed volumes (zm-eakh.12.65.3)
+	{"box", "seal-missing-wrong-name", "volumes", "FAIL  a missing sealed volume identifies its name", nil},
 	{"box", "seal-partial-kept", "volumes", "FAIL  a build volume that is not sealed is gone", nil},
 	{"box", "seal-rw-allowed", "volumes", "FAIL  a sealed volume refuses rw and build", nil},
 	{"box", "seal-not-checked", "volumes", "FAIL  sealed is refused for a volume that is not", nil},

@@ -37,6 +37,9 @@ starting the daemon:
   running on it, from the daemon;
 - the host switch, as a size's driver reads it (so "Paused by your lending rules" when the schedule or idle rule
   says no), or from its file when no size answers;
+- on a host that shares its room through an admission controller, the controller's last "no room" answer while it
+  stands (until its retry time, or until it grants a lease to the same size's state directory): the menu then says "Refusing new work now" with the
+  controller's reason, though the switch says accepting (`refused` in the JSON);
 - the Mac's cores.
 
 Lent cores are, per driver state directory and OS (which share their slots), the slots times the largest size's

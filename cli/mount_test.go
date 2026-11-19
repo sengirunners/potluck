@@ -18,6 +18,7 @@ import (
 
 	"github.com/sengirunners/potluck/conformance/refdriver"
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/daemonrecord"
@@ -158,6 +159,15 @@ func TestAProgramMountsPotlucksCommands(t *testing.T) {
 		!strings.Contains(out, "next: supper pool invite <name> for a friend") {
 		t.Fatalf("create:\n%s", out)
 	}
+	// A friend's command is the potluck program's (a friend needs only
+	// Potluck), with the install line and this program's spelling beside it.
+	if st, err := client.WithHandler(m.dm.SocketHandler()).TailnetUp(context.Background(), api.TailnetUpRequest{}); err != nil || !st.Running {
+		t.Fatalf("tailnet up: %+v %v", st, err)
+	}
+	if out := s.ok(t, "pool", "invite", "ana"); !strings.Contains(out, "\n  potluck join '") ||
+		!strings.Contains(out, "no potluck there yet: curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '") || !strings.Contains(out, "(where they run supper: supper pool <the same words>)") {
+		t.Fatalf("invite:\n%s", out)
+	}
 	// host share, the old spelling a program runs, through the mount: the
 	// host's AfterLend runs once the machine is lent, and its skip flag is
 	// the host's.
@@ -169,6 +179,17 @@ func TestAProgramMountsPotlucksCommands(t *testing.T) {
 	}
 	if o := s.ok(t, append([]string{"pool", "host", "trial", "--no-auto-update"}, share...)...); *s.lent != 1 || strings.Contains(o, "daily update") {
 		t.Fatalf("host --no-auto-update ran AfterLend (%d times):\n%s", *s.lent, o)
+	}
+	// A bare re-run through the mount (the AfterLend skip and --no-sudo
+	// change no share) asks first, in the host's words; host share, which
+	// programs run, never asks.
+	if o, e, code := s.run(t, "pool", "host", "--no-auto-update", "--no-sudo"); code != 1 ||
+		!strings.Contains(o, "this machine already shares solo-c1m2 with pool trial") || !strings.Contains(e, "--yes") ||
+		!strings.Contains(e, "supper pool host status") || strings.Contains(e, "potluck") {
+		t.Fatalf("a bare re-run through the mount: exit %d\nstdout:\n%s\nstderr:\n%s", code, o, e)
+	}
+	if o := s.ok(t, append([]string{"pool", "host", "share", "--pool", "trial", "--no-auto-update"}, share...)...); !strings.Contains(o, "shared solo-c1m2") {
+		t.Fatalf("host share again:\n%s", o)
 	}
 	s.ok(t, append([]string{"pool", "host", "--dry-run"}, share...)...)
 	if *s.lent != 1 {

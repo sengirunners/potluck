@@ -125,7 +125,7 @@ func (a *app) doctorCmd() *cobra.Command {
 			var images []string // what host shares without --image: the best layer's default
 			if b, ok := r.Best(); ok {
 				out.Best = b.Name
-				if p, err := hostprobe.DefaultImage(b.Name); err == nil {
+				if p, err := hostprobe.HostDefaultImage(r, b.Name); err == nil {
 					images = []string{p.Image}
 					for _, tp := range hostprobe.LayerTemplates(b.Name) {
 						if tp.OS == p.OS && tp.Image != "" {
@@ -158,6 +158,9 @@ func (a *app) doctorCmd() *cobra.Command {
 			}
 			w := words{a.host.Stdout}
 			fmt.Fprintf(w, "%s/%s, %d cores, %d MB RAM, %.0f GB free in %s, kvm: %t\n", r.OS, r.Arch, r.Cores, r.RAMMB, r.FreeDiskGB, r.StateDir, r.KVM)
+			if r.MacOS != "" {
+				fmt.Fprintf(w, "macOS %s\n", r.MacOS)
+			}
 			for _, l := range r.Layers {
 				state := "not ready"
 				switch {
@@ -168,6 +171,9 @@ func (a *app) doctorCmd() *cobra.Command {
 				}
 				detail := strings.TrimSpace(strings.Join([]string{l.Version, l.CLI, l.Runtime}, " "))
 				fmt.Fprintln(w, strings.TrimRight(fmt.Sprintf("  %-6s %s %s", l.Name, state, detail), " "))
+				if l.SoftnetPath != "" {
+					fmt.Fprintf(w, "         Softnet %s at %s\n", l.SoftnetVersion, l.SoftnetPath)
+				}
 				for _, p := range l.Problems {
 					fmt.Fprintf(w, "         - %s\n", p)
 				}
@@ -343,9 +349,10 @@ type shareFlags struct {
 	volumeMaxGB int
 	// when is --when (any or away), detach --detach, and skipAfter the
 	// host program's flag that skips its AfterLend.
-	when      string
-	detach    bool
-	skipAfter bool
+	when       string
+	detach     bool
+	skipAfter  bool
+	linuxSlots int
 }
 
 func (s *shareFlags) add(cmd *cobra.Command, a *app) {
@@ -370,6 +377,7 @@ func (s *shareFlags) add(cmd *cobra.Command, a *app) {
 	fl.IntVar(&s.shelfGB, "shelf-gb", 0, "oci: turn the package shelf on: make the potluck-cache volume (if missing) and cap what it holds at this many GiB, on every size, so sandboxes find public npm packages on a read-only shelf (docs/shelf.md); 0 fills nothing (default: what an earlier host run set)")
 	fl.StringVar(&o.ShelfFill, "shelf-fill", "", "oci: what fills the shelf: seed (only "+a.cmd("host shelf fill")+"; the default), \"boxes\" (also the public packages that lockfiles in sandboxes name, so a sandbox can tell someone on this host recently used a given public package) or off; needs --shelf-gb above 0 (default: what an earlier host run set)")
 	fl.IntVar(&s.volumeMaxGB, "volume-max-gb", 0, "oci: the most each renter's named volumes may hold on each size, in GiB, on every size this run shares (default 20; 0 turns volumes off; default: what an earlier host run set)")
+	fl.IntVar(&s.linuxSlots, "linux-slots", 0, fmt.Sprintf("how many Linux sandboxes run here at once, across every size, 1..%d: without an admission controller every size shared must fit that many times inside --share; with one it decides room and this is a ceiling. macOS stays at 2 (Apple's licence) (default: what an earlier host run set, else 2)", hostprobe.MaxLinuxSlots))
 	fl.BoolVar(&s.dryRun, "dry-run", false, "print the plan; pull, test and share nothing")
 	fl.BoolVar(&s.o.ShowCommands, "show-commands", false, "with --dry-run, also print each conformance command line (a dry run prints the pulls and the plan only)")
 	fl.DurationVar(&s.pullTimeout, "pull-timeout", 0, "give up on an image pull after this long (default: image pin budget, else 60m; a stopped pull resumes)")
@@ -427,6 +435,9 @@ func (a *app) shareOptions(cmd *cobra.Command, s *shareFlags) (hostprobe.ShareOp
 	}
 	if cmd.Flags().Changed("volume-max-gb") {
 		o.VolumeMaxGB = &s.volumeMaxGB
+	}
+	if cmd.Flags().Changed("linux-slots") {
+		o.LinuxSlots = &s.linuxSlots
 	}
 	if o.NamePrefix == "" { // the machine name, read without touching the daemon
 		cfg, err := a.loadClient()

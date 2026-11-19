@@ -17,7 +17,7 @@ func TestDoctorNothingReady(t *testing.T) {
 	old := detectHost
 	t.Cleanup(func() { detectHost = old })
 	detectHost = func(context.Context, string) hostprobe.Report {
-		return hostprobe.Report{OS: "darwin", Arch: "arm64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 100,
+		return hostprobe.Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 100,
 			Layers: []hostprobe.Layer{{Name: "tart", Problems: []string{"tart is not installed"}}, {Name: "oci"}}}
 	}
 	t.Setenv(EnvHome, t.TempDir())
@@ -69,7 +69,7 @@ func TestDoctorListsUnownedProjectSettings(t *testing.T) {
 	old := detectHost
 	t.Cleanup(func() { detectHost = old })
 	detectHost = func(context.Context, string) hostprobe.Report {
-		return hostprobe.Report{OS: "darwin", Arch: "arm64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 100, Layers: []hostprobe.Layer{{Name: "oci"}}}
+		return hostprobe.Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 100, Layers: []hostprobe.Layer{{Name: "oci"}}}
 	}
 	home := t.TempDir()
 	t.Setenv(EnvHome, home)

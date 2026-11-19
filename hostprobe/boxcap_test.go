@@ -194,8 +194,9 @@ func TestShareNetMbit(t *testing.T) {
 	// A layer other than oci has no network of zm's to cap: refused, a cap or
 	// its removal alike, never accepted and ignored (zm-eakh.12.53 item 10).
 	pins := []string{"ghcr.io/x/ubuntu@sha256:" + strings.Repeat("a", 64)}
+	withTartImages(t, pins...)
 	for _, layer := range []string{"tart"} { // share lends no incus layer yet (Supported)
-		rep := Report{OS: "darwin", Arch: "arm64", Cores: 16, RAMMB: 48 << 10, FreeDiskGB: 500,
+		rep := Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 16, RAMMB: 48 << 10, FreeDiskGB: 500,
 			Layers: []Layer{{Name: layer, Available: true, Supported: true}}}
 		for _, mbit := range []int{60, 0} {
 			o := ShareOptions{Report: rep, Images: pins, Sizes: []string{"c2m4"}, NetMbit: mbit, NetMbitSet: true}

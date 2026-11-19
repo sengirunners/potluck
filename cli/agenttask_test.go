@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,20 +15,24 @@ import (
 	"github.com/sengirunners/potluck/agenttasks"
 )
 
-// fakeClaude stands in for Claude Code in the box: it needs its token in
-// the environment, writes the prompt (its stdin) to a file and commits it,
+// fakeClaude stands in for Claude Code in the box: it needs its token on
+// descriptor 3, writes the prompt (its stdin) to a file and commits it,
 // leaves one more file uncommitted, prints its argv, and exits 3 when the
 // prompt says fail, 124 when it says exit124. A prompt saying nothing makes
 // no change at all. One saying plant also puts a git repository (a broken
 // box's) where the entry script writes the bundle.
 const fakeClaude = `#!/bin/sh
-[ "$CLAUDE_CODE_OAUTH_TOKEN" = "tok-sekrit-123" ] || { echo "fake claude: no token" >&2; exit 9; }
+[ "$CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR" = 3 ] && [ "$(cat <&3)" = "tok-sekrit-123" ] || { echo "fake claude: no descriptor token" >&2; exit 9; }
+sh -c '[ -z "${CLAUDE_CODE_OAUTH_TOKEN+x}" ] && [ -z "${ANTHROPIC_API_KEY+x}" ] && [ -z "${CLAUDE_CODE_REMOTE+x}" ]' || exit 11
+[ "$CLAUDE_CODE_DISABLE_BACKGROUND_TASKS" = 1 ] && [ "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" = 1 ] || exit 10
 prompt=$(cat)
 echo "argv: $*"
+case "$prompt" in "nothing verbose"*) i=0; while [ "$i" -lt 40 ]; do echo "line-$i"; i=$((i+1)); done ;; esac
 case "$prompt" in nothing*) echo "done: nothing"; exit 0 ;; esac
 printf '%s\n' "$prompt" > from-agent.txt
 git add from-agent.txt && git commit -q -m "agent: from the prompt" || exit 8
 echo leftover > left.txt
+case "$prompt" in wait*) echo task-ready; sleep 30 ;; esac
 case "$prompt" in plant*)
   for o in "$HOME"/.potluck/agent-task/*/out; do
     git init -q "$o/task.bundle" && git -c user.name=box -c user.email=box@example.com -C "$o/task.bundle" commit -q --allow-empty -m planted || exit 7
@@ -47,6 +53,10 @@ exec %s "$@"
 
 // agentTaskResultJSON is what the tests read of agent-task --json.
 type agentTaskResultJSON struct {
+	ErrorCode                         string             `json:"error_code"`
+	SetupS                            *float64           `json:"setup_s"`
+	Seconds                           float64            `json:"seconds"`
+	Phases                            map[string]float64 `json:"phases"`
 	Handle, State, Error, Ref, Commit string
 	Exit                              *int
 	Commits                           int
@@ -55,7 +65,7 @@ type agentTaskResultJSON struct {
 }
 
 // agent-task runs the agent in a box on the pushed commit with the
-// credential as its spawn's secret, and its commits (what it left
+// credential through the box secrets door, and its commits (what it left
 // uncommitted as one more) come back as a ref in the checkout; its exit
 // code is the command's; the credential shows in no argv or output. With no
 // credential nothing is placed; a box without the agent's command is
@@ -127,6 +137,14 @@ func TestAgentTask(t *testing.T) {
 		}
 	})
 
+	t.Run("no target has structured code", func(t *testing.T) {
+		o, e, code := m.run(t, "--json", "agent-task", "--size", "no-such-size", "--image", "ref-image", "--prompt-file", prompt, "--secret-file", tok, "--timeout", "2m")
+		var r agentTaskResultJSON
+		if err := json.Unmarshal([]byte(o), &r); err != nil || code != 1 || r.ErrorCode != "no_target" || r.Handle != "" || r.SetupS != nil {
+			t.Fatalf("exit %d %+v %v\n%s", code, r, err, e)
+		}
+	})
+
 	t.Run("no agent in the box", func(t *testing.T) {
 		t.Setenv("PATH", bare)
 		o, e, code := m.run(t, "--json", "agent-task", "--image", "ref-image", "--prompt-file", prompt, "--secret-file", tok, "--timeout", "2m")
@@ -138,6 +156,17 @@ func TestAgentTask(t *testing.T) {
 		noSecret(t, o, e)
 	})
 
+	t.Run("credential grant refusal releases the box", func(t *testing.T) {
+		t.Setenv("PATH", fake+string(os.PathListSeparator)+sysPath)
+		o, e, code := m.run(t, "--json", "agent-task", "--image", "ref-image", "--prompt-file", prompt, "--secret-file", tok, "--timeout", "2m")
+		var r agentTaskResultJSON
+		if err := json.Unmarshal([]byte(o), &r); err != nil || code == 0 || r.State != "failed" || !r.Released || r.Exit != nil || !strings.Contains(r.Error, "box secrets door") {
+			t.Fatalf("exit %d %+v %v\n%s", code, r, err, e)
+		}
+		noSecret(t, o, e)
+	})
+	m.ok(t, "secrets", "grant", "add", "--name", "CLAUDE_CODE_OAUTH_TOKEN", "--role", "owner", "--scope", "sandbox")
+
 	t.Run("commits back, exit passes through", func(t *testing.T) {
 		t.Setenv("PATH", fake+string(os.PathListSeparator)+sysPath)
 		o, e, code := m.run(t, "--json", "agent-task", "claude", "--image", "ref-image", "--prompt-file", prompt, "--secret-file", tok, "--timeout", "2m")
@@ -145,6 +174,7 @@ func TestAgentTask(t *testing.T) {
 		if err := json.Unmarshal([]byte(o), &r); err != nil || code != 3 || r.State != "exited" || r.Exit == nil || *r.Exit != 3 || !r.Released {
 			t.Fatalf("exit %d %+v %v\n%s", code, r, err, e)
 		}
+		assertJobTiming(t, r.Seconds, r.SetupS, r.Phases)
 		noSecret(t, o, e)
 		if !strings.HasPrefix(r.Ref, AgentTaskRefs) || r.Commits != 2 || r.Commit != base {
 			t.Fatalf("result %+v\n%s", r, e)
@@ -172,6 +202,115 @@ func TestAgentTask(t *testing.T) {
 		}
 	})
 
+	t.Run("stdout file is not part of the dirty snapshot", func(t *testing.T) {
+		t.Setenv("PATH", fake+string(os.PathListSeparator)+sysPath)
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-sekrit-123")
+		path := filepath.Join(repo, "captured.log")
+		t.Cleanup(func() { _ = os.Remove(path) })
+		o, e, code := m.runIn(t, "nothing to do\n", "--json", "agent-task", "--image", "ref-image", "--prompt-file", "-", "--timeout", "2m", "--dirty", "--include-untracked", "--stdout-file", path)
+		var r agentTaskResultJSON
+		if err := json.Unmarshal([]byte(o), &r); err != nil || code != 0 || r.Commit == "" {
+			t.Fatalf("output file changed the snapshot: exit %d %+v %v\n%s", code, r, err, e)
+		}
+		if err := exec.Command("git", "-C", repo, "cat-file", "-e", r.Commit+":captured.log").Run(); err == nil {
+			t.Fatal("stdout file was included in the resolved snapshot")
+		}
+	})
+
+	t.Run("model effort and full stdout", func(t *testing.T) {
+		t.Setenv("PATH", fake+string(os.PathListSeparator)+sysPath)
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-sekrit-123")
+		path := filepath.Join(t.TempDir(), "stdout")
+		o, e, code := m.runIn(t, "nothing verbose\n", "--json", "agent-task", "--image", "ref-image", "--prompt-file", "-", "--timeout", "2m", "--model", "model with spaces; $(false)", "--effort", "high", "--stdout-file", path)
+		if code != 0 {
+			t.Fatalf("exit %d: %s %s", code, o, e)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(b), "--model=model with spaces; $(false) --effort=high") || !strings.Contains(string(b), "done: nothing") || !strings.Contains(string(b), "line-0\n") || !strings.Contains(string(b), "line-39\n") {
+			t.Fatalf("stdout %q: %v", b, err)
+		}
+		fi, err := os.Stat(path)
+		if err != nil || fi.Mode().Perm() != 0600 {
+			t.Fatalf("stdout permissions: %v %v", fi, err)
+		}
+		noSecret(t, o, e, string(b))
+	})
+
+	t.Run("cooperative proxy", func(t *testing.T) {
+		if _, err := exec.LookPath("python3"); err != nil {
+			t.Skip("Python 3 required")
+		}
+		proxied := t.TempDir()
+		check := `case "$HTTPS_PROXY" in http://127.0.0.1:*) ;; *) echo missing-proxy >&2; exit 90 ;; esac
+test "$HTTPS_PROXY" = "$http_proxy" || exit 91
+`
+		if err := os.WriteFile(filepath.Join(proxied, "claude"), []byte(strings.Replace(fakeClaude, "#!/bin/sh\n", "#!/bin/sh\n"+check, 1)), 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", proxied+string(os.PathListSeparator)+sysPath)
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-sekrit-123")
+		o, e, code := m.runIn(t, "nothing proxy\n", "--json", "agent-task", "--image", "ref-image", "--prompt-file", "-", "--timeout", "2m", "--cooperative-proxy", "development", "--proxy-download-mbit", "12", "--proxy-allow-host", "mirror.example.com")
+		if code != 0 {
+			t.Fatalf("exit %d: %s %s", code, o, e)
+		}
+		var result struct {
+			Proxy struct {
+				Profile      string
+				DownloadMbit int `json:"download_mbit"`
+			} `json:"cooperative_proxy"`
+		}
+		if err := json.Unmarshal([]byte(o), &result); err != nil || result.Proxy.Profile != "development" || result.Proxy.DownloadMbit != 12 {
+			t.Fatalf("proxy result: %s: %v", o, err)
+		}
+		if !strings.Contains(e, "cooperative proxy ready; clients can bypass it") {
+			t.Fatalf("missing readiness receipt: %s", e)
+		}
+		noSecret(t, o, e)
+	})
+
+	t.Run("proxy options refuse before placement", func(t *testing.T) {
+		for _, flags := range [][]string{{"--proxy-download-mbit", "12"}, {"--cooperative-proxy", "firewall"}, {"--cooperative-proxy", "development", "--proxy-allow-host", "127.0.0.1"}} {
+			_, e, code := m.runIn(t, "nothing\n", append([]string{"agent-task", "--prompt-file", "-"}, flags...)...)
+			if code == 0 || !strings.Contains(e, "proxy") {
+				t.Fatalf("accepted %v: %s", flags, e)
+			}
+		}
+	})
+
+	t.Run("proxy startup failure never starts agent", func(t *testing.T) {
+		broken := t.TempDir()
+		if err := os.WriteFile(filepath.Join(broken, "python3"), []byte("#!/bin/sh\nexit 125\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", broken+string(os.PathListSeparator)+fake+string(os.PathListSeparator)+sysPath)
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-sekrit-123")
+		o, e, code := m.runIn(t, "nothing proxy\n", "--json", "agent-task", "--image", "ref-image", "--prompt-file", "-", "--timeout", "2m", "--cooperative-proxy", "development")
+		var result agentTaskResultJSON
+		if err := json.Unmarshal([]byte(o), &result); err != nil || code != 125 || result.Exit == nil || *result.Exit != 125 || !result.Released || strings.Contains(e, "done: nothing") {
+			t.Fatalf("startup failure: code %d %s %s (%v)", code, o, e, err)
+		}
+		noSecret(t, o, e)
+	})
+
+	t.Run("deps reach acquire", func(t *testing.T) {
+		t.Setenv("PATH", fake+string(os.PathListSeparator)+sysPath)
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-sekrit-123")
+		for name, content := range map[string]string{"package.json": "{}", "package-lock.json": `{"lockfileVersion":3,"packages":{"":{}}}`} {
+			path := filepath.Join(repo, name)
+			if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(path)
+		}
+		if err := os.WriteFile(filepath.Join(fake, "npm"), []byte("#!/bin/sh\nmkdir -p node_modules\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		o, e, code := m.runIn(t, "nothing to do\n", "--json", "agent-task", "--image", "ref-image", "--prompt-file", "-", "--timeout", "2m", "--deps", "npm", "--deps-scripts", "off")
+		if code != 0 || !strings.Contains(e, "deps npm at checkout: built") {
+			t.Fatalf("deps: exit %d: %s %s", code, o, e)
+		}
+	})
+
 	t.Run("no changes", func(t *testing.T) {
 		t.Setenv("PATH", fake+string(os.PathListSeparator)+sysPath)
 		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-sekrit-123")
@@ -193,6 +332,34 @@ func TestAgentTask(t *testing.T) {
 			t.Fatalf("exit %d %+v %v\n%s", code, r, err, e)
 		}
 	})
+
+	for _, stop := range []string{"deadline", "interrupt"} {
+		t.Run("salvage on "+stop, func(t *testing.T) {
+			t.Setenv("PATH", fake+string(os.PathListSeparator)+sysPath)
+			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-sekrit-123")
+			t.Setenv(EnvHome, m.home)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var out bytes.Buffer
+			errw := &taskCancelOutput{}
+			timeout := "1s"
+			wantCode, wantState := 124, "timeout"
+			if stop == "interrupt" {
+				timeout = "2m"
+				wantCode = 130
+				wantState = "interrupted"
+				errw.cancel = cancel
+			}
+			code := Run(ctx, []string{"--json", "agent-task", "--image", "ref-image", "--prompt-file", "-", "--timeout", timeout}, strings.NewReader("wait after writing changes\n"), &out, errw)
+			var r agentTaskResultJSON
+			if err := json.Unmarshal(out.Bytes(), &r); err != nil || code != wantCode || r.State != wantState || r.Commits != 2 || !r.Released || r.Ref == "" {
+				t.Fatalf("exit %d result %+v: %v\n%s\n%s", code, r, err, out.String(), errw.String())
+			}
+			if got := gitIn("show", r.Ref+":left.txt"); got != "leftover" {
+				t.Fatalf("salvaged %q", got)
+			}
+		})
+	}
 
 	// A broken box sends back a git repository, or a file that is no
 	// bundle, where the bundle goes: refused before any fetch, no ref is
@@ -257,3 +424,64 @@ func plainPath(t *testing.T) string {
 	}
 	return strings.Join(dirs, string(os.PathListSeparator))
 }
+
+// Unsupported adapter options fail before a client or checkout is consulted.
+func TestAgentTaskUnsupportedModel(t *testing.T) {
+	a := agenttasks.Default()
+	a.ModelFlag = ""
+	r, err := agentTask(context.Background(), nil, agentTaskOptions{adapter: a, model: "chosen"})
+	if err == nil || !strings.Contains(err.Error(), "--model is not supported") || r.Handle != "" {
+		t.Fatalf("%+v: %v", r, err)
+	}
+}
+
+func TestAgentTaskOutputRefusals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stdout")
+	if err := os.WriteFile(path, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openTaskOutput(path); err == nil {
+		t.Fatal("existing output accepted")
+	}
+	b, _ := os.ReadFile(path)
+	if string(b) != "preserve" {
+		t.Fatal("existing output overwritten")
+	}
+	link := path + "-link"
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openTaskOutput(link); err == nil {
+		t.Fatal("symlink accepted")
+	}
+	w, err := openTaskOutput(path + "-new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("lost")); err != nil {
+		t.Fatal("capture stopped output following")
+	}
+	if err := w.close(); err == nil {
+		t.Fatal("write failure lost")
+	}
+}
+
+// Cancels through the public command once followed output proves the agent ran.
+type taskCancelOutput struct {
+	bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *taskCancelOutput) Write(p []byte) (int, error) {
+	n, err := w.Buffer.Write(p)
+	if w.cancel != nil && strings.Contains(w.String(), "task-ready") {
+		w.cancel()
+		w.cancel = nil
+	}
+	return n, err
+}
+
+func (w *taskCancelOutput) WriteString(s string) (int, error) { return w.Write([]byte(s)) }

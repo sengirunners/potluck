@@ -594,9 +594,9 @@ func hostAnswer(verb string, res json.RawMessage, err error) (json.RawMessage, e
 			return json.RawMessage(noHandleMark), err
 		}
 		var e *api.Error
-		if errors.As(err, &e) && e.Code == api.CodeUnavailable {
-			if bz := busyData(e.Data); bz != nil {
-				return bz, err // the authority's deps waiter reads it (relayAnswer)
+		if errors.As(err, &e) {
+			if data := volumeErrorData(verb, e.Code, e.Data); data != nil {
+				return data, err
 			}
 		}
 		return nil, err
@@ -615,6 +615,7 @@ func hostAnswer(verb string, res json.RawMessage, err error) (json.RawMessage, e
 // unavailable whose payload is a driver's "building" answer carries it as
 // its data, as a driver of this machine's would (driver.go), so an acquire
 // with deps waits for a layer the host is building instead of failing.
+// Structured missing-volume data also survives for push base acquires.
 func relayAnswer(r teamlink.OpResult) (json.RawMessage, error) {
 	err := r.Err()
 	if err == nil {
@@ -626,10 +627,10 @@ func relayAnswer(r teamlink.OpResult) (json.RawMessage, error) {
 	if e, ok := err.(*api.Error); ok && e.Code == api.CodeNotFound && json.Unmarshal(r.Raw, &mark) == nil && mark.NoHandle {
 		return nil, rt.NoHandle(e)
 	}
-	if e, ok := err.(*api.Error); ok && e.Code == api.CodeUnavailable {
-		if bz := busyData(r.Raw); bz != nil {
-			e.Data = bz
-		}
+	if e, ok := err.(*api.Error); ok {
+		// Only acquire can emit missing-volume data. Other verbs cannot
+		// turn that data into a base miss: the base reader checks its name.
+		e.Data = volumeErrorData(verbAcquire, e.Code, r.Raw)
 	}
 	return nil, err
 }

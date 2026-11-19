@@ -142,16 +142,29 @@ func (o ShareOptions) root() (on bool, from string) {
 	return o.earlier("root", "tart")
 }
 
-// earlier names the first of this machine's box bindings <prefix>-<size>
-// with config key on, on layer vm ("" any layer).
-func (o ShareOptions) earlier(key, vm string) (bool, string) {
-	ts := slices.SortedFunc(slices.Values(o.Earlier), func(a, b computeapi.RunTarget) int { return cmp.Compare(a.Name, b.Name) })
-	for _, t := range ts {
+// Lent are the box bindings an earlier share made on this machine
+// (o.Earlier named <prefix>-<size> for a known size), by name: what a
+// re-run replaces.
+func (o ShareOptions) Lent() []computeapi.RunTarget {
+	var out []computeapi.RunTarget
+	for _, t := range o.Earlier {
 		size, ok := strings.CutPrefix(t.Name, o.NamePrefix+"-")
-		if !ok || t.Kind != "box" || t.Host != "" || t.Config[key] != "on" || vm != "" && cmp.Or(t.Config["vm"], "tart") != vm {
+		if !ok || t.Kind != "box" || t.Host != "" {
 			continue
 		}
 		if _, err := SizeByName(size); err == nil {
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(a, b computeapi.RunTarget) int { return cmp.Compare(a.Name, b.Name) })
+	return out
+}
+
+// earlier names the first of this machine's box bindings <prefix>-<size>
+// with config key on, on layer vm ("" any layer).
+func (o ShareOptions) earlier(key, vm string) (bool, string) {
+	for _, t := range o.Lent() {
+		if t.Config[key] == "on" && (vm == "" || cmp.Or(t.Config["vm"], "tart") == vm) {
 			return true, t.Name
 		}
 	}

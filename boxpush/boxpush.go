@@ -116,10 +116,24 @@ func git(ctx context.Context, dir string, env []string, stdin io.Reader, args ..
 
 func line(b []byte) string { return strings.TrimSpace(string(b)) }
 
-// Make bundles Ref (and with Dirty the uncommitted changes) of the checkout
-// at Dir into a temporary file, refusing one over Max before anything is
-// sent.
-func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
+// Source is a commit of the renter's checkout, resolved (Resolve) and not
+// yet bundled: the bundle is cut (Bundle) once the box has said what it
+// holds, so a fresh box's push and a box on a base differ only in what is
+// packed.
+type Source struct {
+	Repo      string   // the checkout's top-level directory
+	Commit    string   // the commit Ref named
+	Head      string   // the commit the box checks out: Commit, or the dirty commit on top
+	Shallow   string   // the commits the box marks shallow, space-separated
+	Untracked []string // the untracked files the dirty commit carries
+	full      bool
+	max       int64
+	format    string
+}
+
+// Resolve names the commit of o (and with Dirty writes the uncommitted
+// changes as a commit on it) without bundling anything. o.Have is not read.
+func Resolve(ctx context.Context, o MakeOptions) (*Source, error) {
 	if o.Ref == "" {
 		o.Ref = "HEAD"
 	}
@@ -133,44 +147,60 @@ func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("not in a git checkout (%v): run this from your repository, or pass the ref of one", err)
 	}
-	b := &Bundle{Repo: line(top)}
-	c, err := git(ctx, b.Repo, nil, nil, "rev-parse", "--verify", "--end-of-options", o.Ref+"^{commit}")
+	s := &Source{Repo: line(top), full: o.Full, max: o.Max, format: "sha1"}
+	c, err := git(ctx, s.Repo, nil, nil, "rev-parse", "--verify", "--end-of-options", o.Ref+"^{commit}")
 	if err != nil {
 		return nil, fmt.Errorf("%q names no commit here: %v", o.Ref, err)
 	}
-	b.Commit, b.Head = line(c), line(c)
+	s.Commit, s.Head = line(c), line(c)
 	if o.Dirty {
-		if h, err := git(ctx, b.Repo, nil, nil, "rev-parse", "HEAD"); err != nil || line(h) != b.Commit {
+		if h, err := git(ctx, s.Repo, nil, nil, "rev-parse", "HEAD"); err != nil || line(h) != s.Commit {
 			return nil, fmt.Errorf("uncommitted changes sit on HEAD: --dirty needs the ref to be HEAD, not %s", o.Ref)
 		}
-		if b.Head, b.Untracked, err = dirtyCommit(ctx, b.Repo, b.Commit, o.Untracked); err != nil {
+		if s.Head, s.Untracked, err = dirtyCommit(ctx, s.Repo, s.Commit, o.Untracked); err != nil {
 			return nil, err
 		}
 	}
-	format := "sha1"
-	if f, err := git(ctx, b.Repo, nil, nil, "rev-parse", "--show-object-format"); err == nil && line(f) != "" {
-		format = line(f)
+	if f, err := git(ctx, s.Repo, nil, nil, "rev-parse", "--show-object-format"); err == nil && line(f) != "" {
+		s.format = line(f)
 	}
+	if !s.full {
+		s.Shallow = s.Commit
+	} else if p, err := git(ctx, s.Repo, nil, nil, "rev-parse", "--path-format=absolute", "--git-path", "shallow"); err == nil {
+		// A shallow checkout's history stops where its own does.
+		if sh, err := os.ReadFile(line(p)); err == nil {
+			s.Shallow = strings.Join(strings.Fields(string(sh)), " ")
+		}
+	}
+	return s, nil
+}
+
+// Make bundles Ref (and with Dirty the uncommitted changes) of the checkout
+// at Dir into a temporary file, refusing one over Max before anything is
+// sent.
+func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
+	s, err := Resolve(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+	return s.Bundle(ctx, o.Have)
+}
+
+// Bundle bundles s into a temporary file, built on the commits of have
+// (as a box answered them, Have) that are here and ancestors of s (not with
+// Full), refusing a bundle over the limit.
+func (s *Source) Bundle(ctx context.Context, have []string) (*Bundle, error) {
+	b := &Bundle{Repo: s.Repo, Commit: s.Commit, Head: s.Head, Shallow: s.Shallow, Untracked: s.Untracked}
 	// The objects: the commits and their trees only, or the whole history.
 	walk := []string{"rev-list", "--objects", "--no-walk", b.Commit}
 	if b.Head != b.Commit {
 		walk = append(walk, b.Head)
 	}
-	if o.Full {
+	var err error
+	if s.full {
 		walk = []string{"rev-list", "--objects", b.Head}
-		// A shallow checkout's history stops where its own does.
-		if p, err := git(ctx, b.Repo, nil, nil, "rev-parse", "--path-format=absolute", "--git-path", "shallow"); err == nil {
-			if sh, err := os.ReadFile(line(p)); err == nil {
-				b.Shallow = strings.Join(strings.Fields(string(sh)), " ")
-			}
-		}
-	} else {
-		b.Shallow = b.Commit
-	}
-	if !o.Full {
-		if b.Base, err = usable(ctx, b.Repo, b.Head, o.Have); err != nil {
-			return nil, err
-		}
+	} else if b.Base, err = usable(ctx, b.Repo, b.Head, have); err != nil {
+		return nil, err
 	}
 	objs, err := git(ctx, b.Repo, nil, nil, walk...)
 	if err != nil {
@@ -211,10 +241,10 @@ func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
 	}
 	defer f.Close()
 	h := sha256.New()
-	w := &limitWriter{w: io.MultiWriter(f, h), max: o.Max}
+	w := &limitWriter{w: io.MultiWriter(f, h), max: s.max}
 	head := "# v2 git bundle\n"
-	if format != "sha1" {
-		head = "# v3 git bundle\n@object-format=" + format + "\n"
+	if s.format != "sha1" {
+		head = "# v3 git bundle\n@object-format=" + s.format + "\n"
 	}
 	for _, c := range b.Base {
 		head += "-" + c + "\n"
@@ -226,7 +256,7 @@ func Make(ctx context.Context, o MakeOptions) (*Bundle, error) {
 	cmd.Stderr = &errb
 	err = cmd.Run()
 	if w.over {
-		return nil, api.Errorf(api.CodeTooLarge, "the bundle of %s is over %s (the limit): commit fewer large files, or raise the limit", short(b.Head), mib(o.Max))
+		return nil, api.Errorf(api.CodeTooLarge, "the bundle of %s is over %s (the limit): commit fewer large files, or raise the limit", short(b.Head), mib(s.max))
 	}
 	if w.err != nil { // pack-objects then dies of SIGPIPE, which says nothing
 		return nil, fmt.Errorf("writing the bundle to %s: %w", b.Path, w.err)
