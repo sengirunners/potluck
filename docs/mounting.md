@@ -27,7 +27,7 @@ type AfterLend struct {
 func Commands(h Host) []*cobra.Command
 func Report(h Host, err error) int
 func ExitCode(err error) (code int, show error, ok bool)
-var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade"}
+var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade", "uninstall"}
 ```
 
 - **Prefix** is how a person types Potluck's root in the program: `potluck` for the `potluck` program; `supper pool`
@@ -77,9 +77,9 @@ Every top-level command of `potluck` except `ProgramCommands`: `create`, `invite
 `remotes`, `doctor`, `isolation`, `host` (with `status`, `set`, `pause`, `resume`, `stop`, `shelf`), `ci`, `sandbox`, `usage`,
 `sealing`, `run`, `agent-task`, `agent-runner`, `runners`, `secrets` and `driver`.
 
-`daemon`, `status`, `upgrade` and `mcp` are not mounted: they run, report on and replace one program's daemon and
-binary, or serve that program's MCP tools, and a host has its own. A hint that names one uses the program's name
-(`supper status`).
+`daemon`, `status`, `upgrade`, `uninstall` and `mcp` are not mounted: they run, report on, replace and remove one
+program's daemon and binary, or serve that program's MCP tools, and a host has its own. A hint that names one uses
+the program's name (`supper status`).
 
 ## Kit's messages
 

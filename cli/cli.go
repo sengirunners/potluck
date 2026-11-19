@@ -128,6 +128,8 @@ type app struct {
 	homeDone bool
 	homeV    daemonHome
 	homeErr  error
+	// joinNote is the last note a waiting join printed (askForJoin).
+	joinNote string
 }
 
 // Run runs one potluck command line and returns its exit code: 0, 1 for

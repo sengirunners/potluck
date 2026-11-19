@@ -219,9 +219,19 @@ func (a *app) askForJoin(req api.JoinRequest, r api.JoinResponse) (api.JoinReque
 				_, fp, _ := strings.Cut(req.From, "#")
 				who = "home key " + fp
 			}
-			n := a.name()
-			fmt.Fprintf(a.host.Stderr, "%s: authority %s (%s) asks GitHub to admit %s.\n%s: open %s and enter %s (waiting, until %s).\n%s: enter a code only if you started this yourself.\n",
-				n, g.Authority, who, g.For, n, g.VerificationURI, g.UserCode, g.Expires.Local().Format("15:04"), n)
+			n, until := a.name(), g.Expires.Local().Format("15:04")
+			same := ""
+			if g.Resumed {
+				same = " (the same code as before)"
+			}
+			fmt.Fprintf(a.host.Stderr, "%s: authority %s (%s) asks GitHub to admit %s.\n%s: open %s and enter %s%s (waiting, until %s; if this command stops, this machine's daemon goes on with the join: run it again to see it).\n%s: enter a code only if you started this yourself.\n",
+				n, g.Authority, who, g.For, n, g.VerificationURI, g.UserCode, same, until, n)
+		}
+		if note := strings.Join(r.Notes, "; "); req.Login != "" && note != a.joinNote {
+			if note != "" { // while it waits: an authority that does not answer
+				fmt.Fprintf(a.host.Stderr, "%s: %s\n", a.name(), note)
+			}
+			a.joinNote = note
 		}
 		req.Login = g.Login
 		return req, true, nil

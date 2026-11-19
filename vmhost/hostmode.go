@@ -51,6 +51,11 @@ const (
 // (fake_test.go's TestMain); nothing else changes it.
 var hostOverridePath = defaultOverridePath()
 
+// HostOverrideFile is where the host override file is (or would be): the
+// one file `potluck host set` and `potluck host pause` write, outside any
+// home. `potluck uninstall` removes it.
+func HostOverrideFile() string { return hostOverridePath }
+
 func defaultOverridePath() string {
 	if runtime.GOOS == "darwin" {
 		return "/Users/Shared/Potluck/host-override.json"

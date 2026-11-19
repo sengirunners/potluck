@@ -167,7 +167,8 @@ type Service struct {
 	limMu sync.Mutex
 	lims  map[string]*limiter // redemption limits, per transport
 
-	ghJoins sync.Map // GitHub joins this daemon started, by handle (join_github.go)
+	ghJoins sync.Map  // GitHub joins this daemon started, by handle (join_github.go)
+	gh      ghJoinReg // their watches
 
 	ops     opReg        // machine op kinds, the ops poll and the ops running here (ops.go)
 	beat    beatReg      // heartbeat parts and loops (beat.go)

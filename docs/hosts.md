@@ -4,6 +4,9 @@ How a machine's owner lends it as box targets, and how the VM driver, `potluck-d
 boxes. None of this is part of the driver protocol (`docs/protocol.md`): another driver may do all of it
 differently. Box networking and its filter are in `docs/network.md`.
 
+A page for someone who lends a Mac and does not code, covering what setup installs, who can do what, and how to
+pause, leave and remove everything: [lending.md](lending.md).
+
 ## Two commands: doctor and host
 
 Any machine's owner lends it as box targets in two commands, with nothing host-specific built in: facts are

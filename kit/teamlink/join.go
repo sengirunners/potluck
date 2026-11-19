@@ -210,7 +210,9 @@ func (s *Service) finishJoin(ctx context.Context, req api.JoinRequest, red api.R
 			return
 		}
 		if used || viaGitHub {
-			_ = s.call(context.WithoutCancel(ctx), via, hc, http.MethodPost, base+"/v0/team/leave", red.Token, struct{}{}, nil)
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			defer cancel()
+			_ = s.call(cctx, via, hc, http.MethodPost, base+"/v0/team/leave", red.Token, struct{}{}, nil)
 		}
 		_ = removeFile(tokenFile)
 		_ = removeFile(headersFile)
@@ -319,13 +321,20 @@ func (s *Service) CallRemote(ctx context.Context, x *Remote, method, path string
 
 // call is one plain JSON call over transport via (no token: redemption).
 func (s *Service) call(ctx context.Context, via string, hc *http.Client, method, url, token string, in, out any) error {
+	_, err := s.callAt(ctx, via, hc, method, url, token, in, out)
+	return err
+}
+
+// callAt is call, also saying whether the home answered in its own words
+// (decode), not a proxy's status or no answer at all.
+func (s *Service) callAt(ctx context.Context, via string, hc *http.Client, method, url, token string, in, out any) (own bool, err error) {
 	var body []byte
 	if in != nil {
 		body, _ = json.Marshal(in)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return false, err
 	}
 	api.SetHeader(req.Header, api.HeaderProtocol, api.WireProtocol)
 	req.Header.Set("Content-Type", "application/json")
@@ -334,25 +343,32 @@ func (s *Service) call(ctx context.Context, via string, hc *http.Client, method,
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return s.Unreachable(via, url, err)
+		return false, s.Unreachable(via, url, err)
 	}
 	defer resp.Body.Close()
-	return Decode(resp, out)
+	return decode(resp, out)
 }
 
 func Decode(resp *http.Response, out any) error {
+	_, err := decode(resp, out)
+	return err
+}
+
+// decode is Decode, also saying whether the answer is the home's own (a
+// success, or an error in its words), not a status from something between.
+func decode(resp *http.Response, out any) (own bool, err error) {
 	if resp.StatusCode/100 != 2 {
 		var er api.ErrorResponse
 		if json.NewDecoder(resp.Body).Decode(&er) == nil && er.Error != nil {
 			er.Error.HTTPStatus = resp.StatusCode
-			return er.Error
+			return true, er.Error
 		}
-		return api.Errorf(api.CodeUnavailable, "authority answered %s", resp.Status)
+		return false, api.Errorf(api.CodeUnavailable, "authority answered %s", resp.Status)
 	}
 	if out == nil {
-		return nil
+		return true, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return true, json.NewDecoder(resp.Body).Decode(out)
 }
 
 // unreachable is what a caller sees when the home could not be reached

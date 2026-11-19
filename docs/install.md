@@ -95,6 +95,12 @@ token while the repository is public.
 If another unit or agent on the machine already runs `potluck upgrade`, `enable` says so and changes nothing;
 `disable` removes only the job `enable` wrote.
 
+## Removing it
+
+`potluck uninstall` takes off what the script and the first commands put on the machine: the programs and their
+`.prev` copies, the PATH line in your shell's startup file, the daily update job, the host override file, the home (`~/.potluck`) and, on a Mac, the managed Softnet. It prints its plan first and asks; `--dry-run` only prints. What it does, in order, and what
+it leaves for you to remove (Tart's images, Tailscale, the menu bar app) is in [lending.md](lending.md#pause-leave-and-remove-everything).
+
 ## From source
 
 ```sh

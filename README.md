@@ -211,9 +211,31 @@ and asks for `--yes`.
 `--detach` does the checks and the admin step, then goes on in the background (`potluck host status` says how it
 goes). `potluck host --help` lists the rest.
 
+### Lending a Mac, and taking Potluck off it
+
+[docs/lending.md](docs/lending.md) is the page for someone who lends a Mac and does not code: what setup puts on the
+Mac and why, what the pool's members and its owner can and cannot do, what is not yet proven, and how to pause,
+leave and remove everything.
+
+To remove Potluck from a machine:
+
+```sh
+potluck host stop             # stop lending
+potluck host images --remove  # on a Mac: delete old images Potluck pulled and no longer lends; yours are kept
+potluck uninstall --dry-run   # what it would do, in order; changes nothing
+potluck uninstall             # does it, after you type yes
+```
+
+`potluck uninstall` stops sharing, leaves the pools this machine joined, removes the managed Softnet (the one step that
+asks for your password), stops the daemon, and removes the daily update job, the host override file, the line
+`install.sh` added to your shell's startup file, the home (`~/.potluck`, unless `--keep-home`) and the programs. It
+names what it leaves for you: Tart and its images (the current macOS image stays until you run `tart delete` on it), a
+Softnet you installed yourself, the Tailscale node and the menu bar app. `potluck leave <pool>` leaves one pool you joined. No command yet removes a pool you created while keeping
+the rest of Potluck.
+
 ### More
 
-`potluck --help` lists the rest: `leave`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal|stop|start`
+`potluck --help` lists the rest: `leave`, `uninstall`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal|stop|start`
 (`sandbox create --persist` keeps a sandbox's disk while it is stopped), `usage`,
 `run`, `agent-task` (a coding agent run once in a fresh sandbox, its commits back as a local ref:
 [docs/agent-tasks.md](docs/agent-tasks.md)), `agent-runner` (a coding agent vendor's self-hosted runners in fresh sandboxes:

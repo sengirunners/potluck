@@ -186,18 +186,9 @@ func (a *app) softnetUninstall(ctx context.Context, adminStep bool) error {
 		fmt.Fprintf(a.host.Stdout, "removed the managed Softnet in %s\n", store.Dir)
 		return nil
 	}
-	if _, err := os.Lstat(store.Dir); errors.Is(err, os.ErrNotExist) {
-		fmt.Fprintf(a.host.Stdout, "no managed Softnet is installed in %s; nothing to do\n", store.Dir)
-		return nil
-	}
-	if softnetEUID() == 0 {
-		return errors.New("run " + a.cmd("softnet uninstall") + " as yourself, not as root: it asks for the admin password itself")
-	}
-	if err := a.softnetAdmin(ctx, []string{"uninstall", "--admin-step"}, "disarms and removes every managed Softnet build in "+store.Dir); err != nil {
+	removed, err := a.removeManagedSoftnet(ctx, store)
+	if err != nil || !removed {
 		return err
-	}
-	if _, err := os.Lstat(store.Dir); !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("the admin step ended, but %s is still there", store.Dir)
 	}
 	r, _ := hostprobe.CheckMac(ctx, softnetRunner, softnetFacts)
 	used := hostprobe.CheckSoftnet(ctx, softnetRunner, softnetFacts, r)
@@ -209,6 +200,26 @@ func (a *app) softnetUninstall(ctx context.Context, adminStep bool) error {
 		fmt.Fprintf(a.host.Stdout, "this Mac has no Softnet for isolated boxes now: %s\n", a.softnetAdvice(r))
 	}
 	return nil
+}
+
+// removeManagedSoftnet runs the admin step that removes every managed build
+// in store (it asks for the admin password) and checks the directory is gone.
+// removed is false when there was none to remove.
+func (a *app) removeManagedSoftnet(ctx context.Context, store softnet.Store) (removed bool, err error) {
+	if _, err := os.Lstat(store.Dir); errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(a.host.Stdout, "no managed Softnet is installed in %s; nothing to do\n", store.Dir)
+		return false, nil
+	}
+	if softnetEUID() == 0 {
+		return false, errors.New("run " + a.cmd("softnet uninstall") + " as yourself, not as root: it asks for the admin password itself")
+	}
+	if err := a.softnetAdmin(ctx, []string{"uninstall", "--admin-step"}, "disarms and removes every managed Softnet build in "+store.Dir); err != nil {
+		return false, err
+	}
+	if _, err := os.Lstat(store.Dir); !errors.Is(err, os.ErrNotExist) {
+		return false, fmt.Errorf("the admin step ended, but %s is still there", store.Dir)
+	}
+	return true, nil
 }
 
 // softnetBuild is the managed build for this Mac, after the checks every

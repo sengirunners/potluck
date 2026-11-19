@@ -84,11 +84,11 @@ type AfterLend struct {
 }
 
 // ProgramCommands are the potluck program's own commands, never mounted:
-// they run, report on and replace the program's daemon and binary (daemon,
-// status, upgrade) or serve its MCP tools (mcp, whose tools are the
+// they run, report on and replace or remove the program's daemon and binary
+// (daemon, status, upgrade, uninstall) or serve its MCP tools (mcp, whose tools are the
 // program's). A host has its own; hints name them with the program's name
 // (Host.Prefix's first word).
-var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade"}
+var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade", "uninstall"}
 
 // Commands builds Potluck's commands for h: every top-level command but
 // ProgramCommands, each usable under any parent. They read --json and the
@@ -137,7 +137,7 @@ func (a *app) mountable() []*cobra.Command {
 
 // programCommands are ProgramCommands, built.
 func (a *app) programCommands() []*cobra.Command {
-	return []*cobra.Command{a.daemonCmd(), a.mcpCmd(), a.statusCmd(), a.upgradeCmd()}
+	return []*cobra.Command{a.daemonCmd(), a.mcpCmd(), a.statusCmd(), a.upgradeCmd(), a.uninstallCmd()}
 }
 
 // prefix is Host.Prefix: how a person types Potluck's root in a program.

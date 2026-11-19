@@ -159,6 +159,10 @@ func stopAndWait(ctx context.Context, c *client.Client, pid int, req api.DaemonS
 	return true, nil
 }
 
+// processGone reports that process pid has exited (tests replace it: a daemon
+// they run in-process shares their pid).
+var processGone = func(pid int) bool { return syscall.Kill(pid, 0) != nil }
+
 // waitGone waits until the daemon on c stops answering and its process pid
 // has exited (as zm's updater waits, cmd/zm daemon_swap.go); false when it
 // has not within max, or ctx ended.
@@ -168,7 +172,7 @@ func waitGone(ctx context.Context, c *client.Client, pid int, max time.Duration)
 		hctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		_, herr := c.Health(hctx)
 		cancel()
-		if herr != nil && ctx.Err() == nil && (pid <= 0 || syscall.Kill(pid, 0) != nil) {
+		if herr != nil && ctx.Err() == nil && (pid <= 0 || processGone(pid)) {
 			return true
 		}
 		if !time.Now().Before(deadline) {
@@ -289,6 +293,7 @@ var noAutostart = map[string]bool{
 	"status":      true,
 	"daemon":      true,
 	"upgrade":     true,
+	"uninstall":   true, // it never starts a daemon to remove one's files
 	"mcp":         true,
 	"host status": true, // the menu bar item asks every few seconds
 	"host set":    true,

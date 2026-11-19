@@ -187,8 +187,10 @@ func (s *Service) startLoops(ctx context.Context) {
 	}
 }
 
-// StopLoops stops the heartbeat and the ops polls and waits for them.
+// StopLoops stops the heartbeat, the ops polls and the GitHub joins'
+// watches (join_github.go) and waits for them.
 func (s *Service) StopLoops() {
+	defer s.stopGitHubJoins()
 	s.beat.mu.Lock()
 	stop := s.beat.stop
 	s.beat.lctx, s.beat.stop, s.beat.loops = nil, nil, nil

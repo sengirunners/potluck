@@ -21,6 +21,12 @@ import (
 // mail or sessions) in a temp home, its node on tn as id and up.
 func kitDaemon(t *testing.T, tn *tailnettest.Net, machine string, id tailnettest.Identity) *client.Client {
 	t.Helper()
+	return kitDaemonWith(t, tn, machine, id, nil)
+}
+
+// kitDaemonWith is kitDaemon with mut applied to its config first.
+func kitDaemonWith(t *testing.T, tn *tailnettest.Net, machine string, id tailnettest.Identity, mut func(*config.Config)) *client.Client {
+	t.Helper()
 	home, err := os.MkdirTemp("", "zm")
 	if err != nil {
 		t.Fatal(err)
@@ -30,6 +36,9 @@ func kitDaemon(t *testing.T, tn *tailnettest.Net, machine string, id tailnettest
 		t.Fatal(err)
 	}
 	cfg.Human, cfg.Machine = machine+"-human", machine
+	if mut != nil {
+		mut(cfg)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	dm, err := server.New(ctx, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), wiring.Kit)
 	if err != nil {

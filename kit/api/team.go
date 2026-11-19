@@ -265,6 +265,9 @@ type JoinGitHub struct {
 	Authority       string    `json:"authority"` // the machine running the login
 	Owner           string    `json:"owner"`     // its node's tailnet owner (WhoIs login)
 	For             string    `json:"for"`       // who it admits: this node, as machine ...
+	// Resumed: the same code an earlier run started, still waiting (a
+	// client killed or timed out does not end a join; asking again resumes).
+	Resumed bool `json:"resumed,omitempty"`
 }
 
 // RemoteList is GET /v0/team/remotes.
