@@ -25,7 +25,7 @@ func DefaultPins() []DefaultPin { return append([]DefaultPin(nil), defaultPins..
 // DefaultPin is one line of images.pin. Image is "" while zm's own image for
 // the layer is not published yet. MinCPU and MinMemoryMB are the image's own
 // floor (Tart's cpuCountMin and memorySizeMin: tart set refuses less), 0 when
-// it has none. RunnerDir is where the image keeps GitHub's runner (a box's
+// it has none; a published macOS Tart pin always has both (ParsePins). RunnerDir is where the image keeps GitHub's runner (a box's
 // runner_dir: relative to the guest user's home unless absolute), "" when it
 // has none. Template names a template image (template=NAME; zm-eakh.12.5.20:
 // "agent", zm's coding-agent image), "" for the layer's plain default; a
@@ -143,6 +143,9 @@ func ParsePins(s string) ([]DefaultPin, error) {
 		}
 		if p.Name != "" && p.Template != "" {
 			return nil, fmt.Errorf("images.pin line %d: name and template cannot be combined", n+1)
+		}
+		if p.Image != "" && p.Layer == "tart" && p.OS == "darwin" && (p.MinCPU == 0 || p.MinMemoryMB == 0) {
+			return nil, fmt.Errorf("images.pin line %d: a macOS Tart image needs min_cpu and min_memory_mb (tart set refuses a macOS guest under its own floor, and a line without one would lend sizes that never boot)", n+1)
 		}
 		if p.HostDefault && (p.Layer != "tart" || p.Name == "" || p.MinHostMacOS == 0 || p.Arch == "") {
 			return nil, fmt.Errorf("images.pin line %d: host_default needs a named Tart image with arch and min_host_macos", n+1)

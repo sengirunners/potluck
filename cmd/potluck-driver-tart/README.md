@@ -19,7 +19,8 @@ from `acquire`.
 ## Setup (once, by the owner)
 
 ```sh
-# Tart from its release (Homebrew's cirruslabs tap is stale); Softnet must be setuid root:
+# Tart from its release (Homebrew's cirruslabs tap is stale); Softnet must be setuid root
+# (macOS 26+: upstream's latest release; macOS 15: `potluck softnet install`, docs/softnet.md):
 sudo install -o root -g wheel -m 4755 softnet /usr/local/bin/softnet
 tart clone ghcr.io/cirruslabs/ubuntu:latest potluck-base-ubuntu     # Linux: ~5 GB, uncapped
 tart clone ghcr.io/cirruslabs/macos-tahoe-base:latest potluck-base-macos  # macOS: at most 2 running per Mac
@@ -335,12 +336,12 @@ read. It only reports: every acquire still asks the controller.
 
 `potluck host` binds these keys on every size: `--admission-url URL`, `--admission-token-file PATH`
 (a 0600 file, bound as an absolute path) and `--admission-ttl-s N` (120..3600, outlasting `boot_timeout_s` by 30 s),
-checked as above before anything runs. Conformance runs with them too: its boxes are real VMs on the same room, so
-they take leases like a renter's, and a controller with no room fails the run (nothing binds; try again later). A
+checked as above before anything runs. Conformance runs without them: the check boxes share runs before it binds
+take no lease (the owner is running them, and joining comes first), while every box lent takes one. A
 re-run without `--admission-url` keeps the keys an earlier share bound on `<prefix>-<size>` (each flag given replaces
 its own key); `--admission-url URL` takes the flags alone; `--admission-url none` removes them. Every run reads the
 bindings it replaces, in the scope it binds in; when they cannot be read (the daemon, the list, or a view without their
-config), share refuses unless `--admission-url none`, rather than drop the keys or leave a keyless one live. A run with no room says so (`the admission controller had no room now; try again later`).
+config), share refuses unless `--admission-url none`, rather than drop the keys or leave a keyless one live.
 When a run that adds the keys (the first switch-on too) leaves a size unbound, share unbinds that size's earlier
 binding in the same scope when it lacks them, whose boxes the controller would not count (or says it is still live WITHOUT admission when it cannot). `potluck doctor`
 prints one `admission:` line per controller, naming the bindings that ask it.

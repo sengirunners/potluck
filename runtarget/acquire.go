@@ -41,6 +41,9 @@ func (s *Service) acquire(r *http.Request) (any, error) {
 	if err := api.DecodeJSONWithin(r, &req, depsBodyMax); err != nil { // deps.go: a layer's files ride in the body
 		return nil, err
 	}
+	if err := checkDatabaseRequest(b, req); err != nil {
+		return nil, err
+	}
 	if builderRequest(req.RequestID) {
 		return nil, api.Errorf(api.CodeBadRequest, "request_id %s...: that prefix is the daemon's, for dependency layer builders", depsBuildPrefix)
 	}
@@ -65,22 +68,23 @@ type daemonVols struct {
 	// digest is the image the box must boot (the one its layers are keyed
 	// by); a box of another is released, as one off its binding's pin is.
 	digest string
+	image  string // daemon-selected builder image; never caller-controlled
 	base   *baseMount
 }
 
 // acquireBoxWithVolumes is one acquire after daemon-owned volumes are prepared.
 func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b computeapi.RunTarget, db *sql.DB, req computeapi.AcquireRunTargetRequest, x daemonVols) (any, error) {
+	if err := checkDatabaseRequest(b, req); err != nil {
+		return nil, err
+	}
 	sub := core.SubjectOf(ctx)
 	local := owner(ctx)
 	if err := requestIDOK(req.RequestID); err != nil { // acquires.go
 		return nil, err
 	}
-	actor := sub.Address
-	if req.Actor != "" && req.Actor != actor {
-		if !local {
-			return nil, api.Errorf(api.CodeForbidden, "actor must be the caller")
-		}
-		actor = req.Actor
+	actor, err := actingFor(ctx, req.Actor)
+	if err != nil {
+		return nil, err
 	}
 	if req.TTLS < 0 {
 		return nil, api.Errorf(api.CodeBadRequest, "ttl_s must not be negative")
@@ -149,7 +153,6 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		}
 	}
 	var jitDec *grants.Decision
-	var err error
 	if req.JITConfig != "" {
 		// A runner config registers a runner for the project's repo: only on
 		// a trusted host, and only under a grant (grants.go).
@@ -192,9 +195,7 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 	}
 	// hidden: a row of another actor's, or in an area the caller may not
 	// operate in, answers as a missing one would.
-	hidden := func(o row) bool {
-		return !local && (o.Actor != sub.Address || !sub.Can(authz.Operate, authz.Object{Project: t.Project.ID, Area: o.Area}))
-	}
+	hidden := func(o row) bool { return rowHidden(ctx, t.Project.ID, o) }
 	if seen && hidden(prev) {
 		// Another actor's key answers like a free one would not: hidden, as missing.
 		return nil, api.NotFound("handle", req.RequestID)
@@ -203,7 +204,26 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		x.replayBase(prev.request)
 	}
 
+	dbRecipe, err := s.databaseFor(ctx, t.Project.ID, req, prev.request, seen)
+	if err != nil {
+		return nil, err
+	}
+	if x.image != "" {
+		pin, tmplImage = x.image, ""
+	}
+	if dbRecipe != nil {
+		if err := s.hostTrusted(ctx, b, "database snapshot"); err != nil {
+			return nil, err
+		}
+		pin, tmplImage = dbRecipe.Image, ""
+		if x.digest != "" && x.digest != pinDigest(pin) {
+			return nil, api.Errorf(api.CodeConflict, "database image differs from dependency layer image")
+		}
+	}
 	reqJSON, _ := json.Marshal(struct {
+		Database                                string             `json:",omitempty"`
+		BuilderImage                            string             `json:",omitempty"`
+		DatabaseRecipe                          *protocol.Database `json:",omitempty"`
 		Actor, Ref, Commit, Script, Name, Image string
 		Args                                    []string
 		TTLS                                    int
@@ -216,7 +236,7 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		Deps                                    string                 `json:",omitempty"`
 		SelfRenew                               bool                   `json:",omitempty"`
 		Base                                    *baseMount             `json:",omitempty"`
-	}{actor, req.Ref, req.Commit, req.Script, req.Name, req.Image, req.Args, req.TTLS, jitSum, req.JITGuard, req.Template, netKey(req.Net), req.Persist, req.Volumes, x.sum, req.SelfRenew, x.base})
+	}{req.Database, x.image, dbRecipe, actor, req.Ref, req.Commit, req.Script, req.Name, req.Image, req.Args, req.TTLS, jitSum, req.JITGuard, req.Template, netKey(req.Net), req.Persist, req.Volumes, x.sum, req.SelfRenew, x.base})
 	if seen && prev.request != string(reqJSON) {
 		return nil, api.Errorf(api.CodeConflict, "request_id %s was used for a different acquire", req.RequestID)
 	}
@@ -228,6 +248,9 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 
 	d, err := s.describeOf(ctx, b)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkDatabaseDriver(dbRecipe, d.Capabilities); err != nil {
 		return nil, err
 	}
 	if req.JITConfig != "" && !slices.Contains(d.Capabilities, protocol.CapGitHubJIT) {
@@ -307,6 +330,9 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		}
 	}
 	args := map[string]any{"request_id": req.RequestID, "actor": actor}
+	if dbRecipe != nil {
+		args["database"] = dbRecipe
+	}
 	if req.TTLS > 0 {
 		args["ttl_s"] = req.TTLS
 	}
@@ -400,7 +426,7 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 		if err := setBox(actx, db, b.Name, req.RequestID, size, ans.ImageDigest, req.Persist); err != nil {
 			return nil, err
 		}
-		why := ""
+		why := databaseAnswer(dbRecipe, ans.Database)
 		if want := cmp.Or(pinDigest(pin), x.digest); want != "" && ans.ImageDigest != want {
 			why = fmt.Sprintf("booted image %s, not the pinned %s", ans.ImageDigest, want) // something other than the owner's pin
 		} else if net == computeapi.NetOff && ans.Net != computeapi.NetOff {

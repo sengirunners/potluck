@@ -38,6 +38,48 @@ func executableVersion(ctx context.Context, run Runner, path, label string, l *L
 	return firstVersion(version)
 }
 
+// detectTartCLI finds Tart on PATH and checks it runs and has the run
+// options Potluck boots a box with.
+func detectTartCLI(ctx context.Context, run Runner, f Facts, l *Layer) {
+	path, ok := f.LookPath("tart")
+	if !ok {
+		l.Problems = append(l.Problems, "tart is not installed: download tart.tar.gz from https://github.com/openai/tart/releases/latest, unpack it and link tart.app/Contents/MacOS/tart onto your PATH (no root needed; guide: https://tart.run/quick-start/)")
+		return
+	}
+	path = absoluteExecutable(path, l)
+	l.CLI = path
+	if path != "" {
+		l.Version = executableVersion(ctx, run, path, "Tart", l)
+	}
+	if l.Version != "" {
+		detectTartArguments(ctx, run, path, l)
+	}
+}
+
+// CheckMac is the Mac preflight's host part alone: this Mac's hardware
+// architecture and macOS version (in a Report), with Tart's path and
+// version and what stops Tart here (no Apple silicon, too old a macOS, no
+// Tart or one without Potluck's run options).
+func CheckMac(ctx context.Context, run Runner, f Facts) (Report, Layer) {
+	r := Report{OS: "darwin"}
+	l := Layer{Name: "tart", Isolation: "vm"}
+	detectMacOS(ctx, run, &r, &l)
+	detectTartCLI(ctx, run, f, &l)
+	return r, l
+}
+
+// MacRelease is this Mac's hardware architecture and macOS version alone
+// (sysctl and sw_vers at their system paths; nothing on PATH runs).
+func MacRelease(ctx context.Context, run Runner) Report {
+	r := Report{OS: "darwin"}
+	detectMacOS(ctx, run, &r, &Layer{})
+	return r
+}
+
+// MacOSMajor is a macOS product version's major number, 0 when it is not
+// one.
+func MacOSMajor(version string) int { return macOSMajor(version) }
+
 func detectTartArguments(ctx context.Context, run Runner, path string, l *Layer) {
 	res, err := runBounded(ctx, run, path, "run", "--help")
 	if err != nil || res.Exit != 0 {

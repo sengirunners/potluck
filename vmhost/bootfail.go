@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/sengirunners/potluck/softnet"
 )
 
 // errBootExited is a VM's process exiting before its guest answered
@@ -26,9 +28,8 @@ type bootCause struct {
 var bootCauses = []bootCause{{
 	what: "Softnet refused a network rule",
 	hint: "this Softnet does not accept the protocol and port rules Potluck isolates a box with (such as \"out proto tcp port 25\"), " +
-		"so every boot here fails the same way until Softnet changes. If it is older than the latest release " +
-		"(https://github.com/openai/softnet/releases/latest), install that and check this machine again; if the latest " +
-		"refuses them too on this macOS, this Mac cannot lend isolated boxes yet: send the report to whoever invited you",
+		"so every boot here fails the same way until Softnet changes: " + softnet.BootHint(softnet.Command) +
+		"; then check this machine again. If none covers this macOS, this Mac cannot lend isolated boxes yet: send the report to whoever invited you",
 	match: softnetRefused,
 	line:  softnetLine,
 }}

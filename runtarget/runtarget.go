@@ -160,6 +160,27 @@ func owner(ctx context.Context) bool {
 	return core.IsLocal(ctx) && sub != nil && !sub.Remote && sub.Via == authz.ViaLocal
 }
 
+// actingFor is whom an acquire acts for: the caller, or the actor it names
+// when the caller is the machine's owner (who alone acts for another).
+func actingFor(ctx context.Context, named string) (string, error) {
+	actor := core.SubjectOf(ctx).Address
+	if named != "" && named != actor {
+		if !owner(ctx) {
+			return "", api.Errorf(api.CodeForbidden, "actor must be the caller")
+		}
+		actor = named
+	}
+	return actor, nil
+}
+
+// rowHidden says whether the caller sees row o as missing: another actor's
+// row, or one in an area of project the caller may not operate in. The
+// machine's owner sees every row.
+func rowHidden(ctx context.Context, project string, o row) bool {
+	sub := core.SubjectOf(ctx)
+	return !owner(ctx) && (o.Actor != sub.Address || !sub.Can(authz.Operate, authz.Object{Project: project, Area: o.Area}))
+}
+
 // target resolves the project with action a and the binding named in the
 // path. A binding the caller may not see answers like a missing one.
 func (s *Service) target(r *http.Request, a authz.Action) (core.Target, computeapi.RunTarget, *sql.DB, error) {
@@ -601,6 +622,7 @@ func boxPin(b computeapi.RunTarget, req computeapi.AcquireRunTargetRequest) (pin
 }
 
 type acquireAnswer struct {
+	Database    *protocol.Database         `json:"database,omitempty"`
 	Size        json.RawMessage            `json:"size"`
 	ImageDigest string                     `json:"image_digest"`
 	Handle      string                     `json:"handle"`

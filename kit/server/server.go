@@ -27,6 +27,7 @@ import (
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/events"
+	"github.com/sengirunners/potluck/kit/hometerm"
 	"github.com/sengirunners/potluck/kit/project"
 	"github.com/sengirunners/potluck/kit/store"
 )
@@ -112,6 +113,11 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring) (*
 		return nil, err
 	}
 	if err := config.CheckNotRestoring(cfg.Home); err != nil {
+		return nil, err
+	}
+	// One authority per team project: a home that moved away, is frozen for
+	// a move, or is a standby is not served (kit/hometerm).
+	if err := hometerm.CheckServes(cfg.Home); err != nil {
 		return nil, err
 	}
 	program := config.Program

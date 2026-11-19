@@ -50,6 +50,11 @@ const envHostLockFD = "POTLUCK_HOST_LOCK_FD"
 func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string, askFirst bool) error {
 	ctx := cmd.Context()
 	handed := handedLock() // before this run starts any process
+	// An invite cut short or damaged is refused before the daemon, the lock
+	// or a pull.
+	if err := a.checkInvite(arg, "invite <you> --host"); err != nil {
+		return err
+	}
 	o, err := a.shareOptions(cmd, s)
 	if err != nil {
 		return err

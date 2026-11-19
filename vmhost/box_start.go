@@ -11,6 +11,8 @@ import (
 	"github.com/sengirunners/potluck/protocol"
 )
 
+// startsRunner says whether this run starts a GitHub runner in its guest, so
+// its runner may need the refresh (runner_refresh.go).
 func (s *sup) startsRunner(r record) bool {
 	if skipRunnerRefresh(s.cfg) {
 		return false
@@ -29,6 +31,10 @@ func (s *sup) refreshBy(r record) time.Time {
 // for, then ready until its lease ends. Nothing runs in it but what exec
 // sends (from the driver, not this process).
 func (s *sup) box(r record, bootBy time.Time, exited <-chan struct{}) int {
+	if err := s.startDatabase(r, bootBy); err != nil {
+		fail(s.st, r, err)
+		return 1
+	}
 	if r.Commit != "" && r.Starts == 0 { // a start finds its checkout on the kept disk
 		ctx, cancel := context.WithDeadline(context.Background(), bootBy.Add(10*time.Second))
 		err := s.checkout(ctx, r)

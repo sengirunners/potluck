@@ -428,6 +428,9 @@ func depsLayers(req computeapi.AcquireRunTargetRequest, digest string) ([]depsLa
 // builder must boot exactly that image (daemonVols.digest), so an advert
 // gone stale never keys a layer with an image it was not built on.
 func (s *Service) depsDigest(ctx context.Context, b computeapi.RunTarget, req computeapi.AcquireRunTargetRequest) (string, error) {
+	if image := databaseLayerImage(ctx, req); image != "" {
+		return pinDigest(image), nil
+	}
 	if b.Host != "" {
 		ra, ok := s.advertOf(ctx, b)
 		if !ok {
@@ -463,6 +466,10 @@ func (s *Service) acquireDeps(ctx context.Context, t core.Target, b computeapi.R
 		return nil, api.Errorf(api.CodeBadRequest, "a box with deps is neither persistent nor a GitHub runner's")
 	}
 	if err := s.hostTrusted(ctx, b, "dependency layer"); err != nil {
+		return nil, err
+	}
+	ctx, err := s.prepareDatabaseLayers(ctx, t, b, db, req)
+	if err != nil {
 		return nil, err
 	}
 	digest, err := s.depsDigest(ctx, b, req)
@@ -618,7 +625,7 @@ func (s *Service) buildLayer(ctx context.Context, t core.Target, b computeapi.Ru
 		}
 	}
 	vol := computeapi.BoxVolume{Name: l.name(), Path: l.path, Mode: protocol.VolumeBuild}
-	res, err := s.acquireBox(ctx, t, b, db, breq, daemonVols{vols: []computeapi.BoxVolume{vol}, sum: "build:" + l.key, digest: digest})
+	res, err := s.acquireBox(ctx, t, b, db, breq, daemonVols{vols: []computeapi.BoxVolume{vol}, sum: "build:" + l.key, digest: digest, image: databaseLayerImage(ctx, req)})
 	var e *api.Error
 	switch {
 	case err == nil:

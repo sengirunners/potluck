@@ -142,6 +142,7 @@ func TestGoodDrivers(t *testing.T) {
 		{name: "run without --repo", kind: "run", edit: func(o *Options) { o.Repo = "" }, wantSkip: "a run's HEAD is the commit sent"},
 		{name: "run without reclaim config", kind: "run", edit: func(o *Options) { o.ReclaimConfig = nil }, wantSkip: "a reclaim ends the resource"},
 		{name: "box", kind: "box"},
+		{name: "box database boundary", kind: "box", edit: func(o *Options) { o.Config["database"] = "1"; o.Only = []string{"database"} }, wantRan: []string{databaseRefusal}},
 		{name: "box boot", kind: "box", edit: func(o *Options) { o.Only = []string{"boot"} }},
 		{name: "run boot", kind: "run", edit: func(o *Options) { o.Only = []string{"boot"} }, wantSkip: "boot: box targets only"},
 		{name: "box without a ref", kind: "box", edit: func(o *Options) { o.Ref, o.Commit = "", "" }, wantSkip: "a box's checkout is the commit sent, clean"},
@@ -340,6 +341,7 @@ var brokenDrivers = []struct {
 	kind, bug, group, want string
 	edit                   func(*Options)
 }{
+	{"box", "database-ignored", "database", "FAIL  " + databaseRefusal, nil},
 	// describe and the envelope
 	{"run", "describe-no-class", "handles", "FAIL  describe", nil},
 	{"run", "describe-no-credentials", "handles", "FAIL  describe", nil},

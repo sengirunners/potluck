@@ -3,6 +3,7 @@ package vmhost
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/sengirunners/potluck/softnet"
 	"io"
 	"os"
 	"os/exec"
@@ -123,6 +124,10 @@ var softnetMailBlock = func() string {
 // layer blocks them for an isolated VM.
 var mailPorts = []int{25, 465, 587}
 
+// managedSoftnet is the Mac's managed Softnet store (a test replaces it):
+// a boot that pins its build checks the build again first.
+var managedSoftnet = softnet.System
+
 // Boot runs tart run with no window, audio, clipboard or --dir, under the
 // deadman guard; isolated is Softnet.
 func (t tartCLI) Boot(vm string, isolated bool, log io.Writer) (*exec.Cmd, io.WriteCloser, error) {
@@ -130,13 +135,26 @@ func (t tartCLI) Boot(vm string, isolated bool, log io.Writer) (*exec.Cmd, io.Wr
 }
 
 func (t tartCLI) boot(vm string, isolated bool, log io.Writer, guard string) (*exec.Cmd, io.WriteCloser, error) {
-	if isolated && t.softnetPath != "" {
-		info, err := os.Stat(t.softnetPath)
+	helper := t.softnetPath
+	if isolated && helper != "" {
+		if s := managedSoftnet(); helper == s.Current() {
+			id, err := s.CheckCurrent()
+			switch {
+			case id == "":
+				return nil, nil, fmt.Errorf("the managed Softnet Potluck checked is gone (%v): run `potluck host` again so it checks the Softnet this Mac has now", err)
+			case err != nil:
+				return nil, nil, fmt.Errorf("the managed Softnet %s cannot be used: %v. If `%s status` says it is sound, this daemon's potluck is older than the one that installed it: upgrade or restart the daemon", id, err, softnet.Command)
+			}
+			// Tart runs exactly the build just checked, even if current
+			// moves before it starts.
+			helper = s.Build(id)
+		}
+		info, err := os.Stat(helper)
 		if err != nil {
-			return nil, nil, fmt.Errorf("checked Softnet at %s is unavailable: %w", t.softnetPath, err)
+			return nil, nil, fmt.Errorf("checked Softnet at %s is unavailable: %w", helper, err)
 		}
 		if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
-			return nil, nil, fmt.Errorf("checked Softnet at %s is not executable", t.softnetPath)
+			return nil, nil, fmt.Errorf("checked Softnet at %s is not executable", helper)
 		}
 	}
 	a := append([]string{"run"}, TartBootArguments(isolated)...)
@@ -144,7 +162,7 @@ func (t tartCLI) boot(vm string, isolated bool, log io.Writer, guard string) (*e
 	if isolated && t.softnetPath != "" {
 		// Tart resolves softnet through PATH. Use the helper preflight checked,
 		// even when the daemon was started from a different shell.
-		cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(t.softnetPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+		cmd.Env = append(os.Environ(), "PATH="+filepath.Dir(helper)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

@@ -284,12 +284,9 @@ func (s *Service) acquireOf(r *http.Request, a authz.Action) (acquireRef, error)
 		return acquireRef{}, err
 	}
 	sub := core.SubjectOf(r.Context())
-	actor := sub.Address
-	if q := r.URL.Query().Get("actor"); q != "" && q != actor {
-		if !owner(r.Context()) { // as acquire: only the machine's owner acts for another
-			return acquireRef{}, api.Errorf(api.CodeForbidden, "actor must be the caller")
-		}
-		actor = q
+	actor, err := actingFor(r.Context(), r.URL.Query().Get("actor"))
+	if err != nil {
+		return acquireRef{}, err
 	}
 	ref := acquireRef{project: t.Project.ID, b: b, actor: actor, rid: rid, key: actorKey(actor, rid), db: db}
 	if ref.rw, ref.seen, err = byRequest(r.Context(), db, b.Name, ref.key); err != nil {

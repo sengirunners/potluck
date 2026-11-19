@@ -7,8 +7,8 @@
 # inside the VM by default (--root=false overrides it). Named images are not sandbox templates.
 # One default line per layer and guest OS: layer, os, then the image pinned by digest (name@sha256:<64 hex>), or "-" when
 # zm's own image for it is not published yet (share then says so and names --image), then the image's own floor
-# when it has one: min_cpu=N min_memory_mb=N (a Tart image's cpuCountMin and memorySizeMin: tart set refuses less,
-# so share lends no smaller size of it), and runner_dir=PATH when the image carries GitHub's runner (relative to the
+# when it has one (a published macOS Tart line must: ParsePins refuses it without): min_cpu=N min_memory_mb=N (a Tart
+# image's cpuCountMin and memorySizeMin: tart set refuses less, so share lends no smaller size of it), and runner_dir=PATH when the image carries GitHub's runner (relative to the
 # guest user's home unless absolute; zm-eakh.12.24.5): share binds it as the box's runner_dir, so the box serves
 # GitHub Actions jobs (`github-jit`), and template=NAME on a template's line (zm-eakh.12.5.20): a layer's first
 # line without one is its default, and share lends each published template image beside it (the default stays

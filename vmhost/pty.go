@@ -50,8 +50,7 @@ const ttyWrap = `base=$1; cwd=$2; pf=$3; TERM=$4; mem=$5; export TERM; shift 5
 unset ZM_SECRETS POTLUCK_SECRETS
 b=$mem/potluck-secrets
 if [ -d "$b" ] && [ ! -L "$b" ] && [ -O "$b" ]; then POTLUCK_SECRETS=$b; ZM_SECRETS=$b; export POTLUCK_SECRETS ZM_SECRETS; fi
-[ -n "$HOME" ] || HOME=$(cd ~ && pwd); export HOME
-TMPDIR=${TMPDIR:-/tmp}; export TMPDIR
+` + guestHome + `TMPDIR=${TMPDIR:-/tmp}; export TMPDIR
 ` + baseInHome + `[ -n "$base" ] || base=$HOME
 case $cwd in "") d=$base ;; /*) d=$cwd ;; *) d=$base/$cwd ;; esac
 cd "$d" 2>/dev/null || { echo "potluck-driver-tart: no directory $d in the box" >&2; exit 125; }
@@ -64,7 +63,7 @@ func ttyWrapped(r record, cwd, pf, term string, argv []string) []string {
 	if r.Commit != "" {
 		base = srcDir(r)
 	}
-	return append([]string{"sh", "-c", ttyWrap, "sh", base, cwd, pf, term, guestMem}, argv...)
+	return databaseWrapped(r, append([]string{"sh", "-c", ttyWrap, "sh", base, cwd, pf, term, guestMem}, argv...))
 }
 
 // spawnPTY reads spawn's pty: nil without one; not_implemented on a layer

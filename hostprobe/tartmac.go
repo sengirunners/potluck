@@ -2,6 +2,7 @@ package hostprobe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sengirunners/potluck/softnet"
 	"github.com/sengirunners/potluck/vmhost"
 )
 
@@ -51,14 +53,88 @@ func tartDir(f Facts) string {
 	return filepath.Join(h, ".tart")
 }
 
+// managedSoftnetFacts is an optional Facts method: the managed Softnet's
+// path (softnet.Store.Current) and the store's state, when one is
+// installed. A Facts without it has none, so a test never reads this
+// Mac's install.
+type managedSoftnetFacts interface {
+	ManagedSoftnet() (string, softnet.Status, bool)
+}
+
+// ManagedSoftnet is the Mac's managed Softnet, when installed.
+func (SystemFacts) ManagedSoftnet() (string, softnet.Status, bool) {
+	s := softnet.System()
+	if _, err := os.Stat(s.Current()); err != nil {
+		return "", softnet.Status{}, false
+	}
+	return s.Current(), s.Status(), true
+}
+
+// SoftnetAdvice is what this Mac (macOS version, hardware architecture)
+// should do to get a Softnet that enforces Potluck's rules (softnet.For).
+func SoftnetAdvice(macOS, arch string) string {
+	major := macOSMajor(macOS)
+	return softnet.For(major, arch).Text(major, softnet.Command)
+}
+
+// CheckSoftnetRules runs the Softnet at path on the exact rules a box
+// boots with. Upstream parses all rules before this flag's early return,
+// before sudo, bootpd or vmnet: no VM or network is created.
+func CheckSoftnetRules(ctx context.Context, run Runner, path string) error {
+	res, err := runBounded(ctx, run, path, "--vm-fd", "0", "--vm-mac-address", "02:00:00:00:00:01",
+		"--allow="+vmhost.SoftnetAllowRules(), "--block="+vmhost.SoftnetBlockRules(), "--sudo-escalation-probing")
+	if err != nil || res.Exit != 0 {
+		return errors.New(commandFailure(res, err))
+	}
+	return nil
+}
+
+// CheckSoftnet is the Mac preflight's Softnet part alone, for r's macOS
+// version and architecture: the Softnet Potluck pins for Tart, its version
+// and build, and its problems and warnings.
+func CheckSoftnet(ctx context.Context, run Runner, f Facts, r Report) Layer {
+	l := Layer{Name: "tart"}
+	detectSoftnet(ctx, run, f, r, &l)
+	return l
+}
+
 // detectSoftnet checks Softnet, the helper Tart runs a VM's isolated network
-// through. It must be owned by root and setuid, or a box on
-// the isolated network cannot start without a password. The one admin step is a root step, so
+// through: the managed install when there is one (it is what Potluck pins
+// for Tart, whatever else is on PATH), else the first softnet on PATH. It
+// must be owned by root and setuid, or a box on the isolated network cannot
+// start without a password. The one admin step is a root step, so
 // doctor's root line and `potluck host` offer it.
-func detectSoftnet(ctx context.Context, run Runner, f Facts, l *Layer) {
-	path, ok := f.LookPath("softnet")
-	if !ok {
-		l.Problems = append(l.Problems, "Softnet is not installed: isolated Tart boxes need a helper compatible with this macOS and Potluck's protocol/port filtering rules; stock 0.23 cannot enforce these rules. No macOS 15 compatibility build is validated yet")
+func detectSoftnet(ctx context.Context, run Runner, f Facts, r Report, l *Layer) {
+	advice := SoftnetAdvice(r.MacOS, r.Arch)
+	onPath, found := f.LookPath("softnet")
+	path := onPath
+	managed := false
+	var st softnet.Status
+	major := macOSMajor(r.MacOS)
+	if m, ok := f.(managedSoftnetFacts); ok {
+		var p string
+		if p, st, ok = m.ManagedSoftnet(); ok && softnet.For(major, r.Arch).Kind != softnet.Managed {
+			// The matrix gives this Mac no managed build (it moved on to a
+			// macOS upstream covers, or its build was withdrawn): the managed
+			// copy is not used. A setuid file that cannot be used is a
+			// problem until it is removed.
+			uninstall := fmt.Sprintf("Potluck's boxes do not use it: remove it with `%s uninstall`", softnet.Command)
+			if st.Current != nil && st.Current.Problem != "" {
+				l.Problems = append(l.Problems, fmt.Sprintf("the managed Softnet %s at %s cannot be used (%s); %s", st.Current.ID, p, st.Current.Problem, uninstall))
+			} else {
+				l.Warnings = append(l.Warnings, fmt.Sprintf("the managed Softnet at %s is not for this Mac's macOS (%s); %s", p, r.MacOS, uninstall))
+			}
+		} else if ok {
+			if found {
+				if abs, err := filepath.Abs(onPath); err == nil && abs != p {
+					l.Warnings = append(l.Warnings, "Potluck's boxes use the managed Softnet at "+p+"; the softnet first on PATH ("+abs+") is not the one they run")
+				}
+			}
+			path, found, managed = p, true, true
+		}
+	}
+	if !found {
+		l.Problems = append(l.Problems, "Softnet is not installed: isolated Tart boxes need a helper that enforces Potluck's protocol and port rules; "+advice)
 		return
 	}
 	path = absoluteExecutable(path, l)
@@ -72,17 +148,15 @@ func detectSoftnet(ctx context.Context, run Runner, f Facts, l *Layer) {
 	l.SoftnetPath = path
 	l.SoftnetVersion = executableVersion(ctx, run, path, "Softnet", l)
 	if l.SoftnetVersion == "" {
+		l.Problems[len(l.Problems)-1] += "; " + advice
 		return
 	}
-	{
-		// Upstream parses all rules before this flag's early return, before
-		// sudo, bootpd or vmnet. No VM or network is created by this probe.
-		res, err := runBounded(ctx, run, path, "--vm-fd", "0", "--vm-mac-address", "02:00:00:00:00:01",
-			"--allow="+vmhost.SoftnetAllowRules(), "--block="+vmhost.SoftnetBlockRules(), "--sudo-escalation-probing")
-		if err != nil || res.Exit != 0 {
-			l.Problems = append(l.Problems, fmt.Sprintf("Softnet %s at %s cannot parse Potluck's required host DNS-only and SMTP-blocking isolation rules: %s; stock 0.23 is insufficient, and no macOS 15 compatibility build is validated yet. Use a supported host/helper combination that passes this probe and conformance", l.SoftnetVersion, path, commandFailure(res, err)))
-			return
-		}
+	if managed {
+		detectManagedSoftnet(st, r, l)
+	}
+	if err := CheckSoftnetRules(ctx, run, path); err != nil {
+		l.Problems = append(l.Problems, fmt.Sprintf("Softnet %s at %s cannot parse Potluck's required host DNS-only and SMTP-blocking isolation rules: %v; %s", l.SoftnetVersion, path, err, advice))
+		return
 	}
 	res, err := runBounded(ctx, run, "stat", "-L", "-f", "%Sp %Su", path)
 	mode, owner, _ := strings.Cut(strings.TrimSpace(res.Stdout), " ")
@@ -94,8 +168,33 @@ func detectSoftnet(ctx context.Context, run Runner, f Facts, l *Layer) {
 		return
 	}
 	l.Problems = append(l.Problems, "Softnet is installed at "+path+" but is not setuid root (or another user can write to it), so Tart cannot start a VM's isolated network without asking for a password each time")
+	if managed {
+		l.Problems = append(l.Problems, "install it again with `"+softnet.Command+" install`")
+		return
+	}
 	if len(l.Problems) == 1 { // permissions alone: root cannot repair other blockers
 		l.RootSteps = append(l.RootSteps, "chown root "+shQuote(path), "chmod u+s,go-w "+shQuote(path))
+	}
+}
+
+// detectManagedSoftnet reads the managed install: the build in use, and a
+// warning when it is unsound or not this potluck's build for this Mac.
+func detectManagedSoftnet(st softnet.Status, r Report, l *Layer) {
+	if st.Current == nil {
+		return
+	}
+	if st.Current.Problem != "" {
+		l.Problems = append(l.Problems, "the managed Softnet cannot be used: "+st.Current.Problem+"; install it again with `"+softnet.Command+" install`")
+		return
+	}
+	l.SoftnetBuild = st.Current.ID
+	major := macOSMajor(r.MacOS)
+	if b, ok := softnet.ByID(st.Current.ID); ok && !b.Covers(major, r.Arch) {
+		l.Problems = append(l.Problems, fmt.Sprintf("the managed Softnet %s is not built for macOS %d; install this Mac's build with `%s install`", st.Current.ID, major, softnet.Command))
+		return
+	}
+	if a := softnet.For(major, r.Arch); a.Kind == softnet.Managed && a.Build.ID != st.Current.ID {
+		l.Warnings = append(l.Warnings, fmt.Sprintf("the managed Softnet is %s; this potluck's build for macOS %d is %s: update it with `%s install`", st.Current.ID, major, a.Build.ID, softnet.Command))
 	}
 }
 

@@ -6,8 +6,9 @@ package hostprobe
 // work") from --admission-url, --admission-token-file and --admission-ttl-s,
 // and a re-run without them keeps an earlier binding's, so an owner never
 // hand-edits a binding and a later share never drops them. Conformance runs
-// with them too: its boxes are real VMs on the host's room, so they take
-// leases like a renter's (no room now fails the run, and nothing binds).
+// without them: the owner is running share and joining comes first, so its
+// check boxes take no lease, while every box lent does. A controller that
+// counts the boxes it sees still counts them.
 
 import (
 	"context"
@@ -32,8 +33,9 @@ const bootTimeoutS = 90
 
 var admissionKeys = []string{"admission_url", "admission_token_file", "admission_ttl_s"}
 
-// admissionConfig is the admission keys share binds and gives conformance
-// (nil: none) and the earlier binding they were kept from ("": the flags).
+// admissionConfig is the admission keys share binds (nil: none; share's own
+// conformance runs without them) and the earlier binding they were kept
+// from ("": the flags).
 // A URL flag takes the flags alone; without one, an earlier binding's keys
 // stay, each flag given replacing its own. Checked as zm-run-tart checks
 // them, which hostprobe may not import.
@@ -157,13 +159,6 @@ func checkAdmission(cfg map[string]string) error {
 	}
 	return nil
 }
-
-// noRoomText is what zm-run-tart answers when the controller has no room
-// (vmhost's noRoom), as conformance prints it.
-const noRoomText = "no room on this host now"
-
-// noRoomError is a size's error when conformance found no room.
-const noRoomError = "the admission controller had no room now; try again later"
 
 // unbinder is optional on a Binder (computeclient.Owner has it).
 type unbinder interface {

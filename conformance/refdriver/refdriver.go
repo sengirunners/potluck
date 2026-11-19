@@ -324,15 +324,16 @@ type request struct {
 }
 
 type acquireArgs struct {
-	RequestID string   `json:"request_id"`
-	TTL       int      `json:"ttl_s"`
-	Name      string   `json:"name"`
-	Image     string   `json:"image"`
-	Commit    string   `json:"commit"`
-	Script    string   `json:"script"`
-	Args      []string `json:"args"`
-	Net       string   `json:"net"`
-	Persist   bool     `json:"persist"`
+	Database  *protocol.Database `json:"database"`
+	RequestID string             `json:"request_id"`
+	TTL       int                `json:"ttl_s"`
+	Name      string             `json:"name"`
+	Image     string             `json:"image"`
+	Commit    string             `json:"commit"`
+	Script    string             `json:"script"`
+	Args      []string           `json:"args"`
+	Net       string             `json:"net"`
+	Persist   bool               `json:"persist"`
 	// Volumes are volume_owner's, else actor's (volumes.go).
 	Volumes     []rvol `json:"volumes"`
 	VolumeOwner string `json:"volume_owner"`
@@ -589,8 +590,8 @@ func (d *drv) describe() map[string]any {
 		if !d.is("box-no-size") {
 			out["size"] = map[string]any{"name": d.boxSize(), "os": cmp.Or(d.cfg["os"], "linux"), "cpu": max(1, atoi(d.cfg["cpu"])), "memory_mb": 512, "disk_gb": 1}
 		}
-		caps := []string{"github-jit-guard"} // it starts no runner: jit_config and jit_guard (its run too) are taken and ignored
-		if d.cfg["jit"] == "1" {             // a box the runner broker may place a job on (its tests)
+		caps := d.databaseCaps([]string{"github-jit-guard"}) // it starts no runner: jit_config and jit_guard (its run too) are taken and ignored
+		if d.cfg["jit"] == "1" {                             // a box the runner broker may place a job on (its tests)
 			caps = append(caps, "github-jit")
 			if d.cfg["jit_guard_private"] != "0" { // "0": a driver that cannot honour jit_guard.open_if_private
 				caps = append(caps, protocol.CapJITGuardPrivate)
@@ -668,6 +669,9 @@ func (d *drv) acquire(req request) (any, error) {
 	var a acquireArgs
 	if err := json.Unmarshal(req.Args, &a); err != nil {
 		return nil, refuse("bad_request", "bad args: %v", err)
+	}
+	if err := d.databaseAcquire(a.Database); err != nil {
+		return nil, err
 	}
 	if err := d.logAcquire(a.RequestID); err != nil { // acquirelog.go
 		return nil, err

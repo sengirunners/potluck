@@ -63,6 +63,20 @@ func TestNamedPinValidation(t *testing.T) {
 	if _, err := ParsePins("tart darwin -\ntart darwin - name=xcode root=on"); err != nil {
 		t.Fatal(err)
 	}
+	// A macOS Tart image zm lends carries its floor: without one, c1m2 would
+	// be lent and tart set refuse it after the pull. Linux and unpublished
+	// lines need none.
+	const digest = "ghcr.io/example/macos-x@sha256:0000000000000000000000000000000000000000000000000000000000000001"
+	for _, bad := range []string{"tart darwin " + digest, "tart darwin " + digest + " min_cpu=2", "tart darwin " + digest + " min_memory_mb=4096"} {
+		if _, err := ParsePins(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	for _, good := range []string{"tart darwin " + digest + " min_cpu=2 min_memory_mb=4096", "tart linux " + digest} {
+		if _, err := ParsePins(good); err != nil {
+			t.Errorf("refused %q: %v", good, err)
+		}
+	}
 }
 
 func TestShareReusesOnlyExactTartCachePin(t *testing.T) {

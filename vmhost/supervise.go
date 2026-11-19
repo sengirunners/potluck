@@ -296,8 +296,6 @@ if [ -x "$1" ]; then s=./$1; shift; exec "$s" "$@"; fi; exec sh "$@"`
 	return job, job.Start()
 }
 
-// startsRunner says whether this run starts a GitHub runner in its guest, so
-// its runner may need the refresh (runner_refresh.go).
 // watch waits for the run's (or box's) end and records how it ended. A box
 // has no job: done is nil.
 func (s *sup) watch(done <-chan int, exited <-chan struct{}) int {

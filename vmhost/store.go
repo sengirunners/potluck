@@ -36,6 +36,7 @@ const (
 const keepFor = 7 * 24 * time.Hour
 
 type record struct {
+	Database                *protocol.Database // immutable recipe, never its connection URL
 	Handle, Target, Key, ID string
 	Kind                    string           // "run" ("" in older records) or "box"
 	Digest                  string           // a box: the image_digest it booted

@@ -257,6 +257,9 @@ func (d *drv) describe() map[string]any {
 	if d.cfg.Kind == "box" && d.cfg.Warm > 0 {
 		out["warm"] = d.warmDescribe() // warm.go
 	}
+	if d.databaseSupported() {
+		caps = append(caps, protocol.CapDatabase)
+	}
 	if d.cfg.JITRunnerDir != "" {
 		if rs := d.st.runnerStatuses(d.cfg.runnerImages()); len(rs) > 0 {
 			out["runners"] = rs // runner_status.go: one per image
@@ -308,6 +311,9 @@ func (d *drv) answer(r record) map[string]any {
 		}
 		out["size"], out["image_digest"] = d.cfg.Size, r.Digest
 		out["net"] = d.cfg.boxNet(r)
+		if r.Database != nil {
+			out["database"] = r.Database
+		}
 		if len(r.Volumes) > 0 {
 			out["volumes"] = volAnswer(r) // volume.go
 		}

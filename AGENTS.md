@@ -25,9 +25,11 @@ Go module `github.com/sengirunners/potluck`. Apache-2.0. `cmd/potluck` is the pr
 | `site/` | static site (wrangler config) |
 | `kit/` | KIT: identity, projects, transports, the daemon shell (`kit/server`), teamlink |
 | `kit/daemonrecord/` | the machine's record of its running Potluck daemons (`<program>.json`), written by `kit/server`; how `potluck` and the menu bar item find a daemon of another program built on Potluck (`cli/attach.go`, `docs/daemon.md`) |
+| `database/` | project database recipes (`[[databases]]` in `project.toml`) and the snapshot manifest rules; `docs/database-snapshots.md` |
 | `agentrunners/` | the agent runner job kind (`potluck agent-runner`): a vendor's self-hosted runner in a fresh box; adapters are data (`claude.go`); `docs/agent-runners.md` |
 | `agenttasks/` | the agent task (`potluck agent-task`): a coding agent CLI run once in a fresh box on a pushed commit, its commits back as a local ref; adapters are data, the box's entry script; `docs/agent-tasks.md` |
 | `runtarget/`, `runners/`, `usage/`, `grants/` (secret grants), `hostprobe/`, `hostswap/` (the host's swap state: reported in its advert, gates box secrets), `computeapi/`, `computeclient/`, `boxcp/`, `boxpush/`, `wiring/`, `cmd/potluck-e2b` (`internal/e2bgateway`) | COMPUTE: boxes, sandboxes, runners, usage, wirings |
+| `softnet/` | which Softnet a Mac uses (`For`, the one version matrix), the Softnet builds Potluck pins (`Builds`, sha256) and their managed root-owned install with rollback (`Store`); `potluck softnet` (`cli/softnet.go`), `docs/softnet.md`. Softnet is FSL-1.1-ALv2 (`softnet/UPSTREAM-LICENSE`), not Apache |
 | `placement/` | the one rule for which box binding takes a new box (sandboxes and runner jobs): tier order, refusals with reasons, ranking |
 | `pushbase/` | client-side repository identity and host base fill/retry (`docs/push-base.md`) |
 | `depscli/` | the client side of dependency layers: the `--deps` flags, the acquire's deps, the answer's line, the mismatch warning (`potluck sandbox create`, `potluck run`; zm imports it) |

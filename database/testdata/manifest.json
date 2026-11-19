@@ -1,0 +1,36 @@
+{
+  "format": "potluck-postgres-snapshot-v1",
+  "project": "example-org/example-app",
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "inputs_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "snapshot_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "config_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "postgres_image": "postgres@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "agent_image": "agent@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "arch": "amd64",
+  "postgres_version": "17.6",
+  "cluster_state": "shut down",
+  "migration_count": 1,
+  "extensions": {
+    "pgtap": "1.3.0"
+  },
+  "inputs": {
+    "supabase/migrations/00001_init.sql": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "runtime": {
+    "bindir": "/nix/postgres/bindir",
+    "libdir": "/nix/postgres/libdir",
+    "pkglibdir": "/nix/postgres/pkglibdir",
+    "sharedir": "/nix/postgres/sharedir",
+    "sysconfdir": "/nix/postgres/sysconfdir"
+  },
+  "pgdata_path": "/var/lib/postgresql/data",
+  "config_files": {
+    "config": "/etc/postgresql/postgresql.conf",
+    "hba": "/etc/postgresql/pg_hba.conf",
+    "ident": "/etc/postgresql/pg_ident.conf",
+    "sources": [
+      "/etc/postgresql/postgresql.conf"
+    ]
+  }
+}

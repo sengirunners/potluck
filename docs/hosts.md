@@ -14,11 +14,12 @@ detected at run time or given in flags (`hostprobe/`).
   passed.
 
 On a Mac, doctor and host use the same compatibility preflight. It reads the macOS product version and
-hardware architecture, resolves Tart and Softnet on PATH, pins those paths in the binding, and runs bounded executable and isolation checks.
+hardware architecture, resolves Tart on PATH and Softnet (the managed install of [softnet.md](softnet.md) when
+there is one, else PATH), pins those paths in the binding, and runs bounded executable and isolation checks.
 Softnet must parse the exact host DNS exception and outbound SMTP blocks used at boot. The probe returns
 before sudo, bootpd or vmnet setup; a version string alone is insufficient. Stock Softnet 0.23 lacks these
-rules. Newer binaries may require macOS 26 APIs. No macOS 15 compatibility helper has been validated yet;
-a backport must pass the capability probe and real-Mac isolation conformance before delivery.
+rules, and newer releases need macOS 26. Which Softnet each macOS uses, and Potluck's own macOS 15 build (a
+candidate until it passes real-Mac validation), are in [softnet.md](softnet.md).
 
 Each supported Tart digest carries `arch` and `min_host_macos` in `imagepins/images.pin`. These are conservative
 support floors: Tahoe guests are selected on Tahoe hosts, Sequoia on macOS 15, while the ARM Linux guest uses
@@ -366,7 +367,7 @@ Softnet's version and path, the macOS release). A cause known to come from this 
 `setup fault`: the same boot fails the same way until the setup changes, so `potluck host` says running it again
 unchanged fails the same way, and what to do instead. The one known today is Softnet refusing a rule Potluck isolates
 a box with (`out proto udp @host port 53`; seen with Softnet 0.23.0 on macOS 15.6): Potluck needs a Softnet that
-accepts protocol and port rules. Any other boot failure carries no such mark, and may pass when run again.
+accepts protocol and port rules ([softnet.md](softnet.md) says which one this macOS uses). Any other boot failure carries no such mark, and may pass when run again.
 
 Every start that fails (a boot, a checkout, a runner, but not a cancelled acquire) leaves a report, which its error
 names (`report: <path>`): `failed/<id>.txt` in the driver's state directory (`state_dir`, by default
@@ -418,6 +419,25 @@ that stop, run `sudo fdesetup authrestart`.
 - It binds each passed size at machine level (`hostprobe.Bind`) and waits up to 45 s for the pool's machine to list
   each as `<binding>@<machine>` (a host's heartbeat carries it every 15 s). A slower one is reported, not an error.
 
+#### Pasting the invite, and what is safe to share
+
+`potluck invite <name> --host` prints the command for the friend's machine as one line, the whole invite in single
+quotes (`potluck host '<invite>'`); from a program that mounts the commands it also prints that program's whole line
+(`where they run zm instead, the same as one line: zm potluck host '<invite>'`). Copy the line as it is. Host and
+join check their arguments before anything else (the daemon, the host lock, any download), and refuse, exit 2, saying
+what is wrong and repeating nothing typed:
+
+- only the invite's last part (`XXXX-XXXX`, its secret), or an invite missing a part or cut short;
+- a word a copy changed: a no-break or other typeset space, a curly quote, a long dash, an invisible character. A
+  command pasted over several lines whose indentation is no-break spaces arrives as extra words such as
+  `<no-break space>--image`; the refusal names the flag it looks like. Nothing is corrected and used: a secret is
+  used as typed or not at all;
+- more than one argument (an invite without its quotes, or split by a paste).
+
+The invite is a secret until it is used: send it to the one friend, never to a group chat or support thread. What
+`potluck host`, `potluck host status` and `potluck doctor` print holds no invite, and the refusals above repeat
+none, so that output is safe to share when asking for help. A start's failure report is redacted too (above).
+
 How pools, invites and machine classes work is in `docs/daemon.md`.
 
 ## Default images and templates
@@ -433,7 +453,10 @@ How pools, invites and machine classes work is in `docs/daemon.md`.
 - A layer with no image is refused in plain words naming `--image`.
 - A line may carry the image's floor, `min_cpu=N min_memory_mb=N` (a Tart image's `cpuCountMin` and `memorySizeMin`,
   below which `tart set` refuses). No size below the floor of a known image, default or `--image`, is lent or
-  accepted in `--sizes`.
+  accepted in `--sizes`; a `--sizes` under it is refused before anything is pulled, naming the sizes that fit. A
+  published macOS Tart line must carry both (a macOS guest under its floor fails only at `tart set`, after the pull).
+  A Tart image with no pin is refused before any pull, as its host compatibility is unknown; zm does not guess an
+  image's OS or floor from its name.
 - A line may carry `runner_dir=PATH` (below) and `template=NAME`.
 - The pin is checked at acquire like any other.
 
@@ -563,7 +586,9 @@ is a different request.
 
 ## Admission controllers
 
-On a host that runs other work beside Potluck, every VM first takes a lease from the host's admission controller.
+On a host that runs other work beside Potluck, every VM lent first takes a lease from the host's admission
+controller. The checks `potluck host` runs before it binds do not: the owner is running them, and joining comes
+first.
 
 ### The controller's API
 
@@ -582,8 +607,9 @@ On a host that runs other work beside Potluck, every VM first takes a lease from
 - `--admission-ttl-s N` (120 to 3600: `host` binds no `boot_timeout_s`, so the driver's 90 s plus 30).
 
 They are refused as `potluck-driver-tart` refuses them, before anything runs (`Precheck` included). Conformance runs
-with them too, since its boxes are real VMs on the same room and so take leases like a renter's: a controller with no
-room fails the run, and nothing binds.
+without them, so its check boxes ask the controller for nothing and a controller with no room cannot hold up or fail
+the join; the bindings carry them, so every box lent takes a lease. A controller that counts the containers or VMs it
+sees still counts the check boxes.
 
 ### Re-runs
 
@@ -595,9 +621,6 @@ room fails the run, and nothing binds.
   config (a non-owner's view), is refused (`could not read this machine's bindings (...)`). Without the flag it would
   drop their keys; with a URL a keyless one could stay live beside the new ones. A dry run reads them only from a
   daemon already running, and notes when it could not.
-- A conformance run that found no room (the driver's `no room on this host now`) leaves its size unbound as `the
-  admission controller had no room now; try again later`, and the quick check's other sizes say the same instead of
-  blaming the security checks.
 - When a run with admission keys (the first switch-on included) leaves a size unbound whose earlier binding in that
   same scope has none, `host` unbinds exactly that binding, since its boxes take room the controller does not count,
   and says so. (Also when no size passed and nothing binds, but not for an invite code, which has not joined yet.)

@@ -138,8 +138,8 @@ type ShareOptions struct {
 	LinuxSlots *int
 	// AdmissionURL, AdmissionTokenFile and AdmissionTTLS are zm-run-tart's
 	// admission keys for a host that runs other work beside zm (admission.go):
-	// every box, conformance's too, takes a lease first. "" keeps an earlier
-	// binding's (Earlier); NoAdmission removes them.
+	// every box lent takes a lease first; share's own conformance boxes do
+	// not. "" keeps an earlier binding's (Earlier); NoAdmission removes them.
 	AdmissionURL, AdmissionTokenFile string
 	OCIHostProfile                   string // absolute owner profile; the driver verifies runtime identity and host budgets
 	AdmissionTTLS                    int
@@ -158,12 +158,12 @@ type ShareOptions struct {
 // planted path, no value in env, argv or the driver's state, gone after
 // release), port-channel isolation and full-duplex progress, and the package
 // shelf (no box writes it or reaches another through it; it skips where the
-// host has no shelf). What it
+// host has no shelf), and database recipe identity refusals. What it
 // drops is slow and the same on every size: renew and
 // expiry wait out short leases (the host's TTL is the driver's own code, the
 // same for each size), box-secrets-ops waits out a 5 s reader, and code,
 // ended and reclaim are skipped for a share's boxes anyway.
-const QuickGroups = "handles,lifecycle,refuse,net,root,box-secrets,ports,shelf"
+const QuickGroups = "handles,lifecycle,refuse,net,root,box-secrets,ports,shelf,database"
 
 // SizeGroups is what every other size runs by default: a box of that size
 // boots, answers its size and exec, and releases.
@@ -553,7 +553,6 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		}
 		base["state_dir"] = p
 	}
-	maps.Copy(base, res.Admission) // conformance's boxes take leases too: they use the host's room as much
 	var pull func(image string) []string
 	if o.NetMbitSet && layer.Name != "oci" { // never accepted and ignored (zm-eakh.12.53)
 		return res, fmt.Errorf("--net-mbit is for the oci layer: it caps downloads on Potluck's own network %s, which a %s box is not on (a %s box is a full VM on its layer's own network: shape that yourself)",
@@ -767,8 +766,10 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		default:
 			args = append(args, "--only", SizeGroups)
 		}
-		// Conformance runs without the reclaim policy (the owner is at the
-		// keyboard, running share); the binding carries it. The binding's
+		// Conformance runs without the reclaim policy or the admission keys
+		// (the owner is at the keyboard, running share, and joining comes
+		// first: the controller still counts these boxes, lease or not); the
+		// binding carries both. The binding's
 		// images are its pins, which the daemon sends as config images: a
 		// config key of that name too could not be read back from
 		// run_targets.toml (`images` set twice), so --pool lent nothing.
@@ -784,6 +785,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		if p, ok := PinForImage(res.Images[0]); ok && p.Name != "" {
 			bound["image_name"] = p.Name
 		}
+		maps.Copy(bound, res.Admission)
 		if o.ReclaimIdleS > 0 {
 			bound["reclaim_idle_s"] = strconv.Itoa(o.ReclaimIdleS)
 		}
@@ -877,10 +879,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		sr := &res.Sizes[i]
 		if !o.Full && i > 0 && !res.Sizes[0].Passed {
 			sr.Error = "not checked: the security checks failed on " + res.Sizes[0].Binding
-			switch {
-			case res.Sizes[0].Error == noRoomError:
-				sr.Error = "not checked: the admission controller had no room for the checks on " + res.Sizes[0].Binding + "; try again later"
-			case busy:
+			if busy {
 				sr.Error = "not checked: every slot was in use when " + res.Sizes[0].Binding + " was checked; try again when a box ends"
 			}
 			continue
@@ -893,9 +892,6 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		switch {
 		case err != nil:
 			sr.Error = "conformance did not run: " + err.Error()
-			continue
-		case r.Exit != 0 && strings.Contains(sr.Output, noRoomText):
-			sr.Error = noRoomError
 			continue
 		case r.Exit != 0 && slotsFullOS(r.Stdout) != "":
 			total, os := Slots, slotsFullOS(r.Stdout)
@@ -1091,7 +1087,7 @@ func chooseSizes(o ShareOptions, images []string) ([]Size, bool, error) {
 		if len(fitting(o.Report, o.Limits, n)) == 0 && (!auto || len(fitting(o.Report, o.Limits, 1)) == 0) {
 			return nil, false, fmt.Errorf("no size fits %s: %s", within, raise)
 		}
-		return nil, false, fmt.Errorf("no size that fits %s is big enough for the image (%s): %s", within, floor, raise)
+		return nil, false, fmt.Errorf("no size that fits %s is big enough for the image (%s): %s; nothing was downloaded", within, floor, raise)
 	}
 	if len(o.Sizes) == 0 {
 		return l.Sizes, l.OneAtATime, nil
@@ -1109,7 +1105,11 @@ func chooseSizes(o ShareOptions, images []string) ([]Size, bool, error) {
 		case slices.Contains(l.Sizes, s):
 			out = append(out, s)
 		case small(s):
-			return nil, false, fmt.Errorf("size %s is too small for the image, which needs %s", n, floor)
+			names := make([]string, len(l.Sizes))
+			for i, s := range l.Sizes {
+				names[i] = s.Name
+			}
+			return nil, false, fmt.Errorf("size %s is too small for the image, which needs %s: pass --sizes %s instead; nothing was downloaded", n, floor, strings.Join(names, ","))
 		default:
 			return nil, false, fmt.Errorf("size %s does not fit %s", n, within)
 		}

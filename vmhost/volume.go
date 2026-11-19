@@ -224,7 +224,7 @@ func volRelPath(p string) bool { return protocol.VolumePathOK(p) }
 // inside, or be an ancestor of (guestDir: the driver's working directory,
 // which holds the checkout bundle and srcDir). A layer checks a path once
 // HOME is known (HOME / makes "usr" /usr).
-var volSystemPaths = []string{"/proc", "/sys", "/dev", "/etc", "/bin", "/sbin", "/lib", "/lib64", "/usr", "/boot", "/run", guestDir}
+var volSystemPaths = []string{"/proc", "/sys", "/dev", "/etc", "/bin", "/sbin", "/lib", "/lib64", "/usr", "/boot", "/run", guestDir, protocol.DatabaseArtifactDir}
 
 // volSystemPath says whether absolute guest path p is, is inside, or holds a
 // system directory, or is / itself.

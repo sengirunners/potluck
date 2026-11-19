@@ -36,7 +36,8 @@ its owner returns. Pools will let people you invite lend machines too.
 ## What you need
 
 - **A machine that can run sandboxes.** On an Apple-silicon Mac: [Tart](https://tart.run/quick-start/) and
-  [Softnet](https://github.com/openai/softnet/releases/latest) (setuid root; `potluck doctor` prints the one sudo line). On Linux: Docker with Kata or gVisor
+  [Softnet](https://github.com/openai/softnet/releases/latest) (setuid root; `potluck doctor` prints the one sudo line;
+  on macOS 15, see [docs/softnet.md](docs/softnet.md)). On Linux: Docker with Kata or gVisor
   ([cmd/potluck-driver-tart/README.md](cmd/potluck-driver-tart/README.md) has the setup). `potluck doctor` tells you what is missing and
   where to get it.
 - **To try it alone: nothing else.** No account, no second machine. The pool and the machine that shares are the

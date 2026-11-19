@@ -29,9 +29,10 @@ func admissionOptions() ShareOptions {
 	return ShareOptions{Report: bigReport(), Images: []string{pinA}, NamePrefix: "h", Sizes: []string{"c2m4", "c4m16"}, Driver: "ref"}
 }
 
-// zm-eakh.12.7.7: --admission-url, --admission-token-file and
-// --admission-ttl-s go into every size's binding, and into its conformance
-// run, whose boxes use the host's room as much as a renter's.
+// --admission-url, --admission-token-file and --admission-ttl-s go into
+// every size's binding, and into none of share's conformance runs: the
+// check boxes take no lease, so a controller with no room cannot hold up
+// the join (zm-eakh.12.24.18.6).
 func TestShareAdmissionFlagsBindEverySize(t *testing.T) {
 	tok := tokenFile(t, 0o600)
 	o := admissionOptions()
@@ -57,13 +58,31 @@ func TestShareAdmissionFlagsBindEverySize(t *testing.T) {
 			}
 		}
 	}
+	if len(res.Sizes) != 2 {
+		t.Fatalf("%d sizes, want 2", len(res.Sizes))
+	}
 	for _, s := range res.Sizes {
-		args := strings.Join(s.Conformance, " ")
 		for k, v := range want {
-			if !strings.Contains(args, "--config "+k+"="+v) {
-				t.Errorf("%s conformance has no %s: %s", s.Binding, k, args)
+			if s.Config[k] != v {
+				t.Errorf("%s result config: %s=%q, want %q", s.Binding, k, s.Config[k], v)
 			}
 		}
+		args := strings.Join(s.Conformance, " ")
+		if len(s.Conformance) == 0 || strings.Contains(args, "admission") {
+			t.Errorf("%s conformance carries an admission key: %s", s.Binding, args)
+		}
+	}
+	var ran int
+	for _, line := range run.calls {
+		if strings.HasPrefix(line, "zm-run-conformance ") {
+			ran++
+			if strings.Contains(line, "admission") {
+				t.Errorf("conformance ran with an admission key: %s", line)
+			}
+		}
+	}
+	if ran != 2 {
+		t.Errorf("conformance ran %d times, want 2: %v", ran, run.calls)
 	}
 	if res.Admission["admission_url"] != want["admission_url"] || res.AdmissionFrom != "" {
 		t.Errorf("result: %v from %q", res.Admission, res.AdmissionFrom)
@@ -112,6 +131,9 @@ func TestShareAdmissionKeptOnRerun(t *testing.T) {
 	for _, s := range res.Sizes {
 		if s.Config["admission_url"] != "http://10.0.0.5:9000" || s.Config["admission_token_file"] != tok || s.Config["admission_ttl_s"] != "200" {
 			t.Errorf("%s did not keep the admission keys: %v", s.Binding, s.Config)
+		}
+		if args := strings.Join(s.Conformance, " "); strings.Contains(args, "admission") {
+			t.Errorf("%s conformance carries a kept admission key: %s", s.Binding, args)
 		}
 	}
 	if res.AdmissionFrom != "h-c2m4" {
@@ -226,29 +248,6 @@ func TestShareAdmissionUnreadRefuses(t *testing.T) {
 	o.DryRun, o.Earlier = true, []computeapi.RunTarget{{Name: "h-c4m16", Kind: "box"}}
 	if _, err := shareOn(context.Background(), &fakeRunner{}, nil, o); err == nil || !strings.Contains(err.Error(), "h-c4m16") || !strings.Contains(err.Error(), "--admission-url URL or none") {
 		t.Errorf("config not shown: %v", err)
-	}
-}
-
-// A controller with no room during conformance is said in plain words, and
-// the other sizes are not blamed on the security checks.
-func TestShareAdmissionNoRoomSaysSo(t *testing.T) {
-	o := admissionOptions()
-	o.AdmissionURL = "https://ci.example"
-	run := &fakeRunner{on: func(line string) (Result, bool) {
-		if strings.HasPrefix(line, "zm-run-conformance ") {
-			return Result{Exit: 1, Stdout: "FAIL  handles: acquire: unavailable: no room on this host now: ci jobs (retry in 30 s)"}, true
-		}
-		return Result{}, true
-	}}
-	res, err := shareOn(context.Background(), run, binderFunc(nil), o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(res.Sizes[0].Error, "the admission controller had no room now; try again later") {
-		t.Errorf("first size: %q", res.Sizes[0].Error)
-	}
-	if e := res.Sizes[1].Error; strings.Contains(e, "security checks failed") || !strings.Contains(e, "no room") {
-		t.Errorf("second size: %q", e)
 	}
 }
 

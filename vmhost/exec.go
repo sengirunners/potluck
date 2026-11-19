@@ -45,8 +45,7 @@ const (
 // secrets directory (secrets.go) in POTLUCK_SECRETS and ZM_SECRETS when it
 // is a directory (not a link) of the user the command runs as.
 const execWrap = `base=$1; cwd=$2; t=$3; sec=$4; pf=$5; mem=$6; mnt=$7; swp=$8; shift 8
-[ -n "$HOME" ] || HOME=$(cd ~ && pwd); export HOME
-TMPDIR=${TMPDIR:-/tmp}; export TMPDIR
+` + guestHome + `TMPDIR=${TMPDIR:-/tmp}; export TMPDIR
 pf=${pf:+$TMPDIR/$pf}
 ` + baseInHome + `[ -n "$base" ] || base=$HOME
 case $cwd in "") d=$base ;; /*) d=$cwd ;; *) d=$base/$cwd ;; esac
@@ -224,7 +223,7 @@ func wrapped(r record, cwd string, timeout int, sec bool, pf string, argv []stri
 	if sec {
 		flag = "1"
 	}
-	return append([]string{"sh", "-c", execWrap, "sh", base, cwd, strconv.Itoa(timeout), flag, pf, guestMem, guestMounts, guestSwaps}, argv...)
+	return databaseWrapped(r, append([]string{"sh", "-c", execWrap, "sh", base, cwd, strconv.Itoa(timeout), flag, pf, guestMem, guestMounts, guestSwaps}, argv...))
 }
 
 // exec runs one command in a ready box (SPEC 20 "Boxes", exec).

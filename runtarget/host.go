@@ -369,6 +369,12 @@ func (s *Service) HostCall(ctx context.Context, project, binding, verb, id strin
 		if err != nil {
 			return nil, err
 		}
+		if rawDB, ok := m["database"]; ok {
+			var database protocol.Database
+			if json.Unmarshal(rawDB, &database) != nil || database.Project != project {
+				return nil, api.Errorf(api.CodeBadRequest, "database recipe belongs to another project")
+			}
+		}
 		m["request_id"], _ = json.Marshal(hostKey(key, rid))
 		// The authority's word for whose volumes they are holds only within
 		// its project: one binding may serve several projects, and an owner

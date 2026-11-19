@@ -927,3 +927,21 @@ expiration. Streams never name a host or another box. Closing, lease expiration
 or destroying the box ends its guest-side connection and helper. The generic
 HTTP, WebSocket and private browser/CDP transports all consume this one verb.
 The channel's original deadline is not extended by renewing the box.
+
+### Project database snapshots
+
+A driver listing `database-snapshot-v1` accepts acquire's `database` object:
+`project` (authority project ID), `name` (recipe name), `image` (immutable final
+image pin) and `manifest` (the exact packaged JSON text). These are resolved by
+the authority from a project-owned recipe; public acquire requests contain only
+the recipe name. A host relay rejects a database whose project differs from its
+authenticated authority scope. The manifest's own `project` identifies its source
+repository, which may differ from the pool project's identity.
+
+The driver validates before allocating, compares all four fields on a repeated
+request ID, and confirms the same `database` object in a successful acquire
+answer. It must not return success or permit commands before the private
+Postgres snapshot has passed its readiness and provenance checks. Credentials
+are never in this object or driver metadata. The authority releases an answer
+with different or missing provenance. See [database snapshots](database-snapshots.md)
+for the supported manifest, command environment and lifecycle restrictions.

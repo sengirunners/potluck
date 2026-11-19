@@ -540,7 +540,7 @@ func printShare(w io.Writer, res hostprobe.ShareResult, p prefix) {
 		fmt.Fprintf(w, "sandboxes may run any time%s\n", keptFrom(res.ReclaimFrom))
 	}
 	if ad := res.Admission; ad != nil {
-		fmt.Fprintf(w, "admission: every sandbox, conformance's too, first takes a lease from %s%s", ad["admission_url"], admissionDetail(ad))
+		fmt.Fprintf(w, "admission: every sandbox lent first takes a lease from %s%s; the checks this command runs take none", ad["admission_url"], admissionDetail(ad))
 		if res.AdmissionFrom != "" {
 			fmt.Fprintf(w, "; kept from %s (--admission-url none removes it)", res.AdmissionFrom)
 		}

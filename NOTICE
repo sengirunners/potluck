@@ -4,3 +4,7 @@ Copyright 2026 Sengi, Inc.
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
 It began as code in zm, under the same license.
+
+softnet/UPSTREAM-LICENSE is the license of Softnet (copyright OpenAI), the Tart network helper that
+`potluck softnet install` installs: the Functional Source License 1.1, ALv2 Future License. Softnet builds are
+not part of this product and are not under its license.

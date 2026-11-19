@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ import (
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/daemonrecord"
+	"github.com/sengirunners/potluck/kit/project"
 	"github.com/sengirunners/potluck/kit/tailnet/tailnettest"
 	"github.com/sengirunners/potluck/kit/teamlink"
 	"github.com/sengirunners/potluck/menubar"
@@ -164,9 +166,22 @@ func TestAProgramMountsPotlucksCommands(t *testing.T) {
 	if st, err := client.WithHandler(m.dm.SocketHandler()).TailnetUp(context.Background(), api.TailnetUpRequest{}); err != nil || !st.Running {
 		t.Fatalf("tailnet up: %+v %v", st, err)
 	}
-	if out := s.ok(t, "pool", "invite", "ana"); !strings.Contains(out, "\n  potluck join '") ||
-		!strings.Contains(out, "no potluck there yet: curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '") || !strings.Contains(out, "(where they run supper: supper pool <the same words>)") {
-		t.Fatalf("invite:\n%s", out)
+	// Each spelling is the whole command as one line, the whole invite in
+	// single quotes: a shell splits it into the program's words and the
+	// invite, which reads as one.
+	for _, inv := range []struct{ args, words string }{{"ana", "join"}, {"lee --host", "host"}} {
+		out := s.ok(t, append([]string{"pool", "invite"}, strings.Fields(inv.args)...)...)
+		m := regexp.MustCompile(`\n  potluck ` + inv.words + ` '([^']+)'\n`).FindStringSubmatch(out)
+		if m == nil || !strings.Contains(out, "no potluck there yet: curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '"+m[1]+"'") {
+			t.Fatalf("invite %s:\n%s", inv.args, out)
+		}
+		if _, err := project.ParseJoinCode(m[1]); err != nil {
+			t.Fatalf("invite %s prints an invite that does not read: %v\n%s", inv.args, err, out)
+		}
+		line := regexp.MustCompile(`\n  where they run supper instead, the same as one line: (.*)\n`).FindStringSubmatch(out)
+		if line == nil || !slices.Equal(shellWords(t, line[1]), []string{"supper", "pool", inv.words, m[1]}) {
+			t.Fatalf("invite %s: no whole line in supper's words:\n%s", inv.args, out)
+		}
 	}
 	// host share, the old spelling a program runs, through the mount: the
 	// host's AfterLend runs once the machine is lent, and its skip flag is

@@ -64,6 +64,7 @@ behind, no url or secret leaked, verb timing, spend) always run. Groups run in t
 | `box-secrets` | box | the `secrets` verb's isolation: modes, a memory filesystem, no swap, the owner, a planted path, no value in env, argv or the driver's state, gone with the box; without the capability, refused | capability `box-secrets`; `--state-dir` (or config `state_dir`) for the state check |
 | `box-secrets-ops` | box | what the verb does: unset, an exec's own secrets beside the box's, atomic replace, refusals, conflict after release | capability `box-secrets` |
 | `box-authority` | box | from inside a box, a command reaches the pool's machine with only the credential a `potluck-token` grant delivers, and reaches nothing once it is unset | capability `box-secrets`; `--box-credential`, `--box-client`, `--box-want` |
+| `database` | box | an acquire naming a malformed database recipe (mutable image, empty manifest) is refused `bad_request` before any box is lent | capability `database-snapshot-v1` |
 | `persist` | box | kept disks: stop/start keep the disk, the deadline stops rather than wipes | capability `persist`, verbs `stop` and `start` |
 | `ended` | run | a script that exits 7 shows `ended` with that exit; release after the end | run flags |
 | `code` | run, box | the run's HEAD is exactly the commit sent and the tree is clean; a dirty `--worktree` does not leak in | `--repo` (HEAD proof); `--worktree`; for a box, `--ref --commit` |

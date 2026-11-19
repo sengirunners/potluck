@@ -435,3 +435,47 @@ func TestShareTemplatePullFailureKeepsTheDefault(t *testing.T) {
 		t.Errorf("the default's pull failed: %v", err)
 	}
 }
+
+// A macOS Tart image's floor (2 vCPU, 4096 MB) refuses a smaller --sizes, and
+// an image zm has no pin for is refused outright, both before anything is
+// pulled, in a real run: no tart pull, clone or set. The refusal names the
+// sizes that would do; a Linux pin's own floor still lends c1m2.
+func TestShareRefusesBeforeAnyPull(t *testing.T) {
+	const (
+		unknown = "ghcr.io/cirruslabs/macos-sequoia-base@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+		linux   = "reg.example/tart-linux@sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	)
+	withPins(t, DefaultPin{Layer: "tart", OS: "darwin", Image: pinB, MinCPU: 2, MinMemoryMB: 4096, MinHostMacOS: 13, Arch: "arm64"},
+		DefaultPin{Layer: "tart", OS: "linux", Image: linux, MinCPU: 1, MinMemoryMB: 2048, MinHostMacOS: 13, Arch: "arm64"})
+	check := func(images []string, sizes ...string) (ShareResult, []string, error) {
+		run := &fakeRunner{on: func(string) (Result, bool) { return ok(""), true }}
+		res, err := checkOn(context.Background(), run, ShareOptions{Report: macReport(), Images: images, Sizes: sizes, NamePrefix: "m"})
+		var touched []string
+		for _, c := range run.calls {
+			if strings.HasPrefix(c, "tart pull") || strings.HasPrefix(c, "tart clone") || strings.HasPrefix(c, "tart set") {
+				touched = append(touched, c)
+			}
+		}
+		return res, touched, err
+	}
+	for _, images := range [][]string{{pinB}, {linux, pinB}} {
+		for _, sizes := range [][]string{{"c1m2"}, {"c2m4", "c1m2"}} {
+			res, touched, err := check(images, sizes...)
+			if err == nil || !strings.Contains(err.Error(), "size c1m2 is too small for the image, which needs at least 2 vCPU and 4096 MB") ||
+				!strings.Contains(err.Error(), "--sizes c2m4,c2m8") || !strings.Contains(err.Error(), "nothing was downloaded") || len(touched) > 0 || len(res.Pulls) > 0 {
+				t.Errorf("%v %v: %v (ran %v)", images, sizes, err, touched)
+			}
+		}
+	}
+	if res, touched, err := check([]string{unknown}); err == nil || !strings.Contains(err.Error(), "unknown host compatibility") || len(touched) > 0 || len(res.Pulls) > 0 {
+		t.Errorf("an unfamiliar macOS digest: %v (ran %v)", err, touched)
+	}
+	// The same real run with a size that fits does pull: the refusals above
+	// came before the pull, not from a run that never reached one.
+	if res, touched, err := check([]string{pinB}, "c2m4"); err != nil || !slices.Contains(touched, "tart pull -- "+pinB) || len(res.Sizes) != 1 || !res.Sizes[0].Passed {
+		t.Errorf("c2m4 on the macOS pin: %v (ran %v)", err, touched)
+	}
+	if res, touched, err := check([]string{linux}, "c1m2"); err != nil || !slices.Contains(touched, "tart pull -- "+linux) || len(res.Sizes) != 1 || !res.Sizes[0].Passed {
+		t.Errorf("c1m2 on a Linux pin: %v (ran %v)", err, touched)
+	}
+}

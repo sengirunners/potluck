@@ -94,7 +94,10 @@ type Layer struct {
 	CLI            string `json:"cli,omitempty"`       // oci: docker, podman or nerdctl
 	SoftnetPath    string `json:"softnet_path,omitempty"`
 	SoftnetVersion string `json:"softnet_version,omitempty"`
-	Runtime        string `json:"runtime,omitempty"` // oci: kata or runsc, by name
+	// SoftnetBuild is the managed Softnet build in use (softnet.Builds), when
+	// Potluck pins the managed install.
+	SoftnetBuild string `json:"softnet_build,omitempty"`
+	Runtime      string `json:"runtime,omitempty"` // oci: kata or runsc, by name
 	// Runtimes is every isolating runtime this CLI can use, in preference order.
 	Runtimes []string `json:"runtimes,omitempty"`
 	Problems []string `json:"problems,omitempty"` // plain words
@@ -536,19 +539,8 @@ func detectTart(ctx context.Context, run Runner, f Facts, r *Report) Layer {
 		l.Problems = append(l.Problems, "Virtualization.framework is not available on this Mac")
 	}
 	detectMacOS(ctx, run, r, &l)
-	if path, ok := f.LookPath("tart"); !ok {
-		l.Problems = append(l.Problems, "tart is not installed: download tart.tar.gz from https://github.com/openai/tart/releases/latest, unpack it and link tart.app/Contents/MacOS/tart onto your PATH (no root needed; guide: https://tart.run/quick-start/)")
-	} else {
-		path = absoluteExecutable(path, &l)
-		l.CLI = path
-		if path != "" {
-			l.Version = executableVersion(ctx, run, path, "Tart", &l)
-		}
-		if l.Version != "" {
-			detectTartArguments(ctx, run, path, &l)
-		}
-	}
-	detectSoftnet(ctx, run, f, &l)
+	detectTartCLI(ctx, run, f, &l)
+	detectSoftnet(ctx, run, f, *r, &l)
 	if p, err := HostDefaultImage(*r, "tart"); err != nil {
 		l.Warnings = append(l.Warnings, err.Error())
 	} else if p.Name == SmallLinux {

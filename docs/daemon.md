@@ -63,6 +63,14 @@ driver pins as they are; it does the same when potluck has no home yet, so insta
 of another program refuses that home before it opens anything there. With `POTLUCK_HOME` naming such a home while
 its daemon is not running, potluck starts no daemon there and refuses the commands above.
 
+**A home has a term.** `<home>/term.json` (`kit/hometerm`) holds an epoch and a state: `serving`, `frozen` (stopped
+for a move to another home), `fenced` (a named successor serves at a higher epoch) or `standby` (a copy that serves
+only once promoted). A home with no file serves at epoch 0. A daemon starts only on a serving home, before it claims
+the home or opens its store; a term file it cannot read counts as not serving. The file is not on the list of files an off-site
+backup set holds (zm `offsite.HomeFile`, an allow-list), so a home restored on another machine does not take the old machine's
+term. Nothing in this build writes a
+term other than tests: the commands that move a home and promote a standby are planned on bead zm-d3cnz.
+
 ## project.toml and settings this build does not read
 
 `$POTLUCK_HOME/projects/<id>/project.toml` holds a project's own settings (`id`, `slug`, `name`, `paths`, `remotes`,

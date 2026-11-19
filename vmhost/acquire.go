@@ -19,14 +19,15 @@ import (
 
 func (d *drv) acquire(raw json.RawMessage) (any, error) {
 	var a struct {
-		RequestID string   `json:"request_id"`
-		TTL       *int     `json:"ttl_s"`
-		Ref       string   `json:"ref"`
-		Commit    string   `json:"commit"`
-		Script    string   `json:"script"`
-		Args      []string `json:"args"`
-		Image     *string  `json:"image"`
-		JITConfig *string  `json:"jit_config"`
+		Database  *protocol.Database `json:"database"`
+		RequestID string             `json:"request_id"`
+		TTL       *int               `json:"ttl_s"`
+		Ref       string             `json:"ref"`
+		Commit    string             `json:"commit"`
+		Script    string             `json:"script"`
+		Args      []string           `json:"args"`
+		Image     *string            `json:"image"`
+		JITConfig *string            `json:"jit_config"`
 		JITGuard  *struct {
 			Repo          string           `json:"repo"`
 			Events        []string         `json:"events"`
@@ -102,6 +103,9 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 	} else if a.Image != nil {
 		return nil, refuse("bad_request", "image is a box's choice")
 	}
+	if err := d.checkDatabase(a.Database, image, a.Persist, a.JITConfig != nil, a.Volumes); err != nil {
+		return nil, err
+	}
 	ttl := min(defaultTTL, d.cfg.TTLMax)
 	if a.TTL != nil {
 		ttl = *a.TTL
@@ -134,6 +138,9 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 					d.st.remove(o)
 					continue
 				}
+				if !sameDatabase(o.Database, a.Database) {
+					return refuse("bad_request", "request_id was used with a different database")
+				}
 				if o.JIT != (a.JITConfig != nil) || o.JITRepo != guardRepo || !slices.Equal(o.JITEvents, guardEvents) || o.JITOpenIfPrivate != guardOpen || !sameJITRun(o.JITRun, guardRun) {
 					return refuse("bad_request", "request_id %q was used with a different jit_config", a.RequestID)
 				}
@@ -162,7 +169,7 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 			return refuse("bad_request", "a %s box cannot hold a job for its secrets: it serves no box secrets (no %s capability)", os, protocol.CapJITGuardRun)
 		}
 		wa := warmAcquire{image: image, jit: a.JITConfig != nil, persist: a.Persist, volumes: len(a.Volumes) > 0, net: a.Net, ref: a.Ref, cmt: a.Commit}
-		if d.warmServes(wa) { // warm.go
+		if a.Database == nil && d.warmServes(wa) { // warm.go
 			if w, ok := d.takeWarm(a.RequestID, ttl, wa); ok {
 				r = w
 				d.fillWarm()
@@ -200,7 +207,7 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 			}
 		}
 		r = record{Handle: d.cfg.Kind + ":" + d.cfg.Target + "/" + id, Kind: d.cfg.Kind, Target: d.cfg.Target, Key: a.RequestID, ID: id,
-			State: stStarting, OS: os, VM: d.st.vmPrefixNew() + id, Image: image, Remote: d.cfg.Remote,
+			Database: a.Database, State: stStarting, OS: os, VM: d.st.vmPrefixNew() + id, Image: image, Remote: d.cfg.Remote,
 			Ref: a.Ref, Commit: a.Commit, Script: a.Script, Args: a.Args, TTL: ttl, Start: time.Now().UTC(),
 			Log: filepath.Join(d.st.dir, "logs", id+".log"), Config: d.rawConfig(), Net: a.Net, Volumes: vols}
 		if d.engine != nil {
@@ -248,6 +255,9 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 		if r, err = d.waitStarted(r.ID); err != nil {
 			return nil, err
 		}
+	}
+	if r.Database != nil && r.State != stReady {
+		return nil, refuse("conflict", "database box ended before it became ready")
 	}
 	return d.answer(r), nil
 }

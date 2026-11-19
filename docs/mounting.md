@@ -36,8 +36,9 @@ var ProgramCommands = []string{"daemon", "mcp", "status", "upgrade"}
   (`supper pool host stop`). The prefix's first word is the program's name: it starts the lines a command prints
   about itself (`supper: sent TERM`) and names the commands each program has of its own (`supper daemon
   --detach`). One exception: the commands `invite` prints for the friend who gets the code are the `potluck`
-  program's (`potluck join '<code>'`), since a friend's machine needs only Potluck, with the host's spelling
-  beside them (`friendCmd`, `friendNote` in `cli/pool.go`).
+  program's (`potluck join '<code>'`), since a friend's machine needs only Potluck, with the host's spelling of
+  the same command beside them, whole on one line (`supper pool join '<code>'`; `friendCmd`, `otherSpelling` in
+  `cli/pool.go`).
 - **JSON** and **Pool** read the host's own global flags. The commands define no persistent flags, so they sit
   under any parent without adding flags to it. Pool, when given, is applied to a copy of the client.
 - **Client** is the host's client for this machine's daemon and its client config, whose home the commands read and

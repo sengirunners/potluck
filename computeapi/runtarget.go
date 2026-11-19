@@ -279,6 +279,7 @@ type BindRunTargetRequest struct {
 // AcquireRunTargetRequest is POST /v0/run_targets/{target}/acquire. A run
 // names ref (a pushed branch or tag) and script; zm resolves the commit.
 type AcquireRunTargetRequest struct {
+	Database  string   `json:"database,omitempty"` // box: project-scoped database recipe
 	RequestID string   `json:"request_id"`
 	Actor     string   `json:"actor,omitempty"`
 	TTLS      int      `json:"ttl_s,omitempty"`
