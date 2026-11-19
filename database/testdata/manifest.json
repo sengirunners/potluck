@@ -4,7 +4,12 @@
   "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "inputs_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "snapshot_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-  "config_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "config_archives": {
+    "/etc/postgresql": {
+      "archive": "postgres-config.tar.gz",
+      "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  },
   "postgres_image": "postgres@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
   "agent_image": "agent@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
   "arch": "amd64",
@@ -14,9 +19,7 @@
   "extensions": {
     "pgtap": "1.3.0"
   },
-  "inputs": {
-    "supabase/migrations/00001_init.sql": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  },
+  "migration_versions_sha256": "3737c7bac6c62bea048cb5e0c11766a382c0f2772aa9c48b07807f404a721b6a",
   "runtime": {
     "bindir": "/nix/postgres/bindir",
     "libdir": "/nix/postgres/libdir",

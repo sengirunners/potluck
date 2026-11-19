@@ -28,7 +28,19 @@ The image must also be lent by the chosen box binding, pinned to that same
 immutable digest. A binding that does not lend it refuses before it makes
 anything, so placement asks the next database-capable binding. Its `/opt/potluck-db/manifest.json` and `pgdata.tar.gz` follow
 `potluck-postgres-snapshot-v1`. It contains the PostgreSQL runtime under `/nix`
-and `/usr/lib/postgresql`, and its configuration under `/etc/postgresql`.
+and `/usr/lib/postgresql`, and its configuration under the roots its manifest's
+`config_archives` names: `/etc/postgresql`, and siblings such as Supabase's
+`/etc/postgresql-custom`. Each entry maps a root to the archive the producer
+built it from and that archive's sha256:
+
+```json
+"config_archives": {
+  "/etc/postgresql": {"archive": "postgres-config.tar.gz", "sha256": "<64 hex>"},
+  "/etc/postgresql-custom": {"archive": "postgres-custom-config.tar.gz", "sha256": "<64 hex>"}
+}
+```
+
+Every file in `config_files` must lie under `pgdata_path` or one of these roots.
 `manifest.project` identifies the source repository; the recipe belongs to the
 project containing this configuration. A pool project can therefore lend an
 owner-approved snapshot of a different source repository.
@@ -48,8 +60,12 @@ Git base and dependency layers. No volume or dependency mount may overlap
 The driver makes a fresh private copy of the complete, cleanly stopped PGDATA.
 It checks the exact manifest and snapshot checksums, architecture, control file,
 server version, migration ledger and extension versions before reporting ready.
-The ledger must match the migration filenames in the manifest's inputs, not
-merely their count. Configuration is relocated into the private guest directory.
+The ledger must match the manifest's `migration_count` and
+`migration_versions_sha256`, not merely the count. Each configuration root is copied into the private guest directory
+(`/etc/postgresql` to `config`, `/etc/postgresql-custom` to `config-custom`),
+and the configuration sources' references to PGDATA and to those roots are
+rewritten to the private copies, whole path names only (`/opt/etc/postgresql`
+is left alone).
 Postgres listens only on guest loopback, with a random password and no published
 port. The image must supply Python 3.12 or newer and the runtime identified by
 the manifest. A missing prerequisite refuses the acquire.
@@ -59,12 +75,18 @@ service runs:
 
 - The manifest's `extensions` must list `pgtap`, and must equal the snapshot's
   `pg_extension` versions exactly.
-- The migration ledger is read from `supabase_migrations.schema_migrations`. Its
-  versions must equal the filename prefixes (before the first `_`) of the
-  manifest's `supabase/migrations/*.sql` inputs; other inputs do not count.
+- The migration ledger is read from `supabase_migrations.schema_migrations`.
+  `migration_versions_sha256` is the sha256 of its versions in byte order, each
+  followed by a newline (`printf '%s\n' <versions> | LC_ALL=C sort | sha256sum`),
+  and `migration_count` is how many there are. The manifest therefore stays the
+  same size however many migrations a project has; `inputs_sha256` identifies the
+  producer's inputs, which the manifest need not list.
+- The postgres role's random password is set as the cluster's bootstrap
+  superuser (Supabase's `postgres` role is not a superuser).
 - The box's guest user must not be root; the bootstrap refuses uid 0.
 - The manifest is at most 256 KiB, because the driver echoes the recipe in each
-  acquire answer and a remote host's answer has a size cap.
+  acquire answer and a remote host's answer has a size cap. A manifest must
+  not grow with the project: list no per-file inventory in it.
 
 The daemon refuses a recipe whose manifest breaks a rule it can check itself, naming that rule.
 

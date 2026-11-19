@@ -34,6 +34,24 @@ func TestSnapshotManifestAndProjectScope(t *testing.T) {
 		"oversized manifest": func(d *protocol.Database) {
 			d.Manifest = strings.Repeat(" ", database.ManifestMax) + d.Manifest
 		},
+		"undeclared config root": func(d *protocol.Database) {
+			d.Manifest = strings.Replace(d.Manifest, `"sources": [`, `"sources": ["/etc/postgresql-custom/supautils.conf",`, 1)
+		},
+		"config root outside /etc/postgresql": func(d *protocol.Database) {
+			d.Manifest = strings.Replace(d.Manifest, `"/etc/postgresql": {`, `"/etc/postgresql": {"archive": "a.tar.gz", "sha256": "`+strings.Repeat("d", 64)+`"}, "/etc": {`, 1)
+		},
+		"config archive without sha256": func(d *protocol.Database) {
+			d.Manifest = strings.Replace(d.Manifest, `"sha256": "dddd`, `"sha256": "xddd`, 1)
+		},
+		"config root is PGDATA": func(d *protocol.Database) {
+			d.Manifest = strings.ReplaceAll(d.Manifest, `"pgdata_path": "/var/lib/postgresql/data"`, `"pgdata_path": "/etc/postgresql"`)
+		},
+		"PGDATA inside a config root": func(d *protocol.Database) {
+			d.Manifest = strings.ReplaceAll(d.Manifest, `"pgdata_path": "/var/lib/postgresql/data"`, `"pgdata_path": "/etc/postgresql/data"`)
+		},
+		"no ledger digest": func(d *protocol.Database) {
+			d.Manifest = strings.Replace(d.Manifest, `"migration_versions_sha256": "3737`, `"migration_versions_sha256": "x737`, 1)
+		},
 		"bad runtime": func(d *protocol.Database) {
 			d.Manifest = strings.ReplaceAll(d.Manifest, "/nix/postgres/bindir", "/tmp/bin")
 		},
@@ -45,6 +63,13 @@ func TestSnapshotManifestAndProjectScope(t *testing.T) {
 				t.Fatal("accepted invalid recipe")
 			}
 		})
+	}
+	// A source under a declared sibling root, as Supabase's /etc/postgresql-custom, is packaged.
+	custom := identity
+	custom.Manifest = strings.Replace(strings.Replace(identity.Manifest, `"sources": [`, `"sources": ["/etc/postgresql-custom/supautils.conf",`, 1),
+		`"config_archives": {`, `"config_archives": {"/etc/postgresql-custom": {"archive": "postgres-custom-config.tar.gz", "sha256": "`+strings.Repeat("d", 64)+`"},`, 1)
+	if _, err := database.Check(&custom); err != nil {
+		t.Fatalf("sibling configuration root: %v", err)
 	}
 	// A refusal names the rule, so an owner can fix the manifest.
 	noPGTAP := identity

@@ -30,7 +30,12 @@ def run(args, data=None):
     return result.stdout.strip()
 
 
-def start(artifact, configuration, home, manifest_digest):
+# A configuration root the image may carry; database/manifest.go's ConfigRootRE is the same rule.
+CONFIG_ROOT = re.compile(r'/etc/postgresql(-[a-z0-9]+)?')
+
+
+def start(artifact, system, home, manifest_digest):
+    # system is the guest's /: the manifest's configuration roots are read beneath it.
     require(os.getuid() != 0, 'database needs an unprivileged guest user')
     manifest = artifact / 'manifest.json'
     require(sha(manifest) == manifest_digest, 'database manifest checksum mismatch')
@@ -57,16 +62,23 @@ def start(artifact, configuration, home, manifest_digest):
     require(re.search(r'^Database cluster state:\s+shut down\s*$', control, re.M), 'snapshot is not cleanly stopped')
     old_data = m['pgdata_path']
     require(old_data.startswith('/') and '..' not in old_data.split('/'), 'invalid original PGDATA')
-    config = root / 'config'
-    shutil.copytree(configuration, config, symlinks=False)
+    # Each configuration root is copied whole: /etc/postgresql to config, /etc/postgresql-custom to config-custom.
+    roots = {}
+    for original in sorted(m.get('config_archives') or {}):
+        require(CONFIG_ROOT.fullmatch(original), 'database configuration outside packaged roots')
+        roots[original] = root / ('config' + original[len('/etc/postgresql'):])
+        shutil.copytree(system / original.lstrip('/'), roots[original], symlinks=False)
     # PostgreSQL includes need not end in .conf. Relocate the producer's
     # complete source inventory, and the cluster's automatic settings file.
     def relocated(original):
-        if original.startswith(old_data + '/'):
-            return data / original[len(old_data) + 1:]
-        if original.startswith('/etc/postgresql/'):
-            return config / original[len('/etc/postgresql/'):]
+        for old, new in [(old_data, data), *roots.items()]:
+            if original.startswith(old + '/'):
+                return new / original[len(old) + 1:]
         raise RuntimeError('database configuration outside packaged roots')
+    # One pass, longest name first, and only whole path components: /etc/postgresql
+    # never rewrites inside /etc/postgresql-custom, and a rewritten path is never rewritten again.
+    moves = {old_data: str(data), **{old: str(new) for old, new in roots.items()}}
+    pattern = re.compile(r'(?<![A-Za-z0-9_./-])(' + '|'.join(re.escape(old) for old in sorted(moves, key=len, reverse=True)) + r')(?![A-Za-z0-9_.-])')
     sources = set(m['config_files']['sources'] or [])
     sources.add(m['config_files']['config'])
     if (data / 'postgresql.auto.conf').exists():
@@ -74,8 +86,7 @@ def start(artifact, configuration, home, manifest_digest):
     for original in sources:
         path = relocated(original)
         require(path.is_file(), 'missing database configuration source')
-        text = path.read_text().replace(old_data, str(data)).replace('/etc/postgresql', str(config))
-        path.write_text(text)
+        path.write_text(pattern.sub(lambda match: moves[match.group(1)], path.read_text()))
     config_file = relocated(m['config_files']['config'])
     hba = root / 'pg_hba.conf'
     hba.write_text('local all all trust\nhost all all 127.0.0.1/32 scram-sha-256\n')
@@ -97,15 +108,21 @@ def start(artifact, configuration, home, manifest_digest):
     def sql(query):
         return run(psql, query)
     require(sql('show server_version;') == m['postgres_version'], 'database server version mismatch')
-    versions = sql('select version from supabase_migrations.schema_migrations order by version;').splitlines()
-    expected = sorted(path.split('/')[-1].split('_')[0] for path in m['inputs']
-                      if re.fullmatch(r'supabase/migrations/[^/]+\.sql', path))
-    require(expected and len(expected) == len(set(expected)) and versions == expected and
-            len(versions) == m['migration_count'], 'database migration ledger mismatch')
+    # The producer records a digest of its ledger, not one entry per migration file:
+    # the versions in byte order, each followed by a newline.
+    versions = sorted(sql('select version from supabase_migrations.schema_migrations;').splitlines())
+    ledger = hashlib.sha256(''.join(v + '\n' for v in versions).encode()).hexdigest()
+    require(versions and len(versions) == len(set(versions)) == m['migration_count'] and
+            ledger == m['migration_versions_sha256'], 'database migration ledger mismatch')
     extensions = json.loads(sql("select coalesce(jsonb_object_agg(extname, extversion), '{}'::jsonb) from pg_extension;"))
     require(extensions == m['extensions'], 'database extension versions mismatch')
     password = secrets.token_hex(32)
-    sql("alter role postgres password '" + password + "';")
+    # Supabase's postgres role is not a superuser and cannot set its own password;
+    # the cluster's bootstrap superuser (oid 10) can.
+    admin = sql('select rolname from pg_roles where oid = 10;')
+    require(re.fullmatch(r'[a-z_][a-z0-9_]{0,62}', admin), 'database superuser not found')
+    run([str(bindir / 'psql'), '-XAt', '-v', 'ON_ERROR_STOP=1', '-h', str(socket), '-U', admin, '-d', 'postgres'],
+        "alter role postgres password '" + password + "';")
     url = 'postgresql://postgres:' + password + '@127.0.0.1:5432/postgres'
     # Prove the application's connection path before making its credential visible.
     env = dict(os.environ, PGPASSWORD=password)
@@ -118,7 +135,7 @@ def start(artifact, configuration, home, manifest_digest):
 
 if __name__ == '__main__':
     try:
-        start(pathlib.Path('/opt/potluck-db'), pathlib.Path('/etc/postgresql'), pathlib.Path.home(), sys.argv[1])
+        start(pathlib.Path('/opt/potluck-db'), pathlib.Path('/'), pathlib.Path.home(), sys.argv[1])
     except Exception as error:
         # Never print subprocess output: a database can echo credentials.
         print('database snapshot: ' + str(error), file=sys.stderr)
