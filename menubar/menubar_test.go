@@ -8,6 +8,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/protocol"
+	"github.com/sengirunners/potluck/vmhost"
 )
 
 func box(name, stateDir, os string, cpu, slots int, live, stopped []string) computeapi.RunTargetView {
@@ -28,7 +29,7 @@ func TestLend(t *testing.T) {
 	got := Lend([]computeapi.RunTargetView{
 		box("c2", "", "linux", 2, 2, []string{"a"}, nil),
 		box("c3", "", "linux", 3, 2, []string{"b", "c"}, []string{"c"}),
-	})
+	}, vmhost.HostLend{})
 	if got.Lent != 6 || got.InUse != 5 || got.Jobs != 2 || len(got.Unknown) != 0 {
 		t.Errorf("shared slots: %+v", got)
 	}
@@ -45,7 +46,7 @@ func TestLend(t *testing.T) {
 		box("mac", "", "macos", 4, 1, []string{"m"}, nil),
 		box("oci", "/var/lib/p", "linux", 1, 0, nil, nil), // no slots: one
 		failed, remote, run,
-	})
+	}, vmhost.HostLend{})
 	if got.Lent != 4+4+1 || got.InUse != 4 || got.Jobs != 1 || !slices.Equal(got.Unknown, []string{"down"}) {
 		t.Errorf("pools: %+v", got)
 	}

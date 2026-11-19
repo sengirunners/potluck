@@ -13,6 +13,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
+	"github.com/sengirunners/potluck/hostmem"
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/menubar"
@@ -51,10 +52,13 @@ starts the daemon.`,
 			}
 			m := st.Menu
 			lines := []string{m.Title}
-			for _, s := range []string{m.Detail, m.Note, m.Cores} {
+			for _, s := range []string{m.Detail, m.Note, m.Cores, m.Memory} {
 				if s != "" {
 					lines = append(lines, s)
 				}
+			}
+			for _, d := range m.Dials {
+				lines = append(lines, d.Label)
 			}
 			sw := fmt.Sprintf("host switch: %s (%s)", st.Mode, st.State)
 			if st.Refused != nil && st.State == protocol.HostAccepting {
@@ -143,6 +147,20 @@ func (a *app) hostFacts(ctx context.Context) menubar.Facts {
 	}
 	if err != nil {
 		f.HostErr = err.Error()
+	}
+	// The dials as the drivers read them (the same owner), the memory now,
+	// and the disk boxes live on (Tart's and the state directories are in
+	// the home).
+	if f.Lend, err = lendNow(owner); err != nil {
+		f.LendErr = err.Error()
+	}
+	mem := hostmem.Local(ctx)
+	f.Memory, f.MemoryMB = &mem, hostprobe.SystemFacts{}.RAMMB()
+	f.DiskFreeGB = -1
+	if home, err := os.UserHomeDir(); err == nil {
+		if free, total, err := hostprobe.DiskGB(home); err == nil {
+			f.DiskFreeGB, f.DiskTotalGB = free, total
+		}
 	}
 	if cfg, err := a.loadClient(); err == nil {
 		f.Background = hostBackground(cfg.Home)

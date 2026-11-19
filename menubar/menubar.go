@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/hostmem"
 	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/protocol"
+	"github.com/sengirunners/potluck/vmhost"
 )
 
 // Facts are what the menu is made from.
@@ -44,6 +46,17 @@ type Facts struct {
 	Background *Background
 	// Setup is what the setup checklist is made from.
 	Setup SetupFacts
+	// Memory is the memory pressure and swap now (nil: not read);
+	// MemoryMB the machine's memory.
+	Memory   *hostmem.Reading
+	MemoryMB int64
+	// Lend is the lender's dials (potluck host lend); LendErr why they
+	// cannot be read ("" when they can), which holds new work.
+	Lend    vmhost.HostLend
+	LendErr string
+	// DiskFreeGB and DiskTotalGB are the disk boxes live on (-1 and 0: not
+	// read).
+	DiskFreeGB, DiskTotalGB float64
 }
 
 // Background is a host run in the background (host --detach): running
@@ -55,26 +68,41 @@ type Background struct {
 
 // Lending is how much of this machine is lent and in use.
 type Lending struct {
-	// Lent is the most cores the shared sizes may use at once: per driver
-	// state directory and OS (which share their slots), the slots times the
-	// largest size's cores.
-	Lent int `json:"lent"`
+	// Shared is the most cores the shared sizes may use at once: per
+	// driver state directory and OS (which share their slots), the slots
+	// times the largest size's cores. Lent is that with the lender's cores
+	// dial, which bounds each of those groups.
+	Shared int `json:"shared"`
+	Lent   int `json:"lent"`
 	// InUse is the cores held by running boxes; Jobs how many those are.
 	InUse int `json:"in_use"`
 	Jobs  int `json:"jobs"`
+	// MemoryShared, MemoryLent and MemoryInUse are the same for memory, in
+	// MiB.
+	MemoryShared int `json:"memory_shared_mb"`
+	MemoryLent   int `json:"memory_lent_mb"`
+	MemoryInUse  int `json:"memory_in_use_mb"`
+	// Groups is how many state directory and OS groups there are: a dial
+	// bounds each.
+	Groups int `json:"groups"`
 	// Sizes is how many sizes this machine shares, answered or not.
 	Sizes int `json:"sizes"`
 	// Unknown names the shared sizes whose driver did not answer, so their
 	// boxes are not counted.
 	Unknown []string `json:"unknown,omitempty"`
+	// minCPU and minMemory are the smallest size's: a dial's step; sizes
+	// are the sizes that answered, for the choices too small for some.
+	minCPU, minMemory int
+	sizes             []computeapi.RunTargetSize
 }
 
-// Lend sums the bindings. A binding with no size (not a box binding) lends
-// nothing countable; one whose driver gives no slots counts as one slot.
-func Lend(targets []computeapi.RunTargetView) Lending {
+// Lend sums the bindings under the lender's dials. A binding with no size
+// (not a box binding) lends nothing countable; one whose driver gives no
+// slots counts as one slot.
+func Lend(targets []computeapi.RunTargetView, dial vmhost.HostLend) Lending {
 	var out Lending
 	type pool struct {
-		slots, cpu int
+		slots, cpu, mem int
 	}
 	pools := map[string]*pool{}
 	var order []string
@@ -101,13 +129,33 @@ func Lend(targets []computeapi.RunTargetView) Lending {
 		}
 		p.slots = max(p.slots, slots)
 		p.cpu = max(p.cpu, size.CPU)
+		p.mem = max(p.mem, size.MemoryMB)
+		out.sizes = append(out.sizes, *size)
+		if size.CPU > 0 && (out.minCPU == 0 || size.CPU < out.minCPU) {
+			out.minCPU = size.CPU
+		}
+		if size.MemoryMB > 0 && (out.minMemory == 0 || size.MemoryMB < out.minMemory) {
+			out.minMemory = size.MemoryMB
+		}
 		running := max(len(t.Live)-len(t.Stopped), 0)
 		out.Jobs += running
 		out.InUse += running * size.CPU
+		out.MemoryInUse += running * size.MemoryMB
+	}
+	bound := func(n, limit int) int {
+		if limit > 0 {
+			return min(n, limit)
+		}
+		return n
 	}
 	for _, k := range order {
-		out.Lent += pools[k].slots * pools[k].cpu
+		p := pools[k]
+		out.Shared += p.slots * p.cpu
+		out.Lent += bound(p.slots*p.cpu, dial.Cores)
+		out.MemoryShared += p.slots * p.mem
+		out.MemoryLent += bound(p.slots*p.mem, dial.MemoryMB)
 	}
+	out.Groups = len(order)
 	return out
 }
 
@@ -131,7 +179,12 @@ type Menu struct {
 	Note   string `json:"note,omitempty"`
 	// Cores is one rune per core: '●' in use, '○' lent and free, '·' kept.
 	Cores string `json:"cores"`
-	Items []Item `json:"items"`
+	// Memory is the memory pressure line ("" when not read).
+	Memory string `json:"memory,omitempty"`
+	Items  []Item `json:"items"`
+	// Dials are the lender's dials, each a submenu of choices, below the
+	// switch.
+	Dials []Dial `json:"dials,omitempty"`
 	// Windows are items below the switch that each open a window: the
 	// app runs Args and draws the JSON answer as the window named by ID
 	// ("jobs": a JobsView).
@@ -198,7 +251,7 @@ func Build(f Facts) Status {
 	if loc == nil {
 		loc = time.UTC
 	}
-	l := Lend(f.Targets)
+	l := Lend(f.Targets, f.Lend)
 	st := Status{Cores: f.Cores, Lending: l, Mode: protocol.HostUnreadable, State: protocol.HostHolding, Background: f.Background}
 	if f.Host != nil {
 		st.Mode, st.State, st.Until = f.Host.Mode, f.Host.State, f.Host.Until
@@ -275,7 +328,13 @@ func Build(f Facts) Status {
 	if u := clock(st.Until, loc); u != "" && st.Mode != protocol.HostAuto {
 		m.Note = join(m.Note, "until "+u+", then back to your rules")
 	}
+	if f.LendErr != "" {
+		m.Note = join(m.Note, "no new jobs start until your limits can be read: "+f.LendErr)
+	} else if n := overNote(l); n != "" && f.Daemon == "" {
+		m.Note = join(m.Note, n)
+	}
 	m.Cores = dots(f.Cores, lent, l.InUse)
+	m.Memory = memoryLine(f, l)
 	keep := st.Mode == protocol.HostAuto || st.Mode == protocol.HostOpen
 	m.Items = []Item{
 		item("keep", "Keep lending", "", keep, protocol.HostAuto),
@@ -287,6 +346,9 @@ func Build(f Facts) Status {
 	}
 	if stop := &m.Items[2]; stop.Args != nil && l.Jobs > 0 {
 		stop.Confirm = fmt.Sprintf("End %s now? Their work is lost.", plural(l.Jobs, "running job"))
+	}
+	if f.Daemon == "" && f.LendErr == "" {
+		m.Dials = dials(f, l)
 	}
 	m.Windows = []Item{{ID: "jobs", Label: "Jobs this Mac ran…", Sub: "when, how long, counts and electricity",
 		Args: []string{"--json", "host", "jobs"}}}

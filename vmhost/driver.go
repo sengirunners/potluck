@@ -90,14 +90,28 @@ type drv struct {
 	budgetErr     error
 }
 
-// free counts the open slots for guests of os. Live records of this state
-// directory hold slots from clone to delete; for macOS, any other running
-// macOS VM on the host counts too (Apple's cap is per host). Lock held.
+// free counts the open slots for guests of os (room's count).
 func (d *drv) free(os string) (int, error) {
+	n, _, err := d.room(os)
+	return n, err
+}
+
+// room counts the open slots for guests of os, and, when there are none,
+// why in words a refusal gives. Live records of this state directory hold
+// slots from clone to delete; for macOS, any other running macOS VM on the
+// host counts too (Apple's cap is per host). The binding's own host limits
+// and the lender's dials (lend.go) bound the cores and memory those records
+// hold together. Lock held.
+func (d *drv) room(os string) (int, string, error) {
 	budget, err := d.requestedHostBudget()
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
+	lend, err := d.cfg.lend()
+	if err != nil {
+		return 0, "", err
+	}
+	cpuLimit, memLimit := lowest(d.cfg.HostCPULimit, lend.Cores), lowest(d.cfg.HostMemoryLimit, lend.MemoryMB)
 	usedCPU, usedMemory := 0, 0
 	used, ours := 0, map[string]bool{}
 	for _, r := range d.st.all() {
@@ -106,18 +120,20 @@ func (d *drv) free(os string) (int, error) {
 			name := hostParentName(d.st.dir, r.VM, r.Starts)
 			counts = !(&ownedHostParent{path: filepath.Join(hostCgroupRoot, "potluck.slice", name)}).empty()
 		}
-		if counts && (d.cfg.HostCPULimit > 0 || d.cfg.HostMemoryLimit > 0) {
+		if counts && (cpuLimit > 0 || memLimit > 0) {
 			b := r.HostBudget
 			if b == nil {
 				if ociKataRuntime(r.Config["oci_runtime"]) || r.Config["oci_host_profile"] != "" {
-					return 0, fmt.Errorf("a live bounded OCI run has no immutable host allocation")
+					return 0, "", fmt.Errorf("a live bounded OCI run has no immutable host allocation")
 				}
 				cpu, _ := strconv.Atoi(r.Config["cpu"])
 				mem, _ := strconv.Atoi(r.Config["memory"])
 				b = &hostBudget{cpu, mem}
 			}
-			if b.CPU <= 0 || b.MemoryMiB <= 0 {
-				return 0, fmt.Errorf("a live run has no verified host allocation")
+			// A binding's own host limits need both; a dial only what it bounds.
+			bounded := d.cfg.HostCPULimit > 0 || d.cfg.HostMemoryLimit > 0
+			if (bounded || cpuLimit > 0) && b.CPU <= 0 || (bounded || memLimit > 0) && b.MemoryMiB <= 0 {
+				return 0, "", fmt.Errorf("a live run has no verified host allocation")
 			}
 			usedCPU += b.CPU
 			usedMemory += b.MemoryMiB
@@ -130,7 +146,7 @@ func (d *drv) free(os string) (int, error) {
 	if os == "darwin" {
 		vs, err := d.vm.List()
 		if err != nil {
-			return 0, err
+			return 0, "", err
 		}
 		for _, v := range vs {
 			if v.Running && v.Local && !ours[v.Name] {
@@ -141,19 +157,66 @@ func (d *drv) free(os string) (int, error) {
 		}
 	}
 	free := max(0, d.cfg.slots(os)-used)
-	if d.cfg.HostCPULimit > 0 {
-		if budget.CPU <= 0 {
-			return 0, fmt.Errorf("missing host CPU budget")
-		}
-		free = min(free, max(0, (d.cfg.HostCPULimit-usedCPU)/budget.CPU))
+	why := ""
+	if free == 0 {
+		why = fmt.Sprintf("%s (%d in use)", protocol.NoFreeSlot(os), d.cfg.slots(os))
 	}
-	if d.cfg.HostMemoryLimit > 0 {
-		if budget.MemoryMiB <= 0 {
-			return 0, fmt.Errorf("missing host memory budget")
+	// Each limit in turn: the lender's dial names itself when it is the one
+	// that leaves no room.
+	for _, l := range []struct {
+		limit, used, need int
+		dial              bool
+		what              string
+	}{
+		{cpuLimit, usedCPU, budget.CPU, lend.Cores > 0 && lend.Cores == cpuLimit, "cores"},
+		{memLimit, usedMemory, budget.MemoryMiB, lend.MemoryMB > 0 && lend.MemoryMB == memLimit, "memory"},
+	} {
+		if l.limit <= 0 {
+			continue
 		}
-		free = min(free, max(0, (d.cfg.HostMemoryLimit-usedMemory)/budget.MemoryMiB))
+		if l.need <= 0 {
+			return 0, "", fmt.Errorf("missing host %s budget", map[string]string{"cores": "CPU", "memory": "memory"}[l.what])
+		}
+		if l.dial && l.need > l.limit { // waiting never lifts it: no slot words
+			return 0, "", refuse("unavailable", "this size needs %s, and the machine's owner lends only %s now", amount(l.what, l.need), amount(l.what, l.limit))
+		}
+		n := max(0, (l.limit-l.used)/l.need)
+		if n < free || (n == 0 && why == "") {
+			free = n
+			// NoFreeSlot first: waiting lifts it (computeapi FullNow).
+			if n == 0 && l.dial {
+				why = fmt.Sprintf("%s: the machine's owner lends %s now, and running boxes hold %s", protocol.NoFreeSlot(os), amount(l.what, l.limit), amount(l.what, l.used))
+			} else if n == 0 {
+				why = fmt.Sprintf("%s: this host's %s limit is reached (%s of %s in use)", protocol.NoFreeSlot(os), l.what, amount(l.what, l.used), amount(l.what, l.limit))
+			}
+		}
 	}
-	return free, nil
+	return free, why, nil
+}
+
+// lowest is the stricter of two limits, where 0 is none.
+func lowest(a, b int) int {
+	switch {
+	case a <= 0:
+		return b
+	case b <= 0:
+		return a
+	}
+	return min(a, b)
+}
+
+// amount is n cores, or n MiB of memory, in words.
+func amount(what string, n int) string {
+	if what == "cores" {
+		if n == 1 {
+			return "1 core"
+		}
+		return fmt.Sprintf("%d cores", n)
+	}
+	if n%1024 == 0 {
+		return fmt.Sprintf("%d GB of memory", n/1024)
+	}
+	return fmt.Sprintf("%.1f GB of memory", float64(n)/1024)
 }
 
 func (d *drv) describe() map[string]any {
@@ -181,8 +244,9 @@ func (d *drv) describe() map[string]any {
 		why = err.Error()
 	} else {
 		var free int
+		full := ""
 		_ = d.st.locked(func() error {
-			free, err = d.free(os)
+			free, full, err = d.room(os)
 			n, _ := d.warmLive() // an acquire takes a warm box, or its slot (warm.go)
 			free += n
 			return err
@@ -195,7 +259,7 @@ func (d *drv) describe() map[string]any {
 		case err != nil:
 			why = err.Error()
 		case free == 0:
-			why = fmt.Sprintf("%s (%d in use)", protocol.NoFreeSlot(os), d.cfg.slots(os))
+			why = full
 		}
 	}
 	h := d.cfg.host() // hostmode.go

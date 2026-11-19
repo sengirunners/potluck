@@ -20,6 +20,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/conformance/refdriver"
+	"github.com/sengirunners/potluck/hostmem"
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/api"
@@ -53,6 +54,10 @@ func TestMain(m *testing.M) {
 	// Nor read or write this machine's host switch: one in memory stands in.
 	sw := &memSwitch{}
 	hostNow, hostSet = sw.now, sw.set
+	// Nor its lender's dials, nor its memory.
+	ml := &memLend{}
+	lendNow, lendSet = ml.now, ml.set
+	hostmem.Local = func(context.Context) hostmem.Reading { return hostmem.Reading{Pressure: hostmem.Normal} }
 	os.Exit(m.Run())
 }
 

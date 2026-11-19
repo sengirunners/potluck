@@ -111,55 +111,78 @@ func (o override) endedAt(now time.Time) time.Time {
 // its directory: none is {mode: auto}; anything it cannot trust is an error,
 // which refuses new work.
 func readOverride(path string, owner int) (override, error) {
-	auto := override{Mode: modeAuto}
-	fi, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		// No file is auto, unless others could have removed one.
-		if di, derr := os.Lstat(filepath.Dir(path)); derr == nil {
-			if err := ownersOnly(filepath.Dir(path), di, true, owner); err != nil {
-				return override{}, err
-			}
-		} else if !errors.Is(derr, os.ErrNotExist) {
-			return override{}, derr
-		}
-		return auto, nil
-	}
+	b, ok, err := readOwned(path, owner)
 	if err != nil {
 		return override{}, err
 	}
-	if err := ownersOnly(path, fi, false, owner); err != nil {
-		return override{}, err
+	if !ok {
+		return override{Mode: modeAuto}, nil
 	}
-	if di, err := os.Lstat(filepath.Dir(path)); err != nil {
-		return override{}, err
-	} else if err := ownersOnly(filepath.Dir(path), di, true, owner); err != nil {
-		return override{}, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return override{}, err
-	}
-	defer f.Close()
-	if ofi, err := f.Stat(); err != nil || !os.SameFile(fi, ofi) {
-		return override{}, fmt.Errorf("%s changed while it was read", path)
-	}
-	b, err := io.ReadAll(io.LimitReader(f, 4<<10))
-	if err != nil {
-		return override{}, err
-	}
-	dec := json.NewDecoder(strings.NewReader(string(b)))
-	dec.DisallowUnknownFields()
 	var o override
-	if err := dec.Decode(&o); err != nil {
-		return override{}, fmt.Errorf("%s: %v", path, err)
-	}
-	if dec.More() {
-		return override{}, fmt.Errorf("%s: more than one JSON value", path)
+	if err := decodeOne(path, b, &o); err != nil {
+		return override{}, err
 	}
 	if err := o.check(); err != nil {
 		return override{}, fmt.Errorf("%s: %v", path, err)
 	}
 	return o, nil
+}
+
+// readOwned reads a host-wide file the host's owner writes (the override,
+// the lender's dials in lend.go): owner (or root) must own it and its
+// directory, and no one else may write either. ok is false when there is no
+// file and the directory, if any, is the owner's: others could not have
+// removed one. Anything it cannot trust is an error.
+func readOwned(path string, owner int) (b []byte, ok bool, err error) {
+	fi, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if di, derr := os.Lstat(filepath.Dir(path)); derr == nil {
+			if err := ownersOnly(filepath.Dir(path), di, true, owner); err != nil {
+				return nil, false, err
+			}
+		} else if !errors.Is(derr, os.ErrNotExist) {
+			return nil, false, derr
+		}
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if err := ownersOnly(path, fi, false, owner); err != nil {
+		return nil, false, err
+	}
+	if di, err := os.Lstat(filepath.Dir(path)); err != nil {
+		return nil, false, err
+	} else if err := ownersOnly(filepath.Dir(path), di, true, owner); err != nil {
+		return nil, false, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	if ofi, err := f.Stat(); err != nil || !os.SameFile(fi, ofi) {
+		return nil, false, fmt.Errorf("%s changed while it was read", path)
+	}
+	b, err = io.ReadAll(io.LimitReader(f, 4<<10))
+	if err != nil {
+		return nil, false, err
+	}
+	return b, true, nil
+}
+
+// decodeOne decodes b, path's content, as exactly one JSON value with no
+// unknown fields.
+func decodeOne(path string, b []byte, v any) error {
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("%s: %v", path, err)
+	}
+	if dec.More() {
+		return fmt.Errorf("%s: more than one JSON value", path)
+	}
+	return nil
 }
 
 // ownersOnly refuses a symlink, a file that is not regular (or, with dir, a

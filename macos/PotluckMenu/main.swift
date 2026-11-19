@@ -1,6 +1,6 @@
 // Potluck's menu bar item (docs/menubar.md). It draws what
 // `potluck --json host status` answers and, on a click, runs the item's
-// arguments (`potluck host set <mode>`), or opens a window drawn from what
+// arguments (`potluck host set <mode>`, or a dial's `potluck host lend ...`), or opens a window drawn from what
 // they answer (`potluck --json host jobs`). Every word and rule is the potluck
 // command's (package menubar); this file only draws and runs.
 
@@ -15,12 +15,21 @@ struct Item: Decodable {
     let confirm: String?
 }
 
+/// One of the lender's dials: a submenu of choices (`potluck host lend`).
+struct Dial: Decodable {
+    let id: String
+    let label: String
+    let choices: [Item]
+}
+
 struct Menu: Decodable {
     let title: String
     let detail: String
     let note: String?
     let cores: String
+    let memory: String?
     let items: [Item]
+    let dials: [Dial]?
     let windows: [Item]?
 }
 
@@ -231,19 +240,20 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !m.detail.isEmpty { menu.addItem(line(m.detail, size: 12, color: .secondaryLabelColor)) }
             if let n = m.note, !n.isEmpty { menu.addItem(line(n, size: 11, color: .secondaryLabelColor)) }
             if !m.cores.isEmpty { menu.addItem(line(m.cores, size: 11, color: .secondaryLabelColor, mono: true)) }
+            if let mem = m.memory, !mem.isEmpty { menu.addItem(line(mem, size: 11, color: .secondaryLabelColor)) }
             if let p = problem { menu.addItem(line("not current: " + p, size: 11, color: .systemRed)) }
             menu.addItem(.separator())
-            for it in m.items {
-                let mi = NSMenuItem(title: it.label, action: #selector(click(_:)), keyEquivalent: "")
-                mi.target = self
-                mi.state = it.checked ? .on : .off
-                let text = NSMutableAttributedString(string: it.label, attributes: [.font: NSFont.menuFont(ofSize: 0)])
-                if let s = it.sub, !s.isEmpty {
-                    text.append(NSAttributedString(string: "\n" + s, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+            for it in m.items { menu.addItem(choice(it)) }
+            if let ds = m.dials, !ds.isEmpty {
+                menu.addItem(.separator())
+                for d in ds {
+                    let mi = NSMenuItem(title: d.label, action: nil, keyEquivalent: "")
+                    let sub = NSMenu(title: d.label)
+                    sub.autoenablesItems = false
+                    for c in d.choices { sub.addItem(choice(c)) }
+                    mi.submenu = sub
+                    menu.addItem(mi)
                 }
-                mi.attributedTitle = text
-                if let args = it.args { mi.representedObject = Action(it, args) }
-                menu.addItem(mi)
             }
             if let ws = m.windows, !ws.isEmpty {
                 menu.addItem(.separator())
@@ -262,6 +272,20 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Potluck Menu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
+    }
+
+    /// A clickable line: checked when in force; a click runs its arguments.
+    func choice(_ it: Item) -> NSMenuItem {
+        let mi = NSMenuItem(title: it.label, action: #selector(click(_:)), keyEquivalent: "")
+        mi.target = self
+        mi.state = it.checked ? .on : .off
+        let text = NSMutableAttributedString(string: it.label, attributes: [.font: NSFont.menuFont(ofSize: 0)])
+        if let s = it.sub, !s.isEmpty {
+            text.append(NSAttributedString(string: "\n" + s, attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+        }
+        mi.attributedTitle = text
+        if let args = it.args { mi.representedObject = Action(it, args) }
+        return mi
     }
 
     var jobs: JobsWindow?

@@ -160,6 +160,11 @@ potluck-driver-tart host set <open|drain|closed|auto> [--for 2h | --until 23:00]
   owned by `host_owner_uid` (or root); one another user made reads as unreadable, below. `/Users/Shared` is
   writable by every user, so make `/Users/Shared/Potluck` (any `host set` does) when you set the host up.
 - A drain's deadline counts from when it began: `host set drain` again changes the deadline, not the start.
+- Beside it, `host-lend.json` holds the lender's dials (`potluck host lend`, [docs/menubar.md](../../docs/menubar.md#memory-and-the-dials)),
+  read with the same rules: `cores` and `memory_mb` bound what the live boxes of one state directory hold
+  together (with `host_cpu_limit` and `host_memory_limit_mb`, the stricter wins), and `keep_free_gb` refuses a new
+  box, a start, a kept disk, a volume or a shelf fill below that much free disk (with `persist_min_free_gb` for
+  what is kept, the higher wins). A dial that leaves no room refuses as a full slot, so a caller waits for it.
 - A file that cannot be read as an override (bad JSON, an unknown mode or field, a symlink, another owner, or the
   file or its directory writable by others than its owner) refuses new work; running work goes on, unless the
   binding's policy alone would end or drain it.

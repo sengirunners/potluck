@@ -7,10 +7,15 @@ and lets them take it back without a terminal:
 Lending 6 of 12 cores
 6 cores in use by 2 jobs
 ●●●●●●······
+Memory pressure normal; Potluck's jobs may use up to 12 GB of 48 GB (25%); swap 1.2 GB used of 2 GB
 ─────────────
 ✓ Keep lending
   Wind down        finish jobs, take no new ones
   Stop now         end jobs now
+─────────────
+  Cores lent: all shared, 6 cores                 ▸
+  Memory lent: all shared, 12 GB                  ▸
+  Disk kept free for you: none set (300 GB free)  ▸
 ─────────────
   Jobs this Mac ran…
 ```
@@ -39,6 +44,42 @@ A size that lends other images than the daemon's build pins (the daemon moves it
 [hosts.md](hosts.md#after-an-update-the-daemon-moves-a-host-to-the-new-pins)) adds a note, "1 size lends other images
 than this version pins"; `host status` prints a line per size with why, and `--json` carries them as
 `images_behind`.
+
+## Memory, and the dials
+
+The memory line is macOS's own memory pressure (`sysctl kern.memorystatus_vm_pressure_level`: normal, high or
+critical), the most memory Potluck's running jobs may use (each running box's size; a box may use less) as a share
+of the Mac's, and swap in use (`sysctl vm.swapusage`). At high or critical pressure it says whether lending is part
+of it: with Potluck jobs running, "Lending is part of it: turn Memory lent down, or Wind down, to give memory back";
+with none, "Lending is not the cause". Go package `hostmem` reads the pressure and swap.
+
+The three dials are submenus; each choice runs `potluck host lend`, and the checked one is in force:
+
+| dial | runs | what happens |
+| --- | --- | --- |
+| Cores lent | `potluck host lend --cores N` (or `all`) | Potluck's boxes hold at most N cores at once |
+| Memory lent | `potluck host lend --memory-gb N` (or `all`) | they hold at most N GB of memory at once |
+| Disk kept free for you | `potluck host lend --keep-free-gb N` (or `0`) | no box starts, and no kept disk, volume or shelf grows, while the disk has less than N GB free |
+
+The cores and memory choices go up in steps of the smallest size shared, up to all that was shared; a choice too
+small for a larger size says so under it ("too small for size c8m32: its jobs do not start"), and a job of that size
+is refused at once rather than left waiting. The disk choices are 10, 25, 50, 100, 200, 500 and 1000 GB, those
+smaller than the disk. A dial goes no higher than what `potluck host` shared: lending more needs that again
+(`--share`, `--linux-slots`). The disk dial holds boxes whose disks are on this machine (Tart and OCI); while the
+free disk cannot be read, it holds them too.
+
+A dial takes effect at once, for the next box, with no setup run again and no deadline to choose. Jobs running when
+a dial goes down are handled as Wind down handles them, without its deadline: they finish (each within its own time
+limit), no new job starts until the ones running are under the dial, and the menu says so ("running jobs hold 8
+cores (4 lent now): they finish, and no new job starts until they are under it; Stop now ends them"). Stop now ends
+them at once. The title counts what is lent under the dials ("Lending 4 of 12 cores").
+
+The dials live in one file beside the host switch's, `/Users/Shared/Potluck/host-lend.json` (`/etc/potluck` on
+Linux), with the same rules: it and its directory belong to the Mac's owner and no one else may write them. Every
+size's driver reads it when it starts a box (Go package `vmhost`, `lend.go`); a driver that cannot read it starts
+nothing and says why, and so does the menu. A dial bounds each driver state directory (and OS) on its own; the
+sizes `potluck host` shares on a Mac all use one, and when there are more the dial's title says "each of N groups
+of sizes".
 
 ## Jobs this Mac ran
 
@@ -81,10 +122,11 @@ starting the daemon:
 - on a host that shares its room through an admission controller, the controller's last "no room" answer while it
   stands (until its retry time, or until it grants a lease to the same size's state directory): the menu then says "Refusing new work now" with the
   controller's reason, though the switch says accepting (`refused` in the JSON);
-- the Mac's cores.
+- the Mac's cores and memory, its memory pressure and swap, and the free and total size of the disk its home is on;
+- the lender's dials (`host-lend.json`, above), as a size's driver reads them.
 
-Lent cores are, per driver state directory and OS (which share their slots), the slots times the largest size's
-cores. Cores in use are the running boxes' cores; a stopped box with a kept disk holds none. The menu's words,
+Shared cores are, per driver state directory and OS (which share their slots), the slots times the largest size's
+cores; lent cores are those under the cores dial. Memory is counted the same way. Cores in use are the running boxes' cores; a stopped box with a kept disk holds none. The menu's words,
 which item is checked and what a click runs all come from that command (Go package `menubar`, with tests); the
 app only draws them.
 

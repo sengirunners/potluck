@@ -45,16 +45,22 @@ func (SystemFacts) RAMMB() int64 {
 }
 
 func (SystemFacts) FreeDiskGB(dir string) (float64, error) {
+	free, _, err := DiskGB(dir)
+	return free, err
+}
+
+// DiskGB is the free and total size, in GiB, of the disk dir is on (a
+// directory not made yet: the nearest parent that exists).
+func DiskGB(dir string) (free, total float64, err error) {
 	for {
 		var st syscall.Statfs_t
 		err := syscall.Statfs(dir, &st)
 		if err == nil {
-			return float64(st.Bavail) * float64(st.Bsize) / (1 << 30), nil
+			return float64(st.Bavail) * float64(st.Bsize) / (1 << 30), float64(st.Blocks) * float64(st.Bsize) / (1 << 30), nil
 		}
-		// A state dir not made yet: the nearest parent that exists.
 		parent := dir[:max(strings.LastIndex(dir, "/"), 0)]
 		if parent == dir || parent == "" || !os.IsNotExist(err) {
-			return 0, err
+			return 0, 0, err
 		}
 		dir = parent
 	}

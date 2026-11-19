@@ -127,7 +127,7 @@ func (d *drv) fillWarm() {
 		return
 	}
 	for ; n < d.cfg.Warm; n++ {
-		if free, err := d.free(os); err != nil || free == 0 {
+		if free, err := d.free(os); err != nil || free == 0 || d.keepFree() != nil {
 			return
 		}
 		b := make([]byte, 6)

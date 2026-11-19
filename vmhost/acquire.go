@@ -176,18 +176,17 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 				return nil
 			}
 		}
-		free, err := d.free(os)
+		free, why, err := d.room(os)
 		if err != nil {
 			return refuse("unavailable", "%v", err)
 		}
 		if free == 0 && d.preemptWarm(os) { // warm boxes are the first reclaimed
-			free, err = d.free(os)
+			free, why, err = d.room(os)
 		}
 		if err != nil {
 			return refuse("unavailable", "%v", err)
 		}
 		if free == 0 {
-			why := fmt.Sprintf("%s (%d in use)", protocol.NoFreeSlot(os), d.cfg.slots(os))
 			return fullNow(why, why, 0)
 		}
 		if n := d.kept(); a.Persist && n >= d.cfg.PersistMax {
@@ -197,6 +196,8 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 			if err := d.diskRoom(); err != nil { // persist.go
 				return err
 			}
+		} else if err := d.keepFree(); err != nil { // the lender's floor (lend.go)
+			return err
 		}
 		b := make([]byte, 6)
 		_, _ = rand.Read(b)

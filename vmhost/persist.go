@@ -11,7 +11,6 @@ import (
 	"time"
 
 	kitconfig "github.com/sengirunners/potluck/kit/config"
-	"github.com/sengirunners/potluck/protocol"
 )
 
 // Kept disks (SPEC 20 "Boxes", Kept disks; zm-eakh.12.5.23): a box acquired
@@ -240,12 +239,12 @@ func (d *drv) start(handle string, raw json.RawMessage) (any, error) {
 		if ok, why := d.cfg.admitsNow(); !ok { // hostmode.go
 			return refuse("unavailable", "%s (its disk stays kept)", why)
 		}
-		free, err := d.free(r.OS)
+		free, why, err := d.room(r.OS)
 		if err != nil {
 			return refuse("unavailable", "%v", err)
 		}
 		if free == 0 {
-			return refuse("unavailable", "%s (%d in use); its disk stays kept", protocol.NoFreeSlot(r.OS), d.cfg.slots(r.OS))
+			return refuse("unavailable", "%s; its disk stays kept", why)
 		}
 		if err := d.diskRoom(); err != nil { // a booted box writes again
 			return err
@@ -369,25 +368,52 @@ func freeGiB(dir string) float64 {
 func (d *drv) diskRoom() error { return d.diskFloor("kept disks") }
 
 // diskFloor refuses what writes for weeks (kept disks, volumes) below
-// persist_min_free_gb free under the layer's disk directory.
+// persist_min_free_gb, or the lender's keep_free_gb (lend.go), free under
+// the layer's disk directory.
 func (d *drv) diskFloor(what string) error { return diskFloorOf(d.cfg, d.vm, what)() }
 
+// keepFree refuses a new box below the lender's keep_free_gb alone:
+// persist_min_free_gb is for what writes for weeks.
+func (d *drv) keepFree() error { return floorOf(d.cfg, d.vm, "a new box", false)() }
+
 // diskFloorOf is the floor for what on layer vm (diskFloor's; the shelf's
-// filler has no drv): the answer checks the free disk again each time it is
-// called, under the disk directory the layer named once.
-func diskFloorOf(cfg config, vm any, what string) func() error {
+// filler has no drv): the answer checks the free disk, and reads the
+// lender's dials, again each time it is called, under the disk directory
+// the layer named once.
+func diskFloorOf(cfg config, vm any, what string) func() error { return floorOf(cfg, vm, what, true) }
+
+// floorOf is diskFloorOf, with persist_min_free_gb counted only when
+// persist. A layer with no disk directory on this machine has no floor.
+func floorOf(cfg config, vm any, what string, persist bool) func() error {
 	dd, ok := vm.(diskDir)
-	if !ok || cfg.PersistMinFreeGB <= 0 {
+	if !ok {
 		return func() error { return nil }
 	}
 	dir := dd.DiskDir()
 	return func() error {
+		floor, key := 0, ""
+		if persist && cfg.PersistMinFreeGB > 0 {
+			floor, key = cfg.PersistMinFreeGB, "persist_min_free_gb"
+		}
+		lend, err := cfg.lend()
+		if err != nil {
+			return refuse("unavailable", "%v", err)
+		}
+		if lend.KeepFreeGB > floor {
+			floor, key = lend.KeepFreeGB, "the machine's owner keeps it free for their own use"
+		}
+		if floor <= 0 {
+			return nil
+		}
 		free := freeGiB(dir)
 		if f, ok := vm.(interface{ FreeGiB() float64 }); ok { // a layer that knows its own free disk (the tests' fake)
 			free = f.FreeGiB()
 		}
-		if free >= 0 && free < float64(cfg.PersistMinFreeGB) {
-			return refuse("unavailable", "this host has %.1f GiB free under %s, below its floor for %s (persist_min_free_gb %d)", free, dir, what, cfg.PersistMinFreeGB)
+		if free < 0 && lend.KeepFreeGB > 0 && floor == lend.KeepFreeGB { // the lender's floor fails closed
+			return refuse("unavailable", "the free disk under %s cannot be read, so %s waits: the machine's owner keeps %d GB free for their own use", dir, what, floor)
+		}
+		if free >= 0 && free < float64(floor) {
+			return refuse("unavailable", "this host has %.1f GiB free under %s, below its floor of %d GiB for %s (%s)", free, dir, floor, what, key)
 		}
 		return nil
 	}

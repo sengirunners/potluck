@@ -218,7 +218,9 @@ potluck host ['<invite code>' | <pool>] [--image name@sha256:<64 hex>]... [--lay
 some and left nothing shared, a paused host switch goes back to auto, so the next share lends at once.
 `potluck host status` shows what this machine lends and runs now, and whether it takes new work, then the setup
 checklist below; it changes no setting. `potluck host jobs` lists every job this machine ran, with counts and an
-electricity estimate ([menubar.md](menubar.md#jobs-this-mac-ran)).
+electricity estimate ([menubar.md](menubar.md#jobs-this-mac-ran)). `potluck host lend --cores N --memory-gb N
+--keep-free-gb N` turns down, or back up, what this machine lends without a setup run; jobs running finish
+([menubar.md](menubar.md#memory-and-the-dials)).
 
 ### Stages and the setup checklist
 

@@ -268,7 +268,7 @@ help; the invite is not.`,
 	s.add(cmd, a)
 	pastedFlags(cmd)
 	cmd.Flags().BoolVar(&yes, "yes", false, "share again where this machine already shares sizes with the pool, with no flag that changes the share (such a run otherwise only says what it would do)")
-	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostImagesCmd(), a.hostStatusCmd(), a.hostJobsCmd(), a.hostSetCmd(), a.hostPauseCmd(), a.hostResumeCmd())
+	cmd.AddCommand(a.hostStopCmd(), a.hostShelfCmd(), a.hostImagesCmd(), a.hostStatusCmd(), a.hostJobsCmd(), a.hostLendCmd(), a.hostSetCmd(), a.hostPauseCmd(), a.hostResumeCmd())
 	cmd.AddCommand(a.hostOldSpellings()...)
 	return cmd
 }

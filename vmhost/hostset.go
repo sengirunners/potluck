@@ -217,24 +217,13 @@ func parseUntil(s string, now time.Time) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-// writeOverride replaces the override file atomically (a temp file in its
-// directory, then a rename), as its owner: the directory is made 0755 and the
-// file 0644, so a run user reads both and writes neither. A mode set while
+// writeOverride replaces the override file (writeOwned). A mode set while
 // the same mode is in force keeps its start, so a drain's deadline does not
 // move back; auto set after an override ran out starts when it ran out. What
 // is written is read back as the drivers will read it, and returned.
 func writeOverride(path string, o override) (override, error) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return o, fmt.Errorf("%v (make %s yourself, owned by you, mode 0755)", err, dir)
-	}
 	me := os.Getuid()
-	if di, err := os.Lstat(dir); err != nil {
-		return o, err
-	} else if err := ownersOnly(dir, di, true, me); err != nil {
-		return o, err
-	}
-	if err := os.Chmod(dir, 0o755); err != nil { // MkdirAll's mode passed the umask
+	if err := ownedDir(path, me); err != nil {
 		return o, err
 	}
 	if old, err := readOverride(path, me); err == nil && old.at(o.Since) == o.Mode {
@@ -254,36 +243,63 @@ func writeOverride(path string, o override) (override, error) {
 	if err != nil {
 		return o, err
 	}
-	f, err := os.CreateTemp(dir, ".host-override-*")
-	if err != nil {
+	if err := writeOwned(path, b); err != nil {
 		return o, err
-	}
-	tmp := f.Name()
-	defer os.Remove(tmp) // a no-op once renamed
-	if err := f.Chmod(0o644); err != nil {
-		f.Close()
-		return o, err
-	}
-	if _, err := f.Write(append(b, '\n')); err != nil {
-		f.Close()
-		return o, err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return o, err
-	}
-	if err := f.Close(); err != nil {
-		return o, err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return o, err
-	}
-	if d, err := os.Open(dir); err == nil {
-		_ = d.Sync()
-		d.Close()
 	}
 	if _, err := readOverride(path, me); err != nil {
 		return o, fmt.Errorf("wrote %s, but it does not read back: %v", path, err)
 	}
 	return o, nil
+}
+
+// ownedDir makes path's directory if need be, and checks it is uid's (or
+// root's) and that only its owner writes it: 0755, so a run user reads the
+// files in it and writes none.
+func ownedDir(path string, uid int) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("%v (make %s yourself, owned by you, mode 0755)", err, dir)
+	}
+	if di, err := os.Lstat(dir); err != nil {
+		return err
+	} else if err := ownersOnly(dir, di, true, uid); err != nil {
+		return err
+	}
+	return os.Chmod(dir, 0o755) // MkdirAll's mode passed the umask
+}
+
+// writeOwned replaces a host-wide file (readOwned) with b atomically, as
+// its owner: a temp file in its directory, mode 0644, then a rename. The
+// directory is ownedDir's.
+func writeOwned(path string, b []byte) error {
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, "."+strings.TrimSuffix(filepath.Base(path), ".json")+"-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // a no-op once renamed
+	if err := f.Chmod(0o644); err != nil {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(append(b, '\n')); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
 }
