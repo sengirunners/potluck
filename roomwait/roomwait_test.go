@@ -47,7 +47,7 @@ func noRoom(on, why string, retryS int) error {
 func TestWaitAsksAgainUntilRoom(t *testing.T) {
 	c := &clock{t: time.Date(2026, 11, 19, 5, 37, 0, 0, time.Local)}
 	var lines []string
-	answers := []error{noRoom("thefactory-c2m4", "network busy (128/90 Mbit/s)", 240), noRoom("thefactory-c2m4", "network busy (128/90 Mbit/s)", 240), nil}
+	answers := []error{noRoom("bighost-c2m4", "network busy (128/90 Mbit/s)", 240), noRoom("bighost-c2m4", "network busy (128/90 Mbit/s)", 240), nil}
 	asks := 0
 	err := c.wait(30*time.Minute, &lines).Do(context.Background(), func(context.Context) error {
 		asks++
@@ -59,7 +59,7 @@ func TestWaitAsksAgainUntilRoom(t *testing.T) {
 	if want := []time.Duration{4 * time.Minute, 4 * time.Minute}; !equal(c.slept, want) {
 		t.Errorf("waited %v, want %v (the controller's retry time)", c.slept, want)
 	}
-	if len(lines) != 1 || lines[0] != "thefactory-c2m4 has no room: network busy (128/90 Mbit/s); asking again at 05:41:00 (waited 0s of 30m)" {
+	if len(lines) != 1 || lines[0] != "bighost-c2m4 has no room: network busy (128/90 Mbit/s); asking again at 05:41:00 (waited 0s of 30m)" {
 		t.Errorf("lines %q: want one line for the one reason", lines)
 	}
 }
@@ -87,7 +87,7 @@ func TestWaitEndsAtTheBound(t *testing.T) {
 	c := &clock{t: time.Now()}
 	var lines []string
 	asks := 0
-	last := noRoom("thefactory-c2m4", "network busy", 600)
+	last := noRoom("bighost-c2m4", "network busy", 600)
 	err := c.wait(15*time.Minute, &lines).Do(context.Background(), func(context.Context) error { asks++; return last })
 	if err != last {
 		t.Fatalf("err %v, want the last no room", err)
@@ -95,7 +95,7 @@ func TestWaitEndsAtTheBound(t *testing.T) {
 	if want := []time.Duration{10 * time.Minute, 5 * time.Minute}; !equal(c.slept, want) || asks != 3 {
 		t.Errorf("waited %v over %d asks, want %v over 3", c.slept, asks, want)
 	}
-	if l := lines[len(lines)-1]; l != "gave up waiting for room after 15m: thefactory-c2m4 still has no room: network busy" {
+	if l := lines[len(lines)-1]; l != "gave up waiting for room after 15m: bighost-c2m4 still has no room: network busy" {
 		t.Errorf("last line %q", l)
 	}
 }

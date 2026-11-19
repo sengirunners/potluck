@@ -1,7 +1,8 @@
 // Package roomwait is the one wait of a command that asked for a box and was
 // told only that there is no room now: it asks again, up to a bound, saying
-// why and when it asks next. potluck sandbox create, potluck run and potluck
-// host's check boxes wait through it (docs/daemon.md, placement).
+// why and when it asks next. potluck sandbox create, potluck run, potluck
+// agent-task and potluck host's check boxes wait through it (docs/daemon.md,
+// placement).
 //
 // Only a temporary no room waits: an acquire refusal marked
 // computeapi.RefusedNoRoom (every slot in use, the host's reclaim policy

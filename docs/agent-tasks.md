@@ -117,7 +117,12 @@ written to it. An open failure prevents placement; a write or close failure make
 fail after collecting the commits and releasing the sandbox. Partial output remains on failure.
 
 Flags: `--prompt-file` (required; `-` reads stdin; at most 1 MiB), `--secret-file`, `--secret-name`, `--timeout`
-(default 1h), `--keep`, `--stdout-file`, `--model`, `--effort`, placement's `--on`, `--size`, `--image`, and the push flags above.
+(default 1h), `--keep`, `--stdout-file`, `--model`, `--effort`, placement's `--on`, `--size`, `--image`, `--wait`, and the push flags above.
+
+`--wait` is `potluck run`'s wait for room: while every machine that fits has no room now, the task asks
+again at the host's retry time, with the same request id, for up to this long. Unlike `run`, the default
+is 0 (fail at once): a caller with its own deadline sets how much of it the wait may take. A hard refusal
+never waits. `--timeout` starts when the agent does, after the wait.
 
 `--deps npm[:path]`, `--deps-scripts` and `--deps-wait` take the same dependency recipes as
 `potluck run`. Layers mount beside the pushed checkout; the agent starts at the checkout root.

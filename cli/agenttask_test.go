@@ -5,14 +5,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/sengirunners/potluck/agenttasks"
+	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/client"
+	"github.com/sengirunners/potluck/kit/config"
+	"github.com/sengirunners/potluck/protocol"
+	"github.com/sengirunners/potluck/roomwait"
 )
 
 // fakeClaude stands in for Claude Code in the box: it needs its token on
@@ -485,3 +495,83 @@ func (w *taskCancelOutput) Write(p []byte) (int, error) {
 }
 
 func (w *taskCancelOutput) WriteString(s string) (int, error) { return w.Write([]byte(s)) }
+
+// agent-task waits for room as run does (room.go) only when --wait asks it
+// to (default 0: a full pool fails at once): the task's acquire is asked
+// again under one request id at the host's retry time, then places the box;
+// a hard refusal never waits. Its help lists the flag on a line of its own,
+// which callers read to learn the program has it.
+func TestAgentTaskWaitsForRoom(t *testing.T) {
+	var out, errw bytes.Buffer
+	if code := RunProgram(context.Background(), Program{}, []string{"agent-task", "--help"}, strings.NewReader(""), &out, &errw); code != 0 {
+		t.Fatalf("exit %d: %s", code, errw.String())
+	}
+	if !regexp.MustCompile(`(?m)^\s*--wait duration\b`).MatchString(out.String()) {
+		t.Errorf("agent-task --help lists no --wait flag line:\n%s", out.String())
+	}
+
+	repo := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "x"}} {
+		if b, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s %v", args, b, err)
+		}
+	}
+	slept := fakeRoomClock(t)
+
+	// From the command line: no --wait is no wait; --wait 5m waits at the
+	// host's retry time and asks again (a hard refusal then ends the run).
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-test")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Chdir(repo)
+	cfg, err := config.LoadFrom(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := func(d *prepDaemon, flags ...string) error {
+		c := client.WithHandler(d)
+		c.Project, c.ProjectFrom = "pool", "flag"
+		var stdout, stderr bytes.Buffer
+		root := &cobra.Command{Use: "example", SilenceErrors: true, SilenceUsage: true}
+		root.AddCommand(Commands(Host{Prefix: "example", Client: func() (*client.Client, *config.Config, error) { return c, cfg, nil },
+			Stdin: strings.NewReader("fix it"), Stdout: &stdout, Stderr: &stderr})...)
+		root.SetArgs(append([]string{"agent-task", "--prompt-file", "-", "--timeout", "5m"}, flags...))
+		return root.ExecuteContext(context.Background())
+	}
+	forbidden := api.Errorf(api.CodeForbidden, "test acquire boundary")
+	d := &prepDaemon{onlySmall: true, images: []string{agentPin}, verbs: []string{"spawn"}, caps: []string{protocol.CapBoxSecrets}, fail: map[int]*api.Error{1: noRoomOn("small"), 2: forbidden}}
+	if err := command(d); err == nil || !strings.Contains(err.Error(), "no room on this host now") || len(*slept) != 0 || !slices.Equal(d.seen(), []string{"acquire small"}) {
+		t.Errorf("no --wait: %v, asked %q, waited %v; want the no room at once", err, d.seen(), *slept)
+	}
+	d = &prepDaemon{onlySmall: true, images: []string{agentPin}, verbs: []string{"spawn"}, caps: []string{protocol.CapBoxSecrets}, fail: map[int]*api.Error{1: noRoomOn("small"), 2: forbidden}}
+	if err := command(d, "--wait", "5m"); err == nil || err.Error() != "forbidden: test acquire boundary" || !slices.Equal(*slept, []time.Duration{4 * time.Minute}) ||
+		!slices.Equal(d.seen(), []string{"acquire small", "acquire small"}) {
+		t.Errorf("--wait 5m: %v, asked %q, waited %v; want one 4 min wait, then the second answer", err, d.seen(), *slept)
+	}
+	*slept = nil
+	task := func(d *prepDaemon, room time.Duration) (agentTaskResult, error, string) {
+		var said strings.Builder
+		o := agentTaskOptions{adapter: agenttasks.Default(), prompt: []byte("fix it"), secret: "tok", secretName: agenttasks.Default().Secrets[0]}
+		o.repo, o.timeout, o.room, o.started = repo, time.Minute, room, time.Now()
+		o.out, o.errw, o.p = io.Discard, &said, "potluck"
+		r, err := agentTask(context.Background(), client.WithHandler(d), o)
+		return r, err, said.String()
+	}
+
+	d = &prepDaemon{onlySmall: true, fail: map[int]*api.Error{1: noRoomOn("small")}}
+	if _, _, said := task(d, roomwait.Default); len(d.asks) < 2 || !slices.Equal(d.seen()[:2], []string{"acquire small", "acquire small"}) ||
+		d.asks[1].RequestID != d.asks[0].RequestID || !slices.Equal(*slept, []time.Duration{4 * time.Minute}) ||
+		!strings.HasPrefix(said, "potluck: small has no room: network busy (128/90 Mbit/s); asking again at ") {
+		t.Fatalf("asked %q, waited %v, said %q; want one wait at the host's retry time, then the box under the same request id", d.seen(), *slept, said)
+	}
+
+	*slept = nil
+	d = &prepDaemon{onlySmall: true, fail: map[int]*api.Error{1: noRoomOn("small")}}
+	if _, err, _ := task(d, 0); !api.IsCode(err, api.CodeUnavailable) || len(*slept) != 0 || !slices.Equal(d.seen(), []string{"acquire small"}) {
+		t.Errorf("--wait 0: %v, asked %q, waited %v; want it at once", err, d.seen(), *slept)
+	}
+	d = &prepDaemon{onlySmall: true, fail: map[int]*api.Error{1: api.Errorf(api.CodeForbidden, "potluck-driver-oci cannot isolate boxes now, so it makes no box")}}
+	if _, err, _ := task(d, roomwait.Default); !api.IsCode(err, api.CodeForbidden) || len(*slept) != 0 || !slices.Equal(d.seen(), []string{"acquire small"}) {
+		t.Errorf("hard refusal: %v, asked %q, waited %v; want it at once", err, d.seen(), *slept)
+	}
+}

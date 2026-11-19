@@ -123,7 +123,7 @@ install scripts. The files come from this directory, not from --ref.`,
 	f.StringVar(&netOpt, "net", "on", netUsage)
 	f.BoolVar(&req.Persist, "persist", false, "keep the sandbox's disk when it stops, for "+a.cmd("sandbox start")+" (a trusted machine whose driver keeps disks)")
 	f.StringArrayVar(&vols, "volume", nil, "name:path[:rw|ro|cow]: a named volume of yours that outlives the sandbox, mounted at path (repeatable)")
-	roomFlag(f, &wait, noRoomWhile)
+	roomFlag(f, &wait, roomwait.Default, noRoomWhile)
 	push.add(f)
 	df.Add(f)
 	databaseFlags(cmd, &req.Database)

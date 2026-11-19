@@ -14,6 +14,7 @@ import (
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/depscli"
 	"github.com/sengirunners/potluck/kit/client"
+	"github.com/sengirunners/potluck/roomwait"
 )
 
 // JobFile is the script run runs when no command is given, at the shipped
@@ -106,7 +107,7 @@ machine of another member's, name a --template, not an --image.`,
 	f.DurationVar(&o.timeout, "timeout", 30*time.Minute, "kill the command after this long (exit 124)")
 	f.BoolVar(&o.keep, "keep", false, "leave the sandbox up afterwards, for "+a.cmd("sandbox exec")+" (it ends at its lease)")
 	f.StringVar(&o.net, "net", "on", netUsage)
-	roomFlag(f, &o.room, noRoomWhile)
+	roomFlag(f, &o.room, roomwait.Default, noRoomWhile)
 	o.push.add(f)
 	o.df.Add(f)
 	databaseFlags(cmd, &o.database)

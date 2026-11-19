@@ -16,9 +16,9 @@ import (
 )
 
 // roomFlag adds --wait, the bound of a command's wait for room (roomwait)
-// while what it asked for is full for now.
-func roomFlag(f *pflag.FlagSet, d *time.Duration, while string) {
-	f.DurationVar(d, "wait", roomwait.Default, "while "+while+", ask again for up to this long, saying why and when it asks next (0: fail at once)")
+// while what it asked for is full for now; def is its default.
+func roomFlag(f *pflag.FlagSet, d *time.Duration, def time.Duration, while string) {
+	f.DurationVar(d, "wait", def, "while "+while+", ask again for up to this long, saying why and when it asks next (0: fail at once)")
 }
 
 // noRoomWhile is --wait's words for a command that acquires a box.

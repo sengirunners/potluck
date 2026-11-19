@@ -30,6 +30,7 @@ import (
 	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/project"
+	"github.com/sengirunners/potluck/roomwait"
 )
 
 // Test hooks: share's pulls and conformance, what this machine is, and the
@@ -382,7 +383,7 @@ func (s *shareFlags) add(cmd *cobra.Command, a *app) {
 	fl.BoolVar(&s.dryRun, "dry-run", false, "print the plan; pull, test and share nothing")
 	fl.BoolVar(&s.o.ShowCommands, "show-commands", false, "diagnostics: also print each image pull and conformance command line (the stages say what runs)")
 	fl.DurationVar(&s.pullTimeout, "pull-timeout", 0, "give up on an image pull after this long (default: image pin budget, else 60m; a stopped pull resumes)")
-	roomFlag(fl, &s.wait, "every slot of this machine is in use by live sandboxes, so a size cannot be checked")
+	roomFlag(fl, &s.wait, roomwait.Default, "every slot of this machine is in use by live sandboxes, so a size cannot be checked")
 	fl.BoolVar(&s.noSudo, "no-sudo", false, "never run the root step "+a.cmd("doctor")+" prints with sudo: print it, and share without it")
 	fl.BoolVar(&o.Full, "full", false, "run the whole conformance suite on every size (minutes per size); default: the security checks once, a boot check per size")
 	fl.IntVar(&o.ReclaimIdleS, "reclaim-idle-s", 0, fmt.Sprintf("macOS: a sandbox ends when you touch the keyboard or pointer and starts only after this many idle seconds; 0 shares all the time (default: what an earlier host run chose, else %d on macOS, 0 elsewhere)", hostprobe.DefaultReclaimIdleS))

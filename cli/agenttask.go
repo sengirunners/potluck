@@ -71,7 +71,7 @@ func (a *app) agentTaskCmd() *cobra.Command {
 	)
 	def := agenttasks.Default()
 	cmd := &cobra.Command{
-		Use:   "agent-task [" + strings.Join(agenttasks.Names(), "|") + "] --prompt-file <file|-> [--secret-file <file>] [--on <machine-size>] [--database <recipe>] [--ref HEAD] [--dirty] [--timeout 1h] [--keep]",
+		Use:   "agent-task [" + strings.Join(agenttasks.Names(), "|") + "] --prompt-file <file|-> [--secret-file <file>] [--on <machine-size>] [--database <recipe>] [--ref HEAD] [--dirty] [--timeout 1h] [--wait 0] [--keep]",
 		Short: "Run a coding agent once in a fresh sandbox on this checkout's commit; its commits come back as a local ref",
 		Long: `Places a sandbox from the agent template (network on; with --database, the
 project's database recipe image instead) as ` + a.cmd("run") + ` does,
@@ -84,6 +84,10 @@ and nothing from the bundle runs here: look at it with git log, then merge,
 cherry-pick or push it yourself. Exits with the agent's exit code; the
 sandbox ends at the end, also on Ctrl-C, an error or the timeout (exit
 124), unless --keep.
+
+With --wait, while every machine that fits has no room now, it waits for
+one as ` + a.cmd("run") + ` does, for up to that long (default 0: it fails at
+once); --timeout starts when the agent does, after the wait.
 
 The credential is yours: --secret-file is read here (else $` + strings.Join(def.Secrets, ", else $") + `)
 and sent through the sandbox secrets door, only to trusted machines; the sandbox
@@ -184,6 +188,9 @@ Agents: ` + strings.Join(agenttasks.Names(), ", ") + ` (default ` + def.Name + `
 	o.df.Add(f)
 	o.push.add(f)
 	databaseFlags(cmd, &o.database)
+	// room.go: run's wait for room, off unless asked for. A caller that has a
+	// deadline for the agent (a farm) sets how much of it the wait may take.
+	roomFlag(f, &o.room, 0, noRoomWhile)
 	return cmd
 }
 

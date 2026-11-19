@@ -36,6 +36,8 @@ type prepDaemon struct {
 	releaseFails bool     // a release is refused
 	onlySmall    bool     // the daemon lists the small binding alone
 	verbs        []string // the verbs each binding's describe lists
+	images       []string // the images each binding lists (nil: none named)
+	caps         []string // the capabilities each binding's describe lists
 	acquires     int
 	asks         []computeapi.AcquireRunTargetRequest // each acquire's request
 	// renewFail answers the nth renew (1-based) with that error;
@@ -53,8 +55,8 @@ func (d *prepDaemon) seen() []string { d.mu.Lock(); defer d.mu.Unlock(); return 
 func (d *prepDaemon) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(api.HeaderProtocol, api.Protocol)
 	view := func(name string, cpu, ttlMax int) computeapi.RunTargetView {
-		return computeapi.RunTargetView{RunTarget: computeapi.RunTarget{Name: name, Kind: "box", TTLMaxS: ttlMax}, HostClass: api.MachineTrusted,
-			Describe: &computeapi.RunTargetDescribe{Kind: "box", Available: true, Verbs: d.verbs, Size: &computeapi.RunTargetSize{Name: name, OS: "linux", CPU: cpu, MemoryMB: 1024 * cpu}}}
+		return computeapi.RunTargetView{RunTarget: computeapi.RunTarget{Name: name, Kind: "box", TTLMaxS: ttlMax, Images: d.images}, HostClass: api.MachineTrusted,
+			Describe: &computeapi.RunTargetDescribe{Kind: "box", Available: true, Verbs: d.verbs, Capabilities: d.caps, Size: &computeapi.RunTargetSize{Name: name, OS: "linux", CPU: cpu, MemoryMB: 1024 * cpu}}}
 	}
 	views := map[string]computeapi.RunTargetView{"small": view("small", 1, 600), "std": view("std", 2, 7200)}
 	if d.onlySmall {

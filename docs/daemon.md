@@ -297,11 +297,11 @@ Sandboxes and GitHub runner jobs pick a box binding by one rule (package `placem
   `unavailable` with `no_room` data (a free slot taken first, the host's admission controller's no), is refused as
   `{"refused": "no_room", "on": "<binding>", "why": "<the host's words>", "retry_s": N}` (`retry_s` the
   controller's, when it gave one). Placement passes over such a binding and takes another that has room. When none
-  has room and one that is only full would fit, `potluck sandbox create`, `potluck run` and `potluck host`'s check
-  boxes wait (package `roomwait`). They ask again at the controller's retry time (5 s to 10 min), or backing off from
+  has room and one that is only full would fit, `potluck sandbox create`, `potluck run`, `potluck agent-task` and `potluck host`'s
+  check boxes wait (package `roomwait`). They ask again at the controller's retry time (5 s to 10 min), or backing off from
   10 s to 2 min. Each ask is a real acquire, so the controller still counts the demand that waits. For each change
   they print one line: `<binding> has no room: <why>; asking again at 05:41:00 (waited 4m of 30m)`. They wait up to
-  `--wait` (default 30m; `--wait 0` fails at once as before). The bound or Ctrl-C ends the wait with the last
+  `--wait` (default 30m; agent-task's default is 0, so it waits only when asked; `--wait 0` fails at once). The bound or Ctrl-C ends the wait with the last
   answer and nothing held. A hard refusal (`bad_request`, `forbidden`, an isolation refusal, a size no machine
   offers, a spent budget) never waits, nor does a binding its owner paused, drained or closed (`potluck host set`).
 
