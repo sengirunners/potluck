@@ -5,8 +5,117 @@
   <subtitle>Guides and notes on running GitHub Actions jobs and coding agents on your team's idle machines, from the people who make Potluck.</subtitle>
   <link rel="alternate" type="text/html" href="https://potluck.sh/blog"/>
   <link rel="self" type="application/atom+xml" href="https://potluck.sh/feed.xml"/>
-  <updated>2026-11-19T00:00:00Z</updated>
+  <updated>2026-11-20T00:00:00Z</updated>
   <author><name>Sengi</name></author>
+  <entry>
+    <id>https://potluck.sh/blog/volunteer-computing-projects</id>
+    <title>Volunteer computing projects in November 2026: BOINC, GPU projects and self-hosted pools</title>
+    <link rel="alternate" type="text/html" href="https://potluck.sh/blog/volunteer-computing-projects"/>
+    <published>2026-11-20T00:00:00Z</published>
+    <updated>2026-11-20T00:00:00Z</updated>
+    <author><name>Sengi</name></author>
+    <summary>Volunteer computing projects in November 2026: BOINC projects, GPU projects, open-source alternatives, and how to pool your own idle machines instead.</summary>
+    <content type="html">&lt;p&gt;&lt;strong&gt;Short answer:&lt;/strong&gt; Most volunteer computing projects in November 2026 still run on BOINC, the open-source platform from the University of California, Berkeley. The BOINC article on Wikipedia, citing BOINCstats, counts 25,314 active participants on 130,853 computers averaging 15.220 PetaFLOPS a day as of 13 August 2026, and 26 projects on BOINC's official list as of 7 February 2026. Long-running BOINC projects include Einstein@Home, Rosetta@home, World Community Grid, PrimeGrid, LHC@home, climateprediction.net, MilkyWay@home, Asteroids@home and GPUGRID. Outside BOINC, Folding@home, GIMPS and distributed.net run their own clients, and peer-to-peer tools such as Petals, Hivemind and AI Horde pool volunteer GPUs for AI models. If you want to pool your own team's idle Macs and Linux boxes for builds and coding agents instead of donating them to science, that is a different job. Potluck, a free, open-source and early project made by Sengi, does that.&lt;/p&gt;
+&lt;p&gt;Volunteer and project counts change month to month. The Wikipedia &amp;quot;List of volunteer computing projects&amp;quot; and BOINC's own &amp;quot;Choosing BOINC projects&amp;quot; page carry the current figures.&lt;/p&gt;
+&lt;h2 id=&quot;the-options-compared&quot;&gt;The options compared&lt;/h2&gt;
+&lt;div class=&quot;table-wrap&quot;&gt;&lt;table&gt;
+&lt;thead&gt;&lt;tr&gt;&lt;th&gt;Option&lt;/th&gt;&lt;th&gt;What your machine works on&lt;/th&gt;&lt;th&gt;Who uses the result&lt;/th&gt;&lt;th&gt;GPU work&lt;/th&gt;&lt;th&gt;How you take part&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;&lt;td&gt;BOINC projects&lt;/td&gt;&lt;td&gt;Science tasks: astrophysics, biology, maths, climate, physics&lt;/td&gt;&lt;td&gt;The research group that runs each project&lt;/td&gt;&lt;td&gt;In some projects (see below)&lt;/td&gt;&lt;td&gt;Install the BOINC client, attach to projects or use an account manager&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Folding@home&lt;/td&gt;&lt;td&gt;Protein folding simulations&lt;/td&gt;&lt;td&gt;Folding@home research labs&lt;/td&gt;&lt;td&gt;CPU and GPU&lt;/td&gt;&lt;td&gt;Its own client&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;GIMPS&lt;/td&gt;&lt;td&gt;Tests of Mersenne prime candidates&lt;/td&gt;&lt;td&gt;The GIMPS project&lt;/td&gt;&lt;td&gt;CPU, plus separate GPU programs&lt;/td&gt;&lt;td&gt;Its own client&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;distributed.net&lt;/td&gt;&lt;td&gt;Cipher and Golomb ruler searches&lt;/td&gt;&lt;td&gt;distributed.net&lt;/td&gt;&lt;td&gt;CPU and GPU clients&lt;/td&gt;&lt;td&gt;Its own client&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Petals and Hivemind&lt;/td&gt;&lt;td&gt;Parts of large language models&lt;/td&gt;&lt;td&gt;Anyone using the swarm&lt;/td&gt;&lt;td&gt;GPU&lt;/td&gt;&lt;td&gt;Run a Petals server or Hivemind peer&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;AI Horde&lt;/td&gt;&lt;td&gt;Image and text generation&lt;/td&gt;&lt;td&gt;Users of the horde, with kudos as a reward&lt;/td&gt;&lt;td&gt;GPU&lt;/td&gt;&lt;td&gt;Run a worker&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Golem Network&lt;/td&gt;&lt;td&gt;Tasks bought on a marketplace&lt;/td&gt;&lt;td&gt;Paying requestors&lt;/td&gt;&lt;td&gt;Depends on the task&lt;/td&gt;&lt;td&gt;Run a provider node&lt;/td&gt;&lt;/tr&gt;
+&lt;tr&gt;&lt;td&gt;Potluck&lt;/td&gt;&lt;td&gt;GitHub Actions jobs and coding-agent sandboxes&lt;/td&gt;&lt;td&gt;Your team or friends you invite&lt;/td&gt;&lt;td&gt;Not covered so far; you share a fraction of cores and RAM&lt;/td&gt;&lt;td&gt;Join or host in a private pool&lt;/td&gt;&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;&lt;/div&gt;
+&lt;p&gt;Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without Sengi or a Sengi account.&lt;/p&gt;
+&lt;h2 id=&quot;boinc-volunteer-computing-projects-in-2026&quot;&gt;BOINC volunteer computing projects in 2026&lt;/h2&gt;
+&lt;p&gt;BOINC is middleware: a server that hands out work units and a client that runs them when your computer is idle. The client runs on Windows, macOS, Linux, Android, FreeBSD and Raspberry Pi OS, and the code is under the LGPL. A credit system checks returned results before it grants credit, which is how projects catch faulty hardware and cheating.&lt;/p&gt;
+&lt;p&gt;The well-known active projects, by focus:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Einstein@Home&lt;/strong&gt;: searches radio and gravitational-wave data for pulsars.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Rosetta@home&lt;/strong&gt;: protein structure prediction for disease research.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;World Community Grid&lt;/strong&gt;: humanitarian research on disease, clean water and clean energy, now run by the Krembil Research Institute.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;PrimeGrid, SRBase, NumberFields@home, yoyo@home&lt;/strong&gt;: prime searches, Sierpinski and Riesel problems, number theory and factoring.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;LHC@home&lt;/strong&gt;: physics simulations for CERN.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;climateprediction.net&lt;/strong&gt;: climate model runs from Oxford.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;MilkyWay@home&lt;/strong&gt;: a model of our galaxy from Sloan Digital Sky Survey data.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Asteroids@home&lt;/strong&gt;: asteroid shapes and spins from photometry.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;SiDock@home and TN-Grid&lt;/strong&gt;: drug design and gene networks.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Recent additions to the Wikipedia list include Kessler@home, which simulates orbital debris growth; Beacon@Home, which runs light citizen-science tasks such as mapping background radiation with volunteer Geiger counters; and Eternity II, which searches for better arrangements of the edge-matching puzzle. BitBOINC and The Puzzle also appear; both include Bitcoin challenge-key searches, so read a project's About page before you attach and decide whether that is work you want to give cycles to. BOINC Central is a shared pool hosted at Berkeley so researchers can submit jobs without running their own server.&lt;/p&gt;
+&lt;p&gt;Some names have ended. SETI@home stopped in 2020, and the list marks Universe@Home, Amicable Numbers and DreamLab as completed.&lt;/p&gt;
+&lt;p&gt;If you do not want to pick projects yourself, an account manager does it. Science United assigns vetted projects by research area such as medicine or physics; BAM! and GridRepublic manage several accounts across several computers.&lt;/p&gt;
+&lt;h2 id=&quot;gpu-volunteer-computing-projects&quot;&gt;GPU volunteer computing projects&lt;/h2&gt;
+&lt;p&gt;BOINC added NVIDIA CUDA support first, then AMD, then OpenCL on Windows, Linux and macOS; Intel GPU work exists but is sparse, per the BOINC article on Wikipedia, which also says GPU applications run 2 to 10 times faster than the earlier CPU-only versions. Projects that use GPUs:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;GPUGRID&lt;/strong&gt;: full-atom protein simulations, NVIDIA GPUs only.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Einstein@Home, PrimeGrid, World Community Grid&lt;/strong&gt;: GPU and CPU applications.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;MilkyWay@home&lt;/strong&gt;: built NVIDIA CUDA applications early on.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Folding@home&lt;/strong&gt;: its own client, CPU and GPU.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;GPU work availability comes and goes. Before you buy or dedicate a card, check the project's Applications page for your GPU vendor and operating system.&lt;/p&gt;
+&lt;p&gt;For AI workloads, the GPU pools are peer to peer. Petals serves large language models across volunteer GPUs. AI Horde is a crowdsourced GPU cluster for image and text generation, run by a non-profit. Exo is different: it joins your own devices into one cluster at home rather than lending to strangers.&lt;/p&gt;
+&lt;h2 id=&quot;open-source-and-peer-to-peer-alternatives-to-boinc&quot;&gt;Open-source and peer-to-peer alternatives to BOINC&lt;/h2&gt;
+&lt;p&gt;BOINC is the most complete option if you are a researcher: it has a server you can host, a credit system, account managers and a large volunteer base. The cost is that you package your application as BOINC work units and run a project server, which takes real effort.&lt;/p&gt;
+&lt;p&gt;Other open-source approaches:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Hivemind&lt;/strong&gt;: a PyTorch library for training models over the internet without central coordination. Good for ML research; it assumes ML work.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Pando and Wasimoff&lt;/strong&gt;: browser-based volunteer computing, where tasks run in web workers. No install for volunteers; limited to what runs in a browser.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Flower&lt;/strong&gt;: federated learning across devices that keep their own data. It is related to volunteer computing but solves a privacy problem, not a capacity one.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Golem Network&lt;/strong&gt;: a permissionless marketplace for compute. It pays providers, which brings a different trust and payment model than donation.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2 id=&quot;when-you-want-a-self-hosted-pool-instead&quot;&gt;When you want a self-hosted pool instead&lt;/h2&gt;
+&lt;p&gt;Searches like &amp;quot;self-hosted distributed computing pool join volunteer compute&amp;quot; often come from developers who are not after science credit. They have a Mac mini under a desk and a Linux box in a closet, both idle most of the day, and a CI queue or a coding agent that wants somewhere to run. Volunteer computing sends cycles to a project you do not run. A private pool keeps the cycles inside a group you choose.&lt;/p&gt;
+&lt;p&gt;That is what Potluck does. It runs GitHub Actions jobs and coding agents on machines your team already owns, each in a fresh VM or sandbox. Details from the project facts:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;What a host needs&lt;/strong&gt;: Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux. &lt;code&gt;potluck host&lt;/code&gt; checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;How much you share&lt;/strong&gt;: &lt;code&gt;--share&lt;/code&gt; sets the fraction of cores and RAM, default 0.5.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Getting the machine back&lt;/strong&gt;: a Mac sandbox ends when its owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;GitHub Actions status&lt;/strong&gt;: a real Actions job has been run through the runner broker, by hand, on a Mac (Tart) and on a Linux box on another machine (OCI with gVisor). It is not yet running daily in our own CI. See &lt;a href=&quot;/github-actions-runner&quot;&gt;GitHub Actions runner&lt;/a&gt; and &lt;a href=&quot;/blog/self-hosted-github-actions-runner-on-your-mac&quot;&gt;a self-hosted GitHub Actions runner on your Mac&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Agents&lt;/strong&gt;: &lt;code&gt;potluck --pool friends mcp&lt;/code&gt; is an MCP server that gives an agent sandbox tools; see &lt;a href=&quot;/agent-sandbox&quot;&gt;agent sandbox&lt;/a&gt; and &lt;a href=&quot;/blog/give-your-ai-agent-a-sandbox-over-mcp&quot;&gt;give your AI agent a sandbox over MCP&lt;/a&gt;. &lt;code&gt;potluck agent-runner&lt;/code&gt; runs a coding-agent vendor's self-hosted runners in fresh sandboxes.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Isolation&lt;/strong&gt;: &lt;code&gt;potluck isolation test &amp;lt;size&amp;gt;&lt;/code&gt; checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer the default is no network at all.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Trust&lt;/strong&gt;: the machine that runs a VM can read everything in it, secrets included, and the machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust. There are no promises; use it at your own risk.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Macs&lt;/strong&gt;: Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice. More in &lt;a href=&quot;/tart&quot;&gt;Tart&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Potluck is not a hosted cloud, not a sandbox runtime of its own (it drives Tart, Kata, gVisor and Incus) and not a cluster scheduler. For the longer walkthrough, read &lt;a href=&quot;/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents&quot;&gt;pool spare Macs and Linux boxes for builds and agents&lt;/a&gt;.&lt;/p&gt;
+&lt;h2 id=&quot;how-to-start-with-potluck&quot;&gt;How to start with Potluck&lt;/h2&gt;
+&lt;p&gt;Install on macOS or Linux with the install script, install.sh, from the main branch of the sengirunners/potluck repository on GitHub: fetch it with curl and pipe it to sh. No Go is needed. Then start the daemon:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;potluck daemon --detach
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;On the machine that runs the pool:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;potluck create friends
+potluck invite ana
+potluck invite carl --host
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The first &lt;code&gt;potluck create&lt;/code&gt; prints a Tailscale login URL. Machines reach each other over Tailscale or over a tunnel you configure. Ana runs &lt;code&gt;potluck join '&amp;lt;code&amp;gt;'&lt;/code&gt; to use sandboxes; Carl runs &lt;code&gt;potluck host '&amp;lt;code&amp;gt;'&lt;/code&gt; to share a machine. Before sharing, &lt;code&gt;potluck doctor&lt;/code&gt; shows what a machine can share and &lt;code&gt;potluck host --dry-run&lt;/code&gt; prints the plan. &lt;code&gt;potluck host stop&lt;/code&gt; stops sharing.&lt;/p&gt;
+&lt;p&gt;Try a sandbox:&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;potluck sandbox create
+potluck sandbox exec &amp;lt;id&amp;gt; -- uname -a
+potluck sandbox rm &amp;lt;id&amp;gt;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The code is in the sengirunners/potluck repository on GitHub, under Apache-2.0.&lt;/p&gt;
+&lt;h2 id=&quot;questions-people-ask&quot;&gt;Questions people ask&lt;/h2&gt;
+&lt;h3 id=&quot;what-are-the-main-volunteer-computing-projects-in-2026&quot;&gt;What are the main volunteer computing projects in 2026?&lt;/h3&gt;
+&lt;p&gt;On BOINC: Einstein@Home, Rosetta@home, World Community Grid, PrimeGrid, LHC@home, climateprediction.net, MilkyWay@home and Asteroids@home. Outside BOINC: Folding@home, GIMPS and distributed.net, plus GPU pools for AI such as Petals and AI Horde.&lt;/p&gt;
+&lt;h3 id=&quot;how-many-boinc-projects-are-there&quot;&gt;How many BOINC projects are there?&lt;/h3&gt;
+&lt;p&gt;BOINC's official list had 26 projects as of 7 February 2026, according to the BOINC article on Wikipedia. More BOINC projects run outside the official list, and the Wikipedia list of volunteer computing projects tracks many of them.&lt;/p&gt;
+&lt;h3 id=&quot;which-boinc-projects-use-the-gpu&quot;&gt;Which BOINC projects use the GPU?&lt;/h3&gt;
+&lt;p&gt;GPUGRID (NVIDIA only), Einstein@Home, PrimeGrid and World Community Grid have GPU applications, and MilkyWay@home has had them for years. Check each project's Applications page for your card and operating system, since GPU work is not always available.&lt;/p&gt;
+&lt;h3 id=&quot;is-boinc-still-maintained&quot;&gt;Is BOINC still maintained?&lt;/h3&gt;
+&lt;p&gt;Yes. The BOINC article on Wikipedia lists client release 8.2.11 for Windows and macOS in April 2026 and 8.2.13 for Linux in May 2026, and Berkeley runs BOINC Central as a shared project.&lt;/p&gt;
+&lt;h3 id=&quot;what-is-a-good-alternative-to-boinc-for-my-own-machines&quot;&gt;What is a good alternative to BOINC for my own machines?&lt;/h3&gt;
+&lt;p&gt;If you want to keep the compute in your own group rather than donate it, run a private pool. Potluck pools a team's Macs and Linux boxes for GitHub Actions jobs and coding-agent sandboxes; for ML training, Hivemind is the closer fit.&lt;/p&gt;
+&lt;h3 id=&quot;is-potluck-a-volunteer-computing-project&quot;&gt;Is Potluck a volunteer computing project?&lt;/h3&gt;
+&lt;p&gt;No. It does not send work to science projects; it lets you and people you invite share idle machines for builds and agents, each job in a fresh VM or sandbox.&lt;/p&gt;
+&lt;h3 id=&quot;is-it-safe-to-run-other-peoples-work-on-my-computer&quot;&gt;Is it safe to run other people's work on my computer?&lt;/h3&gt;
+&lt;p&gt;BOINC projects run code from the research group you attach to, so pick projects you trust. In Potluck, work runs in a VM or sandbox and &lt;code&gt;potluck isolation test &amp;lt;size&amp;gt;&lt;/code&gt; checks network isolation, but the trust rules still apply: join or host only with people you trust.&lt;/p&gt;
+&lt;h3 id=&quot;can-i-share-only-part-of-a-machine&quot;&gt;Can I share only part of a machine?&lt;/h3&gt;
+&lt;p&gt;In BOINC you set CPU and GPU limits in the client preferences. In Potluck, &lt;code&gt;--share&lt;/code&gt; sets the fraction of cores and RAM, default 0.5, and a Mac sandbox ends as soon as the owner touches the keyboard or pointer.&lt;/p&gt;</content>
+  </entry>
   <entry>
     <id>https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents</id>
     <title>How to pool your team's spare Macs and Linux boxes for builds and coding agents</title>

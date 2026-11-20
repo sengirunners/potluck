@@ -2,6 +2,12 @@
 
 Go module `github.com/sengirunners/potluck`. Apache-2.0. `cmd/potluck` is the program (daemon and commands, in `cli/`).
 
+Work only in `sengirunners/potluck-private`: branches, pull requests and merges. `sengirunners/potluck` is the
+public copy; push to it only through `scripts/public-sync.sh --push`, and never open or merge a pull request there.
+A public release is one copy of a private main commit, made by `scripts/public-sync.sh` when that commit should
+reach people who install Potluck; read `docs/public-sync.md` (when, how, the scan, outside contributions) before
+running it with `--push`.
+
 ## Map
 
 | path | what |

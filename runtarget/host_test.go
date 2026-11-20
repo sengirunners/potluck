@@ -682,3 +682,50 @@ func TestHostCancelBudgetIsPerActor(t *testing.T) {
 		t.Errorf("bo's cancel after ana used up her own bound: %v", err)
 	}
 }
+
+// A lent box's capabilities and verbs reach every reader whole: a vmhost box
+// on Linux lists more than 16 of each, and the push base and dependency
+// layers judge by volumes-seal and volumes-keep, which it lists late.
+func TestHeartbeatAdvertsKeepEveryCapabilityAndVerb(t *testing.T) {
+	rp := newRelayPair(t)
+	ctx := context.Background()
+	p, err := rp.owner.GetProject(ctx, "acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ads := rp.svc.HostAdverts(ctx, p.ID)
+	if len(ads) != 1 {
+		t.Fatalf("adverts: %+v", ads)
+	}
+	caps := []string{"clean-checkout", "net:zm-box", "acquire-progress", "github-jit", "github-jit-guard",
+		"github-jit-guard-private", "github-jit-guard-run", "base64", protocol.CapHostLend, "secrets", "box-secrets", "pty",
+		"net-off", "root", "docker", "persist", protocol.CapVolumes, protocol.CapVolumesSeal, protocol.CapVolumesKeep,
+		"shelf", "database-snapshot-v1", "os:linux"}
+	verbs := []string{"describe", "acquire", "status", "release", "list", "renew", "progress", "cancel", "exec",
+		"spawn", "output", "signal", "port", "input", "stop", "start", "secrets"}
+	ads[0].Describe.Capabilities = caps
+	ads[0].Describe.Verbs = verbs
+	if err := rp.svc.Beat(ctx, p, "lender2", ads); err != nil {
+		t.Fatal(err)
+	}
+	list, err := computeclient.RunTargets(ctx, rp.owner, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, v := range list.Targets {
+		if v.Host != "lender2" || v.Describe == nil {
+			continue
+		}
+		seen = true
+		if !slices.Equal(v.Describe.Capabilities, caps) {
+			t.Errorf("capabilities = %v, want %v", v.Describe.Capabilities, caps)
+		}
+		if !slices.Equal(v.Describe.Verbs, verbs) {
+			t.Errorf("verbs = %v, want %v", v.Describe.Verbs, verbs)
+		}
+	}
+	if !seen {
+		t.Fatal("the heartbeat's advert is not listed")
+	}
+}

@@ -19,6 +19,7 @@ Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; f
 
 ## Blog
 
+- [Volunteer computing projects in November 2026: BOINC, GPU projects and self-hosted pools](https://potluck.sh/blog/volunteer-computing-projects.md): Volunteer computing projects in November 2026: BOINC projects, GPU projects, open-source alternatives, and how to pool your own idle machines instead.
 - [Give your AI agent a sandbox over MCP, on a machine you own](https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp.md): Add one line of MCP configuration and a coding agent gets throwaway VMs and sandboxes on your team's idle Macs and Linux boxes to run its commands in. What it can do and what it keeps away.
 - [Use the E2B SDK on your own machines](https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines.md): potluck-e2b answers the calls the E2B Python and TypeScript SDKs make, so code written for E2B sandboxes runs on your team's idle Macs and Linux boxes with only its environment changed. What it covers and how to set it up.
 - [How to pool your team's spare Macs and Linux boxes for builds and coding agents](https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents.md): How a pool of a team's or friends' spare computers works: who can use whose machine, what a machine owner shares, and how a Mac owner takes it back.

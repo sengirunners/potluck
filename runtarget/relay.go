@@ -47,6 +47,15 @@ var (
 	advertMax = 32
 )
 
+const (
+	// advertCapsMax and advertVerbsMax bound an advert's capabilities and
+	// verbs. A box driver lists more than 20 capabilities and 17 verbs, and every
+	// reader judges by what is listed, so a list cut short reads as a host
+	// without the features past the cut: keep these well above any driver's.
+	advertCapsMax  = 128
+	advertVerbsMax = 64
+)
+
 var advertName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
 // runAdverts is the authority's latest advert set per project and machine.
@@ -121,8 +130,8 @@ func cleanAdverts(in []computeapi.RunTargetAdvert) []computeapi.RunTargetAdvert 
 		d.Runners = protocol.CleanRunners(d.Runners, protocol.MaxRunners)
 		d.Host = protocol.CleanHost(d.Host)
 		d.Name = ad.Binding
-		d.Capabilities = capStrings(d.Capabilities, 16, 64)
-		d.Verbs = capStrings(d.Verbs, 16, 32)
+		d.Capabilities = capStrings(d.Capabilities, advertCapsMax, 64)
+		d.Verbs = capStrings(d.Verbs, advertVerbsMax, 32)
 		d.Images = advertImages(d.Images)
 		d.Swap = cutLine(d.Swap, 20)
 		sz := *d.Size
