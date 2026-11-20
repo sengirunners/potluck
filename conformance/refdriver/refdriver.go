@@ -314,6 +314,8 @@ type record struct {
 	Releases                 int
 	Exit                     *int
 	Start, Deadline, End     time.Time
+	PublishFile              string          // a run's publish file, relative to Checkout (publish.go)
+	Publish                  json.RawMessage `json:",omitempty"` // what it held when the run ended
 }
 
 type request struct {
@@ -633,6 +635,7 @@ func (d *drv) describe() map[string]any {
 		d.warmDescribe(out)                                                                                                            // warm.go
 	}
 	d.progressDescribe(out) // progress.go
+	d.publishDescribe(out)  // publish.go
 	switch d.bug {
 	case "describe-no-class":
 		delete(out, "isolation")
@@ -829,6 +832,10 @@ func (d *drv) acquireLocked(kind string, a acquireArgs) (map[string]any, error) 
 			return nil, refuse("bad_request", "script %q is a name, never a shell string", a.Script)
 		}
 		r.Commit, r.Script, r.Args = a.Commit, a.Script, a.Args
+		var err error
+		if r.PublishFile, err = d.publishAcquire(); err != nil { // publish.go
+			return nil, err
+		}
 		r.Handle = "run:" + d.cfg["target"] + "/r" + strconv.Itoa(n)
 		if d.is("shell-string") && strings.ContainsAny(a.Script, "; ") {
 			return map[string]any{}, exec.Command("sh", "-c", a.Script).Run()
@@ -1130,6 +1137,7 @@ func (d *drv) status(req request) (any, error) {
 	if d.is("status-wrong-state") {
 		out["state"] = "ended"
 	}
+	d.publishStatus(r, out) // publish.go
 	return out, nil
 }
 
@@ -1404,6 +1412,7 @@ func supervise(state, handle, bug string) int {
 			cmd = exec.Command("sleep", "60")
 		}
 		cmd.Dir = r.Checkout
+		cmd.Env = (&drv{bug: bug}).publishEnv(r) // publish.go
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
 			return 1
@@ -1441,6 +1450,7 @@ func supervise(state, handle, bug string) int {
 					code = 0
 				}
 				r.State, r.Exit, r.End = "ended", &code, time.Now().UTC()
+				r.Publish = readPublish(r, bug) // publish.go
 				return save(state, r)
 			})
 			return 0

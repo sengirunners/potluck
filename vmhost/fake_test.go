@@ -525,9 +525,21 @@ func TestConformanceOverAFakeLayer(t *testing.T) {
 	if n := conformance.Failed(res); n > 0 {
 		t.Fatalf("%d failed:\n%s", n, out)
 	}
-	// Only the dirty-worktree check may skip: runs never start from a worktree.
-	if n := conformance.Skipped(res); n > 1 {
-		t.Fatalf("%d skipped, want at most 1:\n%s", n, out)
+	// Two checks skip, by name: the dirty-worktree check (runs never start
+	// from a worktree) and the publish group (this driver serves boxes and
+	// does not list run-publish). Any other skip is a check that stopped running.
+	expected := map[string]string{
+		"a dirty working tree does not leak in": "no --worktree",
+		"a run's publish":                       "describe lists no run-publish capability",
+	}
+	for _, r := range conformance.SkippedResults(res) {
+		if why, ok := expected[r.Name]; !ok || r.Detail != why {
+			t.Fatalf("unexpected skip %q (%s):\n%s", r.Name, r.Detail, out)
+		}
+		delete(expected, r.Name)
+	}
+	if len(expected) > 0 {
+		t.Fatalf("expected skips did not happen: %v:\n%s", expected, out)
 	}
 	t.Log("\n" + out)
 }

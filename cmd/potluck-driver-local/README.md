@@ -17,6 +17,11 @@ allowlist (`PATH`, `HOME`, `LANG`, `TERM`, `TZ`) and stdin closed, writes stdout
 ends it at the deadline (TERM, then KILL after 5 s; `exit: 124`) and removes the checkout. The script sets up
 anything else it needs (a `PATH` with its own tools, a settings file under `HOME`).
 
+With `ZM_PUBLISH_FILE` set at acquire to a path inside the checkout (the daemon always sets it:
+`.potluck-publish.json` unless its own environment names another), the script
+gets the file's absolute path in its own `ZM_PUBLISH_FILE`, and what it wrote there (one JSON value, at most
+64 KiB) is the ended run's `publish` in `status` (`docs/protocol.md`, "A run's publish").
+
 `remote` must be the same repository as the binding's `--repo`: zm checks the commit is the head of the binding's
 branch there, and the driver only that it is in `ref`'s history on `remote`. Both are the owner's settings.
 

@@ -249,7 +249,9 @@ A box runs whatever its holder sends, so it is untrusted code by construction.
 
 - A target is code run with the daemon's UID: it is **not a secrets boundary** (it can read whatever the user can),
   and binding one trusts its code.
-- It gets the environment allowlist (`PATH`, `HOME`, `LANG`, `TERM`, `TZ`) and nothing more; `env = "inherit"` does
+- It gets the environment allowlist (`PATH`, `HOME`, `LANG`, `TERM`, `TZ`, and `ZM_PUBLISH_FILE`, a path in a run's
+  checkout, `.potluck-publish.json` unless the daemon's own environment names another: `docs/protocol.md`, "A run's
+  publish") and nothing more; `env = "inherit"` does
   not apply to run targets.
 - A credential reaches it only through a `*_file` config key naming a `0600` file it reads itself. A secret value in
   a binding is refused.
@@ -1010,7 +1012,8 @@ A program built on Potluck carries these commands in its own command tree, in it
   no exit.
 - `create` places the box. `--on` takes a binding as named: its full name (`c2m4-box@example-host`, as the target list prints it), its own name (`c2m4-box`), a machine that shares one box, or a machine with `--size`; more than one match is refused with the names, and a miss names the closest. Otherwise every box binding describes itself, and the
   smallest available one matching `--size` and `--os` wins: fewest CPUs, then least memory, then name. With `--net
-  off`, only a binding listing `net-off`.
+  off`, only a binding listing `net-off`; with `--deps`, only one that builds dependency layers (`volumes`,
+  `volumes-seal`, `volumes-keep` and `base64`).
 - A refusal names each binding and why, and, when `--size` names a size no binding placement may pick states, the
   sizes they do (Potluck's own: `c1m2`, `c2m4`, `c2m8`, `c4m16`, `c8m32`).
 - Both use the run-target routes; there are no sandbox routes.

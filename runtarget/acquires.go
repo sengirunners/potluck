@@ -436,7 +436,7 @@ func (s *Service) cancelAcquire(r *http.Request) (any, error) {
 			// what an earlier call made under the key, if anything, is found
 			// by list.
 			if h, found, lerr := s.reconcile(r.Context(), ref.b, ref.key); lerr == nil && found {
-				_ = s.record(r.Context(), ref.project, ref.db, ref.b.Name, ref.key, upd{handle: h.Handle, state: h.State, expiresAt: h.ExpiresAt})
+				_ = s.record(r.Context(), ref.project, ref.db, ref.b.Name, ref.key, upd{handle: h.Handle, state: h.State, expiresAt: h.ExpiresAt, exit: h.Exit, publish: h.Publish})
 				rw, _, _ = byRequest(r.Context(), ref.db, ref.b.Name, ref.key)
 			}
 		}
@@ -583,7 +583,7 @@ func (s *Service) settleOne(ctx context.Context, project string, db *sql.DB, bin
 		_ = deleteAcquiring(ctx, db, rw.Target, rw.RequestID) // nothing was made, and the driver keeps the cancel
 		return true
 	}
-	if err := s.record(ctx, project, db, rw.Target, rw.RequestID, upd{handle: h.Handle, state: h.State, expiresAt: h.ExpiresAt}); err != nil {
+	if err := s.record(ctx, project, db, rw.Target, rw.RequestID, upd{handle: h.Handle, state: h.State, expiresAt: h.ExpiresAt, exit: h.Exit, publish: h.Publish}); err != nil {
 		return true
 	}
 	if now, ok, err := byRequest(ctx, db, rw.Target, rw.RequestID); err == nil && ok && now.Handle != "" {
@@ -620,7 +620,7 @@ func (s *Service) cutOff(ctx context.Context, project string, db *sql.DB, b comp
 		}
 		return nil, retry
 	}
-	if err := s.record(ctx, project, db, b.Name, requestID, upd{handle: h.Handle, state: h.State, expiresAt: h.ExpiresAt}); err != nil {
+	if err := s.record(ctx, project, db, b.Name, requestID, upd{handle: h.Handle, state: h.State, expiresAt: h.ExpiresAt, exit: h.Exit, publish: h.Publish}); err != nil {
 		return nil, err
 	}
 	rw, ok, rerr := byRequest(ctx, db, b.Name, requestID)

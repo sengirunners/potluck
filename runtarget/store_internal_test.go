@@ -3,6 +3,7 @@ package runtarget
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ func TestSpendBookkeeping(t *testing.T) {
 	}
 	defer db.Close()
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL); err != nil {
+	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL+";"+publishDDL); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 6, 15, 0, 0, 0, time.UTC) // a Friday
@@ -106,7 +107,7 @@ func TestEndedRows(t *testing.T) {
 	}
 	defer db.Close()
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL); err != nil {
+	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL+";"+publishDDL); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
@@ -152,7 +153,7 @@ func TestEndedOrderWithinASecond(t *testing.T) {
 	}
 	defer db.Close()
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL); err != nil {
+	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL+";"+publishDDL); err != nil {
 		t.Fatal(err)
 	}
 	sec := time.Date(2026, 11, 6, 12, 0, 5, 0, time.UTC)
@@ -186,5 +187,47 @@ func TestEndedOrderWithinASecond(t *testing.T) {
 	_ = db.QueryRowContext(ctx, `SELECT ended FROM run_handles WHERE request_id='b'`).Scan(&ended)
 	if ended != sec.Add(500*time.Millisecond).Format(tsLayout) {
 		t.Errorf("normalized: %q", ended)
+	}
+}
+
+// A publish is kept once, from the update that ends the row as ended: not
+// from one that leaves it running or ends it any other way, and never
+// replaced by a later one.
+func TestPublishIsKeptOnceAtTheEnd(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "p.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL+";"+publishDDL); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 6, 15, 0, 0, 0, time.UTC).Format(tsLayout)
+	for _, k := range []string{"ended", "released", "twice"} {
+		if err := insertAcquiring(ctx, db, "vm", k, "{}", "run", "human:ana", "main", "c", "probe.sh", "", at, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pub := func(s string) json.RawMessage { return json.RawMessage(s) }
+	for _, s := range []struct {
+		key string
+		u   upd
+	}{
+		{"ended", upd{handle: "run:vm/ended", state: stateRunning, publish: pub(`{"early":1}`)}},
+		{"ended", upd{state: stateEnded, publish: pub(`{"a":1}`)}},
+		{"released", upd{handle: "run:vm/released", state: stateReleased, publish: pub(`{"b":1}`)}},
+		{"twice", upd{handle: "run:vm/twice", state: stateEnded, publish: pub(`{"c":1}`)}},
+		{"twice", upd{state: stateEnded, publish: pub(`{"c":2}`)}},
+	} {
+		if _, err := update(ctx, db, "vm", s.key, s.u, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for k, want := range map[string]string{"ended": `{"a":1}`, "released": "", "twice": `{"c":1}`} {
+		r, _, err := byRequest(ctx, db, "vm", k)
+		if err != nil || string(r.Publish) != want {
+			t.Errorf("%s: publish %q (%v), want %q", k, r.Publish, err, want)
+		}
 	}
 }

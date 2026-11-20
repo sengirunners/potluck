@@ -688,7 +688,14 @@ func (s *Service) reconcile(ctx context.Context, b computeapi.RunTarget, request
 	}
 	for _, h := range l.Handles {
 		if h.RequestID == requestID && strings.HasPrefix(h.Handle, b.Kind+":"+b.Name+"/") && driverStates[h.State] {
-			return computeapi.RunTargetHandle{Handle: h.Handle, State: h.State, ExpiresAt: h.ExpiresAt}, true, nil
+			found := computeapi.RunTargetHandle{Handle: h.Handle, State: h.State, ExpiresAt: h.ExpiresAt}
+			if h.State == stateEnded { // list says no exit and no publish: a run that ended before it was found is asked once for them
+				var st statusAnswer
+				if s.call(ctx, b, verbStatus, h.Handle, nil, &st) == nil && st.State == stateEnded {
+					found.Exit, found.Publish = st.Exit, st.publishOf()
+				}
+			}
+			return found, true, nil
 		}
 	}
 	return computeapi.RunTargetHandle{}, false, nil
@@ -827,6 +834,17 @@ type statusAnswer struct {
 	Exit      *int                       `json:"exit"`
 	ExpiresAt string                     `json:"expires_at"`
 	Spend     *computeapi.RunTargetSpend `json:"spend"`
+	Publish   json.RawMessage            `json:"publish"`
+}
+
+// publishOf is what an ended run published, by the protocol's rule whatever
+// the driver sent: only an ended run's, within its size, one JSON value.
+func (a statusAnswer) publishOf() json.RawMessage {
+	if a.State != stateEnded {
+		return nil
+	}
+	p, _ := protocol.CleanPublish(a.Publish)
+	return p
 }
 
 var driverStates = map[string]bool{stateReady: true, stateRunning: true, stateStopped: true, stateEnded: true, stateExpired: true,
@@ -883,7 +901,7 @@ func (s *Service) refresh(ctx context.Context, pid string, b computeapi.RunTarge
 		d, _ = s.describeOf(ctx, b)
 	}
 	if err := s.record(ctx, pid, db, b.Name, rw.RequestID, upd{state: ans.State, commit: ans.Commit,
-		exit: ans.Exit, expiresAt: ans.ExpiresAt, spend: s.unitSpend(d, ans.Spend)}); err != nil {
+		exit: ans.Exit, expiresAt: ans.ExpiresAt, spend: s.unitSpend(d, ans.Spend), publish: ans.publishOf()}); err != nil {
 		return rw.RunTargetHandle, err
 	}
 	out, _, err := byHandle(ctx, db, rw.Handle)

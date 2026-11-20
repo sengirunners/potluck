@@ -60,27 +60,19 @@ jobs:
     if: always() && github.repository == 'sengirunners/potluck' && (needs.proof.result == 'success' || needs.proof.result == 'failure')
     runs-on: ubuntu-slim
     permissions:
+      contents: read
       issues: write
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/failing-issue.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RESULT: ${{ needs.proof.result }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         shell: bash
-        run: |
-          set -euo pipefail
-          title="clean-machine proof failing"
-          open=$(gh issue list --state open --limit 100 --json number,title)
-          n=$(jq -r --arg t "$title" '[.[] | select(.title == $t) | .number] | first // empty' <<<"$open")
-          if [[ "$RESULT" == failure ]]; then
-            if [[ -n "$n" ]]; then
-              gh issue comment "$n" --body "Failed again: $URL"
-            else
-              gh issue create --title "$title" --body "The clean-machine proof (scripts/clean-machine-proof.sh) failed: $URL. Later failures comment here; the next passing proof closes this issue."
-            fi
-          elif [[ -n "$n" ]]; then
-            gh issue comment "$n" --body "Passing again: $URL"
-            gh issue close "$n" --reason completed
-          fi
+        run: bash scripts/ci/failing-issue.sh "clean-machine proof failing" "$RESULT" "$URL" "The clean-machine proof (scripts/clean-machine-proof.sh)"

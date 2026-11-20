@@ -39,7 +39,7 @@ const (
 // envAllowlist is all of the daemon's environment a driver gets (SPEC 20:
 // env = "inherit" does not apply to run targets). driverEnv adds only that
 // and how a person types Potluck's commands here (config.EnvPrefix), which
-// the driver's messages name.
+// the driver's messages name, and the run's publish file.
 var envAllowlist = []string{"PATH", "HOME", "LANG", "TERM", "TZ"}
 
 func driverEnv() []string {
@@ -49,7 +49,19 @@ func driverEnv() []string {
 			env = append(env, k+"="+v)
 		}
 	}
-	return env
+	return append(env, protocol.PublishFileEnv+"="+publishFile())
+}
+
+// publishFile is the run's publish file a driver with capability run-publish
+// reads at acquire (protocol.PublishFileEnv): a path in the run's working
+// directory. The daemon's own ZM_PUBLISH_FILE when set, else
+// protocol.DefaultPublishFile, so a caller's script can always publish without
+// anyone setting up the machine that runs it.
+func publishFile() string {
+	if v := os.Getenv(protocol.PublishFileEnv); v != "" {
+		return v
+	}
+	return protocol.DefaultPublishFile
 }
 
 // errTimeout marks a driver that did not answer in its time limit.

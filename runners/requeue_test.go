@@ -298,7 +298,7 @@ func pinnedStarting(t *testing.T, before func(*runners.Service), names ...string
 func (f *fixture) serveOn(t *testing.T, job, run int64, box string) {
 	t.Helper()
 	f.deliver(t, "workflow_job", jobEvent("queued", job, run, "acme/app", true, "pool:s"+box))
-	eventually(t, fmt.Sprintf("job %d on box %s", job, box), func() bool {
+	eventuallyBox(t, fmt.Sprintf("job %d on box %s", job, box), func() bool {
 		return f.liveOn(t, box) == 1 && f.svc.Undone(context.Background()) == 0
 	})
 }

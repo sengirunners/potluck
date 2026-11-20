@@ -73,6 +73,7 @@ func TestQuickGroupsCoverTheSuite(t *testing.T) {
 		"reclaim":          "share passes no --reclaim-config, so a SKIP",
 		"code":             "share passes no --ref, so a SKIP",
 		"ended":            "run targets only",
+		"publish":          "needs a run driver listing run-publish; share's drivers serve boxes, so a SKIP",
 		"procs":            "waits out a 20 s background process; spawn, output and signal are the driver's code, the same on every size",
 		"pty":              "terminals ride the background-process verbs (procs): the driver's code, the same on every size",
 		"persist":          "waits out a short lease and boots a box twice; kept disks are the driver's code, the same on every size",

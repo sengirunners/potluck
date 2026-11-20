@@ -6,10 +6,11 @@
 # The private key lives only in the potluck-release environment (secret POTLUCK_RELEASE_KEY), which deploys from
 # main alone.
 #
-# Three jobs: pick (the newest green main), menubar (builds Potluck Menu.app on a GitHub-hosted Mac: swiftc is
-# not Go) and release (builds the tarballs, with the app's zip inside each darwin one, signs and publishes). The
-# app is ad hoc signed, not Developer ID signed or notarized, until the owners provide an Apple Developer ID
-# (docs/menubar.md). A failed app build never blocks a release: the tarballs ship without the zip, with a warning.
+# Four jobs: pick (the newest green main), report (an issue while ci fails on main), menubar (builds Potluck
+# Menu.app on a GitHub-hosted Mac: swiftc is not Go) and release (builds the tarballs, with the app's zip inside
+# each darwin one, signs and publishes). The app is ad hoc signed, not Developer ID signed or notarized, until the
+# owners provide an Apple Developer ID (docs/menubar.md). A failed app build never blocks a release: the tarballs
+# ship without the zip, with a warning.
 #
 # Why this polls ci instead of running after it: a workflow_run trigger, or a release job inside ci.yml (needs: on
 # its jobs, or a workflow_call), puts a write-scoped job in a workflow a fork's pull request can start, which
@@ -39,6 +40,8 @@ jobs:
       sha: ${{ steps.pick.outputs.sha }}
       version: ${{ steps.pick.outputs.version }}
       tag: ${{ steps.pick.outputs.tag }}
+      ci: ${{ steps.pick.outputs.ci }}
+      ci_url: ${{ steps.pick.outputs.ci_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,13 +62,23 @@ jobs:
           runs="repos/$GH_REPO/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=50"
           if [[ "$EVENT" == push ]]; then
             for _ in $(seq 1 20); do
-              state=$(gh api "$runs&head_sha=$SHA" --jq '[.workflow_runs[] | select(.repository.full_name==env.GH_REPO)] | max_by(.run_number) | (.status // "none") + " " + (.conclusion // "")')
-              case "$state" in
-                "completed success") break ;;
-                completed*) echo "::notice::ci for $SHA ended ${state#completed }: not releasing it"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0 ;;
-              esac
+              # An assignment, not read < <(gh ...): a failed gh api then fails the step under set -e.
+              state=$(gh api "$runs&head_sha=$SHA" --jq '[.workflow_runs[] | select(.repository.full_name==env.GH_REPO)] | max_by(.run_number) // {} | [(.status // "none"), (.conclusion // ""), (.html_url // "")] | join("|")')
+              IFS='|' read -r status conclusion url <<<"$state"
+              if [[ "$status" == completed ]]; then
+                # ci and ci_url feed the report job; a cancelled or skipped run is no verdict on the commit.
+                case "$conclusion" in
+                  success) echo "ci=success" >> "$GITHUB_OUTPUT" ;;
+                  failure | timed_out | startup_failure) echo "ci=failure" >> "$GITHUB_OUTPUT" ;;
+                esac
+                echo "ci_url=$url" >> "$GITHUB_OUTPUT"
+                [[ "$conclusion" == success ]] && break
+                echo "::warning::ci for $SHA ended $conclusion: not releasing it"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+              fi
               sleep 60
             done
+            # Not finished in 20 minutes: no verdict to report, and this commit is not the one released.
+            [[ "$status" == completed ]] || echo "::warning::ci for $SHA is $status after 20 minutes: releasing the newest main whose ci passed"
           fi
           sha=$(gh api "$runs&status=success" \
             --jq '[.workflow_runs[] | select(.head_branch=="main" and .event=="push" and .conclusion=="success" and .repository.full_name==env.GH_REPO)] | max_by(.run_number) | .head_sha')
@@ -87,6 +100,32 @@ jobs:
             echo "go=true" >> "$GITHUB_OUTPUT"
           fi
         shell: bash
+
+  # A main whose ci failed is never released, and that skip is a green run nobody sees: so a failed ci on the pushed
+  # commit opens (or comments on) one issue, which GitHub mails to the repository's watchers, and the next push whose
+  # ci passes closes it.
+  report:
+    name: report a failed ci on main
+    needs: pick
+    if: needs.pick.outputs.ci == 'failure' || needs.pick.outputs.ci == 'success'
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+      issues: write
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/failing-issue.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.pick.outputs.ci }}
+          URL: ${{ needs.pick.outputs.ci_url }}
+        shell: bash
+        run: bash scripts/ci/failing-issue.sh "ci failing on main" "$RESULT" "$URL" "ci on main (a commit whose ci failed is not released)"
 
   # Potluck Menu.app, built on a GitHub-hosted Mac (never a self-hosted runner, whose owner a release must not
   # depend on) from the picked commit: arm64 and x86_64 joined, ad hoc signed, zipped with ditto.

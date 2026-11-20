@@ -484,10 +484,8 @@ func (s *Service) acquireDeps(ctx context.Context, t core.Target, b computeapi.R
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range []string{protocol.CapVolumes, protocol.CapVolumesSeal, protocol.CapVolumesKeep, computeapi.EncodingBase64} {
-		if !slices.Contains(d.Capabilities, c) {
-			return nil, api.Errorf(api.CodeBadRequest, "run target %s builds no dependency layers (potluck-driver-%s lists no %s capability)", b.Name, b.Driver, c)
-		}
+	if c := computeapi.DepsLayersLack(d.Capabilities); c != "" {
+		return nil, api.Errorf(api.CodeBadRequest, "run target %s builds no dependency layers (potluck-driver-%s lists no %s capability)", b.Name, b.Driver, c)
 	}
 	wait := depsWaitS(req.DepsWaitS)
 	deadline := s.now().Add(time.Duration(wait) * time.Second)

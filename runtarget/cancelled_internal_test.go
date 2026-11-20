@@ -20,7 +20,7 @@ func TestCancelledAcquiringPages(t *testing.T) {
 	}
 	defer db.Close()
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL); err != nil {
+	if _, err := db.ExecContext(ctx, handlesDDL+";"+boxDDL+";"+areaDDL+";"+persistDDL+";"+startedSpendDDL+";"+cancelledDDL+";"+selfRenewDDL+";"+publishDDL); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)

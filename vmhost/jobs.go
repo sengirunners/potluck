@@ -177,14 +177,19 @@ func (s store) trimJobs(p string) {
 func gone(pid int) bool { return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) }
 
 // lastSeen is the latest a record or its supervisor's log was written,
-// never before its start: as late as a job whose supervisor died is known
-// to have run.
+// never before its start and never after now (now wins if the start is
+// ahead of it): as late as a job whose supervisor died is known to have
+// run. A file stamped ahead of now (the clock stepped back since) cannot
+// end a job in the future.
 func (s store) lastSeen(r record) time.Time {
 	t := r.Start
 	for _, p := range []string{s.file(r.ID), filepath.Join(s.dir, "logs", r.ID+".supervisor.log"), s.beatFile(r.ID)} {
 		if fi, err := os.Stat(p); err == nil && fi.ModTime().After(t) {
 			t = fi.ModTime()
 		}
+	}
+	if now := time.Now(); t.After(now) {
+		t = now
 	}
 	return t.UTC()
 }

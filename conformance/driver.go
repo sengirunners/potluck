@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -51,6 +52,8 @@ const (
 )
 
 // envAllowlist is all of the suite's environment a driver gets (SPEC 20).
+// ZM_PUBLISH_FILE, which the daemon also passes on, is left out: the suite
+// sets it itself, for the publish group's acquires only (publish.go).
 var envAllowlist = []string{"PATH", "HOME", "LANG", "TERM", "TZ"}
 
 func allowedEnv() []string {
@@ -222,7 +225,11 @@ func envelope(verb, id string, a json.RawMessage, cfg map[string]string) []byte 
 // callCfg sends one request. A refusal comes back as *protocol.Error; a broken
 // answer (crash, bad JSON, timeout) is a plain error.
 func (r *run) callCfg(verb, id string, a json.RawMessage, cfg map[string]string, out any) (*protocol.Error, error) {
-	stdout, exit, err := r.exchange(verb, envelope(verb, id, a, cfg), r.env)
+	env := r.env
+	if verb == verbAcquire && len(r.acquireEnv) > 0 {
+		env = append(slices.Clone(r.env), r.acquireEnv...)
+	}
+	stdout, exit, err := r.exchange(verb, envelope(verb, id, a, cfg), env)
 	if err != nil {
 		return nil, err
 	}

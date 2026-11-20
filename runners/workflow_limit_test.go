@@ -94,7 +94,7 @@ func TestRuntimeDeadlineStopsWithoutRetry(t *testing.T) {
 	}
 	elapsed.Store(61)
 	f.svc.Watch(ctx)
-	eventually(t, "intentional runtime timeout", func() bool { return f.jobs(t)[9981].State == "done" && f.liveOn(t, "a") == 0 })
+	eventuallyBox(t, "intentional runtime timeout", func() bool { return f.jobs(t)[9981].State == "done" && f.liveOn(t, "a") == 0 })
 	if why := f.jobs(t)[9981].Why; !strings.Contains(why, "job time limit reached (60 s") || !strings.Contains(why, "not re-run") {
 		t.Fatal(why)
 	}
@@ -243,7 +243,7 @@ func TestSwappedJobTimeoutRequeuesOriginalJob(t *testing.T) {
 	eventually(t, "actual job owns runtime", func() bool { j := f.jobs(t)[9987]; return j.LimitS == 60 && j.Deadline == base.Unix()+60 })
 	elapsed.Store(61)
 	f.svc.Watch(ctx)
-	eventually(t, "original queued job served again", func() bool { return f.jobs(t)[9986].Runner == "potluck-9986-2" && f.liveOn(t, "a") == 1 })
+	eventuallyBox(t, "original queued job served again", func() bool { return f.jobs(t)[9986].Runner == "potluck-9986-2" && f.liveOn(t, "a") == 1 })
 	actual := f.jobs(t)[9987]
 	if actual.State != "done" || actual.Run != 987 || !strings.Contains(actual.Why, "job time limit reached (60 s") {
 		t.Fatalf("actual timeout missing or wrong run: %+v", actual)
@@ -274,7 +274,7 @@ func TestRuntimeTimeoutRetriesFailedRelease(t *testing.T) {
 	}
 	refuse.Store(false)
 	f.svc.Watch(ctx)
-	eventually(t, "release retried", func() bool { return f.jobs(t)[9988].State == "done" && f.liveOn(t, "a") == 0 })
+	eventuallyBox(t, "release retried", func() bool { return f.jobs(t)[9988].State == "done" && f.liveOn(t, "a") == 0 })
 }
 
 func TestSweepDiscoversActualExecutionStart(t *testing.T) {
@@ -473,7 +473,7 @@ func TestTakersOwnTimeoutLeavesAnotherJobOnItsBoxRunning(t *testing.T) {
 				f.gh.conclusion[99113] = "success"
 				f.gh.mu.Unlock()
 				f.deliver(t, "workflow_job", endEvent(99113, 995, "acme/app", "success", 1, "pool:sb"))
-				eventually(t, "C completed independently", func() bool { return f.liveOn(t, "b") == 0 && f.svc.Undone(ctx) == 0 })
+				eventuallyBox(t, "C completed independently", func() bool { return f.liveOn(t, "b") == 0 && f.svc.Undone(ctx) == 0 })
 			} else {
 				elapsed.Store(70)
 				f.svc.AnswerStatus(func(target string, h computeapi.RunTargetHandle, err error) (computeapi.RunTargetHandle, error) {
@@ -484,7 +484,7 @@ func TestTakersOwnTimeoutLeavesAnotherJobOnItsBoxRunning(t *testing.T) {
 				})
 				f.svc.Watch(ctx)
 				f.svc.AnswerStatus(nil)
-				eventually(t, "C lost its host independently", func() bool { return f.liveOn(t, "b") == 0 })
+				eventuallyBox(t, "C lost its host independently", func() bool { return f.liveOn(t, "b") == 0 })
 				f.gh.mu.Lock()
 				f.gh.status[99113] = "completed"
 				f.gh.conclusion[99113] = "failure"

@@ -512,14 +512,15 @@ func (s *Schedule) Start() error {
 
 // Argv is the command line the installed job runs, read from its file (the
 // plist's ProgramArguments, or the service's ExecStart), whoever wrote it.
-// ErrNoJob when there is no file; an error when the file names no command or,
+// ErrNoJob when there is no file (a link to nothing is no file); an error
+// when what is there is not a job file readJob takes, or names no command or,
 // in a service, more than one.
 func (s *Schedule) Argv() ([]string, error) {
 	if err := s.Supported(); err != nil {
 		return nil, err
 	}
 	path := s.Files()[0]
-	b, err := os.ReadFile(path)
+	b, err := readJob(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrNoJob
 	} else if err != nil {
@@ -540,6 +541,29 @@ func (s *Schedule) Argv() ([]string, error) {
 		return nil, fmt.Errorf("%s runs %d commands, not one", path, len(cmds))
 	}
 	return cmds[0], nil
+}
+
+// jobFileMax bounds the job file Argv reads; a unit or a plist is a few
+// hundred bytes.
+const jobFileMax = 64 << 10
+
+// readJob is the job file at path: a regular file, or a link to one (a
+// machine's owner may link their own unit there), of at most jobFileMax
+// bytes. Anything else is an error before a byte is read, so a pipe or a
+// device left at the job's name does not hold a caller that reads the job
+// often.
+func readJob(path string) ([]byte, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if fi.Size() > jobFileMax {
+		return nil, fmt.Errorf("%s is %d bytes, more than the %d a job file may be", path, fi.Size(), jobFileMax)
+	}
+	return os.ReadFile(path)
 }
 
 // LingerNote is a sentence for a Linux user whose timer stops at logout, and

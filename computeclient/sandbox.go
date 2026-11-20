@@ -44,6 +44,9 @@ type BoxWant struct {
 	BoxSecrets bool
 	// Database places only on a driver that provisions a private database snapshot.
 	Database bool
+	// Deps places only on a binding whose driver builds dependency layers
+	// (computeapi.DepsLayersLack): an acquire asking any.
+	Deps bool
 }
 
 // PlaceBox picks the box binding to acquire. A named
@@ -122,7 +125,7 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 	case len(boxes) == 0:
 		return nil, &NoTarget{Err: api.Errorf(api.CodeNotFound, "no machine in this pool shares sandboxes yet").
 			WithHint("on a machine to share: potluck host")}
-	case len(boxes) == 1 && w.Size == "" && w.OS == "" && w.Net != computeapi.NetOff && !w.Volumes && !w.Secrets && !w.BoxSecrets && !w.Database:
+	case len(boxes) == 1 && w.Size == "" && w.OS == "" && w.Net != computeapi.NetOff && !w.Volumes && !w.Secrets && !w.BoxSecrets && !w.Database && !w.Deps:
 		return boxes[:1], nil
 	}
 	if l, err = RunTargets(ctx, c, true); err != nil {
@@ -135,6 +138,8 @@ func PlaceBox(ctx context.Context, c *client.Client, w BoxWant) ([]string, error
 			return "provides no project database snapshots (capability " + protocol.CapDatabase + ")"
 		case w.Net == computeapi.NetOff && !slices.Contains(d.Capabilities, computeapi.CapNetOff):
 			return "cannot make a box without a network (net off)"
+		case w.Deps && computeapi.DepsLayersLack(d.Capabilities) != "":
+			return "builds no dependency layers (capability " + computeapi.DepsLayersLack(d.Capabilities) + ")"
 		case w.Volumes && !slices.Contains(d.Capabilities, computeapi.CapVolumes):
 			return "mounts no named volumes (--volume)"
 		case w.BoxSecrets && boxSecretsCapability(d) != "":
@@ -229,6 +234,7 @@ func MadeNothing(err error) bool {
 func AcquireBox(ctx context.Context, c *client.Client, w BoxWant, req computeapi.AcquireRunTargetRequest,
 	prep func(ctx context.Context, target string, req *computeapi.AcquireRunTargetRequest) error) (target string, h computeapi.RunTargetHandle, err error) {
 	w.Database = w.Database || req.Database != ""
+	w.Deps = w.Deps || len(req.Deps) > 0
 	targets, err := PlaceBox(ctx, c, w)
 	if err != nil {
 		return "", h, err

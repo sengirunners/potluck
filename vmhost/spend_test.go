@@ -143,3 +143,52 @@ func TestSweepCountsADeadSupervisorsJobToItsLastSeen(t *testing.T) {
 		t.Errorf("the lender's list: %+v %v, want one job ended at %v", js, err, seen)
 	}
 }
+
+// zm-82u4.1: whether a job whose supervisor died ran out its time is judged
+// by when it ended (lastSeen), not by when the sweep came. One that died two
+// hours ago, an hour before its deadline, is lost (unbilled) though the sweep
+// comes after that deadline; and a file stamped ahead of now (the clock
+// stepped back) cannot end a job in the future or past its deadline.
+func TestSweepJudgesExpiryByWhenADeadSupervisorsJobEnded(t *testing.T) {
+	m := cfg(t)
+	now := time.Now().UTC()
+	st := store{m["state_dir"]}
+	for _, c := range []struct {
+		id             string
+		seen, deadline time.Time
+	}{
+		{"r000000000004", now.Add(-2 * time.Hour), now.Add(-time.Hour)}, // died before its deadline, swept after it
+		{"r000000000005", now.Add(2 * time.Hour), now.Add(time.Hour)},   // its files stamped ahead of now
+	} {
+		start := now.Add(-3 * time.Hour)
+		r := put(t, m, record{ID: c.id, Kind: "run", State: stRunning, Supervisor: deadPID(t),
+			Start: start, RunStart: start, Deadline: c.deadline})
+		if err := os.WriteFile(st.beatFile(r.ID), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []string{st.file(r.ID), st.beatFile(r.ID)} {
+			if err := os.Chtimes(p, c.seen, c.seen); err != nil {
+				t.Fatal(err)
+			}
+		}
+		s, err := call(t, m, "status", r.Handle, nil) // its sweep ends the run
+		after := time.Now()
+		if err != nil || s["state"] != stLost || s["exit"] != nil {
+			t.Errorf("%s: status after the sweep %v %v, want lost with no exit", c.id, s, err)
+		}
+		got, err := st.load(r.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.State != stLost || got.Exit != nil {
+			t.Errorf("%s: record %s exit %v, want lost with no exit", c.id, got.State, got.Exit)
+		}
+		if c.seen.After(after) { // clamped to the sweep's now
+			if got.End.Before(now) || got.End.After(after) {
+				t.Errorf("%s: End %v, want the sweep's now (%v..%v)", c.id, got.End, now, after)
+			}
+		} else if !got.End.Equal(c.seen) {
+			t.Errorf("%s: End %v, want its last seen %v", c.id, got.End, c.seen)
+		}
+	}
+}

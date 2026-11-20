@@ -96,6 +96,7 @@ func fixture(t *testing.T, kind, bug string) (string, Options) {
 		opt.LeftoverRoots = []string{tmp}
 		opt.Config = map[string]string{"remote": repo.Remote, "host_tmp": tmp}
 	}
+	opt.NetPeerPort = peerPorts(t)
 	return path, opt
 }
 
@@ -128,7 +129,9 @@ func TestGoodDrivers(t *testing.T) {
 		wantSkip        string
 		wantRan         []string // checks that must pass, not skip
 	}{
-		{name: "run", kind: "run"},
+		{name: "run", kind: "run", wantRan: []string{pbEnded, pbKept, pbHeld, pbBig, pbBad, pbNoEnv, pbBadPath}},
+		{name: "run without publish", kind: "run", bug: "no-publish", wantSkip: "a run's publish"},
+		{name: "box without a run's publish", kind: "box", edit: func(o *Options) { o.Only = []string{"publish"} }, wantSkip: "a run's publish"},
 		{name: "db", kind: "db"},
 		{name: "run without renew", kind: "run", bug: "no-renew", wantSkip: "the lifetime cap across renewals"},
 		{name: "db without renew", kind: "db", bug: "no-renew", wantSkip: "the lifetime cap across renewals"},
@@ -212,24 +215,21 @@ func TestGoodDrivers(t *testing.T) {
 // link-local) is a SKIP, which fails strict.
 func TestStrict(t *testing.T) {
 	open, _ := listeners(t)
-	_, free := listeners(t)
 	forbid, lanClosed, ok := lanListeners(t)
 	if !ok {
 		t.Skip("this machine has no non-loopback, non-link-local IPv4 address on an up interface: no forbidden address the suite tries")
 	}
 	_, port, _ := net.SplitHostPort(open)
 	_, fport, _ := net.SplitHostPort(forbid)
-	_, pport, _ := net.SplitHostPort(free)
 	bin := refdriver.FirewallCI(t, t.TempDir(), forbid)
 	if err := os.WriteFile(filepath.Join(bin, "ip"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	peerPort, _ := strconv.Atoi(pport)
 	withNet := func(forbid string) func(*Options) {
 		return func(o *Options) {
 			o.NetAllow, o.NetForbid, o.NetResolve = []string{open}, []string{forbid}, []string{"localhost:" + port}
-			o.NetPeers, o.NetPeerPort = true, peerPort
+			o.NetPeers = true
 		}
 	}
 	notProven := "FAIL  " + StrictCheck + `: not proven: "a box cannot reach `
@@ -383,6 +383,15 @@ var brokenDrivers = []struct {
 	// a run that ends on its own
 	{"run", "ended-wrong-exit", "ended", "FAIL  status after the script exits", nil},
 	{"run", "release-no-exit", "ended", "FAIL  release of a run already ended", nil},
+	// a run's publish
+	{"run", "publish-ignored", "publish", "FAIL  " + pbEnded, nil},
+	{"run", "publish-no-env", "publish", "FAIL  " + pbEnded, nil},
+	{"run", "publish-early", "publish", "FAIL  " + pbHeld, nil},
+	{"run", "publish-uncapped", "publish", "FAIL  " + pbBig, nil},
+	{"run", "publish-unchecked", "publish", "FAIL  " + pbBad, nil},
+	{"run", "publish-always-env", "publish", "FAIL  " + pbNoEnv, nil},
+	{"run", "publish-lost", "publish", "FAIL  " + pbKept, nil},
+	{"run", "publish-escapes", "publish", "FAIL  " + pbBadPath, nil},
 	// the code a run gets
 	{"run", "wrong-head", "code", "FAIL  a run's HEAD is the commit sent", nil},
 	{"run", "ended-wrong-exit", "code", "FAIL  the probe can fail", nil},

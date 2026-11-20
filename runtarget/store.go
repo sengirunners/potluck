@@ -3,6 +3,7 @@ package runtarget
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -31,6 +32,8 @@ var handleMigrations = []store.Migration{
 	{Kind: store.KindProject, Name: "runtarget/0011_request_index", Script: `CREATE INDEX run_handles_request ON run_handles (request_id, kind);`},
 	// A handle whose client renews it itself: the sweep leaves it (sweep.go renewHeld).
 	{Kind: store.KindProject, Name: "runtarget/0012_self_renew", Script: selfRenewDDL},
+	// What an ended run published (publish.go).
+	{Kind: store.KindProject, Name: "runtarget/0013_publish", Script: publishDDL},
 }
 
 // markCancelled records that a cancel of an acquire with no handle yet
@@ -100,6 +103,9 @@ const cancelledDDL = `ALTER TABLE run_handles ADD COLUMN cancelled INTEGER NOT N
 // acquire's self_renew): the sweep never renews such a handle.
 const selfRenewDDL = `ALTER TABLE run_handles ADD COLUMN self_renew INTEGER NOT NULL DEFAULT 0;`
 
+// publishDDL adds what an ended run published: JSON, "" for none.
+const publishDDL = `ALTER TABLE run_handles ADD COLUMN publish TEXT NOT NULL DEFAULT '';`
+
 // areaDDL adds the area the acquire was made in: a pool team is an area, and
 // a handle is seen only by those who may read its area.
 const areaDDL = `ALTER TABLE run_handles ADD COLUMN area TEXT NOT NULL DEFAULT '';`
@@ -157,7 +163,7 @@ func terminal(state string) bool {
 }
 
 const handleCols = `target, request_id, request, COALESCE(handle,''), kind, actor, state, ref, commit_sha, script,
-  exit_code, expires_at, ttl_s, log, spend_unit, spend_amount, created, ended, size, image_digest, acquired, area, persist, started, started_spend, cancelled, self_renew`
+  exit_code, expires_at, ttl_s, log, spend_unit, spend_amount, created, ended, size, image_digest, acquired, area, persist, started, started_spend, cancelled, self_renew, publish`
 
 type row struct {
 	computeapi.RunTargetHandle
@@ -169,12 +175,15 @@ func scanRow(sc interface{ Scan(...any) error }) (row, error) {
 	var r row
 	var exit sql.NullInt64
 	var amount, startedAmount sql.NullFloat64
-	var unit string
+	var unit, publish string
 	err := sc.Scan(&r.Target, &r.RequestID, &r.request, &r.Handle, &r.Kind, &r.Actor, &r.State, &r.Ref, &r.Commit,
 		&r.Script, &exit, &r.ExpiresAt, &r.TTLS, &r.Log, &unit, &amount, &r.Created, &r.Ended, &r.Size, &r.ImageDigest, &r.Acquired, &r.Area,
-		&r.Persist, &r.Started, &startedAmount, &r.cancelled, &r.SelfRenew)
+		&r.Persist, &r.Started, &startedAmount, &r.cancelled, &r.SelfRenew, &publish)
 	if err != nil {
 		return r, err
+	}
+	if publish != "" {
+		r.Publish = json.RawMessage(publish)
 	}
 	if exit.Valid {
 		n := int(exit.Int64)
@@ -337,6 +346,7 @@ func update(ctx context.Context, db *sql.DB, target, requestID string, u upd, no
   spend_unit = CASE WHEN ? IS NOT NULL AND (spend_amount IS NULL OR ?>spend_amount) THEN ? ELSE spend_unit END,
   spend_amount = CASE WHEN ? IS NOT NULL AND (spend_amount IS NULL OR ?>spend_amount) THEN ? ELSE spend_amount END,
   billed = CASE WHEN ?=0 AND ended='' THEN 0 ELSE billed END,
+  publish = CASE WHEN ?<>'' AND publish='' AND ended='' AND ?=? THEN ? ELSE publish END,
   ended = CASE WHEN ended='' THEN ? ELSE ended END
 WHERE target=? AND request_id=?`,
 		u.handle, u.acquired, u.acquired, stateAcquiring, u.state, u.state,
@@ -348,6 +358,7 @@ WHERE target=? AND request_id=?`,
 		amount, amount, unit,
 		amount, amount, amount,
 		billed,
+		string(u.publish), u.state, stateEnded, string(u.publish),
 		ended,
 		target, requestID)
 	if err != nil {
@@ -365,6 +376,8 @@ type upd struct {
 	ttl                                   int
 	exit                                  *int
 	spend                                 *computeapi.RunTargetSpend
+	// publish is what an ended run published, already bounded (publishOf).
+	publish json.RawMessage
 }
 
 // setBox records a box's size, booted image digest and whether it keeps its disk.

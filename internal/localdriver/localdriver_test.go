@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"syscall"
@@ -475,5 +476,237 @@ func TestBusyMirrorDelaysNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(r.Checkout); !os.IsNotExist(err) {
 		t.Fatalf("checkout files left: %v", err)
+	}
+}
+
+// publishRun acquires a run of probe with ZM_PUBLISH_FILE=file in the driver's
+// environment (file "" leaves it unset) and answers its status once it ended.
+func publishRun(t *testing.T, probe, file string) (fixture, map[string]any, map[string]any) {
+	t.Helper()
+	f := newFixture(t, probe)
+	if file != "" {
+		t.Setenv("ZM_PUBLISH_FILE", file)
+	}
+	a := result(t, f.call(t, "acquire", "", map[string]any{"request_id": "p1", "actor": "a", "ref": "main",
+		"commit": f.repo.Commit, "script": "probe.sh"}, f.cfg))
+	return f, a, waitEnd(t, f, a["handle"].(string))
+}
+
+func TestDescribeListsRunPublish(t *testing.T) {
+	f := newFixture(t, "#!/bin/sh\nexit 0\n")
+	d := result(t, f.call(t, "describe", "", nil, f.cfg))
+	if !slices.Contains(toStrings(d["capabilities"]), "run-publish") {
+		t.Errorf("capabilities %v", d["capabilities"])
+	}
+}
+
+func toStrings(v any) []string {
+	var out []string
+	for _, x := range v.([]any) {
+		out = append(out, x.(string))
+	}
+	return out
+}
+
+// An ended run's status carries the JSON its script wrote to the file
+// ZM_PUBLISH_FILE named at acquire; a status after release answers the same.
+func TestPublishOnEndedStatus(t *testing.T) {
+	f, a, st := publishRun(t, "#!/bin/sh\nmkdir -p out\nprintf '{ \"url\": \"https://x.test/a\",\n \"n\": 2 }\\n' > out/pub.json\nexit 3\n", "out/pub.json")
+	want := map[string]any{"url": "https://x.test/a", "n": float64(2)}
+	if st["state"] != "ended" || st["exit"] != float64(3) {
+		t.Fatalf("status %v", st)
+	}
+	if !reflect.DeepEqual(st["publish"], want) {
+		t.Errorf("publish %v, want %v", st["publish"], want)
+	}
+	if rel := result(t, f.call(t, "release", a["handle"].(string), nil, f.cfg)); rel["released"] != false {
+		t.Errorf("release %v", rel)
+	}
+	again := result(t, f.call(t, "status", a["handle"].(string), nil, f.cfg))
+	if !reflect.DeepEqual(again["publish"], want) {
+		t.Errorf("later status %v", again)
+	}
+}
+
+// The script is told the file by absolute path, inside its checkout.
+func TestPublishFileEnvInScript(t *testing.T) {
+	f, a, _ := publishRun(t, "#!/bin/sh\necho \"pub=$ZM_PUBLISH_FILE\"\necho \"cwd=$(pwd -P)\"\n", "a/b.json")
+	b, _ := os.ReadFile(a["log"].(string))
+	var pub, cwd string
+	for _, line := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(line, "pub="); ok {
+			pub = v
+		}
+		if v, ok := strings.CutPrefix(line, "cwd="); ok {
+			cwd = v
+		}
+	}
+	state, err := filepath.EvalSymlinks(f.state) // a temporary directory may sit behind a link (macOS /var)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rest, ok := strings.CutPrefix(pub, f.state)
+	if cwd == "" || !ok || state+rest != filepath.Join(cwd, "a/b.json") {
+		t.Errorf("ZM_PUBLISH_FILE %q in cwd %q", pub, cwd)
+	}
+}
+
+// Without ZM_PUBLISH_FILE at acquire nothing is published and the script is told of no file.
+func TestPublishOffWithoutEnv(t *testing.T) {
+	_, a, st := publishRun(t, "#!/bin/sh\necho \"pub=[$ZM_PUBLISH_FILE]\"\necho '{\"a\":1}' > pub.json\n", "")
+	if _, ok := st["publish"]; ok {
+		t.Errorf("publish %v", st["publish"])
+	}
+	if b, _ := os.ReadFile(a["log"].(string)); !strings.Contains(string(b), "pub=[]") {
+		t.Errorf("log %s", b)
+	}
+}
+
+// A file that is absent, too big, not JSON, a directory, a fifo or a link
+// out of the checkout publishes nothing; the run still ends with its exit.
+func TestPublishOmitted(t *testing.T) {
+	secret := filepath.Join(t.TempDir(), "secret.json")
+	if err := os.WriteFile(secret, []byte(`{"stolen":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"absent":    "exit 0",
+		"oversize":  "{ printf '{\"x\":\"'; head -c 70000 /dev/zero | tr '\\0' a; printf '\"}'; } > p.json",
+		"not json":  "echo '{nope' > p.json",
+		"two":       "echo '{} {}' > p.json",
+		"null":      "echo null > p.json",
+		"directory": "mkdir p.json",
+		"fifo":      "mkfifo p.json",
+		"link out":  "ln -s " + secret + " p.json",
+		"dir link":  "mkdir d; ln -s " + filepath.Dir(secret) + " d/x; : > /dev/null",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file := "p.json"
+			if name == "dir link" {
+				file = "d/x/secret.json"
+			}
+			_, _, st := publishRun(t, "#!/bin/sh\n"+body+"\nexit 0\n", file)
+			if st["state"] != "ended" || st["exit"] != float64(0) {
+				t.Fatalf("status %v", st)
+			}
+			if _, ok := st["publish"]; ok {
+				t.Errorf("publish %v", st["publish"])
+			}
+		})
+	}
+}
+
+// A file the commit carries at the publish path is not published: only what
+// the script writes is.
+func TestPublishIgnoresACommittedFile(t *testing.T) {
+	f := newFixture(t, "#!/bin/sh\nexit 0\n")
+	gitIn := func(a ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", f.repo.Worktree, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", a, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if err := os.WriteFile(filepath.Join(f.repo.Worktree, "p.json"), []byte(`{"stale":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn("add", "p.json")
+	gitIn("commit", "-q", "-m", "stale publish")
+	gitIn("push", "-q", f.repo.Remote, "HEAD:refs/heads/main")
+	t.Setenv("ZM_PUBLISH_FILE", "p.json")
+	a := result(t, f.call(t, "acquire", "", map[string]any{"request_id": "p1", "actor": "a", "ref": "main",
+		"commit": gitIn("rev-parse", "HEAD"), "script": "probe.sh"}, f.cfg))
+	st := waitEnd(t, f, a["handle"].(string))
+	if st["exit"] != float64(0) {
+		t.Fatalf("status %v", st)
+	}
+	if _, ok := st["publish"]; ok {
+		t.Errorf("a committed file was published: %v", st["publish"])
+	}
+}
+
+// A publish path the commit makes unreachable (a directory above it that is
+// a link out of the checkout) or a directory does not stop the run: it ends
+// with its exit and publishes nothing.
+func TestPublishPathTheCommitBlocks(t *testing.T) {
+	for name, file := range map[string]string{"link above": "out/p.json", "directory": "dir"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, "#!/bin/sh\nexit 0\n")
+			gitIn := func(a ...string) string {
+				t.Helper()
+				out, err := exec.Command("git", append([]string{"-C", f.repo.Worktree, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"}, a...)...).CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v: %s", a, err, out)
+				}
+				return strings.TrimSpace(string(out))
+			}
+			if err := os.Symlink(t.TempDir(), filepath.Join(f.repo.Worktree, "out")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(f.repo.Worktree, "dir"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(f.repo.Worktree, "dir", "keep"), []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gitIn("add", "out", "dir")
+			gitIn("commit", "-q", "-m", "blocking paths")
+			gitIn("push", "-q", f.repo.Remote, "HEAD:refs/heads/main")
+			t.Setenv("ZM_PUBLISH_FILE", file)
+			a := result(t, f.call(t, "acquire", "", map[string]any{"request_id": "p1", "actor": "a", "ref": "main",
+				"commit": gitIn("rev-parse", "HEAD"), "script": "probe.sh"}, f.cfg))
+			st := waitEnd(t, f, a["handle"].(string))
+			if _, ok := st["publish"]; ok || st["exit"] != float64(0) {
+				t.Errorf("status %v", st)
+			}
+		})
+	}
+}
+
+// A run that did not end on its own (released) publishes nothing.
+func TestPublishNotOnReleasedRun(t *testing.T) {
+	f := newFixture(t, "#!/bin/sh\necho '{\"a\":1}' > p.json\nsleep 60\n")
+	t.Setenv("ZM_PUBLISH_FILE", "p.json")
+	a := result(t, f.call(t, "acquire", "", map[string]any{"request_id": "p2", "actor": "a", "ref": "main",
+		"commit": f.repo.Commit, "script": "probe.sh"}, f.cfg))
+	h := a["handle"].(string)
+	rel := result(t, f.call(t, "release", h, nil, f.cfg))
+	st := result(t, f.call(t, "status", h, nil, f.cfg))
+	if rel["released"] != true || st["state"] == "ended" {
+		t.Errorf("release %v, status %v", rel, st)
+	}
+	if _, ok := st["publish"]; ok {
+		t.Errorf("status %v", st)
+	}
+}
+
+// A publish path that is not clean and inside the checkout is refused at acquire, and makes no run.
+func TestPublishPathRefused(t *testing.T) {
+	for _, p := range []string{"/etc/passwd", "../x.json", "a/../b", "a b\nc"} {
+		f := newFixture(t, "#!/bin/sh\nexit 0\n")
+		t.Setenv("ZM_PUBLISH_FILE", p)
+		got := code(f.call(t, "acquire", "", map[string]any{"request_id": "p3", "actor": "a", "ref": "main",
+			"commit": f.repo.Commit, "script": "probe.sh"}, f.cfg))
+		if got != "bad_request" {
+			t.Errorf("%q: %q", p, got)
+		}
+	}
+}
+
+// A repeat of an acquire answers its run whatever ZM_PUBLISH_FILE says now:
+// the run keeps the file it was acquired with.
+func TestPublishRepeatKeepsTheRunsFile(t *testing.T) {
+	f := newFixture(t, "#!/bin/sh\nmkdir -p out\necho '{\"a\":1}' > out/p.json\n")
+	t.Setenv("ZM_PUBLISH_FILE", "out/p.json")
+	args := map[string]any{"request_id": "p4", "actor": "a", "ref": "main", "commit": f.repo.Commit, "script": "probe.sh"}
+	first := result(t, f.call(t, "acquire", "", args, f.cfg))
+	t.Setenv("ZM_PUBLISH_FILE", "../elsewhere.json")
+	again := result(t, f.call(t, "acquire", "", args, f.cfg))
+	if again["handle"] != first["handle"] {
+		t.Fatalf("repeat answered %v, first %v", again, first)
+	}
+	if st := waitEnd(t, f, first["handle"].(string)); !reflect.DeepEqual(st["publish"], map[string]any{"a": float64(1)}) {
+		t.Errorf("status %v", st)
 	}
 }

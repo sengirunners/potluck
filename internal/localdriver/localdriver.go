@@ -67,7 +67,9 @@ var (
 	handlePattern = regexp.MustCompile(`^run:([^/]+)/(.+)$`)
 	handleID      = regexp.MustCompile(`^r[0-9a-f]{20}$`) // never a path
 	// envAllowlist is SPEC 20's: all of this process's environment a run gets.
-	envAllowlist = []string{"PATH", "HOME", "LANG", "TERM", "TZ"}
+	// ZM_PUBLISH_FILE is the run's publish file (publish.go): the driver reads it
+	// at acquire; the script gets its own, absolute (runEnv).
+	envAllowlist = []string{"PATH", "HOME", "LANG", "TERM", "TZ", protocol.PublishFileEnv}
 )
 
 type refusal struct{ code, msg string }
@@ -187,6 +189,11 @@ type record struct {
 	Exit       *int      `json:"exit,omitempty"`
 	Ended      time.Time `json:"ended,omitzero"`
 	Why        string    `json:"why,omitempty"`
+	// PublishFile is the publish file's path inside the checkout (config of
+	// the run, from ZM_PUBLISH_FILE at acquire); Publish is what it held when
+	// the script ended (publish.go).
+	PublishFile string          `json:"publish_file,omitempty"`
+	Publish     json.RawMessage `json:"publish,omitempty"`
 }
 
 func (r record) live() bool { return r.State == "starting" || r.State == "running" }
@@ -219,7 +226,7 @@ func (d *drv) describe() map[string]any {
 	out := map[string]any{"potluck": "potluck/1", "zm": "zm/v0", "name": name, "kind": "run", "version": version, "verbs": verbs,
 		"available": true, "isolation": "none", "credentials": true,
 		"cost": map[string]any{"unit": "run_min", "amount": 0}, "reports_spend": false,
-		"ttl_max_s": d.cfg.TTLMax, "capabilities": []string{}}
+		"ttl_max_s": d.cfg.TTLMax, "capabilities": []string{protocol.CapRunPublish}}
 	if _, err := exec.LookPath("git"); err != nil {
 		out["available"], out["why"] = false, "git is not on PATH"
 	}
@@ -489,6 +496,10 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 			}
 			return nil
 		}
+		publishFile, err := publishFileFromEnv() // a repeat of an acquire keeps its run's: only a new run is judged by it
+		if err != nil {
+			return err
+		}
 		id := make([]byte, 10)
 		_, _ = rand.Read(id)
 		now := time.Now().UTC()
@@ -497,7 +508,7 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 			Ref: a.Ref, Commit: a.Commit, Script: a.Script, Args: a.Args,
 			Checkout: filepath.Join(dir, "checkout"), Log: filepath.Join(dir, "output.log"),
 			Mirror: d.mirrorDir(), TTL: ttl, Acquired: now, Expires: now.Add(time.Duration(ttl) * time.Second),
-			State: "starting"}
+			State: "starting", PublishFile: publishFile}
 		p, prepare = d.file(r.Handle), true
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
@@ -706,6 +717,10 @@ func (d *drv) checkout(r record, by time.Time) error {
 		removeCheckoutLocked(r, by)
 		return refuse("bad_request", "%s must be an executable file inside the repository at %s", r.Script, r.Commit[:12])
 	}
+	if err := clearPublish(r); err != nil {
+		removeCheckoutLocked(r, by)
+		return refuse("unavailable", "clear the publish file: %v", err)
+	}
 	return nil
 }
 
@@ -851,6 +866,9 @@ func (d *drv) status(handle string) (any, error) {
 	if r.Exit != nil {
 		out["exit"] = *r.Exit
 	}
+	if r.State == "ended" && len(r.Publish) > 0 {
+		out["publish"] = r.Publish
+	}
 	return out, nil
 }
 
@@ -966,7 +984,7 @@ func supervise(p string) int {
 	defer logf.Close()
 	cmd := exec.Command(filepath.Join(r.Checkout, r.Script), r.Args...)
 	cmd.Dir = r.Checkout
-	cmd.Env = allowedEnv()
+	cmd.Env = runEnv(r)
 	cmd.Stdout, cmd.Stderr = logf, logf // stdin stays /dev/null
 	cmd.ExtraFiles = []*os.File{run}    // fd 3: run.lock is held while the script's processes run
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -1006,13 +1024,14 @@ func supervise(p string) int {
 		select {
 		case code := <-done:
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // its leftover children
+			publish := readPublish(r)                           // before the checkout goes
 			_ = os.RemoveAll(r.Checkout)                        // before the verdict: an ended run has no checkout
 			_ = locked(lock, func() error {
 				cur, err := load(p)
 				if err != nil || !cur.live() {
 					return err
 				}
-				cur.State, cur.Exit, cur.Ended = "ended", &code, time.Now().UTC()
+				cur.State, cur.Exit, cur.Ended, cur.Publish = "ended", &code, time.Now().UTC(), publish
 				return save(p, cur)
 			})
 			removeCheckout(r, time.Now().Add(time.Minute)) // git's record, after the verdict: a busy mirror never delays it

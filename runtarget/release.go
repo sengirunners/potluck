@@ -43,7 +43,7 @@ func (s *Service) release(r *http.Request) (any, error) {
 			u.spend = sp
 		}
 		if !ans.Released {
-			u.state = st.State
+			u.state, u.publish = st.State, st.publishOf()
 		}
 	}
 	if ans.Released {

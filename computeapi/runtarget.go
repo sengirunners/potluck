@@ -3,6 +3,7 @@ package computeapi
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -394,6 +395,19 @@ type ReleaseRunTargetRequest struct {
 	Seal bool `json:"seal,omitempty"`
 }
 
+// DepsLayersLack is the first capability caps (a binding's describe) lacks
+// for building dependency layers ("" when it has them all): named volumes
+// that seal and are kept, and base64 exec to write the layer's files. Both
+// placement (computeclient.PlaceBox) and the daemon's acquire judge by it.
+func DepsLayersLack(caps []string) string {
+	for _, c := range []string{protocol.CapVolumes, protocol.CapVolumesSeal, protocol.CapVolumesKeep, EncodingBase64} {
+		if !slices.Contains(caps, c) {
+			return c
+		}
+	}
+	return ""
+}
+
 // BoxDeps is one dependency layer an acquire asks for. Kind names what is
 // built and from which files (npm: package-lock.json, package.json and the
 // package.json of every workspace the lockfile names, all relative to
@@ -518,12 +532,15 @@ type RunTargetHandle struct {
 	RequestID string `json:"request_id"`
 	Actor     string `json:"actor"`
 	// Area is the area the acquire was made in ("" = the whole project).
-	Area      string          `json:"area,omitempty"`
-	State     string          `json:"state"`
-	Commit    string          `json:"commit,omitempty"`
-	Ref       string          `json:"ref,omitempty"`
-	Script    string          `json:"script,omitempty"`
-	Exit      *int            `json:"exit,omitempty"`
+	Area   string `json:"area,omitempty"`
+	State  string `json:"state"`
+	Commit string `json:"commit,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	Script string `json:"script,omitempty"`
+	Exit   *int   `json:"exit,omitempty"`
+	// Publish is the JSON a run's script left in its publish file, on an
+	// ended run only (protocol.CapRunPublish); omitted when there was none.
+	Publish   json.RawMessage `json:"publish,omitempty"`
 	ExpiresAt string          `json:"expires_at"`
 	TTLS      int             `json:"ttl_s,omitempty"`
 	Log       string          `json:"log,omitempty"`

@@ -73,6 +73,7 @@ behind, no url or secret leaked, verb timing, spend) always run. Groups run in t
 | `database` | box | an acquire naming a malformed database recipe (mutable image, empty manifest) is refused `bad_request` before any box is lent | capability `database-snapshot-v1` |
 | `persist` | box | kept disks: stop/start keep the disk, the deadline stops rather than wipes | capability `persist`, verbs `stop` and `start` |
 | `ended` | run | a script that exits 7 shows `ended` with that exit; release after the end | run flags |
+| `publish` | run | a run's publish: the JSON the script wrote to the file `ZM_PUBLISH_FILE` named at acquire is on the ended run's status, and still after release; a running run, a file over 64 KiB, one that is not one JSON value, and a run acquired without the variable publish nothing; a path outside the working directory is refused `bad_request` | run flags; capability `run-publish`, else the group skips (the probe script's `publish` command: `--print-probe` prints the current one) |
 | `code` | run, box | the run's HEAD is exactly the commit sent and the tree is clean; a dirty `--worktree` does not leak in | `--repo` (HEAD proof); `--worktree`; for a box, `--ref --commit` |
 | `renew` | all | renew's lifetime cap and a later `expires_at`, or `not_implemented` when not listed | verb `renew` |
 | `expiry` | all | a short ttl ends the resource with no release and no call to the driver; status then says `expired` (run: exit 124); with `--strict`, for a box, `list` is the first call after the deadline and grace and must show it `expired` | `--ttl-short`, `--grace`; see skips |
@@ -271,7 +272,7 @@ potluck-conformance potluck-driver-<name> --kind box --ref main --commit <older 
 A driver that drains before it reclaims needs its drain off for the reclaim check: for potluck-driver-tart add
 `--reclaim-config drain_deadline_s=0`. For a run driver use `--script` and `--worktree` as well, and `--remote` if the run shares no filesystem with the
 suite. Whatever the flags, read the output for the SKIP lines left. A group that belongs to another kind prints one
-SKIP (`ended` for a box or db; `net` and `code` for a db).
+SKIP (`ended` and `publish` for a box or db; `net` and `code` for a db).
 
 ## `--strict`
 

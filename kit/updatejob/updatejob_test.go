@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -407,5 +408,91 @@ func TestArgvRefusesAServiceWithNoOrManyCommands(t *testing.T) {
 		if argv, err := s.Argv(); err == nil || errors.Is(err, ErrNoJob) {
 			t.Errorf("%s: argv = %q, %v", name, argv, err)
 		}
+	}
+}
+
+// A job file that is not a plain file of a job's size is refused before it
+// is read: a pipe at the job's name would hold the reader for good.
+func TestArgvRefusesWhatIsNotAPlainJobFile(t *testing.T) {
+	link := func(put func(string) error) func(*testing.T, string) error {
+		return func(t *testing.T, path string) error {
+			to := filepath.Join(t.TempDir(), "target")
+			if err := put(to); err != nil {
+				return err
+			}
+			return os.Symlink(to, path)
+		}
+	}
+	direct := func(put func(string) error) func(*testing.T, string) error {
+		return func(_ *testing.T, path string) error { return put(path) }
+	}
+	pipe := func(path string) error { return syscall.Mkfifo(path, 0o644) }
+	dir := func(path string) error { return os.Mkdir(path, 0o755) }
+	big := func(path string) error { return os.WriteFile(path, make([]byte, jobFileMax+1), 0o644) }
+	for _, goos := range []string{"linux", "darwin"} {
+		for name, put := range map[string]func(*testing.T, string) error{
+			"pipe": direct(pipe), "directory": direct(dir), "too big": direct(big),
+			"link to a pipe": link(pipe), "link to a directory": link(dir), "link to a file too big": link(big),
+			"link to a device": func(_ *testing.T, path string) error { return os.Symlink("/dev/zero", path) },
+		} {
+			s, _ := newSchedule(t, goos)
+			if err := os.MkdirAll(s.unitDir(), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := put(t, s.Files()[0]); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { _, err := s.Argv(); done <- err }()
+			select {
+			case err := <-done:
+				if err == nil || errors.Is(err, ErrNoJob) {
+					t.Errorf("%s, %s: argv error = %v, want a refusal that is not ErrNoJob", goos, name, err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Errorf("%s, %s: Argv did not return", goos, name)
+			}
+		}
+	}
+}
+
+// A link to a unit elsewhere is read as the unit: an owner may keep their
+// own job file in another place. A link to nothing is no job.
+func TestArgvFollowsALinkToAJobFile(t *testing.T) {
+	s, _ := newSchedule(t, "linux")
+	if err := os.MkdirAll(s.unitDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	real := filepath.Join(t.TempDir(), "own.service")
+	if err := os.Symlink(real, s.Files()[0]); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Argv(); !errors.Is(err, ErrNoJob) || got != nil {
+		t.Errorf("a link to nothing: argv = %q, %v, want ErrNoJob", got, err)
+	}
+	if err := os.WriteFile(real, []byte("[Service]\nExecStart=/x/example upgrade\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Argv(); err != nil || !slices.Equal(got, []string{"/x/example", "upgrade"}) {
+		t.Errorf("argv = %q, %v", got, err)
+	}
+}
+
+// A job file of exactly the largest size is still read.
+func TestArgvReadsAJobFileOfTheLargestSize(t *testing.T) {
+	s, _ := newSchedule(t, "linux")
+	if err := os.MkdirAll(s.unitDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "[Service]\nExecStart=/x/example upgrade\n"
+	body += "#" + strings.Repeat("x", jobFileMax-len(body)-2) + "\n"
+	if len(body) != jobFileMax {
+		t.Fatalf("body is %d bytes", len(body))
+	}
+	if err := os.WriteFile(s.Files()[0], []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Argv(); err != nil || !slices.Equal(got, []string{"/x/example", "upgrade"}) {
+		t.Errorf("argv = %q, %v", got, err)
 	}
 }

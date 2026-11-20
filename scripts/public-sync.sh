@@ -26,6 +26,19 @@ if [ "$(git rev-parse "$sha^{tree}")" = "$(git rev-parse "$public_main^{tree}")"
 	echo "public-sync: the public main already has this tree"
 	exit 0
 fi
+# The whole tree goes over, so publishing a commit older than the one the public main already carries would undo
+# everything merged in between. Go on only when the public main's tree is the tree of one of this commit's own
+# ancestors (the public main is behind it); otherwise name the newer private commit and stop.
+public_tree="$(git rev-parse "$public_main^{tree}")"
+if ! git log --format=%T "$sha" | grep -x "$public_tree" >/dev/null; then
+	newer="$(git log --format='%H %T' origin/main | awk -v t="$public_tree" '$2 == t && !n { print $1; n = 1 }')"
+	if [ -n "$newer" ]; then
+		echo "public-sync: the public main already carries private $newer, which $sha does not contain; publishing $sha would undo it. Publish origin/main (or a commit that contains $newer) instead." >&2
+	else
+		echo "public-sync: the public main's tree is no private main commit's tree (a change made on the public repository?); a sync would replace it. Bring that change to the private main first (docs/public-sync.md)." >&2
+	fi
+	exit 1
+fi
 
 # Scan exactly the tree that will go over. Read every hit by hand: test fixtures and public keys are expected; a
 # real secret, a person's address, a private repository or a machine name is not.

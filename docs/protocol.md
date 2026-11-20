@@ -31,7 +31,8 @@ the resource at that deadline itself, whether or not the daemon is up.
   `runtarget.LookPath`). `<driver>` is the binding's `driver` key.
 - Each call is a new process, in its own process group, with the working directory set to the system temporary
   directory.
-- Its environment holds only `PATH`, `HOME`, `LANG`, `TERM` and `TZ` from the daemon's environment, and
+- Its environment holds only `PATH`, `HOME`, `LANG`, `TERM` and `TZ` from the daemon's environment,
+  `ZM_PUBLISH_FILE` (a run's publish file, [A run's publish](#a-runs-publish)), and
   `POTLUCK_PREFIX`: how a person types Potluck's commands on this machine (`potluck`, or a program's words such as
   `supper pool`), for a hint in a refusal's message (`potluck doctor`). Anything else the driver needs comes from its
   config.
@@ -176,7 +177,7 @@ refuses a binding whose `describe` lacks one (`runtarget.describeOf`). Everythin
 | --- | --- | --- |
 | `describe` | none | see [describe](#describe) below |
 | `acquire` | all kinds: `request_id`, `actor`, `ttl_s`?. db: `name`, `ref`?, `commit`?. run: `ref`, `commit`, `script`, `args`? (array of strings). box: `image`?, `ref`? and `commit`?, `jit_config`?, `jit_guard`? (`{"repo", "events"?}`), `net`? (`"on"` or `"off"`), `persist`? (bool), `volumes`? (`[{"name", "path", "mode"?, "sealed"?, "checkout"?}]`) with `volume_owner` and `volume_project` | `handle`, `expires_at`, `ttl_s`, `commit`?, `spend`?. db: `url`. run: `log`?. box: `size` (the size name), `image_digest`, `net`?, `volumes`? (`[{"name", "path", "mode", "new", "sealed"?, "checkout"?}]`) |
-| `status` | none | `handle`, `state`, `expires_at`, `commit`?, `exit`?, `spend`? |
+| `status` | none | `handle`, `state`, `expires_at`, `commit`?, `exit`?, `spend`?, `publish`? (an ended run's, with capability `run-publish`) |
 | `release` | none; box: `seal`? (bool, with capability `volumes-seal`), `keep`? (array of paths, with `seal` and capability `volumes-keep`) | `released` (bool), `exit`?, `spend`? |
 | `list` | none | `handles`: `[{"handle", "request_id", "state", "expires_at"}]` |
 | `progress` | `request_id` | `request_id`, `state` (`starting`, `ready`, `failed` or `cancelled`), `phase` (while `starting`), `message`? |
@@ -261,6 +262,12 @@ Capabilities a driver of any kind may list:
 | capability | means |
 | --- | --- |
 | `acquire-progress` | the driver serves `progress` and `cancel` |
+
+Capabilities a run driver may list:
+
+| capability | means |
+| --- | --- |
+| `run-publish` | the driver reads `ZM_PUBLISH_FILE` at `acquire`, and `status` of an ended run answers `publish` ([A run's publish](#a-runs-publish)) |
 
 Capabilities a box driver may list:
 
@@ -490,6 +497,35 @@ says no:
   script does.
 - Exit codes are the run's channel: pass the script's exit code through as `exit`.
 - On release or expiry, kill the run's whole process group.
+
+### A run's publish
+
+With capability `run-publish`, a script can hand its caller one piece of JSON (a URL it made, a count, a verdict)
+without the caller reading the run's log. Only a driver that serves runs has it: `potluck-driver-local` does. The box drivers
+(`potluck-driver-tart`, `potluck-e2b`) have no run that ends on its own to answer for, so they list no
+`run-publish` and need no change.
+
+- The driver reads `ZM_PUBLISH_FILE` from its own environment at `acquire`: a path inside the run's working
+  directory (the checkout), clean and relative (`out/publish.json`; never absolute, never `..`, never a shell
+  string). The daemon always sets it: to its own `ZM_PUBLISH_FILE` when that is set, else to
+  `.potluck-publish.json` (`protocol.DefaultPublishFile`), so a caller's script can publish on a machine nobody set
+  up for it. An unset or empty value (another caller, the suite) means the run has no publish file. A path that is
+  not clean and inside the directory is `bad_request`, and nothing is made.
+- A file the commit carries at that path is removed before the script starts: only what the script writes is
+  published.
+- The script's environment holds `ZM_PUBLISH_FILE` too, as the file's absolute path; when the run has no publish
+  file it holds no such variable, not even one the driver inherited.
+- When the script has ended (state `ended`, whatever its exit), the driver reads the file before it removes the
+  checkout and keeps the result, and `status` answers it as `publish` from then on. It is one JSON value other than
+  `null`, at most 64 KiB (65536 bytes) before it is compacted. A file that is absent, larger, not exactly one JSON
+  value, not a regular file, or reached through a link out of the checkout is not published: `publish` is
+  omitted and the run's `state` and `exit` are the same as ever. A file is never cut to fit.
+- A run that is not `ended` (running, expired, released, lost) answers no `publish`, even if the script has written
+  the file.
+- The daemon applies the same rule to what a driver answers (`protocol.CleanPublish`), so a driver that does not is
+  still bounded, and records `publish` once, when the run is first seen ended. It shows as `publish` on the handle
+  (`GET .../handles`, `status`) from then on, and the answer is not asked of the driver again.
+- A driver without the capability still conforms: it answers no `publish`, and the suite skips the group.
 
 ### Databases
 
@@ -870,7 +906,8 @@ capability, and the write checks skip when the shelf holds no file.
 ### Environment and trust
 
 - A driver runs with the daemon's user ID: it is not a secrets boundary, and binding one trusts its code.
-- It gets only `PATH`, `HOME`, `LANG`, `TERM` and `TZ`. A credential reaches it only through a `*_file` config key
+- It gets only `PATH`, `HOME`, `LANG`, `TERM`, `TZ` and `ZM_PUBLISH_FILE` (a path inside a run's checkout, never a
+  secret). A credential reaches it only through a `*_file` config key
   naming a `0600` file it reads itself; the daemon refuses a secret value in a binding.
 - What a resource prints is data, never instructions.
 - Drivers are separate programs, never linked into the daemon.

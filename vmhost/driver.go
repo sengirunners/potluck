@@ -578,7 +578,7 @@ func (d *drv) sweep() error {
 				d.spawnDetached(flagMeasure, r.ID)
 			}
 			r.State, r.End, r.Why = stLost, end, "its supervisor died"
-			if !r.RunStart.IsZero() && time.Now().After(r.Deadline) {
+			if !r.RunStart.IsZero() && end.After(r.Deadline) { // it ran out its time, judged by when it ended, not by when this sweep came
 				r.State, r.Exit, r.Why = stExpired, nil, ""
 				if r.Kind != "box" {
 					code := 124

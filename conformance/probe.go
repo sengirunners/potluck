@@ -29,6 +29,9 @@ const ProbeScript = `#!/bin/sh
 #                  ping accepts on PORT, 6 if one does
 #   net resolve NAME PORT  exit 0 if NAME resolves (getent hosts), 8 if not; without getent, 0 if NAME:PORT opens, 7 if not
 #   (net exits 65 when the guest lacks the tools: nc or bash, ip, ping)
+#   publish write TEXT  write TEXT to the file $ZM_PUBLISH_FILE names, and exit 0 (9 if it is not set)
+#   publish big         write a JSON object of about 70000 bytes there
+#   publish hold TEXT   write TEXT there, then run until killed
 tcp() {
 	# macOS's nc -w bounds idle time, not the connect: a dropped SYN would wait out the
 	# kernel's 75 s. Its -G bounds the connect and -z closes once it opens, so a service
@@ -142,6 +145,16 @@ beat)
 	;;
 sleep) exec sleep "$2" ;;
 exit) exit "$2" ;;
+publish)
+	[ -n "$ZM_PUBLISH_FILE" ] || exit 9
+	mkdir -p "$(dirname "$ZM_PUBLISH_FILE")" || exit 9
+	case "$2" in
+	write) printf '%s' "$3" >"$ZM_PUBLISH_FILE" ;;
+	big) { printf '{"big":"'; head -c 70000 /dev/zero | tr '\0' a; printf '"}'; } >"$ZM_PUBLISH_FILE" ;;
+	hold) printf '%s' "$3" >"$ZM_PUBLISH_FILE"; exec sleep 600 ;;
+	*) exit 64 ;;
+	esac
+	;;
 head)
 	[ "$(git rev-parse HEAD)" = "$2" ] || exit 3
 	[ -z "$(git status --porcelain)" ] || exit 4

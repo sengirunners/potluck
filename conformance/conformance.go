@@ -73,7 +73,8 @@ type Options struct {
 	// or box must not open them, and this machine must, else the check is a
 	// SKIP (zm-eakh.12.5.13). NetPeers runs two at once and checks that
 	// neither reaches the other (IPv4 /24 and IPv6 link-local neighbours), on
-	// NetPeerPort (default 47123). NetResolve are DNS names (or name:port,
+	// NetPeerPort (default 47123; the probe's own listeners take the three
+	// ports above it). NetResolve are DNS names (or name:port,
 	// the port the probe opens where the guest has no getent; default 443) a
 	// run or box must resolve; unset, a guest NetAllow gives a network must
 	// resolve NetAllow's names, or github.com (zm-eakh.12.24.7). All empty
@@ -122,7 +123,7 @@ type Options struct {
 // Groups are the check groups, in the order they run. "boot" runs only when
 // Only names it: one box acquired, its size, exec and release, the short check
 // `zm host share` gives each size after the first (lifecycle covers it).
-var Groups = []string{"boot", "handles", "lifecycle", "acquire-progress", "procs", "agent-runner", "pty", "ports", "box-secrets", "box-secrets-ops", "box-authority", "database", "persist", "volumes", "shelf", "warm", "ended", "code", "renew", "expiry", "reclaim", "refuse", "net", "root"}
+var Groups = []string{"boot", "handles", "lifecycle", "acquire-progress", "procs", "agent-runner", "pty", "ports", "box-secrets", "box-secrets-ops", "box-authority", "database", "persist", "volumes", "shelf", "warm", "ended", "publish", "code", "renew", "expiry", "reclaim", "refuse", "net", "root"}
 
 // Result is one check. Warn is a pass worth a person's look. Group is the
 // group that made it ("" for describe, the envelope and the final checks).
@@ -192,6 +193,10 @@ type run struct {
 	stderr  capped
 	answers capped // stdout of every call but acquire
 	secrets []string
+
+	// acquireEnv is added to the driver's environment for an acquire: the
+	// publish group's ZM_PUBLISH_FILE (publish.go). Groups run one at a time.
+	acquireEnv []string
 
 	live  map[string]bool // handles this run must still end
 	beats []string
@@ -283,7 +288,7 @@ func Run(ctx context.Context, path string, opt Options) []Result {
 	}
 	r.envelope()
 	r.checkList()
-	groups := map[string]func(){"boot": r.boot, "handles": r.handles, "lifecycle": r.lifecycle, "acquire-progress": r.acquireProgress, "procs": r.procs, "agent-runner": r.agentRunner, "pty": r.pty, "ports": r.ports, "box-secrets": r.boxSecretsGroup, "box-secrets-ops": r.boxSecretsOpsGroup, "box-authority": r.boxAuthorityGroup, "database": r.databaseSnapshots, "persist": r.persist, "volumes": r.volumes, "shelf": r.shelf, "warm": r.warm, "ended": r.ended, "code": r.code,
+	groups := map[string]func(){"boot": r.boot, "handles": r.handles, "lifecycle": r.lifecycle, "acquire-progress": r.acquireProgress, "procs": r.procs, "agent-runner": r.agentRunner, "pty": r.pty, "ports": r.ports, "box-secrets": r.boxSecretsGroup, "box-secrets-ops": r.boxSecretsOpsGroup, "box-authority": r.boxAuthorityGroup, "database": r.databaseSnapshots, "persist": r.persist, "volumes": r.volumes, "shelf": r.shelf, "warm": r.warm, "ended": r.ended, "publish": r.publish, "code": r.code,
 		"renew": r.renew, "expiry": r.expiry, "reclaim": r.reclaim, "refuse": r.refuse, "net": r.net, "root": r.root}
 	for _, g := range Groups {
 		if r.group(g) && ctx.Err() == nil {
@@ -532,6 +537,8 @@ type (
 		Exit      *int         `json:"exit"`
 		ExpiresAt string       `json:"expires_at"`
 		Spend     *spendReport `json:"spend"`
+		// Publish is only present on an ended run that published (publish.go).
+		Publish json.RawMessage `json:"publish"`
 	}
 	releaseReport struct {
 		Released *bool        `json:"released"`

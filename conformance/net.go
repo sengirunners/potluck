@@ -416,6 +416,11 @@ func (r *run) netControls(in func(...string) (int, error)) bool {
 	return false
 }
 
+// peerPortSpan is how many ports from peerPort up the net checks listen on:
+// the peers serve (peerPort), the net group's self (+1), the net-off box's
+// self (+2) and root's self (+3).
+const peerPortSpan = 4
+
 func (r *run) peerPort() int {
 	if r.opt.NetPeerPort != 0 {
 		return r.opt.NetPeerPort

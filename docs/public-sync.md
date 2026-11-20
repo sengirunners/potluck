@@ -26,6 +26,10 @@ scripts/public-sync.sh origin/main          # makes the commit, scans and prints
 scripts/public-sync.sh origin/main --push   # the same, then pushes it to the public main
 ```
 
+The script refuses a commit that does not contain the private commit the public main already carries: it copies
+the whole tree, so publishing an older commit would undo everything merged since. When two people publish close
+together, the second publishes `origin/main` again after `git fetch origin`.
+
 Before `--push`, read the gitleaks output and the changed file list. Test fixtures and public keys are expected.
 Stop if you see a real secret, a person's address, a private repository's name or a machine's name: fix it on the
 private main first, then sync again.
