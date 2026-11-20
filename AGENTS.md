@@ -19,7 +19,7 @@ Go module `github.com/sengirunners/potluck`. Apache-2.0. `cmd/potluck` is the pr
 | `cmd/potluck-conformance` (`internal/conformancecmd`) | runs the suite against a driver |
 | `cmd/potluck-driver-tart`, `cmd/potluck-driver-local` (`internal/localdriver`) | drivers: VMs on this host; jobs on this machine |
 | `cmd/zm-run-tart`, `cmd/zm-run-local`, `cmd/zm-run-conformance`, `cmd/zm-e2b` | one-line mains: the same programs under their old names (zm's build lists and old updaters name these paths; keep them) |
-| `ghapp/` | GitHub App auth for runners; one-repository tokens minted and revoked per holder; read-only account tokens (`AccountToken`), which the owners driver looks logins up with when `github.lookup_token` is unset (`wiring/lookuptoken.go`) |
+| `ghapp/` | GitHub App auth for runners; one-repository tokens minted and revoked per holder |
 | `issuers/` | the secrets door's minted kinds (`github-token`, `potluck-token`): one lifecycle (`minted.go`), a backend per kind; ceiling, renewal, revocation, ledger |
 | `jobrule/` | the one copy of which GitHub jobs may hold a secret (events, ref, fork), shared by grants and issuers |
 | `site/` | static site (wrangler config) |

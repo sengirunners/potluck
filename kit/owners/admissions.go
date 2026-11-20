@@ -201,7 +201,7 @@ func (s *Service) orgChecksFailing(ctx context.Context, project, reason string) 
 	}
 	ref := api.ProjectRef{ID: project, Slug: s.d.Projects.Slug(project)}
 	body := fmt.Sprintf("GitHub org membership checks failing for %s: %s. Nobody is removed while they fail; after %s, new joins through "+
-		"org grants stop until a check runs again. Fix github.lookup_token (a secret reference to an org member's token, scope read:org), or with none set, install runners.github's App on the org with Members read.",
+		"org grants stop until a check runs again. Fix github.lookup_token (a secret reference to an org member's token, scope read:org).",
 		ref.Slug, reason, s.OrgFailGrace)
 	switch err := s.d.Notify(ctx, core.Notice{Project: ref, To: "owners", Body: body}); {
 	case err == nil:

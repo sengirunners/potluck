@@ -62,8 +62,7 @@ type Accounts interface {
 	// OrgMember reports whether login is a member of org now, asked with
 	// the authority's own lookup token (never a person's): how a join from
 	// an org grant is re-checked after the person's token is gone.
-	// ErrNoView when the authority cannot see the org's members;
-	// ErrLookupRefused when the provider refused its token.
+	// ErrNoView when the authority cannot see the org's members.
 	OrgMember(ctx context.Context, org, login string) (bool, error)
 }
 
@@ -93,10 +92,6 @@ var (
 	ErrExpired  = errors.New("owners: the login code expired")
 	ErrNotFound = errors.New("owners: no such account")
 	ErrNoView   = errors.New("owners: the authority's lookup token cannot see the org's members")
-	// ErrLookupRefused is the provider refusing the authority's own lookup
-	// token (GitHub's 401): a minted one is minted anew on the next call; a
-	// configured one must be replaced.
-	ErrLookupRefused = errors.New("owners: the provider refused the authority's lookup token")
 )
 
 // RateLimited is what a driver answers when the provider refused a call for

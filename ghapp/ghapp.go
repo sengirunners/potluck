@@ -414,12 +414,7 @@ func (c *Client) InstallationToken(ctx context.Context, installation int64, repo
 	if err := p.validate(); err != nil {
 		return "", err
 	}
-	return c.cachedToken(ctx, installation, repo, p)
-}
-
-// cachedToken is InstallationToken's cache and mint for repo (owner/name),
-// or for no repository when repo is "" (AccountToken). Callers validate.
-func (c *Client) cachedToken(ctx context.Context, installation int64, repo string, p Perms) (string, error) {
+	_, name, _ := strings.Cut(repo, "/")
 	key := strconv.FormatInt(installation, 10) + "|" + strings.ToLower(repo) + "|" + p.key()
 	c.mu.Lock()
 	e := c.tokens[key]
@@ -444,11 +439,7 @@ func (c *Client) cachedToken(ctx context.Context, installation int64, repo strin
 		Token     string    `json:"token"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	in := map[string]any{"permissions": p}
-	if repo != "" {
-		_, name, _ := strings.Cut(repo, "/")
-		in["repositories"] = []string{name}
-	}
+	in := map[string]any{"repositories": []string{name}, "permissions": p}
 	path := "/app/installations/" + strconv.FormatInt(installation, 10) + "/access_tokens"
 	j, err := c.jwt()
 	if err != nil {

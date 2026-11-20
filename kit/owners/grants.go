@@ -120,10 +120,7 @@ func (s *Service) grantable(ctx context.Context, login string) (Account, error) 
 		switch _, err := s.acc.OrgMember(ctx, acc.Login, acc.Login); {
 		case errors.Is(err, ErrNoView):
 			return Account{}, api.Errorf(api.CodeForbidden, "this authority cannot see @%s's members, so it could not re-check them", acc.Login).
-				WithHint(`an org grant needs github.lookup_token: a secret reference (file:, keychain: or env:; never the token itself in config.json) to a token of a member of @` + acc.Login + ` with scope read:org only; or, with no github.lookup_token, runners.github's App installed on @` + acc.Login + ` with Members read`)
-		case errors.Is(err, ErrLookupRefused):
-			return Account{}, api.Errorf(api.CodeUnavailable, "GitHub refused this authority's lookup token, so it could not check @%s's members", acc.Login).
-				WithHint("try again: a token minted from runners.github's App is minted anew; a github.lookup_token GitHub refuses must be replaced")
+				WithHint(`an org grant needs github.lookup_token: a secret reference (file:, keychain: or env:; never the token itself in config.json) to a token of a member of @` + acc.Login + ` with scope read:org only`)
 		case isRateLimited(err):
 			return Account{}, err
 		case err != nil:
