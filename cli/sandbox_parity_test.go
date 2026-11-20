@@ -81,7 +81,9 @@ func TestSandboxOldSpellings(t *testing.T) {
 		[]string{"exec", id, "--detach", "--", "true"})), &sp); err != nil || sp.PID == "" {
 		t.Fatalf("spawn: %+v %v", sp, err)
 	}
-	// output until the command ended: the answer the old programs read last.
+	// output once the command ended: the answer the old programs read last.
+	// The wait is on logs alone, so output and logs are compared only after
+	// the end, never across it (an answer while running has no exit).
 	var out struct {
 		Stdout, Stderr string
 		Running        bool
@@ -89,14 +91,20 @@ func TestSandboxOldSpellings(t *testing.T) {
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		raw := pair([]string{"output", id, sp.PID, "--wait", "2", "--max-bytes", "4096", "--stdout-from", "0", "--stderr-from", "0"},
-			[]string{"logs", id, sp.PID, "--wait", "2", "--max-bytes", "4096"})
-		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		if err := json.Unmarshal([]byte(m.ok(t, "--json", "sandbox", "logs", id, sp.PID, "--wait", "2", "--max-bytes", "4096")), &out); err != nil {
 			t.Fatal(err)
 		}
 		if !out.Running || time.Now().After(deadline) {
 			break
 		}
+	}
+	if out.Running {
+		t.Fatalf("the spawned command still runs after 20 s: %+v", out)
+	}
+	out.Exit = nil
+	if err := json.Unmarshal([]byte(pair([]string{"output", id, sp.PID, "--wait", "2", "--max-bytes", "4096", "--stdout-from", "0", "--stderr-from", "0"},
+		[]string{"logs", id, sp.PID, "--wait", "2", "--max-bytes", "4096"})), &out); err != nil {
+		t.Fatal(err)
 	}
 	if out.Running || out.Exit == nil || *out.Exit != 3 || out.Stdout != "out\n" || out.Stderr != "err\n" {
 		t.Fatalf("output: %+v", out)

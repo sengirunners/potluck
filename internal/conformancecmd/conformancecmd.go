@@ -8,6 +8,7 @@
 //	    box: [--ref <ref> --commit <sha> [--repo <remote>]] (the checkout check; without them a SKIP)
 //	    [--reclaim-config k=v]... [--reclaim-in <duration>]
 //	    [--ttl-short <seconds>] [--grace <duration>] [--run-wait <duration>] [--only <group,group>] [--strict]
+//	    [--json-out <file>] (the results and the skipped checks' names, written to a file; see report.go)
 //	    [--state-dir <dir>]... (box secrets: where the driver keeps its records, searched for a value)
 //	potluck-conformance --print-probe
 //
@@ -48,6 +49,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -100,7 +102,7 @@ func run(argv []string) int {
 	fs := flag.NewFlagSet("potluck-conformance", flag.ContinueOnError)
 	opt := conformance.Options{Config: map[string]string{}, OutsideConfig: map[string]string{}, ReclaimConfig: map[string]string{}}
 	var asJSON, printProbe bool
-	var dbProbe, only, boxCred, boxClient, boxWant string
+	var dbProbe, only, jsonOut, boxCred, boxClient, boxWant string
 	fs.StringVar(&opt.Kind, "kind", "", "db, run or box (default: what describe answers; a driver serving more than one needs this)")
 	fs.StringVar(&opt.Target, "target", "", "the binding name sent in config (default potluck-conformance)")
 	fs.Var(kv(opt.Config), "config", "driver config key=value, sent with every request (repeatable)")
@@ -125,6 +127,7 @@ func run(argv []string) int {
 	fs.IntVar(&opt.NetPeerPort, "net-peer-port", 0, "the port the listening run uses for --net-peers (default 47123)")
 	fs.StringVar(&only, "only", "", "comma list of check groups: "+strings.Join(conformance.Groups, ", "))
 	fs.BoolVar(&asJSON, "json", false, "print results as JSON")
+	fs.StringVar(&jsonOut, "json-out", "", "write the results and the skipped checks' names to this file as JSON (version, driver, kind, passed, failed, skipped, results); written even when a check failed; it adds no output and changes no exit code (a file that cannot be written is named in the summary)")
 	fs.Var((*dirs)(&opt.StateDirs), "state-dir", "a directory the driver keeps its records and logs in, searched for a box secret's value (repeatable; default: config state_dir and ~/.potluck-driver-<name>, where they exist)")
 	fs.BoolVar(&opt.Strict, "strict", false, "fail (exit 1) when a network or expiry check was skipped or did not run, or a run or box lacks --net-forbid or --net-peers")
 	fs.BoolVar(&printProbe, "print-probe", false, "print the probe script to commit, and exit")
@@ -173,6 +176,12 @@ func run(argv []string) int {
 		}
 		opt.BoxAuthority = &conformance.BoxAuthority{Credential: strings.TrimSpace(string(b)), Client: strings.Fields(boxClient), Want: boxWant}
 	}
+	if jsonOut != "" {
+		if st, err := os.Stat(filepath.Dir(jsonOut)); err != nil || !st.IsDir() {
+			fmt.Fprintln(stderr, "potluck-conformance: --json-out: the directory for", jsonOut, "is not there or not a directory")
+			return 2
+		}
+	}
 	path, err := conformance.Find(target)
 	if err != nil {
 		fmt.Fprintln(stderr, "potluck-conformance:", err)
@@ -217,6 +226,12 @@ func run(argv []string) int {
 	n := conformance.Failed(res)
 	if n > 0 {
 		fmt.Fprintf(sum, "%d check(s) failed\n", n)
+	}
+	if jsonOut != "" {
+		// A report that cannot be written is said so; the run's own exit code stays what the checks decided.
+		if err := writeReport(jsonOut, newReport(path, opt.Kind, opt.Strict, res)); err != nil {
+			fmt.Fprintln(sum, "potluck-conformance: --json-out:", err)
+		}
 	}
 	if opt.Strict {
 		for _, r := range res {

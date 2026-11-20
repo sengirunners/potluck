@@ -76,6 +76,11 @@ type Deps struct {
 	// machine numbers (SPEC 2 "Release channel"); the daemon sets it, and it
 	// may be nil (a module's tests).
 	Zm func() *api.MachineZm
+	// UpdateJob is the update job this daemon can start on request, or nil
+	// when it knows none; the daemon calls it each time it builds its
+	// machine numbers (MachineZm.Job). The program sets it; nil reports no
+	// job.
+	UpdateJob func() *api.UpdateJob
 	// GitHubLogin is the GitHub login an identity (by ID) is linked to, or
 	// "" (the owners brick sets it; nil in a module's tests).
 	GitHubLogin func(ctx context.Context, identity string) string

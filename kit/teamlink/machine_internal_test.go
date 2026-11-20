@@ -109,3 +109,185 @@ func TestMachineReportDropsSandboxForOlderAuthority(t *testing.T) {
 		t.Fatalf("slots alone: %+v", st)
 	}
 }
+
+// olderBuild is the build block as an authority from before the update job
+// reads it: every field but job.
+type olderBuild struct {
+	Version   string           `json:"version"`
+	Commit    string           `json:"commit"`
+	Started   time.Time        `json:"started"`
+	Release   string           `json:"release,omitempty"`
+	Installed time.Time        `json:"installed,omitzero"`
+	Held      string           `json:"held,omitempty"`
+	HeldSince time.Time        `json:"held_since,omitzero"`
+	Last      *api.UpdateCheck `json:"last,omitempty"`
+	Stable    []string         `json:"stable,omitempty"`
+	Failed    []string         `json:"failed,omitempty"`
+}
+
+// olderAuthority decodes a report's build as an authority from before the
+// update job does, strictly (its decode error names the nested field alone,
+// as encoding/json does) or not; knowsPotluck is false for one from before
+// the build's new name, which refuses "potluck" first.
+func olderAuthority(st api.MachineStats, strict, knowsPotluck bool) (map[string]olderBuild, error) {
+	b, _ := json.Marshal(api.MachineReport{Project: "p1", Stats: st})
+	var rep struct {
+		Stats map[string]json.RawMessage `json:"stats"`
+	}
+	if err := json.Unmarshal(b, &rep); err != nil {
+		return nil, err
+	}
+	if _, ok := rep.Stats["potluck"]; ok && strict && !knowsPotluck {
+		return nil, api.Errorf(api.CodeBadRequest, "invalid JSON body: json: unknown field %q", "potluck")
+	}
+	got := map[string]olderBuild{}
+	for _, f := range []string{"potluck", "zm"} {
+		raw, ok := rep.Stats[f]
+		if !ok {
+			continue
+		}
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		if strict {
+			dec.DisallowUnknownFields()
+		}
+		var ob olderBuild
+		if err := dec.Decode(&ob); err != nil {
+			return nil, api.Errorf(api.CodeBadRequest, "invalid JSON body: %v", err)
+		}
+		got[f] = ob
+	}
+	return got, nil
+}
+
+// An authority from before the build's update job: a strict one refuses
+// "job", and the report goes again without it, so the machine's other
+// numbers (its build included) still arrive, and the job stays out for the
+// back-off; a tolerant one takes the report with the job in it as it is.
+func TestMachineReportDropsJobForOlderAuthority(t *testing.T) {
+	zero := int64(0)
+	kept := &api.MachineZm{Version: "v9", Held: "testing", Job: &api.UpdateJob{MinAgeS: &zero}}
+	fresh := func() api.MachineStats {
+		return api.MachineStats{MemoryTotalMB: 8, ScriptRuns: true, Potluck: kept}
+	}
+
+	// Tolerant: nothing to drop.
+	if got, err := olderAuthority(fresh(), false, true); err != nil || got["potluck"].Version != "v9" {
+		t.Fatalf("tolerant authority: %+v %v", got, err)
+	}
+
+	for _, knowsPotluck := range []bool{true, false} {
+		m := &machineState{noZm: map[string]time.Time{}, noJob: map[string]time.Time{}, noRuns: map[string]time.Time{}}
+		st := fresh()
+		now := time.Now()
+		_, err := olderAuthority(st, true, knowsPotluck)
+		if err == nil {
+			t.Fatal("a strict older authority took the job")
+		}
+		var got map[string]olderBuild
+		for tries := 0; err != nil; tries++ {
+			if tries > 2 || !m.drop(refusedField(err), &st, "p1", now) {
+				t.Fatalf("knows potluck %v: not dropped after %d tries: %v (%+v)", knowsPotluck, tries, err, st)
+			}
+			got, err = olderAuthority(st, true, knowsPotluck)
+		}
+		b := st.Build()
+		if b == nil || b.Job != nil || st.MemoryTotalMB != 8 || !st.ScriptRuns {
+			t.Fatalf("knows potluck %v: after the back-off: %+v %+v", knowsPotluck, st, b)
+		}
+		name := "potluck"
+		if !knowsPotluck {
+			name = "zm"
+		}
+		if ob, ok := got[name]; !ok || ob.Version != "v9" || ob.Held != "testing" {
+			t.Fatalf("knows potluck %v: the authority read %+v", knowsPotluck, got)
+		}
+		if !now.Before(m.noJob["p1"]) || now.Before(m.noZm["p1"]) {
+			t.Fatalf("knows potluck %v: back-off job %v zm %v", knowsPotluck, m.noJob["p1"], m.noZm["p1"])
+		}
+		if m.drop("job", &st, "p1", now) {
+			t.Fatalf("knows potluck %v: dropped twice", knowsPotluck)
+		}
+		// The next send within the hour leaves the job out before it goes,
+		// so the authority takes it at once; after the hour the job goes
+		// again.
+		next := fresh()
+		buildUnderNewName(&next)
+		m.leaveOut(&next, "p1", now.Add(time.Minute))
+		if knowsPotluck {
+			if _, err := olderAuthority(next, true, true); err != nil || next.Build().Job != nil || next.Build().Version != "v9" || !next.ScriptRuns {
+				t.Fatalf("the next send: %+v %v", next.Build(), err)
+			}
+		} else if next.Build() == nil || next.Build().Job != nil {
+			t.Fatalf("knows potluck %v: the next send carries %+v", knowsPotluck, next.Build())
+		}
+		later := fresh()
+		m.leaveOut(&later, "p1", now.Add(machineBackoff+time.Minute))
+		if later.Build().Job == nil {
+			t.Fatalf("knows potluck %v: the job stays out after the back-off", knowsPotluck)
+		}
+	}
+	// The store's own value is never changed.
+	if kept.Job == nil {
+		t.Fatal("the dropped job was cut from the store's value")
+	}
+}
+
+// An older strict authority through the real send loop: the first send costs
+// one refusal and arrives without the job; sends within the hour go out
+// without it at once (one request each); after the hour the job goes again.
+func TestSendNumbersLeavesJobOutWithinBackoff(t *testing.T) {
+	min := int64(600)
+	kept := &api.MachineZm{Version: "v9", Job: &api.UpdateJob{MinAgeS: &min}}
+	fresh := func() api.MachineStats {
+		return api.MachineStats{MemoryTotalMB: 8, ScriptRuns: true, Potluck: kept}
+	}
+	for _, knowsPotluck := range []bool{true, false} {
+		m := &machineState{noZm: map[string]time.Time{}, noJob: map[string]time.Time{}, noRuns: map[string]time.Time{}}
+		requests := 0
+		var last map[string]olderBuild
+		send := func(st api.MachineStats) error {
+			requests++
+			var err error
+			last, err = olderAuthority(st, true, knowsPotluck)
+			return err
+		}
+		now := time.Now()
+		st := fresh()
+		buildUnderNewName(&st)
+		if err := m.sendNumbers(st, "p1", now, send); err != nil {
+			t.Fatalf("knows potluck %v: first send: %v", knowsPotluck, err)
+		}
+		first := requests
+		if first < 2 {
+			t.Fatalf("knows potluck %v: the first send made %d requests, want a refusal then a resend", knowsPotluck, first)
+		}
+		for _, ob := range last {
+			if ob.Version != "v9" {
+				t.Fatalf("knows potluck %v: the authority read %+v", knowsPotluck, last)
+			}
+		}
+		// Within the hour: no refusal for the job. One request, or two for an
+		// authority from before the build's new name, which refuses "potluck"
+		// on every send (there is no back-off for the rename).
+		want := 1
+		if !knowsPotluck {
+			want = 2
+		}
+		requests = 0
+		next := fresh()
+		buildUnderNewName(&next)
+		if err := m.sendNumbers(next, "p1", now.Add(time.Minute), send); err != nil || requests != want {
+			t.Fatalf("knows potluck %v: the next send made %d requests: %v", knowsPotluck, requests, err)
+		}
+		// After the hour the job goes out again, and is refused again.
+		requests = 0
+		later := fresh()
+		buildUnderNewName(&later)
+		if err := m.sendNumbers(later, "p1", now.Add(machineBackoff+time.Minute), send); err != nil || requests <= want {
+			t.Fatalf("knows potluck %v: after the back-off %d requests: %v", knowsPotluck, requests, err)
+		}
+		if kept.Job == nil {
+			t.Fatal("the dropped job was cut from the store's value")
+		}
+	}
+}

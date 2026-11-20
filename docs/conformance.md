@@ -40,6 +40,12 @@ That ended with exit 0 after about 9 seconds: 38 PASS, 1 WARN, 5 SKIP, and the l
 proven`. The WARN is the driver's class (`isolation none`, credentials true), which is a pass a person should read.
 Invocations for `potluck-driver-tart`, which start real VMs, are in `cmd/potluck-driver-tart/README.md`.
 
+`--json-out <file>` writes the run as one JSON file as well: `version`, `driver`, `kind`, `strict`, `passed`, `failed`,
+`skipped` (the name and group of each check that was not proven) and `results` (every check, as `--json` prints them).
+It is written when a check failed too, and changes no exit code and adds no output, except one line when the file cannot be written. Potluck's own CI
+(`conformance-report` in `.github/workflows/ci.yml`, `scripts/ci/conformance-report.sh`) runs the example above this way
+and uploads the file as the `conformance-results` artifact. It is a report only: no required check names it.
+
 A db driver also needs a way to see the database: `--db-probe '<shell command>'` (the url is in
 `$POTLUCK_CONFORMANCE_URL`, and in its old name `$ZM_CONFORMANCE_URL`; exit 0 when the database is there). The
 default is `psql "$POTLUCK_CONFORMANCE_URL" -Atc 'select 1'` when `psql` is on PATH. Without either, the db checks that need it are SKIPs.

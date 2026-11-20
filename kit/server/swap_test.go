@@ -207,3 +207,46 @@ func TestZmStateInMachineNumbers(t *testing.T) {
 		t.Fatalf("last check after a restart: %+v", z.Last)
 	}
 }
+
+// Machine numbers carry the update job the program reports through
+// Deps.UpdateJob, read each time they are built; a daemon with no hook
+// reports none.
+func TestUpdateJobInMachineNumbers(t *testing.T) {
+	ctx := context.Background()
+	dm := swapDaemon(t, shortHome(t))
+	c := client.WithHandler(dm.SocketHandler())
+	build := func() *api.MachineZm {
+		t.Helper()
+		l, err := c.Machines(ctx)
+		if err != nil || len(l.Machines) != 1 || l.Machines[0].Stats.Build() == nil {
+			t.Fatalf("machines %+v %v", l, err)
+		}
+		return l.Machines[0].Stats.Build()
+	}
+	if z := build(); z.Job != nil {
+		t.Fatalf("no hook, yet a job: %+v", z.Job)
+	}
+	minAge := int64(0)
+	dm.Deps.UpdateJob = func() *api.UpdateJob {
+		if minAge < 0 {
+			return &api.UpdateJob{}
+		}
+		v := minAge
+		return &api.UpdateJob{MinAgeS: &v}
+	}
+	if z := build(); z.Job == nil || z.Job.MinAgeS == nil || *z.Job.MinAgeS != 0 {
+		t.Fatalf("job taking a release at once: %+v", z.Job)
+	}
+	minAge = 3600
+	if z := build(); z.Job == nil || z.Job.MinAgeS == nil || *z.Job.MinAgeS != 3600 {
+		t.Fatalf("the job changed, the numbers did not: %+v", z.Job)
+	}
+	minAge = -1
+	if z := build(); z.Job == nil || z.Job.MinAgeS != nil {
+		t.Fatalf("min-age unknown: %+v", z.Job)
+	}
+	dm.Deps.UpdateJob = func() *api.UpdateJob { return nil }
+	if z := build(); z.Job != nil {
+		t.Fatalf("the hook knows no job, yet one is reported: %+v", z.Job)
+	}
+}

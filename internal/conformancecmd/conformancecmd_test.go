@@ -219,3 +219,72 @@ func TestStrict(t *testing.T) {
 		t.Fatalf("--json: group %v strict %v\nstdout %s\nstderr %s", sawGroup, sawStrict, out, errOut)
 	}
 }
+
+// --json-out writes the results and the skipped checks' names to a file, for a failing run too, and leaves the exit
+// code and the printed output as they were.
+func TestJSONOut(t *testing.T) {
+	read := func(path string) Report {
+		t.Helper()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var r Report
+		if err := json.Unmarshal(b, &r); err != nil {
+			t.Fatalf("%v\n%s", err, b)
+		}
+		return r
+	}
+	p, repo := ref(t, "")
+	out := filepath.Join(t.TempDir(), "results.json")
+	argv := []string{p, "--kind", "box", "--config", "remote=" + repo.Remote, "--only", "net,expiry", "--ttl-short", "2", "--grace", "2s", "--json-out", out}
+	code, stdout, _ := capture(argv)
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, stdout)
+	}
+	r := read(out)
+	if r.Version != ReportVersion || r.Kind != "box" || r.Driver != p || !r.Passed || r.Failed != 0 || len(r.Results) == 0 {
+		t.Fatalf("report: %+v", r)
+	}
+	want := []SkippedCheck{{Name: "a short ttl ends the resource with no release and no call to the driver", Group: "expiry"}, {Name: "net", Group: "net"}}
+	if len(r.Skipped) != len(want) || r.Skipped[0] != want[0] || r.Skipped[1] != want[1] {
+		t.Fatalf("skipped: %+v, want %+v", r.Skipped, want)
+	}
+	// What is printed is the same with and without the file.
+	_, plain, _ := capture(argv[:len(argv)-2])
+	if plain != stdout {
+		t.Fatalf("--json-out changed the output:\n%s\nvs\n%s", plain, stdout)
+	}
+
+	// A failed run still writes its report, and exits 1 as before.
+	p, repo = ref(t, "wrong-head")
+	bad := filepath.Join(t.TempDir(), "bad.json")
+	code, _, _ = capture([]string{p, "--kind", "run", "--config", "remote=" + repo.Remote, "--ref", "main", "--commit", repo.Commit,
+		"--script", "probe.sh", "--ttl-short", "2", "--grace", "3s", "--run-wait", "10s", "--only", "code", "--json-out", bad})
+	if code != 1 {
+		t.Fatalf("broken driver: exit %d", code)
+	}
+	if r := read(bad); r.Passed || r.Failed == 0 {
+		t.Fatalf("a failed run reported as passed: %+v", r)
+	}
+
+	// With no skipped check the list is [], not null.
+	b, _ := json.Marshal(newReport("d", "run", false, nil))
+	if !strings.Contains(string(b), `"skipped":[]`) {
+		t.Fatalf("%s", b)
+	}
+
+	// A directory that is not there is a usage error before any call.
+	p, repo = ref(t, "")
+	box := []string{p, "--kind", "box", "--config", "remote=" + repo.Remote, "--only", "net,expiry", "--ttl-short", "2", "--grace", "2s"}
+	code, _, errOut := capture(append(box, "--json-out", filepath.Join(t.TempDir(), "gone", "r.json")))
+	if code != 2 || !strings.Contains(errOut, "--json-out") {
+		t.Fatalf("missing directory: exit %d\n%s", code, errOut)
+	}
+
+	// A report that cannot be written (the path is a directory) is said so, and the exit code stays the run's own.
+	code, stdout, _ = capture(append(box, "--json-out", t.TempDir()))
+	if code != 0 || !strings.Contains(stdout, "--json-out:") {
+		t.Fatalf("unwritable report: exit %d\n%s", code, stdout)
+	}
+}

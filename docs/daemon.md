@@ -939,6 +939,26 @@ yours has a grant (Potluck alone makes none; the machine that runs it asks GitHu
 refused, since it would add a pool's area there. `potluck remotes` shows a remote's local copy when its program
 keeps one.
 
+### Machine numbers
+
+A member's daemon sends its machine's numbers to the project's authority (`POST /v0/team/machine`) after a heartbeat
+went through, at most every 30 seconds per project; the authority keeps them for a machine whose token reads the whole
+project and serves them on `GET /v0/machines` (`kit/teamlink/machine.go`, the fields in `api.MachineStats`). The build
+the machine runs is the `potluck` block (`zm` from a machine before the rename; `MachineStats.Build` reads either):
+its version, the release it installed, the hold switch, the last update check, and:
+
+- `job`: the update job this daemon can start on request, as the program reports it through `core.Deps.UpdateJob`
+  each time the numbers are built (nothing is cached). No `job` means the daemon knows no update job it can start, its
+  build is from before the field, or the authority reading it is (a lenient authority drops the field, a strict one
+  refuses it and the daemon leaves it out for an hour).
+- `job.min_age_s`: how old a release must be, in seconds since it was published, before the job takes it. `0` means
+  it takes a release at once; no `min_age_s` means the job's minimum age is unknown, never zero.
+
+An authority older than a field either ignores it or refuses the report naming it. On a refusal the daemon sends the
+numbers again without that field. `zm`, `job` and `script_runs` stay out for an hour; `task_slots`, `sandbox_tasks`
+and `sandbox_slots` are dropped again on each send. A refused `potluck` is sent again as `zm`, with no back-off. For
+`job` only the job goes, the rest of the build still arrives.
+
 ### Inviters
 
 Only an owner (or an admin of the whole project) makes invites, unless an owner makes a member an inviter. An

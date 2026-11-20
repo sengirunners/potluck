@@ -44,14 +44,15 @@ var (
 )
 
 // machineState is a member's sends per joined project (the last report, an
-// older authority's backoff, until when to leave out the zm block and
-// script_runs, which an authority older than them refuses) and an
-// authority's reports in memory when no module keeps them.
+// older authority's backoff, until when to leave out the zm block, the
+// build's update job and script_runs, which an authority older than them
+// refuses) and an authority's reports in memory when no module keeps them.
 type machineState struct {
 	mu     sync.Mutex
 	sent   map[string]time.Time
 	off    map[string]time.Time
 	noZm   map[string]time.Time
+	noJob  map[string]time.Time
 	noRuns map[string]time.Time
 	mem    map[[2]string]core.MachineSeen // by (machine, project)
 }
@@ -86,6 +87,24 @@ func buildUnderNewName(st *api.MachineStats) {
 	st.Zm = nil
 }
 
+// withoutJob leaves the update job out of st's build, under either name,
+// and reports whether there was one. The build is copied first: a store
+// may hand out a value it keeps.
+func withoutJob(st *api.MachineStats) bool {
+	cut := func(z **api.MachineZm) bool {
+		if *z == nil || (*z).Job == nil {
+			return false
+		}
+		c := **z
+		c.Job = nil
+		*z = &c
+		return true
+	}
+	a := cut(&st.Potluck)
+	b := cut(&st.Zm)
+	return a || b
+}
+
 // drop leaves the field an older authority refused out of st, and reports
 // whether there was one to leave out (m.mu held). Each field drops at most
 // once, so the resend loop ends.
@@ -100,6 +119,11 @@ func (m *machineState) drop(f string, st *api.MachineStats, id string, now time.
 	case f == "zm" && st.Zm != nil:
 		m.noZm[id] = now.Add(machineBackoff)
 		st.Zm = nil
+	case f == "job" && withoutJob(st):
+		// An authority from before the build's update job (nested in the
+		// build, so its decode names only "job"): the rest of the build
+		// still goes.
+		m.noJob[id] = now.Add(machineBackoff)
 	case f == "task_slots" && st.TaskSlots != 0:
 		st.TaskSlots = 0 // an authority from before the waiting line
 	case (f == "sandbox_tasks" || f == "sandbox_slots") && (st.SandboxTasks || st.SandboxSlots != 0):
@@ -112,6 +136,44 @@ func (m *machineState) drop(f string, st *api.MachineStats, id string, now time.
 	return true
 }
 
+// leaveOut leaves out of st, before it is sent, each field an older
+// authority of project id refused within the back-off (m.mu held).
+func (m *machineState) leaveOut(st *api.MachineStats, id string, now time.Time) {
+	if now.Before(m.noZm[id]) {
+		st.Potluck = nil
+	}
+	if now.Before(m.noJob[id]) {
+		withoutJob(st)
+	}
+	if now.Before(m.noRuns[id]) {
+		st.ScriptRuns = false
+	}
+}
+
+// sendNumbers sends st for project id through send: first without the fields
+// an older authority refused within the back-off, then, on each refusal that
+// names a field, again without it. An authority older than a field decodes
+// strictly and refuses the field it names; the field stays out for a while
+// (script_runs: SPEC 8 "Script runs"; zm and job: SPEC 2 "Release channel";
+// sandbox_tasks/sandbox_slots: SPEC 8 "Waiting line"). It returns the last
+// send's error.
+func (m *machineState) sendNumbers(st api.MachineStats, id string, now time.Time, send func(api.MachineStats) error) error {
+	m.mu.Lock()
+	m.leaveOut(&st, id, now)
+	m.mu.Unlock()
+	err := send(st)
+	for err != nil {
+		m.mu.Lock()
+		dropped := m.drop(refusedField(err), &st, id, now)
+		m.mu.Unlock()
+		if !dropped {
+			break
+		}
+		err = send(st)
+	}
+	return err
+}
+
 // reportMachine sends this machine's numbers to x's authority when they are
 // due (a heartbeat to it just went through).
 func (s *Service) reportMachine(ctx context.Context, x *Remote, snap api.Remote) {
@@ -119,7 +181,7 @@ func (s *Service) reportMachine(ctx context.Context, x *Remote, snap api.Remote)
 	id := snap.Project.ID
 	m.mu.Lock()
 	if m.sent == nil {
-		m.sent, m.off, m.noZm, m.noRuns = map[string]time.Time{}, map[string]time.Time{}, map[string]time.Time{}, map[string]time.Time{}
+		m.sent, m.off, m.noZm, m.noJob, m.noRuns = map[string]time.Time{}, map[string]time.Time{}, map[string]time.Time{}, map[string]time.Time{}, map[string]time.Time{}
 	}
 	now := time.Now()
 	if now.Before(m.off[id]) || now.Sub(m.sent[id]) < MachineEvery {
@@ -127,36 +189,14 @@ func (s *Service) reportMachine(ctx context.Context, x *Remote, snap api.Remote)
 		return
 	}
 	m.sent[id] = now
-	plain, noRuns := now.Before(m.noZm[id]), now.Before(m.noRuns[id])
 	m.mu.Unlock()
 	st := s.localStats(ctx)
 	buildUnderNewName(&st)
-	if plain {
-		st.Potluck = nil
-	}
-	if noRuns {
-		st.ScriptRuns = false
-	}
-	send := func() error {
+	err := m.sendNumbers(st, id, now, func(st api.MachineStats) error {
 		cctx, cancel := context.WithTimeout(ctx, BeatTimeout)
 		defer cancel()
 		return s.CallRemote(cctx, x, http.MethodPost, MachinePath, api.MachineReport{Project: id, Stats: st}, nil)
-	}
-	err := send()
-	// An authority older than a field decodes strictly and refuses the field
-	// it names: send the numbers again without it, and leave it out for a
-	// while (script_runs: SPEC 8 "Script runs"; zm: SPEC 2 "Release
-	// channel"; sandbox_tasks/sandbox_slots: SPEC 8 "Waiting line").
-	for err != nil {
-		f := refusedField(err)
-		m.mu.Lock()
-		dropped := m.drop(f, &st, id, now)
-		m.mu.Unlock()
-		if !dropped {
-			break
-		}
-		err = send()
-	}
+	})
 	if err == nil {
 		return
 	}

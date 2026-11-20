@@ -124,6 +124,21 @@ type MachineZm struct {
 	// failed here (a veto). Newest first.
 	Stable []string `json:"stable,omitempty"`
 	Failed []string `json:"failed,omitempty"`
+	// Job is the update job this daemon can start on request (the program
+	// reports it through core.Deps.UpdateJob). Nil means this daemon knows
+	// no update job it can start, its build is from before the field, or
+	// the authority reading it is (a lenient one drops the field, a strict
+	// one refuses it and the daemon leaves it out for an hour).
+	Job *UpdateJob `json:"job,omitempty"`
+}
+
+// UpdateJob is a machine's update job as its daemon reads it each time it
+// builds its machine numbers.
+type UpdateJob struct {
+	// MinAgeS is the minimum age, in seconds since publication, a release
+	// must reach before the job takes it. Nil means unknown, never zero; a pointer to 0
+	// means the job takes a release at once.
+	MinAgeS *int64 `json:"min_age_s,omitempty"`
 }
 
 // UpdateCheck is the gist of an update check's SwapRecord.

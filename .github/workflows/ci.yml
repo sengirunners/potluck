@@ -68,6 +68,52 @@ jobs:
           for v in $(env | grep -E '^ZM_' | cut -d= -f1); do unset "$v"; done
           env GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" GOPATH="$(go env GOPATH)" \
             HOME="$tmp/home" ZM_HOME="$tmp/zm" go test -timeout 30m ./...
+  # Conformance as a report: potluck-conformance against potluck-driver-local (scripts/ci/conformance-report.sh), its
+  # results written as JSON with the skipped checks' names (--json-out) and uploaded as the conformance-results
+  # artifact. Report only: no required check names it, no job needs it, and the conformance step does not fail the
+  # job (the run summary shows its outcome and the report's text; results.json holds passed, failed and the skipped
+  # names). go above already runs the suite as a test and is what gates. It takes a GitHub-hosted runner, not
+  # route's label, so it never holds the one free self-hosted runner go needs.
+  conformance-report:
+    runs-on: ubuntu-latest
+    # release.yml publishes only when this workflow run succeeded, so a failure of any step here (checkout, setup,
+    # upload, the job timeout) must not turn the run red either.
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: conformance run
+        id: run
+        continue-on-error: true
+        # A hang ends this step, not the job, so the job stays green.
+        timeout-minutes: 10
+        run: scripts/ci/conformance-report.sh conformance-results/results.json
+      - name: summary
+        if: ${{ always() }}
+        run: |
+          {
+            echo "### potluck-conformance (report only)"
+            echo "conformance step: ${{ steps.run.outcome }}"
+            echo '```'
+            if [ -f conformance-results/results.txt ]; then
+              grep -E 'check\(s\) (skipped|failed)|^  - |^FAIL  |^--strict|--json-out:' conformance-results/results.txt || echo "no checks skipped or failed"
+            else
+              echo "no results.txt (the step did not get as far as running)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ always() }}
+        with:
+          name: conformance-results
+          path: conformance-results/
+          if-no-files-found: warn
+          retention-days: 30
   # A few fast, hermetic checks on a Potluck pool runner (a box on a machine lent to the pool), so Potluck's own CI
   # uses Potluck. A shadow: no required check names it and no job needs it, so a pool that is down, busy or broken
   # by the change under test never blocks a merge; go above still runs the whole suite off the pool. It runs only

@@ -39,7 +39,16 @@ func TestHostJobsReadsStateDirectories(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pl, "run_targets.toml"), []byte(rt.EncodeHostRunTargets([]computeapi.HostRunTarget{box, other})), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	// The jobs start an hour ago, but never before local midnight: the text
+	// is asked for "Today", which an hour ago is not between 00:00 and 01:00.
+	// In the first minute after midnight the second job starts up to a minute
+	// ahead, still today and still in the last 12 hours.
+	now := time.Now()
+	start := now.Add(-time.Hour)
+	if y, m, d := now.Date(); start.Before(time.Date(y, m, d, 0, 0, 0, 0, now.Location())) {
+		start = time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+	}
+	start = start.UTC().Truncate(time.Second)
 	var lines []byte
 	for _, j := range []vmhost.Job{
 		{Handle: "box:small/a", Binding: "small", Kind: "box", Size: "small", CPU: 2, Start: start, End: start.Add(30 * time.Minute), UpS: 1800, State: "released"},

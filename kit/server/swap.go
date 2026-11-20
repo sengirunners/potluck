@@ -196,7 +196,8 @@ func (dm *Daemon) noteUpdate(u api.UpdateCheck) {
 // machine numbers (core.Deps.Zm; SPEC 2 "Release channel"): the release it
 // installed, the hold switch, the last update check, and the releases it
 // vouches for (ran release.Soak with no restart, the one it runs now
-// included once it has) or vetoes (failed here).
+// included once it has) or vetoes (failed here), and the update job it can
+// start (core.Deps.UpdateJob, read each time).
 func (dm *Daemon) zmState() *api.MachineZm {
 	d := dm.Deps
 	home := d.Config.Home
@@ -211,6 +212,9 @@ func (dm *Daemon) zmState() *api.MachineZm {
 	}
 	if h, held, err := release.ReadHold(release.HoldPath(home)); held || err != nil {
 		z.Held, z.HeldSince = cmp.Or(h.Reason, "held"), h.Since
+	}
+	if d.UpdateJob != nil {
+		z.Job = d.UpdateJob()
 	}
 	dm.swap.mu.Lock()
 	if u := dm.swap.update; u != nil {
