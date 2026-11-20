@@ -94,7 +94,7 @@ func TestUnitQuote(t *testing.T) {
 	}{
 		{"plain", true, "plain"}, {"", true, `""`}, {"a b", true, `"a b"`}, {"it's", true, `"it's"`},
 		{`a"b`, true, `"a\"b"`}, {`a\b`, true, `"a\\b"`}, {"50%", true, `"50%%"`},
-		{"$HOME", true, `"$$HOME"`}, {"$HOME", false, "$HOME"},
+		{"$HOME", true, `"$$HOME"`}, {"$HOME", false, "$HOME"}, {";", true, `";"`}, {"a;", true, "a;"},
 	} {
 		if got := unitQuote(c.in, c.exec); got != c.want {
 			t.Errorf("unitQuote(%q, %v) = %s, want %s", c.in, c.exec, got, c.want)
@@ -272,5 +272,140 @@ func TestInstallLeavesNoTempFile(t *testing.T) {
 	names, _ := filepath.Glob(filepath.Join(s.unitDir(), ".*"))
 	if len(names) != 0 {
 		t.Errorf("left behind: %v", names)
+	}
+}
+
+func TestStartRunsTheJobOnceWithoutWaiting(t *testing.T) {
+	for goos, want := range map[string]string{
+		"linux":  "systemctl --user start --no-block example-update.service",
+		"darwin": "launchctl kickstart gui/7/sh.example.update",
+	} {
+		s, r := newSchedule(t, goos)
+		if _, err := s.Install(spec); err != nil {
+			t.Fatal(err)
+		}
+		r.calls = nil
+		if err := s.Start(); err != nil {
+			t.Fatalf("%s: start: %v", goos, err)
+		}
+		if !slices.Equal(r.calls, []string{want}) {
+			t.Errorf("%s: calls %v, want %q", goos, r.calls, want)
+		}
+	}
+}
+
+func TestStartAndArgvWithNoJob(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		s, r := newSchedule(t, goos)
+		if err := s.Start(); !errors.Is(err, ErrNoJob) {
+			t.Errorf("%s: start = %v, want ErrNoJob", goos, err)
+		}
+		if len(r.calls) != 0 {
+			t.Errorf("%s: calls %v with no job", goos, r.calls)
+		}
+		if argv, err := s.Argv(); !errors.Is(err, ErrNoJob) || argv != nil {
+			t.Errorf("%s: argv = %q, %v, want ErrNoJob", goos, argv, err)
+		}
+	}
+}
+
+func TestStartAndArgvOnUnsupportedSystem(t *testing.T) {
+	s, r := newSchedule(t, "windows")
+	want := s.Supported()
+	if err := s.Start(); err == nil || err.Error() != want.Error() || len(r.calls) != 0 {
+		t.Errorf("start = %v, calls %v", err, r.calls)
+	}
+	if _, err := s.Argv(); err == nil || err.Error() != want.Error() {
+		t.Errorf("argv = %v", err)
+	}
+}
+
+func TestArgvOfAJobThisPackageWrote(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		s, _ := newSchedule(t, goos)
+		sp := spec
+		sp.Argv = append(slices.Clone(spec.Argv), "--note", `50% of $HOME's "x" \ y`, "", ";")
+		if _, err := s.Install(sp); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := s.Argv(); err != nil || !slices.Equal(got, sp.Argv) {
+			t.Errorf("%s: argv = %q, %v, want %q", goos, got, err, sp.Argv)
+		}
+	}
+}
+
+// A job at the program's names that someone wrote by hand carries no mark;
+// it is still the machine's update job: Start starts it and Argv reads it.
+func TestHandWrittenJob(t *testing.T) {
+	for _, c := range []struct {
+		goos, body, start string
+		want              []string
+	}{
+		{
+			goos: "linux",
+			body: "[Unit]\nDescription=mine\n[Service]\nType=oneshot\nExecStart=/bin/false\nExecStart=\n" +
+				"ExecStart=-'/opt/my tools/example' upgrade --min-age 72h \"--label=a b\" 100%%\n",
+			start: "systemctl --user start --no-block example-update.service",
+			want:  []string{"/opt/my tools/example", "upgrade", "--min-age", "72h", "--label=a b", "100%"},
+		},
+		{
+			goos: "darwin",
+			body: "<?xml version=\"1.0\"?>\n<plist version=\"1.0\"><dict>\n<key>Label</key><string>sh.example.update</string>\n" +
+				"<key>ProgramArguments</key>\n<array>\n\t<string>/Users/x/my tools/example</string>\n\t<string>upgrade</string>\n" +
+				"\t<string>--tag=a&amp;b</string>\n</array>\n</dict></plist>\n",
+			start: "launchctl kickstart gui/7/sh.example.update",
+			want:  []string{"/Users/x/my tools/example", "upgrade", "--tag=a&b"},
+		},
+	} {
+		s, r := newSchedule(t, c.goos)
+		os.MkdirAll(s.unitDir(), 0o755)
+		if err := os.WriteFile(s.Files()[0], []byte(c.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if s.Installed() {
+			t.Fatalf("%s: a hand-written job counts as this package's", c.goos)
+		}
+		if got, err := s.Argv(); err != nil || !slices.Equal(got, c.want) {
+			t.Errorf("%s: argv = %q, %v, want %q", c.goos, got, err, c.want)
+		}
+		if err := s.Start(); err != nil || !slices.Equal(r.calls, []string{c.start}) {
+			t.Errorf("%s: start = %v, calls %v", c.goos, err, r.calls)
+		}
+	}
+}
+
+// Escapes and continued lines that people write in units by hand.
+func TestArgvOfAHandWrittenUnitReadsAsSystemdDoes(t *testing.T) {
+	for body, want := range map[string][]string{
+		`ExecStart=/opt/my\x20tools/example upgrade`:            {"/opt/my tools/example", "upgrade"},
+		`ExecStart=/opt/my\040tools/example up\sgrade`:          {"/opt/my tools/example", "up grade"},
+		"ExecStart=/x/example \\\n  upgrade --min-age 72h":      {"/x/example", "upgrade", "--min-age", "72h"},
+		`ExecStart=@/x/example example upgrade "a;" \; b`:       {"example", "upgrade", "a;", ";", "b"},
+		"ExecStart=/x/example 'it''s' \"tab\\there\" \\\\ \\\"": {"/x/example", "its", "tab\there", `\`, `"`},
+	} {
+		s, _ := newSchedule(t, "linux")
+		os.MkdirAll(s.unitDir(), 0o755)
+		os.WriteFile(s.Files()[0], []byte("[Service]\n"+body+"\n"), 0o644)
+		if got, err := s.Argv(); err != nil || !slices.Equal(got, want) {
+			t.Errorf("%q: argv = %q, %v, want %q", body, got, err, want)
+		}
+	}
+}
+
+func TestArgvRefusesAServiceWithNoOrManyCommands(t *testing.T) {
+	for name, body := range map[string]string{
+		"none":      "[Service]\nType=oneshot\n",
+		"two":       "[Service]\nExecStart=/x/example upgrade\nExecStart=/x/other\n",
+		"separated": "[Service]\nExecStart=/x/example upgrade ; /x/other\n",
+		"escape":    "[Service]\nExecStart=/x/example \\q\n",
+		"quote":     "[Service]\nExecStart=/x/example \"upgrade\n",
+		"backslash": "[Service]\nExecStart=/x/example \\",
+	} {
+		s, _ := newSchedule(t, "linux")
+		os.MkdirAll(s.unitDir(), 0o755)
+		os.WriteFile(s.Files()[0], []byte(body), 0o644)
+		if argv, err := s.Argv(); err == nil || errors.Is(err, ErrNoJob) {
+			t.Errorf("%s: argv = %q, %v", name, argv, err)
+		}
 	}
 }

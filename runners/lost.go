@@ -48,6 +48,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -57,11 +58,14 @@ import (
 )
 
 const (
-	maxAttempts = 3         // attempts of one run: a job that lost its box is re-run on attempts 1 and 2
-	lostAskMax  = 10        // Watches in a row GitHub may leave boxLost's question unanswered before the job is given up on
-	lostRunning = "running" // runners_lost.state: GitHub still has the job running on the vanished runner
-	lostEnded   = "ended"   // GitHub failed it: re-run once its run completed
-	lostClosed  = "closed"  // re-run, or not: the job's row says which
+	maxAttempts = 3 // attempts of one run: a job that lost its box is re-run on attempts 1 and 2
+	// maxBounceReruns: re-runs of one run for bounces alone (a job stopped
+	// on a box guarded to another run, bounce), not counted in maxAttempts.
+	maxBounceReruns = 5
+	lostAskMax      = 10        // Watches in a row GitHub may leave boxLost's question unanswered before the job is given up on
+	lostRunning     = "running" // runners_lost.state: GitHub still has the job running on the vanished runner
+	lostEnded       = "ended"   // GitHub failed it: re-run once its run completed
+	lostClosed      = "closed"  // re-run, or not: the job's row says which
 )
 
 // forget drops Watch's notes on j and releases its box in the background (a
@@ -171,6 +175,7 @@ type lostJob struct {
 	job, installation, run int64
 	attempt                int
 	repo, why              string
+	bounced                bool // stopped on a box guarded to another run (bounce)
 }
 
 // lostEnded is GitHub ending job: if the broker recorded it as having lost
@@ -236,7 +241,7 @@ func (s *Service) closeLost(ctx context.Context, jobs []lostJob, state, what str
 // lostOf lists the lost jobs GitHub has failed of one attempt of a run (a
 // row left from an earlier attempt is not this re-run's).
 func (s *Service) lostOf(ctx context.Context, repo string, run int64, attempt int) ([]lostJob, error) {
-	rows, err := s.db().QueryContext(ctx, `SELECT job, installation, attempt, why FROM runners_lost WHERE run = ? AND repo = ? COLLATE NOCASE AND state = ?
+	rows, err := s.db().QueryContext(ctx, `SELECT job, installation, attempt, why, bounced FROM runners_lost WHERE run = ? AND repo = ? COLLATE NOCASE AND state = ?
 		AND attempt = ? ORDER BY job`, run, repo, lostEnded, attempt)
 	if err != nil {
 		return nil, err
@@ -245,7 +250,7 @@ func (s *Service) lostOf(ctx context.Context, repo string, run int64, attempt in
 	var out []lostJob
 	for rows.Next() {
 		lo := lostJob{run: run, repo: repo}
-		if err := rows.Scan(&lo.job, &lo.installation, &lo.attempt, &lo.why); err != nil {
+		if err := rows.Scan(&lo.job, &lo.installation, &lo.attempt, &lo.why, &lo.bounced); err != nil {
 			return nil, err
 		}
 		out = append(out, lo)
@@ -280,17 +285,29 @@ func (s *Service) rerun(ctx context.Context, body []byte) error {
 	if err != nil {
 		return err
 	}
-	var running int
+	var running, bounceReruns int
 	if err := s.db().QueryRowContext(ctx, `SELECT count(*) FROM runners_lost WHERE run = ? AND repo = ? COLLATE NOCASE AND state = ?`,
 		q.Run, q.Repo, lostRunning).Scan(&running); err != nil {
 		return err
 	}
+	if err := s.db().QueryRowContext(ctx, `SELECT count(*) FROM runners_bounce_reruns WHERE run = ? AND repo = ? AND attempt < ?`,
+		q.Run, q.Repo, q.Attempt).Scan(&bounceReruns); err != nil {
+		return err
+	}
+	// A batch of bounces alone counts against maxBounceReruns; any other
+	// against maxAttempts, less the attempts the broker re-ran for bounces
+	// alone (GitHub's run_attempt counts both, and a person's re-runs).
+	bounces := !slices.ContainsFunc(jobs, func(lo lostJob) bool { return !lo.bounced })
 	switch {
 	case run.Attempt > q.Attempt:
 		// A person re-ran it, or the broker did and stopped before it wrote so.
 		return s.closeLost(ctx, jobs, jobDone, fmt.Sprintf("; its run is on attempt %d already: not asked again", run.Attempt))
-	case q.Attempt >= maxAttempts:
-		return s.closeLost(ctx, jobs, jobLost, fmt.Sprintf("; that was attempt %d of %d: not re-run again", q.Attempt, maxAttempts))
+	case bounces && bounceReruns >= maxBounceReruns:
+		s.logf("runners: ALERT: run %d of %s: its jobs were stopped on boxes guarded to other runs %d times; not re-run again (same-label credentialed workflows keep taking each other's runners)",
+			q.Run, q.Repo, bounceReruns+1)
+		return s.closeLost(ctx, jobs, jobLost, fmt.Sprintf("; its run was re-run %d times for bounces already: not re-run again", bounceReruns))
+	case !bounces && q.Attempt-bounceReruns >= maxAttempts:
+		return s.closeLost(ctx, jobs, jobLost, fmt.Sprintf("; that was attempt %d of %d: not re-run again", q.Attempt-bounceReruns, maxAttempts))
 	case run.Status != "completed":
 		return &waitErr{why: "run " + itoa(q.Run) + " still has jobs running: its lost job is re-run once they end"}
 	case running > 0:
@@ -326,7 +343,14 @@ func (s *Service) rerun(ctx context.Context, body []byte) error {
 	case err != nil:
 		return err
 	}
-	return s.closeLost(ctx, jobs, jobDone, fmt.Sprintf("; re-queued: attempt %d of %d", q.Attempt+1, maxAttempts))
+	if bounces {
+		if _, err := s.db().ExecContext(ctx, `INSERT OR IGNORE INTO runners_bounce_reruns (repo, run, attempt, updated) VALUES (?, ?, ?, ?)`,
+			q.Repo, q.Run, q.Attempt, s.now().Unix()); err != nil {
+			s.logf("runners: run %d of %s: recording its re-run for bounces: %v; it counts as an attempt", q.Run, q.Repo, err)
+		}
+		return s.closeLost(ctx, jobs, jobDone, fmt.Sprintf("; re-queued: bounce re-run %d of %d", bounceReruns+1, maxBounceReruns))
+	}
+	return s.closeLost(ctx, jobs, jobDone, fmt.Sprintf("; re-queued: attempt %d of %d", q.Attempt-bounceReruns+1, maxAttempts))
 }
 
 // rerunDropped closes a run's lost jobs when their re-run is given up on.

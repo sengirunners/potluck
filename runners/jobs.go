@@ -166,13 +166,16 @@ func (s *Service) drain(ctx context.Context, lane int) {
 	}
 }
 
-// next takes the oldest due delivery of lane no worker holds; in the serve
-// lane, none of a job another worker is serving (one job, one serve at a time).
+// next takes the oldest due delivery of lane no worker holds, one never
+// tried before any retry: serves waiting for a size no box has are made due
+// on every freed box (nudge), and taken oldest first they would keep the few
+// workers from ever reaching a new job a free box fits. In the serve lane,
+// none of a job another worker is serving (one job, one serve at a time).
 func (s *Service) next(ctx context.Context, lane int) (item, bool) {
 	s.flight.Lock()
 	defer s.flight.Unlock()
 	rows, err := s.db().QueryContext(ctx, `SELECT delivery, event, body, attempts, fails, received FROM runners_inbox
-		WHERE done = 0 AND lane = ? AND next_at <= ? ORDER BY received LIMIT 64`, lane, s.now().UnixNano())
+		WHERE done = 0 AND lane = ? AND next_at <= ? ORDER BY attempts > 0, received LIMIT 64`, lane, s.now().UnixNano())
 	if err != nil {
 		return item{}, false
 	}
@@ -228,12 +231,12 @@ func (s *Service) settle(ctx context.Context, lane int, it item, err error) {
 	}
 	now := s.now()
 	it.tries++
-	gap := s.Retry << min(it.tries-1, 10)
 	done := 0
+	var gap time.Duration
 	var w *waitErr
 	if errors.As(err, &w) {
 		it.fails = 0
-		next := now.Add(min(gap, s.WaitMax))
+		next := now.Add(min(s.Retry<<min(it.tries-1, 10), s.WaitMax))
 		if w.until.After(next) {
 			next = w.until
 		}
@@ -243,7 +246,12 @@ func (s *Service) settle(ctx context.Context, lane int, it item, err error) {
 			s.giveUp(ctx, it.job, "GitHub kept it queued for a day: given up ("+w.why+")")
 			s.rerunDropped(ctx, it, "its run did not end within a day")
 		}
-	} else if it.fails++; it.fails >= maxTries {
+	} else if it.fails++; it.fails < maxTries {
+		// An error backs off by the errors in a row, not by earlier waits:
+		// at most Retry<<(maxTries-2) (8 min at the default 30 s) before
+		// the next try, whatever the delivery waited for before.
+		gap = s.Retry << (it.fails - 1)
+	} else {
 		done = 2
 		s.logf("runners: delivery %s dropped after %d failed tries: %v", it.delivery, it.fails, err)
 		if lane == laneServe {
@@ -526,7 +534,7 @@ func (s *Service) launch(ctx context.Context, cl *ghapp.Client, sub *authz.Subje
 	// (a stale runs would have the sweep end this box for that runner's job).
 	// Serving before the mint, so the sweep can find the runner; never over a
 	// job that ended meanwhile (completed is applied in the other lane).
-	run, err := s.secretsRun(ctx, cl, l, d) // job grants: the box guarded to the run, nothing minted yet
+	run, err := s.secretsRun(ctx, cl, l, d, at.reguards) // job grants: the box guarded to the run, nothing minted yet
 	if err != nil {
 		return false, "", err
 	}
@@ -1033,6 +1041,9 @@ func (s *Service) ended(ctx context.Context, d delivery) error {
 		}
 	}
 	secretsErr := s.endJobSecrets(ctx, d.Job.ID) // revoked now, not only when its box ends
+	// Stopped on a box guarded to another run, whichever of GitHub's
+	// in_progress and completed came first: recorded before lostEnded reads.
+	s.endedOnGuardedBox(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt, d.Job.RunnerName)
 	if err := s.githubEnded(ctx, d.Job.ID, d.Job.Conclusion); err != nil {
 		return err
 	}
@@ -1227,6 +1238,9 @@ func (s *Service) Sweep(ctx context.Context) {
 				s.renew(ctx, j, caps)
 			}
 		case gj.Status == "completed":
+			if on != id { // its completion never came: sweepLost re-runs it if it was stopped there
+				s.endedOnGuardedBox(ctx, j.installation, j.repo, on, gj.RunID, gj.RunAttempt, j.runner)
+			}
 			_ = s.githubEnded(ctx, on, gj.Conclusion)
 		case j.handle != "":
 			if !j.started && gj.Status == "in_progress" && gj.RunnerName == j.runner {
@@ -1250,6 +1264,7 @@ func (s *Service) Sweep(ctx context.Context) {
 	_, _ = s.db().ExecContext(ctx, `DELETE FROM runners_pending WHERE expires <= ?`, now.Unix())
 	_, _ = s.db().ExecContext(ctx, `DELETE FROM runners_jobs WHERE state != ? AND updated < ?`, jobServing, now.Add(-jobsKept).Unix())
 	_, _ = s.db().ExecContext(ctx, `DELETE FROM runners_lost WHERE updated < ?`, now.Add(-jobsKept).Unix())
+	_, _ = s.db().ExecContext(ctx, `DELETE FROM runners_bounce_reruns WHERE updated < ?`, now.Add(-jobsKept).Unix())
 	s.forgetJobSecrets(ctx, now.Add(-jobsKept))
 }
 

@@ -147,6 +147,9 @@ func (s *Service) startRuntime(ctx context.Context, id, by int64, known *ghapp.J
 		return err
 	}
 	if holder.started && holder.runs == by {
+		if by != id {
+			return s.followTaker(ctx, id, by) // again, where an earlier try failed after the start was recorded
+		}
 		return nil
 	}
 	cl, err := s.client(ctx)
@@ -180,16 +183,95 @@ func (s *Service) startRuntime(ctx context.Context, id, by int64, known *ghapp.J
 	// currently running another job. Assignment facts on that box stay intact.
 	_, err = s.db().ExecContext(ctx, `INSERT INTO runners_jobs (job,installation,repo,run,labels,state,why,created,updated,limit_s,limit_source,started_at,deadline)
  VALUES (?,?,?,?, '[]', ?, ?,?,?,?,?,?,?) ON CONFLICT(job) DO UPDATE SET
- state = CASE WHEN runners_jobs.state IN (?,?) THEN excluded.state ELSE runners_jobs.state END,
+ state = CASE WHEN runners_jobs.state IN (?,?,?) THEN excluded.state ELSE runners_jobs.state END,
  limit_s = CASE WHEN runners_jobs.limit_s = 0 THEN excluded.limit_s ELSE runners_jobs.limit_s END,
  limit_source = CASE WHEN runners_jobs.started_at = 0 THEN excluded.limit_source ELSE runners_jobs.limit_source END,
  started_at = CASE WHEN runners_jobs.started_at = 0 THEN excluded.started_at ELSE runners_jobs.started_at END,
- deadline = CASE WHEN runners_jobs.started_at = 0 THEN excluded.deadline ELSE runners_jobs.deadline END`, by, holder.installation, holder.repo, cmp.Or(jc.RunID, holder.run), jobRunning, "running on runner "+holder.runner+" minted for job "+itoa(id), s.now().Unix(), s.now().Unix(), v.seconds, v.source, start, start+int64(v.seconds), jobWaiting, jobFailed)
+ deadline = CASE WHEN runners_jobs.started_at = 0 THEN excluded.deadline ELSE runners_jobs.deadline END`, by, holder.installation, holder.repo, cmp.Or(jc.RunID, holder.run), jobRunning, "running on runner "+holder.runner+" minted for job "+itoa(id), s.now().Unix(), s.now().Unix(), v.seconds, v.source, start, start+int64(v.seconds), jobWaiting, jobFailed, jobTaken)
 	if err != nil {
 		return err
 	}
 	_, err = s.db().ExecContext(ctx, `UPDATE runners_jobs SET started = 1, runs = ? WHERE job = ? AND state = ? AND started = 0`, by, id, jobServing)
-	return err
+	if err != nil || by == id {
+		return err
+	}
+	return s.followTaker(ctx, id, by)
+}
+
+// followTaker gives the box of job id, whose runner job by took (GitHub
+// gives a runner any queued job of its repository with its labels), to by:
+// the box's lease budget becomes by's limit plus the startup allowance, and
+// the box is renewed to it now, longer or shorter than id's. Where by has no
+// box of its own, by's row carries the box from here on and id, still queued
+// on GitHub, is served again with a new box (requeue; reserve asks GitHub
+// first). Where by has its own box, id keeps carrying this one: by's idle
+// runner is there for id's job. So too where id's box holds job grants of
+// id's run (it is guarded to that run and its secrets are issued through
+// id's row, issueSecrets) or has an open guard (fork serving: the retire of
+// open runners, retireOpen, and the rules for who may take one go by id's
+// row). A box re-guarded to by's run (takeOver) is by's like any other; by's
+// rows of job grants for no box it holds go then, so nothing is ever issued
+// through them into the box by now carries.
+func (s *Service) followTaker(ctx context.Context, id, by int64) error {
+	holder, err := s.job(ctx, id)
+	if err != nil || holder.state != jobServing || holder.runs != by || holder.handle == "" {
+		return err
+	}
+	actual, err := s.job(ctx, by)
+	if err != nil || actual.limit == 0 {
+		return err
+	}
+	ttl := actual.limit + startupAllowance
+	tx, err := s.db().BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := s.now().Unix()
+	carrier := id
+	var moved int64
+	if !holder.openGuard {
+		res, err := tx.ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = '', target = ?, handle = ?, runner = ?, ttl = ?, leased = ?, started = 1, runs = ?,
+			updated = ? WHERE job = ? AND state = ? AND NOT EXISTS (SELECT 1 FROM runners_job_secrets WHERE job = ? AND run = ? AND state IN (?, ?, ?))`, jobServing, holder.target,
+			holder.handle, holder.runner, ttl, holder.leased, by, now, by, jobRunning, id, holder.run, secretsPlanned, secretsIssuing, secretsIssued)
+		if err != nil {
+			return err
+		}
+		moved, _ = res.RowsAffected()
+	}
+	if moved > 0 {
+		carrier = by
+		res, err := tx.ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = ?, handle = '', started = 0, runs = 0, checked = 0, updated = ?
+			WHERE job = ? AND state = ? AND handle = ? AND runs = ?`, jobWaiting,
+			clip("its runner "+holder.runner+" was taken by job "+itoa(by)+", which keeps its box: served again"), now, id, jobServing, holder.handle, by)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil // the box changed hands meanwhile: nothing moved
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM runners_job_secrets WHERE job = ? AND state NOT IN `+secretsHeld, by); err != nil {
+			return err
+		}
+		if err := s.queueAgain(ctx, tx, id, holder.runner); err != nil {
+			return err
+		}
+	} else if _, err := tx.ExecContext(ctx, `UPDATE runners_jobs SET ttl = ? WHERE job = ? AND state = ? AND handle = ? AND runs = ?`,
+		ttl, id, jobServing, holder.handle, by); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if carrier == by {
+		s.kick(laneServe)
+	}
+	j, err := s.job(ctx, carrier)
+	if err != nil {
+		return err
+	}
+	s.renew(ctx, j, map[string]map[string]int{})
+	return nil
 }
 
 // activeJob follows the holder's assignment. Runtime facts belong only to

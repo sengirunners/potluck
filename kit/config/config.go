@@ -296,7 +296,10 @@ type GitHub struct {
 	// env:NAME; kit/secrets) to the authority's own GitHub token, for
 	// lookups by login and id and for re-checking org memberships: an org
 	// grant needs the token of one of the org's members. Never a person's
-	// login token.
+	// login token. Unset, a daemon wired with Potluck's owners module mints
+	// installation tokens from runners.github's App instead, when that App
+	// is on the same GitHub: metadata read for lookups, members read on an
+	// org it is installed on (wiring/lookuptoken.go).
 	LookupToken string `json:"lookup_token,omitempty"`
 }
 

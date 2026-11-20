@@ -3,6 +3,7 @@ package protocol
 import (
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +16,12 @@ const (
 	// CapJITGuardRun: the driver's job-started hook takes jit_guard.run.
 	// A driver that lists it lists box-secrets too.
 	CapJITGuardRun = "github-jit-guard-run"
+	// CapJITGuardReguard: the driver's job-started hook, on a box held to one
+	// run, holds a job of another run (one its strict guard serves
+	// otherwise) for a ready marker that re-guards the box to that job's own
+	// run (ReguardMarker), and stops it as before if none comes in the hold.
+	// The broker re-guards only a box whose driver lists it.
+	CapJITGuardReguard = "github-jit-guard-reguard"
 	// SecretNameReady is the door's ready marker, a box secret whose value
 	// is the run's id (decimal), written once every secret of the job is in
 	// the box. The authority reserves the name: no holder sets it.
@@ -61,6 +68,17 @@ func (r JITRun) Check(repo string) error {
 		return ErrJITRun
 	}
 	return nil
+}
+
+// ReguardMarker is the ready marker that re-guards a box held to one run to
+// the job of run r that took its runner: "<id> <workflow ref> <ref>", the
+// workflow ref in lower case. The hook passes a job of another run only on
+// this marker naming its own GITHUB_RUN_ID, GITHUB_WORKFLOW_REF (compared
+// without case) and GITHUB_REF; the plain marker (the run's id alone) never
+// matches it. The broker writes it only after its own checks of that job
+// and once that job's own credentials, and nothing else, are in the box.
+func ReguardMarker(r JITRun) string {
+	return strconv.FormatInt(r.ID, 10) + " " + strings.ToLower(r.WorkflowRef) + " " + r.Ref
 }
 
 // Hold is how long the hook waits for the ready marker, in seconds.

@@ -6,8 +6,6 @@
 package wiring
 
 import (
-	"context"
-
 	"github.com/sengirunners/potluck/grants"
 	"github.com/sengirunners/potluck/issuers"
 	"github.com/sengirunners/potluck/kit/core"
@@ -67,7 +65,8 @@ func Compute(d *core.Deps) ([]core.Module, error) {
 }
 
 // ownersModule is the owners brick over its GitHub driver (SPEC 22),
-// configured by config.json "github"; no client_id, no logins.
+// configured by config.json "github"; no client_id, no logins. Its lookup
+// token is setLookup's.
 func ownersModule(d *core.Deps) *owners.Service {
 	gh := d.Config.File.GitHub
 	var dev owners.Device
@@ -75,19 +74,7 @@ func ownersModule(d *core.Deps) *owners.Service {
 		dev = ghaccounts.NewDevice(gh.WebURL, gh.ClientID, nil)
 	}
 	drv := ghaccounts.New(gh.APIURL, nil)
-	if gh.LookupToken != "" {
-		ref, err := secrets.Parse(gh.LookupToken)
-		if err != nil || ref.Name == "" {
-			// The error would quote the value: a token pasted in config.json.
-			d.Log.Warn("owners: github.lookup_token is not a secret reference (file:, keychain: or env:); looking up without it")
-		} else {
-			rd := secrets.Default()
-			drv.LookupToken = func(ctx context.Context) (string, error) {
-				v, err := rd.Get(ctx, ref)
-				return v.Reveal(), err
-			}
-		}
-	}
+	setLookup(drv, d.Config.File, d.Log, secrets.Default())
 	return owners.New(d, drv, dev)
 }
 

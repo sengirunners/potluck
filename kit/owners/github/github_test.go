@@ -32,7 +32,7 @@ func TestConformance(t *testing.T) {
 	conformance.Run(t, conformance.Harness{
 		Accounts: drv,
 		SetLookup: func(t *testing.T, tok string) {
-			drv.LookupToken = func(context.Context) (string, error) { return tok, nil }
+			drv.LookupToken = func(context.Context, string) (string, error) { return tok, nil }
 		},
 		NewUser: func(t *testing.T, login string) string {
 			_, tok := gh.AddUser(login, "User")
@@ -149,7 +149,7 @@ func TestRateLimitedLookups(t *testing.T) {
 	}
 	if _, err := drv.OrgMember(context.Background(), "o", "ana"); errors.Is(err, owners.ErrNoView) || !errors.As(err, &rl) {
 		// no lookup token: ErrNoView comes first; the limit needs a token
-		drv.LookupToken = func(context.Context) (string, error) { return "tok", nil }
+		drv.LookupToken = func(context.Context, string) (string, error) { return "tok", nil }
 		if _, err := drv.OrgMember(context.Background(), "o", "ana"); !errors.As(err, &rl) {
 			t.Fatalf("org member while limited: %v, want *owners.RateLimited", err)
 		}

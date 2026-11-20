@@ -1992,8 +1992,21 @@ box, and nothing is minted before GitHub says the right job holds it.
   config ceiling, trusted machine, the grant check with the job as subject), then writes the ready marker
   (`POTLUCK_READY`, the run id). It gives this 240 s from the job's start (GitHub's
   `started_at`, or the box's acquire if that is later), inside the hold: a webhook or lane running late leaves less,
-  and none left mints nothing. A job of another run gets nothing: its guard
-  stops it.
+  and none left mints nothing.
+- **A job of another run** that takes the box's runner (GitHub gives a runner any queued job of its repository with
+  its labels; same-label credentialed workflows do) is admitted on its own: GitHub must say it is in progress on the
+  box's runner, its labels, link, connection and run must pass as at a serve (`trustAll` only: never fork serving),
+  its installation must be linked to the box's area, and the grants naming *its* run (its workflow, ref, event) are
+  looked up as at its own serve. Then the box's record is re-guarded to its run, its own tokens are issued, and the
+  marker `<run id> <workflow ref> <ref>` lets the hook pass it (driver capability `github-jit-guard-reguard`). The
+  grants of the job the box was acquired for are never looked up for it, and nothing was issued for that job (a JIT
+  runner takes one job). The box then goes to the taker's record, and the job it was acquired for is served again
+  with a new box. A box with an open guard (fork serving) is never taken over: the taker gets nothing and is stopped.
+- **Bounce**: when any of those checks refuses (or the driver cannot re-guard), the taker is stopped by the hook
+  (killed, so none of its steps run, `if: always()` ones included), recorded to be re-run once GitHub fails it and
+  its run completed (whichever of GitHub's `in_progress` and `completed` comes first, or the sweep), and the job the
+  box was acquired for is served again at once. Bounce re-runs have a cap of their own (5 per run, an `ALERT` log line
+  at the cap) and do not count against the 3 attempts of a run whose jobs lost their box.
 - **Fails closed**: GitHub not answering, a grant gone, an issue refused (two grants giving one name different
   permissions among them), the issuer not started within the 240 s, or the marker not written revokes what the box
   got and writes no marker; the hook stops the job before its first step when the hold ends. The broker records why (`runners_job_secrets`).

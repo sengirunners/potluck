@@ -717,7 +717,9 @@ like this:
   `GITHUB_RUN_ID`, `GITHUB_WORKFLOW_REF` and `GITHUB_REF` with the run's, then waits (polling every 250 ms, at most
   `hold_s`) for `/dev/shm/potluck-secrets/POTLUCK_READY` to hold the run's id. A job of another run, workflow or
   ref, or one whose marker never comes, is stopped as above. A guest that keeps no box secrets (macOS) gets no
-  `github-jit-guard-run` and refuses a run guard.
+  `github-jit-guard-run` and refuses a run guard. A job of another run that the strict guard would serve otherwise
+  (`github-jit-guard-reguard`) is held for a marker of `<run id> <workflow ref> <ref>` naming its own run: the
+  broker re-guards the box to it and issues its own grants. No such marker within the hold stops it as above.
 
 - With `jit_guard.open_if_private`, a job the events refuse is served when the event payload
   (`GITHUB_EVENT_PATH`) says `repository.private` is true and `repository.visibility` is `"private"`; anything else

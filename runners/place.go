@@ -105,6 +105,9 @@ type placed struct {
 	// open guard can check at the job's start that the repository is still
 	// private (guard); a runner on any other gets no open guard.
 	guardsPrivate bool
+	// reguards: its driver lists protocol.CapJITGuardReguard, so a box held
+	// to one run can be re-guarded to a job of another run (takeOver).
+	reguards bool
 }
 
 // place answers the box bindings to try for w, best first (at most
@@ -126,6 +129,7 @@ func (s *Service) place(ctx context.Context, sub *authz.Subject, svc rt.Service,
 		for _, v := range list.Targets {
 			if v.Name == n && v.Describe != nil {
 				p.guardsPrivate = slices.Contains(v.Describe.Capabilities, protocol.CapJITGuardPrivate)
+				p.reguards = slices.Contains(v.Describe.Capabilities, protocol.CapJITGuardReguard)
 			}
 		}
 		if needPrivate && !p.guardsPrivate {

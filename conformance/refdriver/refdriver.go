@@ -624,6 +624,9 @@ func (d *drv) describe() map[string]any {
 		if d.boxSecretsListed() { // secrets.go
 			caps = append(caps, protocol.CapBoxSecrets)
 			caps = append(caps, protocol.CapJITGuardRun) // jit_guard.run is taken and ignored with the rest of the guard
+			if d.cfg["jit_guard_reguard"] != "0" {       // "0": a driver whose hook cannot be re-guarded
+				caps = append(caps, protocol.CapJITGuardReguard)
+			}
 			out["verbs"] = append(out["verbs"].([]string), protocol.VerbSecrets)
 		}
 		out["capabilities"] = d.shelfDescribe(out, d.volumeDescribe(d.rootDescribe(d.persistDescribe(out, d.ptyDescribe(out, caps))))) // persist.go, root.go, volumes.go, shelf.go

@@ -105,7 +105,16 @@ const jitStartWindow = 5 * time.Second
 // (compared without case, as GitHub's owner and name are) or ref, then holds
 // the job its rules serve until the door's ready marker (${10}/POTLUCK_READY,
 // protocol.SecretNameReady) holds the run's id, for at most $9 seconds, and
-// stops it as it stops a refused one if the marker never comes. The values
+// stops it as it stops a refused one if the marker never comes. A job of
+// another run (GitHub gives a runner any queued job of its repository with
+// its labels) that the strict guard serves otherwise (${11} not "private",
+// its event among $3, not a fork's) is held the same way for a re-guard
+// marker (protocol.ReguardMarker): the door writes "<run> <workflow ref>
+// <ref>" naming that job's own run only after the broker admitted it and
+// issued its own credentials alone, so it passes on its own GITHUB_RUN_ID,
+// GITHUB_WORKFLOW_REF (without case) and GITHUB_REF and nothing else; no
+// marker in the hold stops it as any refusal (killed: none of its steps run,
+// if: always() ones included). The values
 // go into the hook as they are: the driver let only a run that
 // protocol.JITRun.Check passed through, whose characters cannot leave a JS
 // string or start a shell expansion. The runner, and so its steps, get the
@@ -178,22 +187,34 @@ function otherRun() {
   if (String(env.GITHUB_REF || '') !== ref) return 'of another ref';
   return '';
 }
-// held waits for the door's ready marker, whose content is the run's id, for at most hold seconds.
-function held() {
+// held waits for the door's ready marker to be want, for at most hold seconds.
+function held(want) {
   const nap = new Int32Array(new SharedArrayBuffer(4)), until = Date.now() + hold * 1000;
   for (;;) {
     let v = null;
     try { v = fs.readFileSync(ready, 'utf8').trim(); } catch (e) {}
-    if (v === run) return true;
+    if (v === want) return true;
     const left = until - Date.now();
     if (left <= 0) return false;
     Atomics.wait(nap, 0, 0, Math.min(250, left));
   }
 }
+// The re-guard marker this job passes on (protocol.ReguardMarker): its own run, workflow ref (lower case) and ref; ''
+// for a job whose values could not be one (the door writes only values protocol.JITRun.Check passed).
+function reguard() {
+  const id = String(env.GITHUB_RUN_ID || ''), wf = String(env.GITHUB_WORKFLOW_REF || '').toLowerCase(), r = String(env.GITHUB_REF || '');
+  if (!/^[1-9][0-9]{0,19}$/.test(id) || !/^[a-z0-9._/@-]+$/.test(wf) || !/^refs\/heads\/[A-Za-z0-9._/-]+$/.test(r)) return '';
+  return id + ' ' + wf + ' ' + r;
+}
 const why = refused() || otherRun();
 let stop = '';
-if (why !== '') stop = 'zm: this runner serves only jobs the broker would serve; this job is ' + why + ': stopped before its first step';
-else if (run !== '' && !held()) stop = 'zm: this job was held for its secrets from the Potluck secrets door, which did not deliver them in ' + hold + 's: stopped before its first step';
+// A job of another run that the strict guard serves otherwise (never an open guard's widening): held for the broker
+// to re-guard this box to its own run (runners/jobsecrets.go), else stopped as any refusal.
+const other = why === 'of another run' && !openIfPrivate && untrusted() === '' ? reguard() : '';
+if (other !== '') {
+  if (!held(other)) stop = 'zm: this runner was minted for run ' + run + '; this job is of another run, which the Potluck broker did not take this box over for in ' + hold + 's: stopped before its first step';
+} else if (why !== '') stop = 'zm: this runner serves only jobs the broker would serve; this job is ' + why + ': stopped before its first step';
+else if (run !== '' && !held(run)) stop = 'zm: this job was held for its secrets from the Potluck secrets door, which did not deliver them in ' + hold + 's: stopped before its first step';
 if (stop === '') process.exit(0);
 console.error(stop);
 const ps = (args) => { try { return cp.execFileSync('ps', args, { stdio: ['ignore', 'pipe', 'ignore'] }).toString(); } catch (e) { return ''; } };

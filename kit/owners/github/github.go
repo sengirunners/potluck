@@ -42,11 +42,18 @@ type Driver struct {
 	api string
 	hc  *http.Client
 	// LookupToken, when set, is the authority's own token for lookups by
-	// login and id (GitHub allows 60 unauthenticated calls an hour per
-	// address) and for re-checking org memberships (OrgMember: it must be
-	// an org member's to see private members). Never a person's login
-	// token; an error or "" goes without one.
-	LookupToken func(ctx context.Context) (string, error)
+	// login and id (org "": GitHub allows 60 unauthenticated calls an hour
+	// per address) and for re-checking the members of org (OrgMember: it
+	// must see that org's private members, as a member's token or an App
+	// installation's on org with members read does). Never a person's
+	// login token; an error or "" goes without one.
+	LookupToken func(ctx context.Context, org string) (string, error)
+	// LookupSource names where LookupToken's tokens come from, in the
+	// error when GitHub refuses one ("github.lookup_token" when empty).
+	LookupSource string
+	// LookupRefused, when set, is told each lookup token GitHub answered
+	// 401, so a source that caches tokens drops that one.
+	LookupRefused func(token string)
 }
 
 // New is a driver for the API at base (DefaultAPI when empty). hc nil is a
@@ -172,18 +179,41 @@ func (d *Driver) ByLogin(ctx context.Context, login string) (owners.Account, err
 // authorityLookup is lookup with the authority's own token: GitHub
 // refusing it is an outage (the operator's to fix), not ErrBadToken.
 func (d *Driver) authorityLookup(ctx context.Context, path string) (owners.Account, error) {
-	a, err := d.lookup(ctx, path, d.lookupToken(ctx))
+	tok := d.lookupToken(ctx, "")
+	a, err := d.lookup(ctx, path, tok)
 	if errors.Is(err, owners.ErrBadToken) {
-		return a, fmt.Errorf("GitHub refused the authority's lookup token (github.lookup_token)")
+		return a, d.refused(tok)
 	}
 	return a, err
 }
 
-func (d *Driver) lookupToken(ctx context.Context) string {
+// refused tells LookupRefused that GitHub answered tok 401, and is the
+// error to answer: owners.ErrLookupRefused, naming the token's source.
+func (d *Driver) refused(tok string) error {
+	if d.LookupRefused != nil {
+		d.LookupRefused(tok)
+	}
+	src := d.LookupSource
+	if src == "" {
+		src = "github.lookup_token"
+	}
+	return lookupRefused{src: src}
+}
+
+// lookupRefused is owners.ErrLookupRefused with the token's source.
+type lookupRefused struct{ src string }
+
+func (e lookupRefused) Error() string {
+	return "GitHub refused the authority's lookup token (" + e.src + ")"
+}
+
+func (e lookupRefused) Is(target error) bool { return target == owners.ErrLookupRefused }
+
+func (d *Driver) lookupToken(ctx context.Context, org string) string {
 	if d.LookupToken == nil {
 		return ""
 	}
-	tok, err := d.LookupToken(ctx)
+	tok, err := d.LookupToken(ctx, org)
 	if err != nil {
 		return ""
 	}
@@ -192,12 +222,12 @@ func (d *Driver) lookupToken(ctx context.Context) string {
 
 // OrgMember is GET /orgs/{org}/members/{login} with the authority's lookup
 // token: 204 a member, 404 not; a 302 means the token cannot see the org's
-// members (it is no member's): ErrNoView.
+// members (it is no member's): ErrNoView; a 401 is ErrLookupRefused.
 func (d *Driver) OrgMember(ctx context.Context, org, login string) (bool, error) {
 	if !validLogin(org) || !validLogin(login) {
 		return false, nil
 	}
-	tok := d.lookupToken(ctx)
+	tok := d.lookupToken(ctx, org)
 	if tok == "" {
 		return false, owners.ErrNoView
 	}
@@ -223,7 +253,9 @@ func (d *Driver) OrgMember(ctx context.Context, org, login string) (bool, error)
 		return true, nil
 	case http.StatusNotFound:
 		return false, nil
-	case http.StatusFound, http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
+		return false, d.refused(tok)
+	case http.StatusFound, http.StatusForbidden:
 		return false, owners.ErrNoView
 	}
 	return false, fmt.Errorf("GitHub answered %d for an org's member", resp.StatusCode)

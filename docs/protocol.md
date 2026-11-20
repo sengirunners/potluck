@@ -281,6 +281,7 @@ Capabilities a box driver may list:
 | `github-jit` | `acquire` takes `jit_config` |
 | `github-jit-guard` | `acquire` takes `jit_guard` |
 | `github-jit-guard-run` | `jit_guard` takes `run`: one run, held for the door's ready marker |
+| `github-jit-guard-reguard` | with `run`: a job of another run that the strict guard serves otherwise is held for a ready marker re-guarding the box to that job's own run |
 | `github-jit-guard-private` | `jit_guard` takes `open_if_private`: beyond `events`, any run whose event payload says the repository is private |
 | `host-lend` | the driver holds the boxes it starts to the lender's dials (cores, memory and disk kept free, the host's `host-lend.json`), read at every `acquire`; a driver without it ignores them, and `potluck host lend` and `potluck host status` say so ([menubar.md](menubar.md#memory-and-the-dials)) |
 
@@ -837,6 +838,12 @@ capability, and the write checks skip when the shelf holds no file.
   and holds a job that passes until the box secret `POTLUCK_READY` (the door's ready marker) holds `id`; no marker
   within the hold refuses it. With a run, the runner's environment has `POTLUCK_SECRETS` (and `ZM_SECRETS`) set to
   the box secrets' directory.
+- With capability `github-jit-guard-reguard` (listed only beside `github-jit-guard-run`), a job of another run that
+  the guard serves otherwise (`events` given, its event among them, not a fork's; never under `open_if_private`) is
+  held the same way, for a `POTLUCK_READY` of `<run id> <workflow ref, lower case> <ref>` naming that job's own
+  `GITHUB_RUN_ID`, `GITHUB_WORKFLOW_REF` (case-folded) and `GITHUB_REF`; anything else, or nothing within the hold,
+  refuses it (killed: none of its steps run). The daemon writes that marker only after admitting that job itself and
+  issuing its own credentials alone (`docs/daemon.md`, "Job grants").
 - Registering and deregistering the runner, and sweeping orphans, are the daemon's, never the driver's.
 - A driver that replaces a runner GitHub would refuse (`potluck-driver-tart` does, before the runner starts) says
   what its newest box of each image found in `describe.runners`: a list with one entry per image of the binding, in

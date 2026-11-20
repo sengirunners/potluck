@@ -3,6 +3,7 @@ package runners
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"time"
 
@@ -301,6 +302,15 @@ func (s *Service) JobSecretsState(ctx context.Context, job int64) string {
 	return st
 }
 
+// JobSecretsEver reports whether any of job's grant rows, not only its newest,
+// reached a state other than planned: a job served again at once gets a new
+// planned row, which hides the refused one from JobSecretsState.
+func (s *Service) JobSecretsEver(ctx context.Context, job int64, state string) bool {
+	var n int
+	_ = s.db().QueryRowContext(ctx, `SELECT count(*) FROM runners_job_secrets WHERE job = ? AND (state = ? OR (? = '' AND state != 'planned'))`, job, state, state).Scan(&n)
+	return n > 0
+}
+
 // LoseIssuing forgets which job grant rows this process is issuing, as a
 // crash and restart would: the issueSecrets still running stands for the
 // process that is gone.
@@ -344,3 +354,42 @@ func (s *Service) Stored(ctx context.Context) (n int) {
 
 // MayPublishCapacity is mayPublishCapacity (capacity.go).
 var MayPublishCapacity = mayPublishCapacity
+
+// Nudge is a box freed: every waiting serve is due now.
+func (s *Service) Nudge(ctx context.Context) { s.nudge(ctx) }
+
+// SettleTry settles one failed try of a stored serve delivery that has had
+// attempts tries, fails of them failures in a row: a wait for a box when
+// wait, else an error. It answers the delivery's fails, the gap to its next
+// try and whether it was dropped. The delivery is held as a worker's for
+// the test's life: no worker applies it.
+func (s *Service) SettleTry(ctx context.Context, delivery string, attempts, fails int, wait bool) (int, time.Duration, bool, error) {
+	now := s.now()
+	s.flight.Lock()
+	s.taking[laneServe][delivery] = true
+	s.flight.Unlock()
+	if _, err := s.db().ExecContext(ctx, `INSERT INTO runners_inbox (delivery, event, body, attempts, fails, next_at, received, lane) VALUES (?, 'workflow_job', x'', ?, ?, 0, ?, ?)
+		ON CONFLICT(delivery) DO UPDATE SET attempts = excluded.attempts, fails = excluded.fails, done = 0`,
+		delivery, attempts, fails, now.UnixNano(), laneServe); err != nil {
+		return 0, 0, false, err
+	}
+	var err error = errors.New("database is locked (5) (SQLITE_BUSY)")
+	if wait {
+		err = &waitErr{why: "no box fits now"}
+	}
+	s.settle(ctx, laneServe, item{delivery: delivery, event: "workflow_job", tries: attempts, fails: fails, received: now.UnixNano()}, err)
+	var next int64
+	var done int
+	if err := s.db().QueryRowContext(ctx, `SELECT fails, next_at, done FROM runners_inbox WHERE delivery = ?`, delivery).Scan(&fails, &next, &done); err != nil {
+		return 0, 0, false, err
+	}
+	return fails, time.Unix(0, next).Sub(now), done == 2, nil
+}
+
+// SeedBounceReruns records that run of repo was re-run for bounces alone on
+// its attempts 1..n (runners_bounce_reruns).
+func (s *Service) SeedBounceReruns(ctx context.Context, repo string, run int64, n int) {
+	for a := 1; a <= n; a++ {
+		_, _ = s.db().ExecContext(ctx, `INSERT OR IGNORE INTO runners_bounce_reruns (repo, run, attempt, updated) VALUES (?, ?, ?, ?)`, repo, run, a, s.now().Unix())
+	}
+}

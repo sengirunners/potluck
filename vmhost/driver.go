@@ -275,6 +275,9 @@ func (d *drv) describe() map[string]any {
 			// jit_guard.run: the hook holds the job for the door's ready
 			// marker, a box secret, so only where box secrets are served.
 			caps = append(caps, protocol.CapJITGuardRun)
+			// jit_guard.run's re-guard: a job of another run held for the
+			// broker's re-guard marker (jitLaunch).
+			caps = append(caps, protocol.CapJITGuardReguard)
 		}
 	}
 	if d.cfg.Kind == "box" {

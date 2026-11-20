@@ -91,7 +91,11 @@ type doorFixture struct {
 // and grants (name -> permissions) are added as job grants of
 // .github/workflows/x.yml on refs/heads/main for push.
 func newDoorFixture(t *testing.T, issuer bool, grants ...[2]string) *doorFixture {
-	f := newFixture(t)
+	return newDoorFixtureOn(t, newFixture(t), issuer, grants...)
+}
+
+// newDoorFixtureOn is newDoorFixture on fixture f.
+func newDoorFixtureOn(t *testing.T, f *fixture, issuer bool, grants ...[2]string) *doorFixture {
 	d := &doorGitHub{runs: map[int64]doorRun{}, compare: map[string]string{}, tags: map[string]bool{}, fail: map[string]bool{},
 		files: map[string]string{".github/workflows/x.yml": pinnedWorkflow, ".github/actions/setup/action.yml": "runs:\n  using: composite\n  steps:\n    - run: true\n      shell: bash\n"}}
 	df := &doorFixture{f, d}
@@ -622,7 +626,8 @@ func (df *doorFixture) boxWrites() map[string]map[string]string {
 // (d) Two jobs of one run swap runners: each box gets its token and the
 // marker for the job holding it, and the completion of a job revokes the
 // token of the box it held (the other job's). A job of another run taking
-// a runner gets nothing in that box.
+// a runner gets its own grant there, under its own run's re-guard marker,
+// never the box's run's.
 func TestJobGrantSwapWithinARun(t *testing.T) {
 	df := newDoorFixture(t, true, grantGH)
 	df.set(func(d *doorGitHub) {
@@ -675,11 +680,18 @@ func TestJobGrantSwapWithinARun(t *testing.T) {
 		t.Errorf("revoked for %q, want once for B's completion", whys)
 	}
 
-	// A job of another run on a guarded box's runner: nothing for that box.
+	// A job of another run on a guarded box's runner: the box is re-guarded
+	// to its run (733), and holds its own token under that run's marker.
 	df.served(t, 7303, 732, 3)
 	df.served(t, 7304, 733, 4)
 	df.applied(t, df.startOn(7304, 733, "acme/app", "potluck-7303"))
-	if all, _ := df.issued(); len(all) != 2 || len(df.boxWrites()) != 2 {
+	want := "733 acme/app/.github/workflows/x.yml@refs/heads/main refs/heads/main"
+	eventually(t, "7304's token and its run's re-guard marker in 7303's box", func() bool {
+		all, _ := df.issued()
+		w := df.boxWrites()
+		return len(all) == 3 && len(w) == 3 && w["box:small/b3"][protocol.SecretNameReady] == want
+	})
+	if all, _ := df.issued(); df.boxWrites()["box:small/b3"]["GH_TOKEN"] != all[2].token || len(df.boxWrites()["box:small/b3"]) != 2 {
 		t.Fatalf("a job of another run on the runner: issued %+v, writes %v", all, df.boxWrites())
 	}
 }

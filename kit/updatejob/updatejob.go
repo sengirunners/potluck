@@ -1,12 +1,13 @@
-// Package updatejob writes, loads and removes one program's daily update job
-// as this user's own scheduled job: a systemd --user timer on Linux, a
-// LaunchAgent on macOS; never root. It is the one home of that writer. A
-// program names its job (Names) and says what it runs (Spec); this package
-// knows nothing about which program that is.
+// Package updatejob writes, loads, starts, reads and removes one program's
+// daily update job as this user's own scheduled job: a systemd --user timer
+// on Linux, a LaunchAgent on macOS; never root. It is the one home of that
+// writer and its reader. A program names its job (Names) and says what it
+// runs (Spec); this package knows nothing about which program that is.
 //
-// A job another program or person wrote is left alone: only files that carry
-// Names.Mark are ever rewritten or removed, and an install never adds a
-// second updater beside a foreign one.
+// A job another program or person wrote is never changed: only files that
+// carry Names.Mark are ever rewritten or removed, and an install never adds a
+// second updater beside a foreign one. Starting the job and reading its
+// command line do not change it, so they work on any job at these names.
 package updatejob
 
 import (
@@ -189,28 +190,159 @@ var (
 	plistStringRE = regexp.MustCompile(`<string>([^<]*)</string>`)
 )
 
-// plistWords are the words a plist's ProgramArguments make.
-func plistWords(b []byte) []string {
+// plistArgs are a plist's ProgramArguments, one string each, unescaped.
+func plistArgs(b []byte) []string {
 	m := plistArgsRE.FindSubmatch(b)
 	if m == nil {
 		return nil
 	}
-	var words []string
+	var args []string
 	for _, a := range plistStringRE.FindAllSubmatch(m[1], -1) {
-		words = append(words, strings.Fields(html.UnescapeString(string(a[1])))...)
+		args = append(args, html.UnescapeString(string(a[1])))
 	}
-	return words
+	return args
 }
 
-// unitWords are the words of a unit's ExecStart lines.
-func unitWords(b []byte) []string {
-	var words []string
-	for _, line := range strings.Split(string(b), "\n") {
-		if rest, ok := strings.CutPrefix(line, "ExecStart="); ok {
-			words = append(words, strings.Fields(rest)...)
+// unitCommands are the commands of a unit's ExecStart lines, each split into
+// its arguments as systemd splits them: a line ending in a backslash goes on
+// the next, quotes and backslash escapes are undone, a lone ; separates two
+// commands, and %% and $$ are made single (other % specifiers and $VAR are
+// left as written). An empty ExecStart= clears the lines before it. A
+// command's prefixes (-, @, :, +, !) are dropped; after @ the second word is
+// the program's argv[0], so the path before it is dropped too. The error
+// names a line it could not read (an unknown escape, an open quote); the
+// commands are what it read anyway.
+func unitCommands(b []byte) ([][]string, error) {
+	var (
+		cmds [][]string
+		errs []error
+	)
+	text := strings.ReplaceAll(string(b), "\\\n", " ")
+	for _, line := range strings.Split(text, "\n") {
+		rest, ok := strings.CutPrefix(line, "ExecStart=")
+		if !ok {
+			continue
+		}
+		if strings.TrimLeft(rest, " \t") == "" {
+			cmds = nil
+			continue
+		}
+		parsed, err := unitSplit(rest)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("ExecStart=%s: %w", rest, err))
+		}
+		for _, args := range parsed {
+			if cmd := unitCommand(args); len(cmd) > 0 {
+				cmds = append(cmds, cmd)
+			}
 		}
 	}
-	return words
+	return cmds, errors.Join(errs...)
+}
+
+// unitCommand drops a command's prefixes from its first word.
+func unitCommand(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	path := strings.TrimLeft(args[0], "-@:+!")
+	at := strings.Contains(args[0][:len(args[0])-len(path)], "@")
+	cmd := append([]string{path}, args[1:]...)
+	if at {
+		cmd = cmd[1:]
+	}
+	return cmd
+}
+
+// unitEscapes are systemd's one-character escapes (\; is a literal ;).
+var unitEscapes = map[byte]byte{
+	'a': '\a', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t', 'v': '\v',
+	's': ' ', '\\': '\\', '"': '"', '\'': '\'', ';': ';',
+}
+
+// unitSingle undoes the doubling of % and $ in a unit's word.
+var unitSingle = strings.NewReplacer("%%", "%", "$$", "$")
+
+// unitSplit splits one ExecStart value into its commands and their words;
+// it undoes what unitQuote does. A lone ; that is neither quoted nor escaped
+// ends a command.
+func unitSplit(line string) ([][]string, error) {
+	var (
+		cmds  [][]string
+		args  []string
+		cur   []byte
+		in    bool // a word has started
+		lit   bool // the word holds a quoted or escaped character
+		quote byte
+	)
+	end := func() {
+		if w := string(cur); w == ";" && !lit {
+			cmds, args = append(cmds, args), nil
+		} else {
+			args = append(args, unitSingle.Replace(w))
+		}
+		cur, in, lit = nil, false, false
+	}
+	done := func(err error) ([][]string, error) {
+		if in && err == nil {
+			end()
+		}
+		return append(cmds, args), err
+	}
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case quote != 0 && c == quote:
+			quote = 0
+		case c == '\\':
+			if i+1 == len(line) {
+				return done(errors.New("it ends in a backslash"))
+			}
+			i++
+			e := line[i]
+			if v, ok := unitEscapes[e]; ok {
+				cur = append(cur, v)
+			} else if e == 'x' && i+2 < len(line) {
+				v, err := strconv.ParseUint(line[i+1:i+3], 16, 8)
+				if err != nil {
+					return done(fmt.Errorf("bad escape \\x%s", line[i+1:i+3]))
+				}
+				cur, i = append(cur, byte(v)), i+2
+			} else if e >= '0' && e <= '7' && i+2 < len(line) {
+				v, err := strconv.ParseUint(line[i:i+3], 8, 8)
+				if err != nil {
+					return done(fmt.Errorf("bad escape \\%s", line[i:i+3]))
+				}
+				cur, i = append(cur, byte(v)), i+2
+			} else {
+				return done(fmt.Errorf("unknown escape \\%c", e))
+			}
+			in, lit = true, true
+		case quote == 0 && (c == '"' || c == '\''):
+			quote, in, lit = c, true, true
+		case quote == 0 && (c == ' ' || c == '\t'):
+			if in {
+				end()
+			}
+		default:
+			cur = append(cur, c)
+			in = true
+		}
+	}
+	if quote != 0 {
+		return done(fmt.Errorf("a %c quote is not closed", quote))
+	}
+	return done(nil)
+}
+
+// words are args split at whitespace, so an updater named inside a quoted
+// shell command ("sh -c 'example upgrade'") is still seen.
+func words(args []string) []string {
+	var w []string
+	for _, a := range args {
+		w = append(w, strings.Fields(a)...)
+	}
+	return w
 }
 
 // runs reports whether words run the program with the update words: a word
@@ -259,11 +391,12 @@ func (s *Schedule) Foreign() string {
 		if err != nil {
 			continue
 		}
-		words := unitWords(b)
+		cmds, _ := unitCommands(b) // what it could read
+		args := slices.Concat(cmds...)
 		if s.GOOS == "darwin" {
-			words = plistWords(b)
+			args = plistArgs(b)
 		}
-		if s.Names.runs(words) {
+		if s.Names.runs(words(args)) {
 			return p
 		}
 	}
@@ -352,6 +485,63 @@ func (s *Schedule) Remove() (removed bool, foreign string, err error) {
 	return true, foreign, errors.Join(errs...)
 }
 
+// ErrNoJob is Start's and Argv's answer when no job file is at this
+// program's names.
+var ErrNoJob = errors.New("no update job is installed on this machine")
+
+// Start starts the update job now, once, and returns without waiting for it
+// to end: systemctl --user start --no-block on the service, or launchctl
+// kickstart on the agent (never -k: a run already going is not killed). It
+// starts whatever job is at this program's names, including one this package
+// did not write and that carries no Mark: a job at these names is this
+// machine's update job whoever wrote it. ErrNoJob when there is no file.
+func (s *Schedule) Start() error {
+	if err := s.Supported(); err != nil {
+		return err
+	}
+	if _, err := os.Stat(s.Files()[0]); errors.Is(err, fs.ErrNotExist) {
+		return ErrNoJob
+	} else if err != nil {
+		return err
+	}
+	if s.GOOS == "darwin" {
+		return s.Run("launchctl", "kickstart", "gui/"+strconv.Itoa(s.UID)+"/"+s.Names.Label)
+	}
+	return s.Run("systemctl", "--user", "start", "--no-block", s.Names.Service)
+}
+
+// Argv is the command line the installed job runs, read from its file (the
+// plist's ProgramArguments, or the service's ExecStart), whoever wrote it.
+// ErrNoJob when there is no file; an error when the file names no command or,
+// in a service, more than one.
+func (s *Schedule) Argv() ([]string, error) {
+	if err := s.Supported(); err != nil {
+		return nil, err
+	}
+	path := s.Files()[0]
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNoJob
+	} else if err != nil {
+		return nil, err
+	}
+	if s.GOOS == "darwin" {
+		args := plistArgs(b)
+		if len(args) == 0 {
+			return nil, fmt.Errorf("%s has no ProgramArguments this program can read", path)
+		}
+		return args, nil
+	}
+	cmds, err := unitCommands(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if len(cmds) != 1 {
+		return nil, fmt.Errorf("%s runs %d commands, not one", path, len(cmds))
+	}
+	return cmds[0], nil
+}
+
 // LingerNote is a sentence for a Linux user whose timer stops at logout, and
 // "" otherwise.
 func (s *Schedule) LingerNote(user string) string {
@@ -383,14 +573,15 @@ func writeFileAtomic(path, body string) error {
 	return nil
 }
 
-// unitQuote quotes one systemd word: % is a specifier, $ expands in ExecStart.
+// unitQuote quotes one systemd word: % is a specifier, $ expands in ExecStart,
+// and a lone ; separates two commands.
 func unitQuote(s string, exec bool) string {
 	r := []string{`\`, `\\`, `"`, `\"`, `%`, `%%`}
 	if exec {
 		r = append(r, `$`, `$$`)
 	}
 	q := strings.NewReplacer(r...).Replace(s)
-	if q == s && s != "" && !strings.ContainsAny(s, " \t'") {
+	if q == s && s != "" && s != ";" && !strings.ContainsAny(s, " \t'") {
 		return s
 	}
 	return `"` + q + `"`

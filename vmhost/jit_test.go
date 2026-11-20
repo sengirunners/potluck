@@ -522,7 +522,11 @@ func fakeRunnerShEnv(node, out, errs, pidf, job, envf string) string {
 // A runner held to one run (jit_guard.run) serves only that run's job, of
 // its workflow at its branch, and holds it before its first step until the
 // door's ready marker holds the run's id: a marker of another run, or none
-// within the hold, stops the job as a refused one is stopped.
+// within the hold, stops the job as a refused one is stopped. A job of
+// another run that the strict guard serves otherwise is held for a re-guard
+// marker naming its own run, workflow and ref (protocol.ReguardMarker), and
+// passes on that alone; anything else stops it, killed before any step (its
+// if: always() step included), and an open guard never holds one.
 func TestJITHookHoldsARunForItsSecrets(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -530,27 +534,46 @@ func TestJITHookHoldsARunForItsSecrets(t *testing.T) {
 	}
 	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
 	const (
-		wf   = "acme/app/.github/workflows/ci.yml@refs/heads/main"
-		ours = "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF="
+		wf    = "acme/app/.github/workflows/ci.yml@refs/heads/main"
+		ours  = "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF="
+		other = "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4243 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF="
+		rel   = "acme/app/.github/workflows/release.yml@refs/heads/main"
 	)
 	for _, c := range []struct {
 		name, env, marker string
 		after             time.Duration // the marker is written this long after the job starts
 		hold              string
 		served, door      bool
+		over              bool // held for the broker's re-guard (a job of another run)
+		private           bool // ${11} "private": an open guard
 	}{
-		{"the run, its marker there", ours + wf, "4242\n", 0, "5", true, false},
-		{"the run, its marker coming during the hold", ours + wf, "4242", 700 * time.Millisecond, "5", true, false},
-		{"the run, its workflow ref in GitHub's case", ours + "Acme/App/.github/workflows/ci.yml@refs/heads/main", "4242", 0, "5", true, false},
-		{"another run", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4243 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF=" + wf, "4242", 0, "5", false, false},
-		{"another workflow of the run's repository", ours + "acme/app/.github/workflows/release.yml@refs/heads/main", "4242", 0, "5", false, false},
-		{"no workflow ref", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/main", "4242", 0, "5", false, false},
-		{"a tag of the branch's name", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/tags/main GITHUB_WORKFLOW_REF=" + wf, "4242", 0, "5", false, false},
-		{"another branch", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/dev GITHUB_WORKFLOW_REF=" + wf, "4242", 0, "5", false, false},
-		{"the run of another repository", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/Other GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF=" + wf, "4242", 0, "5", false, false},
-		{"the run, a marker of another run", ours + wf, "4243", 0, "1", false, true},
-		{"the run, a marker naming the run within more", ours + wf, "42424", 0, "1", false, true},
-		{"the run, no marker in the hold", ours + wf, "", 0, "1", false, true},
+		{"the run, its marker there", ours + wf, "4242\n", 0, "5", true, false, false, false},
+		{"the run, its marker coming during the hold", ours + wf, "4242", 700 * time.Millisecond, "5", true, false, false, false},
+		{"the run, its workflow ref in GitHub's case", ours + "Acme/App/.github/workflows/ci.yml@refs/heads/main", "4242", 0, "5", true, false, false, false},
+		{"another run, the box's run's marker", other + wf, "4242", 0, "1", false, false, true, false},
+		{"another run, its re-guard marker there", other + rel, "4243 " + rel + " refs/heads/main\n", 0, "5", true, false, false, false},
+		{"another run, its re-guard marker coming during the hold", other + rel, "4243 " + rel + " refs/heads/main", 700 * time.Millisecond, "5", true, false, false, false},
+		{"another run, its workflow ref in GitHub's case", other + "Acme/App/.github/workflows/release.yml@refs/heads/main", "4243 " + rel + " refs/heads/main", 0, "5", true, false, false, false},
+		{"another run of the box's workflow, its re-guard marker", other + wf, "4243 " + wf + " refs/heads/main", 0, "5", true, false, false, false},
+		{"another run, the plain marker of its run", other + rel, "4243", 0, "1", false, false, true, false},
+		{"another run, a re-guard marker naming another workflow", other + rel, "4243 " + wf + " refs/heads/main", 0, "1", false, false, true, false},
+		{"another run, a re-guard marker naming another ref", other + rel, "4243 " + rel + " refs/heads/dev", 0, "1", false, false, true, false},
+		{"another run, a re-guard marker naming another run", other + rel, "4244 " + rel + " refs/heads/main", 0, "1", false, false, true, false},
+		{"another run, a re-guard marker naming its run within more", other + rel, "4243 " + rel + " refs/heads/main x", 0, "1", false, false, true, false},
+		{"another run, no marker in the hold", other + rel, "", 0, "1", false, false, true, false},
+		{"another run on an open guard, its re-guard marker there", other + rel, "4243 " + rel + " refs/heads/main", 0, "5", false, false, false, true},
+		{"another run of an event the guard refuses, its re-guard marker there", "GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4243 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF=" + rel, "4243 " + rel + " refs/heads/main", 0, "5", false, false, false, false},
+		{"another run of another repository, its re-guard marker there", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/Other GITHUB_RUN_ID=4243 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF=acme/other/.github/workflows/release.yml@refs/heads/main", "4243 acme/other/.github/workflows/release.yml@refs/heads/main refs/heads/main", 0, "5", false, false, false, false},
+		{"another run of a tag, its re-guard marker there", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4243 GITHUB_REF=refs/tags/main GITHUB_WORKFLOW_REF=acme/app/.github/workflows/release.yml@refs/tags/main", "4243 acme/app/.github/workflows/release.yml@refs/tags/main refs/tags/main", 0, "1", false, false, false, false},
+		{"the run, a re-guard marker naming it", ours + wf, "4242 " + wf + " refs/heads/main", 0, "1", false, true, false, false},
+		{"another workflow of the run's repository", ours + "acme/app/.github/workflows/release.yml@refs/heads/main", "4242", 0, "5", false, false, false, false},
+		{"no workflow ref", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/main", "4242", 0, "5", false, false, false, false},
+		{"a tag of the branch's name", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/tags/main GITHUB_WORKFLOW_REF=" + wf, "4242", 0, "5", false, false, false, false},
+		{"another branch", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/App GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/dev GITHUB_WORKFLOW_REF=" + wf, "4242", 0, "5", false, false, false, false},
+		{"the run of another repository", "GITHUB_EVENT_NAME=push GITHUB_REPOSITORY=Acme/Other GITHUB_RUN_ID=4242 GITHUB_REF=refs/heads/main GITHUB_WORKFLOW_REF=" + wf, "4242", 0, "5", false, false, false, false},
+		{"the run, a marker of another run", ours + wf, "4243", 0, "1", false, true, false, false},
+		{"the run, a marker naming the run within more", ours + wf, "42424", 0, "1", false, true, false, false},
+		{"the run, no marker in the hold", ours + wf, "", 0, "1", false, true, false, false},
 	} {
 		dir, _ := filepath.EvalSymlinks(t.TempDir())
 		runner, secrets := filepath.Join(dir, "actions-runner"), filepath.Join(dir, "secrets")
@@ -569,7 +592,11 @@ func TestJITHookHoldsARunForItsSecrets(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		launch := exec.Command("sh", "-c", jitLaunch, "sh", runner, "acme/app", "push", "", "", "4242", wf, "refs/heads/main", c.hold, secrets)
+		private := ""
+		if c.private {
+			private = "private"
+		}
+		launch := exec.Command("sh", "-c", jitLaunch, "sh", runner, "acme/app", "push", "", "", "4242", wf, "refs/heads/main", c.hold, secrets, private)
 		launch.Stdin = strings.NewReader("eyJzZWtyaXQiOiJKSVQtY29uZmlnLXZhbHVlIn0=\n")
 		launch.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "TMPDIR=" + filepath.Join(dir, "tmp")}
 		launch.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -594,6 +621,10 @@ func TestJITHookHoldsARunForItsSecrets(t *testing.T) {
 			t.Errorf("%s: the runner wrote %q (hook stderr %q), want the hook to pass and the steps to run", c.name, got, read(errs))
 		case !c.served && (got != "" || alive):
 			t.Errorf("%s: the runner wrote %q (alive %t), want it killed by the hook before any step", c.name, got, alive)
+		case c.over && !strings.Contains(read(errs), "did not take this box over for in "+c.hold+"s"):
+			t.Errorf("%s: hook stderr %q, want it held for the broker's re-guard for the hold", c.name, read(errs))
+		case !c.over && strings.Contains(read(errs), "take this box over"):
+			t.Errorf("%s: hook stderr %q, want it not held for a re-guard", c.name, read(errs))
 		case c.door && !strings.Contains(read(errs), "Potluck secrets door, which did not deliver them in "+c.hold+"s"):
 			t.Errorf("%s: hook stderr %q, want it to name the door and the hold", c.name, read(errs))
 		case !c.served && !c.door && strings.Contains(read(errs), "secrets door"):

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/sengirunners/potluck/computeapi"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -12,6 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/kit/config"
 )
 
 func TestWorkflowLimitThroughBroker(t *testing.T) {
@@ -321,6 +324,11 @@ func TestSwappedJobCompletionOrLossRequeuesOwnSelectedLimit(t *testing.T) {
 			f.gh.mu.Unlock()
 			f.deliver(t, "workflow_job", []byte(strings.ReplaceAll(string(startEvent(9987, 987, "acme/app", "potluck-9986")), `"sengi"`, `"pool:sa"`)))
 			eventually(t, "actual job owns runtime", func() bool { j := f.jobs(t)[9987]; return j.LimitS == 60 && j.Deadline == base.Unix()+60 })
+			// The taker had no box of its own: it keeps this one, and the
+			// original job, still queued, is served again at once.
+			eventuallyBox(t, "original queued job served again", func() bool {
+				return f.jobs(t)[9986].Runner == "potluck-9986-2" && f.liveOn(t, "a") == 2 && f.svc.Undone(context.Background()) == 0
+			})
 			if _, err := f.set("job_ttl_s", "1800"); err != nil {
 				t.Fatal(err)
 			}
@@ -333,7 +341,7 @@ func TestSwappedJobCompletionOrLossRequeuesOwnSelectedLimit(t *testing.T) {
 				f.deliver(t, "workflow_job", endEvent(9987, 987, "acme/app", "success", 1, "pool:sa"))
 			} else {
 				f.svc.AnswerStatus(func(_ string, h computeapi.RunTargetHandle, err error) (computeapi.RunTargetHandle, error) {
-					if err == nil {
+					if err == nil && strings.HasSuffix(h.RequestID, "gh-9986") { // the taker's box, not the original's new one
 						h.State = "reclaimed"
 					}
 					return h, err
@@ -341,7 +349,9 @@ func TestSwappedJobCompletionOrLossRequeuesOwnSelectedLimit(t *testing.T) {
 				f.svc.Watch(context.Background())
 				f.svc.AnswerStatus(nil)
 			}
-			eventually(t, "original queued job served again", func() bool { return f.jobs(t)[9986].Runner == "potluck-9986-2" && f.liveOn(t, "a") == 1 })
+			eventuallyBox(t, "the taker's box ended", func() bool {
+				return f.jobs(t)[9987].State != "serving" && f.jobs(t)[9986].Runner == "potluck-9986-2" && f.liveOn(t, "a") == 1
+			})
 			actual := f.jobs(t)[9987]
 			if ending == "success" && (actual.State != "done" || actual.Run != 987) {
 				t.Fatalf("actual timeout missing or wrong run: %+v", actual)
@@ -404,7 +414,8 @@ func TestExistingWaitingTakerKeepsItsPolicyAndClock(t *testing.T) {
 	f.svc.HideTargets()
 	elapsed.Store(1801)
 	f.svc.Watch(ctx)
-	if j := f.jobs(t)[99101]; j.State != "serving" || f.liveOn(t, "a") != 1 {
+	// The taker had no box of its own: it carries the box it took.
+	if j := f.jobs(t)[99102]; j.State != "serving" || strings.Contains(j.Why, "time limit") {
 		t.Fatalf("taker stopped at changed fallback instead of selected limit: %+v", j)
 	}
 	elapsed.Store(3001)
@@ -582,38 +593,110 @@ func TestOtherJobsEarlierTimeoutDoesNotClaimThisJobTimedOut(t *testing.T) {
 		j := f.jobs(t)
 		return j[99122].Deadline == base.Unix()+120 && j[99123].Deadline == base.Unix()+60
 	})
-	gate := make(chan struct{})
-	var open sync.Once
-	t.Cleanup(func() {
-		f.gh.mu.Lock()
-		if f.gh.gate == gate {
-			f.gh.gate = nil
-		}
-		f.gh.mu.Unlock()
-		open.Do(func() { close(gate) })
-	})
-	f.gh.mu.Lock()
-	f.gh.gate = gate
-	f.gh.gateOn = "/actions/jobs/99122"
-	f.gh.mu.Unlock()
+	// C, without a box of its own, carries B's box; B runs on A's box.
 	elapsed.Store(61)
 	f.svc.Watch(ctx)
-	eventually(t, "B re-serve held before its GitHub check", func() bool { f.gh.mu.Lock(); defer f.gh.mu.Unlock(); return f.gh.waiting > 0 })
+	eventuallyBox(t, "C stopped at its own limit", func() bool { return f.jobs(t)[99123].State == "done" && f.svc.Undone(ctx) == 0 })
 	b, c := f.jobs(t)[99122], f.jobs(t)[99123]
-	if b.LimitS != 120 || b.Deadline != base.Unix()+120 || !strings.Contains(b.Why, "job 99123 on its runner") || strings.HasPrefix(b.Why, "job time limit reached") {
+	if b.LimitS != 120 || b.Deadline != base.Unix()+120 || strings.Contains(b.Why, "job time limit reached") {
 		t.Fatalf("C's earlier timeout falsely described as B's: %+v", b)
 	}
-	if f.liveOn(t, "a") != 1 || !strings.Contains(c.Why, "job time limit reached (60 s") {
+	if !strings.Contains(c.Why, "job time limit reached (60 s") {
 		t.Fatalf("wrong execution stopped: B=%+v C=%+v", b, c)
 	}
-	f.gh.mu.Lock()
-	f.gh.gate = nil
-	f.gh.mu.Unlock()
-	open.Do(func() { close(gate) })
-	eventually(t, "held re-serve settled", func() bool { return f.svc.Undone(ctx) == 0 })
 	elapsed.Store(121)
 	f.svc.Watch(ctx)
 	if why := f.jobs(t)[99122].Why; !strings.Contains(why, "job time limit reached (120 s") {
 		t.Fatalf("B's later actual timeout missing: %s", why)
 	}
 }
+
+// Two queued jobs with the same labels and different limits: the runner
+// minted for the short one takes the long one. Its box lives for the long
+// job's limit (renewed past the short one's, stopped only at the long one's),
+// and the short job, still queued on GitHub, gets a new box.
+func TestTakenRunnerBoxLivesForTheTakenJobsLimit(t *testing.T) {
+	f := newPoolFixture(t, func(r *config.Runners) { r.Pool.Sizes = map[string]string{} },
+		box("a", "sa", "linux", "1"), box("b", "sa", "linux", "1"))
+	if w := f.link(t, inst, "good"); w.Code != http.StatusOK {
+		t.Fatalf("link: %d %s", w.Code, w.Body)
+	}
+	ctx := context.Background()
+	base := time.Now().Truncate(time.Second)
+	var elapsed atomic.Int64
+	f.svc.Now = func() time.Time { return base.Add(time.Duration(elapsed.Load()) * time.Second) }
+	const short, long = 99301, 99302
+	f.gh.mu.Lock()
+	for run, job := range map[int64]int64{9931: short, 9932: long} {
+		f.gh.workflow[run] = fmt.Sprintf(`{"id":%d,"event":"push","path":".github/workflows/ci.yml","head_sha":%q,"repository":{"full_name":"acme/app"},"head_repository":{"full_name":"acme/app"}}`, run, strings.Repeat("a", 40))
+		f.gh.status[job] = "queued"
+	}
+	f.gh.jobNames[short], f.gh.jobNames[long] = "Verdict", "Land"
+	f.gh.contents = "jobs:\n  verdict:\n    name: Verdict\n    timeout-minutes: 10\n  land:\n    name: Land\n    timeout-minutes: 20\n"
+	f.gh.mu.Unlock()
+
+	// The short job gets a box; the long one waits for room.
+	f.deliver(t, "workflow_job", jobEvent("queued", short, 9931, "acme/app", true, "pool:sa"))
+	eventuallyBox(t, "short job on a box", func() bool {
+		j := f.jobs(t)[short]
+		return j.State == "serving" && j.LimitS == 600 && j.Target != "" && f.liveOn(t, j.Target) == 1 && f.svc.Undone(ctx) == 0
+	})
+	live := func() int { return f.liveOn(t, "a") + f.liveOn(t, "b") }
+	other := map[string]string{"a": "b", "b": "a"}[f.jobs(t)[short].Target]
+	f.svc.HideTargets(other)
+	f.deliver(t, "workflow_job", jobEvent("queued", long, 9932, "acme/app", true, "pool:sa"))
+	eventually(t, "long job waits", func() bool { j := f.jobs(t)[long]; return j.State == "waiting" && j.LimitS == 1200 })
+
+	// GitHub gives the short job's runner the long job.
+	elapsed.Store(60)
+	f.gh.mu.Lock()
+	f.gh.jobStarts[long] = base.Add(60 * time.Second).Format(time.RFC3339)
+	f.gh.mu.Unlock()
+	startOn(t, f, long, 9932, "potluck-99301", "pool:sa")
+	eventuallyBox(t, "long job carries the box", func() bool {
+		j := f.jobs(t)[long]
+		return j.State == "serving" && j.Deadline == base.Unix()+60+1200 && f.svc.Undone(ctx) == 0
+	})
+	if got := f.renews(t); len(got) == 0 || got[len(got)-1] != 1200 {
+		t.Fatalf("box not renewed to the taken job's limit: %v", got)
+	}
+
+	// The short job, still queued, gets a new box.
+	f.svc.HideTargets()
+	elapsed.Store(61) // its serve waited for room: due again
+	f.svc.Watch(ctx)
+	eventuallyBox(t, "short job served again", func() bool {
+		j := f.jobs(t)[short]
+		return j.State == "serving" && j.Runner == "potluck-99301-2" && live() == 2 && f.svc.Undone(ctx) == 0
+	})
+
+	// The short job starts on its new box.
+	elapsed.Store(400)
+	f.gh.mu.Lock()
+	f.gh.jobStarts[short] = base.Add(400 * time.Second).Format(time.RFC3339)
+	f.gh.mu.Unlock()
+	startOn(t, f, short, 9931, "potluck-99301-2", "pool:sa")
+	eventually(t, "short job runs on its new box", func() bool { return f.jobs(t)[short].Deadline == base.Unix()+400+600 })
+
+	// Past the short job's limit and the lease its first box was acquired
+	// with, measured from the long job's start, the long job's box lives on.
+	elapsed.Store(60 + 600 + startupAllowanceS + 1)
+	f.svc.Sweep(ctx)
+	f.svc.Watch(ctx)
+	if j := f.jobs(t)[long]; j.State != "serving" || live() != 2 {
+		t.Fatalf("taken job's box stopped at the short job's limit: %+v (%d boxes)", j, live())
+	}
+	if got := f.renews(t); !slices.Contains(got, 1200-600-startupAllowanceS-1) {
+		t.Fatalf("renewal not bounded by the taken job's deadline: %v", got)
+	}
+	// Each is stopped at its own limit.
+	elapsed.Store(60 + 1200 + 1)
+	f.svc.Watch(ctx)
+	eventuallyBox(t, "both stopped at their own limits", func() bool {
+		l, sh := f.jobs(t)[long], f.jobs(t)[short]
+		return l.State == "done" && strings.Contains(l.Why, "job time limit reached (1200 s") &&
+			sh.State == "done" && strings.Contains(sh.Why, "job time limit reached (600 s") && live() == 0
+	})
+}
+
+const startupAllowanceS = 300
