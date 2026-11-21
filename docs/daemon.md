@@ -1981,8 +1981,19 @@ and its token acts on `oncall` area `ci`, as `ci`, which must hold `member` ther
   at most until that token would have expired, and is not renewed once it is revoked. A caller on the local socket
   or the tailnet without a token is bounded by the lease and the hour only.
 - Revoking is `token revoke` on the token's row, at every way a box ends (below). The tokens table outlives the
-  authority, so after a crash the next start revokes every token an earlier run held (by its hash, recorded
-  `revoked`), rather than leaving it to lapse.
+  authority, so the next start revokes every token an earlier run left (by its hash, recorded `revoked`) rather
+  than leaving it to lapse, except a job's token it holds again (below).
+- A job's token is not revoked when the authority stops (an upgrade, a restart, a crash): it authenticates only
+  against this authority's tokens table, so while the authority is down it serves nothing. The next start holds the
+  box's newest one again if its assignment stands (same box, name and job), its box still lives and it has more than
+  a minute left; the box keeps that working token across the restart, and the first tick renews it, asking every
+  check again (class, swap, the job still holding its box, the rule and identity, the grant). A refusal ends it,
+  revoked by its hash, as does every way a box ends (a box or grant that ends before the start has held it again
+  revokes it by its hash then); a check that cannot answer is tried again each minute, the old
+  token staying until it expires, as at any renewal. A box that ended meanwhile, or whose live state cannot be
+  read, has the token revoked at start and its assignment handled as any other. A person's token is revoked at the
+  stop (its caller is kept in memory only, so it could not pass again). A token left by a potluck issuer that no
+  longer runs (its config removed or renamed) is revoked by its hash when the daemon starts.
 - The ledger names it by `hashed_token`: the SHA-256 (hex) the tokens table looks a secret up by. The value is
   never stored or logged.
 - The box gets one file under the grant's name: a box credential (below), holding the token and a key made for that
@@ -2038,10 +2049,11 @@ nothing long-lived. The file (`kit/tunnel` `BoxCredential`) is one JSON object:
   not answering is retried, never taken as a yes.
 - Tokens are held in memory only: nothing stores them. What is stored is the assignment: which box holds which
   request (never a token), removed when the box ends.
-- When the authority stops cleanly it revokes every token it holds and keeps the assignments. At the next start,
-  every assigned box its owner says still lives is issued a new token through the whole check again (config
-  ceiling, class, grant), delivered in place of the revoked one; an assignment whose box is gone, or that no longer
-  passes, is dropped. So a restart cuts a box off for as long as the restart takes.
+- When the authority stops cleanly it revokes every `github-token` it holds (and every `potluck-token` but a job's:
+  above) and keeps the assignments. At the next start, every assigned box its owner says still lives is issued a
+  new token through the whole check again (config ceiling, class, grant), delivered in place of the revoked one; an
+  assignment whose box is gone, or that no longer passes, is dropped. So for a `github-token` a restart cuts a box
+  off for as long as the restart takes.
 - After a crash the tokens cannot be revoked: each one an earlier run minted and never revoked is recorded
   `expired_unrevoked` and lapses at its expiry, within the hour; the boxes are issued new tokens as above.
 

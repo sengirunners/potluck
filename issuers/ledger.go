@@ -141,12 +141,24 @@ func (l SQLLedger) Record(ctx context.Context, e Entry) error {
 }
 
 func (l SQLLedger) Outstanding(ctx context.Context, issuer string) ([]Entry, error) {
+	return l.outstanding(ctx, `m.issuer = ?`, issuer)
+}
+
+// OutstandingKind is Outstanding for every issuer of credential kind kind
+// (Module: what an issuer that no longer runs left).
+func (l SQLLedger) OutstandingKind(ctx context.Context, kind string) ([]Entry, error) {
+	return l.outstanding(ctx, `m.kind = ?`, kind)
+}
+
+// outstanding is the minted, never revoked, expired or settled entries
+// where (on issuers_ledger m) holds, oldest first.
+func (l SQLLedger) outstanding(ctx context.Context, where string, arg string) ([]Entry, error) {
 	rows, err := l.DB.QueryContext(ctx, `SELECT at, event, issuer, kind, subject, name, project, area, box, host, host_class, repo, permissions,
 		expires, hashed_token, elevated, reason, rule_reason, why, grant_id, token_project, token_area FROM issuers_ledger m
-		WHERE m.issuer = ? AND m.event IN ('issued', 'renewed') AND m.hashed_token != ''
+		WHERE `+where+` AND m.event IN ('issued', 'renewed') AND m.hashed_token != ''
 		AND NOT EXISTS (SELECT 1 FROM issuers_ledger e WHERE e.hashed_token = m.hashed_token
 			AND e.event IN ('revoked', 'expired', 'expired_unrevoked'))
-		ORDER BY m.id`, issuer)
+		ORDER BY m.id`, arg)
 	if err != nil {
 		return nil, err
 	}

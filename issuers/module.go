@@ -259,6 +259,7 @@ func (m *Module) Routes(*core.Router) {}
 // minute until it succeeds; until then Issue for its kind waits), and Tick
 // and Sweep for those that have started.
 func (m *Module) Start(ctx context.Context) error {
+	m.settleLeftOver(ctx)
 	if len(m.iss) == 0 {
 		return nil
 	}
@@ -271,6 +272,47 @@ func (m *Module) Start(ctx context.Context) error {
 	m.wg.Add(1)
 	go m.run(ctx)
 	return nil
+}
+
+// settleLeftOver revokes, by its hash, every potluck-token an earlier run
+// left outstanding under a potluck issuer that does not run now (its config
+// removed, renamed or not usable): Close leaves a job's token valid for its
+// own issuer's next Start (Minted.takeBack), and with that issuer gone
+// nothing else would take it back before its expiry.
+func (m *Module) settleLeftOver(ctx context.Context) {
+	if m.d.Store == nil || m.d.Projects == nil {
+		return
+	}
+	running := map[string]bool{}
+	for _, iss := range m.iss {
+		if iss.Kind() == KindPotluckToken {
+			running[iss.Name()] = true
+		}
+	}
+	led := SQLLedger{DB: m.d.Store.Registry()}
+	es, err := led.OutstandingKind(ctx, KindPotluckToken)
+	if err != nil {
+		if m.d.Log != nil {
+			m.d.Log.Error("secrets issuer: reading the potluck-tokens an earlier run left; those of an issuer that no longer runs lapse at their expiry", "err", err)
+		}
+		return
+	}
+	for _, e := range es {
+		if running[e.Issuer] {
+			continue
+		}
+		if _, err := m.d.Projects.RevokeTokenHash(ctx, e.HashedToken); err != nil {
+			if m.d.Log != nil {
+				m.d.Log.Error("secrets issuer: revoking a potluck-token of an issuer that no longer runs; it lapses at its expiry",
+					"issuer", e.Issuer, "box", e.Project+"/"+e.Box, "err", err)
+			}
+			continue
+		}
+		e.At, e.Event, e.Why = time.Now().UTC(), EventRevoked, "its issuer no longer runs: revoked at start"
+		if err := led.Record(context.WithoutCancel(ctx), e); err != nil && m.d.Log != nil {
+			m.d.Log.Error("secrets issuer: the ledger refused a row", "issuer", e.Issuer, "event", EventRevoked, "err", err)
+		}
+	}
 }
 
 func (m *Module) run(ctx context.Context) {
@@ -398,7 +440,8 @@ func (m *Module) End(ctx context.Context, box Box, why EndReason) error {
 	return first
 }
 
-// Close stops the loop, then revokes everything still held.
+// Close stops the loop, then closes each issuer (Minted.Close: what it
+// revokes and what it keeps for the next start).
 func (m *Module) Close() error {
 	if len(m.iss) == 0 {
 		return nil

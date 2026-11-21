@@ -61,8 +61,10 @@ type Issuer interface {
 	// Start settles what a previous run issued and could not revoke, and
 	// issues again to every box still assigned one that its owner says lives.
 	Start(ctx context.Context) error
-	// Close revokes everything still held and refuses every later Issue. It
-	// keeps the assignments, so Start issues again after a restart.
+	// Close revokes everything still held, except a job's credential of a
+	// kind that serves only while this authority runs (potluck-token: Start
+	// holds it again), and refuses every later Issue. It keeps the
+	// assignments, so Start issues again after a restart.
 	Close(ctx context.Context) error
 }
 

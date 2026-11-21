@@ -317,3 +317,17 @@ func permString(p map[string]string) string {
 	sort.Strings(ks)
 	return strings.Join(ks, ",")
 }
+
+// permMap reads permString's form back (nil for "").
+func permMap(s string) map[string]string {
+	if s == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, kv := range strings.Split(s, ",") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			out[k] = v
+		}
+	}
+	return out
+}

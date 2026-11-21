@@ -146,6 +146,10 @@ func (b *githubBackend) revoke(ctx context.Context, c Credential) error {
 // revokes only by the token itself, so it lapses within the hour.
 func (b *githubBackend) settle(context.Context, Entry) bool { return false }
 
+// keeps: an installation token works against GitHub whether this authority
+// runs or not, and could not be revoked after a restart: Close revokes it.
+func (b *githubBackend) keeps() bool { return false }
+
 func (b *githubBackend) ceiling(raw json.RawMessage) (json.RawMessage, error) {
 	c, rules, err := ParseGrantCeiling(raw)
 	if err != nil {

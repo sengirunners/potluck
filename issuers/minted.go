@@ -69,6 +69,10 @@ const (
 	retryMax     = 5 * time.Minute  // the longest gap between revocation retries
 	lapseMargin  = 10 * time.Minute // a revocation is retried this long past the credential's expiry
 	tickCap      = time.Minute      // Tick never answers later than this
+	// recheckGrace is how long a credential taken back from an earlier run
+	// (held.recheck) may wait for its first checks to answer: one this run
+	// has never checked is revoked once it passes, not kept to its expiry.
+	recheckGrace = 5 * time.Minute
 	mintTimeout  = 30 * time.Second
 )
 
@@ -107,6 +111,13 @@ type backend interface {
 	// (the authority crashed): true when it was revoked now, false when it
 	// can only lapse at its expiry.
 	settle(ctx context.Context, e Entry) bool
+	// keeps reports whether a job's credential still held when the issuer
+	// closes is left valid for the next Start to take back (takeBack)
+	// rather than revoked. True only for a kind whose credential
+	// authenticates against this authority alone, so it serves nothing
+	// while the authority is down, and that revoke takes back by its hash
+	// alone (a heldOver).
+	keeps() bool
 	ceiling(raw json.RawMessage) (json.RawMessage, error)
 	within(ceiling, params json.RawMessage) error
 }
@@ -137,6 +148,19 @@ type unrevokedError struct {
 
 func (e *unrevokedError) Error() string { return e.err.Error() }
 
+// heldOver is a credential an earlier run of this authority minted and left
+// valid in its box at its stop (backend.keeps), held again by Start: known
+// by its ledger hash and expiry only, its value being in the box alone.
+// Only a backend that keeps revokes one.
+type heldOver struct {
+	hash string
+	exp  time.Time
+}
+
+func (c heldOver) Reveal() string     { return "" }
+func (c heldOver) Expires() time.Time { return c.exp }
+func (c heldOver) Hashed() string     { return c.hash }
+
 // Minted is one issuer of a minted kind: per box, a credential its backend
 // mints inside the issuer's config ceiling. Credentials are held in memory
 // only and never written anywhere; what is written is the assignment (the
@@ -152,6 +176,7 @@ type Minted struct {
 
 	mu      sync.Mutex
 	closed  bool
+	started bool             // Start has succeeded (settleEarlier)
 	held    map[string]*held // box key \x00 name
 	old     []*retired       // renewed-away credentials and revocations to retry
 	reissue []*pendingIssue  // assignments Start could not issue yet
@@ -171,6 +196,10 @@ type held struct {
 	done     chan struct{}
 	renewing bool
 	nextTry  time.Time
+	// recheck is a credential taken back from an earlier run (takeBack):
+	// renewed at the first Tick from nextTry whatever its age, so every
+	// check is asked again before it is kept a moment longer than needed.
+	recheck bool
 }
 
 // retired is a credential to revoke at at.
@@ -678,7 +707,7 @@ func (g *Minted) Tick(ctx context.Context) time.Time {
 			lapsed = append(lapsed, h)
 			continue
 		}
-		if !now.Before(renewAt(h)) && !now.Before(h.nextTry) {
+		if (h.recheck || !now.Before(renewAt(h))) && !now.Before(h.nextTry) {
 			h.renewing = true
 			renew = append(renew, h)
 		}
@@ -754,6 +783,9 @@ func (g *Minted) next() time.Time {
 			continue
 		}
 		at := renewAt(h)
+		if h.recheck {
+			at = h.nextTry
+		}
 		if h.nextTry.After(at) {
 			at = h.nextTry
 		}
@@ -773,7 +805,25 @@ func (g *Minted) next() time.Time {
 
 func (g *Minted) renew(ctx context.Context, h *held) {
 	k := heldKey(h.box, h.e.Name)
-	fail := func(why string) {
+	// unchecked is fail for a check that could not be asked: a credential
+	// taken back from an earlier run that no check of this run has passed
+	// is revoked once recheckGrace has gone by, never kept to its expiry
+	// on the earlier run's word alone.
+	var fail func(string)
+	unchecked := func(why string) {
+		g.mu.Lock()
+		over := h.recheck && !g.o.Now().Before(g.born.Add(recheckGrace))
+		if over {
+			h.renewing = false
+		}
+		g.mu.Unlock()
+		if over {
+			g.endOne(ctx, k, "held over from an earlier run, and its checks did not answer within the grace: "+why)
+			return
+		}
+		fail(why)
+	}
+	fail = func(why string) {
 		g.record(ctx, h.e, EventFailed, "renewal: "+why)
 		g.o.Log.Warn("secrets issuer: renewal failed; the old credential stays until it expires", "issuer", g.name,
 			"box", h.box.key(), "name", h.e.Name, "why", why)
@@ -804,7 +854,7 @@ func (g *Minted) renew(ctx context.Context, h *held) {
 		g.mu.Unlock()
 		var ae *api.Error
 		if errors.As(err, &ae) && ae.Code == api.CodeUnavailable {
-			fail("asking whether the box's host may hold a secret: " + err.Error())
+			unchecked("asking whether the box's host may hold a secret: " + err.Error())
 			return
 		}
 		g.End(ctx, h.box, EndSwapUnsafe) // its swap is not safe now: nothing more goes there, and what is there is revoked
@@ -816,7 +866,7 @@ func (g *Minted) renew(ctx context.Context, h *held) {
 	if req.Subject.Job != nil {
 		why, err := g.jobHolds(ctx, req)
 		if err != nil {
-			fail("asking whether the job still holds the box: " + err.Error())
+			unchecked("asking whether the job still holds the box: " + err.Error())
 			return
 		}
 		if why != "" {
@@ -831,7 +881,7 @@ func (g *Minted) renew(ctx context.Context, h *held) {
 	// a token acts as, its role) may have changed since.
 	p, why, err := g.check(ctx, req)
 	if err != nil {
-		fail("asking the kind's check: " + err.Error())
+		unchecked("asking the kind's check: " + err.Error())
 		return
 	}
 	if why != "" {
@@ -880,13 +930,16 @@ func (g *Minted) renew(ctx context.Context, h *held) {
 		return
 	}
 	g.mu.Lock()
-	if g.held[k] != h || g.closed { // ended or closed meanwhile: they revoked the old one
+	if g.held[k] != h || (g.closed && !g.keeps(h.req)) { // ended or closed meanwhile: they revoked the old one
 		g.mu.Unlock()
 		g.revokeNow(ctx, e, tok, "the box ended during renewal")
 		return
 	}
+	// Closed meanwhile with a credential it keeps: the new one, now in the
+	// box, is the one kept, and the old one is left to the next Start's
+	// settle (it is no longer the box's newest).
 	old := &retired{e: h.e, tok: h.tok, at: g.o.Now().Add(g.o.Grace), why: "renewed"}
-	h.e, h.req, h.plan, h.tok, h.minted, h.renewing, h.nextTry = e, req, p, tok, g.o.Now(), false, time.Time{}
+	h.e, h.req, h.plan, h.tok, h.minted, h.renewing, h.nextTry, h.recheck = e, req, p, tok, g.o.Now(), false, time.Time{}, false
 	g.old = append(g.old, old)
 	g.mu.Unlock()
 }
@@ -928,6 +981,7 @@ func (g *Minted) End(ctx context.Context, box Box, why EndReason) error {
 		g.o.Log.Error("secrets issuer: an assignment was not removed; Start asks the owner before issuing to it", "issuer", g.name,
 			"box", box.key(), "err", err)
 	}
+	g.settleEarlier(ctx, string(why), func(e Entry) bool { return e.Project == box.Project && e.Box == box.ID })
 	g.mu.Lock()
 	keep := g.reissue[:0]
 	for _, p := range g.reissue {
@@ -946,6 +1000,7 @@ func (g *Minted) EndGrant(ctx context.Context, id string) error {
 	if id == "" {
 		return errors.New("issuers: EndGrant needs a grant id")
 	}
+	g.settleEarlier(ctx, string(EndGrant), func(e Entry) bool { return e.Grant == id })
 	var ks []string
 	g.mu.Lock()
 	for k, h := range g.held {
@@ -1071,11 +1126,14 @@ func (g *Minted) EndUntrusted(ctx context.Context) {
 	}
 }
 
-// Start settles what an earlier run minted and never revoked (it crashed:
-// credentials are held in memory only): the backend revokes each it can,
-// recorded revoked; the rest lapse at their expiry, recorded
-// expired_unrevoked. Then it issues again, through the whole of Issue
-// (ceiling, class, grant), to every assigned box its owner says still
+// Start settles what an earlier run minted and did not revoke: the backend
+// revokes each it can, recorded revoked; the rest lapse at their expiry,
+// recorded expired_unrevoked. The one exception is a job's credential that
+// the earlier run left valid at its stop (keptOver): if its box still
+// lives it is held again (takeBack), so the box keeps a working credential
+// across the restart, and the next Tick renews it, asking every check
+// again. Every other assignment is issued again, through the whole of
+// Issue (ceiling, class, grant), to every assigned box its owner says still
 // lives, delivering the new credential in place of the old. An assignment
 // whose box is gone, or that no longer passes, is dropped; one the source
 // fails for is tried again by Tick.
@@ -1084,31 +1142,162 @@ func (g *Minted) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, e := range es {
-		if !e.At.Before(g.born) {
-			continue
-		}
-		if g.b.settle(ctx, e) {
-			if err := g.record(ctx, e, EventRevoked, "the authority restarted: a credential of an earlier run, revoked at start"); err != nil {
-				return err
-			}
-			continue
-		}
-		g.o.Log.Warn("secrets issuer: a credential of an earlier run could not be revoked; it lapses at its expiry", "issuer", g.name,
-			"box", e.Project+"/"+e.Box, "name", e.Name, "repo", e.Repo, "expires", e.ExpiresAt)
-		if err := g.record(ctx, e, EventExpiredUnrevoked, "the authority restarted: the credential was held in memory only and lapses at its expiry"); err != nil {
-			return err
-		}
-	}
 	reqs, err := g.o.Ledger.Assigned(ctx, g.name)
 	if err != nil {
 		return err
 	}
+	kept := g.keptOver(es, reqs)
+	for _, e := range es {
+		if !e.At.Before(g.born) {
+			continue
+		}
+		if k, ok := kept[entryKey(e)]; ok && k.HashedToken == e.HashedToken {
+			continue
+		}
+		if err := g.settleOne(ctx, e); err != nil {
+			return err
+		}
+	}
 	for _, req := range reqs {
+		if e, ok := kept[heldKey(req.Box, req.Name)]; ok {
+			g.takeBack(ctx, req, e)
+			continue
+		}
 		g.reissueOne(ctx, &pendingIssue{req: req})
 	}
+	g.mu.Lock()
+	g.started = true
+	g.mu.Unlock()
 	return nil
 }
+
+// settleEarlier revokes now, by the backend, each credential an earlier run
+// left outstanding that match picks, until Start has succeeded: a kept
+// credential (keeps) is not in held until Start takes it back, so a box or
+// grant that ends before then would otherwise leave it valid until Start
+// succeeds or it expires. One the backend cannot revoke now stays
+// outstanding for Start to settle. Once Start has succeeded every earlier
+// credential is settled or held, and the end revokes it through held.
+func (g *Minted) settleEarlier(ctx context.Context, why string, match func(Entry) bool) {
+	g.mu.Lock()
+	started := g.started
+	g.mu.Unlock()
+	if started || !g.b.keeps() {
+		return
+	}
+	es, err := g.o.Ledger.Outstanding(ctx, g.name)
+	if err != nil {
+		g.o.Log.Error("secrets issuer: reading what an earlier run left for an ending box; the next start settles it", "issuer", g.name, "err", err)
+		return
+	}
+	mine := map[string]bool{} // this run's own: the end revokes them through held and old
+	g.mu.Lock()
+	for _, h := range g.held {
+		if h.tok != nil {
+			mine[h.tok.Hashed()] = true
+		}
+	}
+	for _, r := range g.old {
+		mine[r.tok.Hashed()] = true
+	}
+	g.mu.Unlock()
+	for _, e := range es {
+		if !e.At.Before(g.born) || mine[e.HashedToken] || !match(e) {
+			continue
+		}
+		if !g.b.settle(ctx, e) {
+			g.o.Log.Warn("secrets issuer: a credential of an earlier run was not revoked at its end; the next start settles it", "issuer", g.name,
+				"box", e.Project+"/"+e.Box, "name", e.Name)
+			continue
+		}
+		g.record(ctx, e, EventRevoked, why) // a refusal is logged by record
+	}
+}
+
+// settleOne settles e, a credential of an earlier run: revoked by the
+// backend if it can, else recorded to lapse at its expiry. err is the
+// ledger refusing the row.
+func (g *Minted) settleOne(ctx context.Context, e Entry) error {
+	if g.b.settle(ctx, e) {
+		return g.record(ctx, e, EventRevoked, "the authority restarted: a credential of an earlier run, revoked at start")
+	}
+	g.o.Log.Warn("secrets issuer: a credential of an earlier run could not be revoked; it lapses at its expiry", "issuer", g.name,
+		"box", e.Project+"/"+e.Box, "name", e.Name, "repo", e.Repo, "expires", e.ExpiresAt)
+	return g.record(ctx, e, EventExpiredUnrevoked, "the authority restarted: the credential was held in memory only and lapses at its expiry")
+}
+
+// entryKey is the held key of ledger entry e's box and name.
+func entryKey(e Entry) string { return heldKey(Box{Project: e.Project, ID: e.Box}, e.Name) }
+
+// keptOver is, by held key, each credential an earlier run left valid for
+// Start to take back: for a kind that keeps, the newest outstanding entry
+// of an earlier run under a job's assignment of the same box, name and
+// subject, with at least minLease left. A box whose newest entry does not
+// qualify gets none back (an older one is no longer what the box holds).
+func (g *Minted) keptOver(es []Entry, reqs []Request) map[string]Entry {
+	if !g.b.keeps() {
+		return nil
+	}
+	newest := map[string]Entry{}
+	for _, e := range es { // oldest first (Outstanding): a later one replaces it
+		if e.At.Before(g.born) {
+			newest[entryKey(e)] = e
+		}
+	}
+	out := map[string]Entry{}
+	limit := g.o.Now().Add(minLease)
+	for _, req := range reqs {
+		k := heldKey(req.Box, req.Name)
+		e, ok := newest[k]
+		if !ok || !g.keeps(req) || e.Kind != g.b.kind() || e.Subject != g.base(req).Subject || !e.ExpiresAt.After(limit) {
+			continue
+		}
+		out[k] = e
+	}
+	return out
+}
+
+// keeps reports whether req's credential is left valid when the issuer
+// closes (backend.keeps): a job's only. An identity's could not pass again
+// after a restart (its caller is kept in memory only), so it is revoked.
+func (g *Minted) keeps(req Request) bool { return g.b.keeps() && req.Subject.Job != nil }
+
+// takeBack holds e, a credential an earlier run left valid in req's box at
+// its stop, again: if the box lives, as if issued here, due for renewal at
+// the next Tick (recheck), which asks the class, the swap, whether the job
+// still holds the box, the kind's check and the grant again and ends it on
+// a refusal. Otherwise, or if the box is held here already, e is settled
+// now and the assignment goes the way of any other (reissueOne).
+func (g *Minted) takeBack(ctx context.Context, req Request, e Entry) {
+	k := heldKey(req.Box, req.Name)
+	live, err := g.o.Live(ctx, req.Box)
+	if err == nil && live {
+		e.Job = req.Subject.Job // published, not stored
+		h := &held{e: e, req: req, box: req.Box, plan: plan{perms: permMap(e.Permissions)},
+			tok: heldOver{hash: e.HashedToken, exp: e.ExpiresAt}, minted: e.At, done: closedDone, recheck: true, nextTry: g.o.Now()}
+		g.mu.Lock()
+		cur := g.held[k]
+		switch {
+		case cur != nil && !cur.pending && cur.tok.Hashed() == e.HashedToken: // a Start tried again: held already
+			g.mu.Unlock()
+			return
+		case cur == nil && !g.closed:
+			g.held[k] = h
+			g.mu.Unlock()
+			g.o.Log.Info("secrets issuer: a credential of the earlier run is held again; it is renewed at once", "issuer", g.name,
+				"box", req.Box.key(), "name", req.Name)
+			return
+		}
+		g.mu.Unlock()
+	}
+	if err := g.settleOne(ctx, e); err != nil {
+		g.o.Log.Error("secrets issuer: the ledger refused a settle row; the next start settles it again", "issuer", g.name, "err", err)
+	}
+	g.reissueOne(ctx, &pendingIssue{req: req})
+}
+
+// closedDone is a held entry's done for one never pending.
+var closedDone = func() chan struct{} { c := make(chan struct{}); close(c); return c }()
 
 // reissueOne issues an assignment again if its box lives.
 func (g *Minted) reissueOne(ctx context.Context, p *pendingIssue) {
@@ -1155,24 +1344,33 @@ func (g *Minted) reissueOne(ctx context.Context, p *pendingIssue) {
 }
 
 // Close refuses every later Issue and renewal, and revokes every credential
-// still held and every renewed-away one (the authority stops: nothing it
-// minted should outlive it). It keeps the assignments, so Start issues
-// again. One the source does not confirm stays outstanding in the ledger,
-// and the next Start settles it.
+// still held and every renewed-away one, except a job's credential of a
+// kind that keeps (keeps): that one stays valid and outstanding in the
+// ledger, serving nothing while this authority is down, so the next Start
+// takes it back and the job's box is never left with a revoked one across
+// a restart. It keeps the assignments, so Start issues again. One the
+// source does not confirm stays outstanding in the ledger, and the next
+// Start settles it.
 func (g *Minted) Close(ctx context.Context) error {
-	boxes := map[string]Box{}
+	var ends []*held
 	g.mu.Lock()
 	g.closed = true
-	for _, h := range g.held {
-		boxes[h.box.key()] = h.box
+	for k, h := range g.held {
+		if !h.pending && g.keeps(h.req) {
+			continue
+		}
+		delete(g.held, k) // one being issued revokes what it mints
+		if !h.pending {
+			ends = append(ends, h)
+		}
 	}
 	olds := g.old
 	g.old, g.reissue = nil, nil
 	g.mu.Unlock()
-	var first error
-	for _, b := range boxes {
-		if err := g.revokeBox(ctx, b, string(EndShutdown)); err != nil && first == nil {
-			first = err
+	failed := 0
+	for _, h := range ends {
+		if !g.revokeNow(ctx, h.e, h.tok, string(EndShutdown)) {
+			failed++
 		}
 	}
 	for _, r := range olds {
@@ -1181,5 +1379,8 @@ func (g *Minted) Close(ctx context.Context) error {
 	g.mu.Lock()
 	g.old = nil // Close does not keep retrying; Start settles the rest
 	g.mu.Unlock()
-	return first
+	if failed > 0 {
+		return g.unavailable("%d revocation(s) not confirmed at close; the next start settles them", failed)
+	}
+	return nil
 }

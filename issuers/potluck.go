@@ -400,17 +400,29 @@ func (b *potluckBackend) mint(ctx context.Context, req *Request, p plan) (Creden
 }
 
 func (b *potluckBackend) revoke(ctx context.Context, c Credential) error {
-	t, ok := c.(potluckToken)
-	if !ok {
-		return api.Errorf(api.CodeInternal, "potluck-token: not a potluck token")
+	switch t := c.(type) {
+	case potluckToken:
+		_, err := b.tokens.RevokeToken(ctx, t.id)
+		var ae *api.Error
+		if errors.As(err, &ae) && ae.Code == api.CodeNotFound {
+			return nil // no such token: nothing can authenticate with it
+		}
+		return err
+	case heldOver: // an earlier run's, held again: known by its hash alone
+		if t.hash == "" {
+			return api.Errorf(api.CodeInternal, "potluck-token: a held-over token with no hash")
+		}
+		_, err := b.tokens.RevokeTokenHash(ctx, t.hash) // false: no token has the hash, so nothing authenticates with it
+		return err
 	}
-	_, err := b.tokens.RevokeToken(ctx, t.id)
-	var ae *api.Error
-	if errors.As(err, &ae) && ae.Code == api.CodeNotFound {
-		return nil // no such token: nothing can authenticate with it
-	}
-	return err
+	return api.Errorf(api.CodeInternal, "potluck-token: not a potluck token")
 }
+
+// keeps: a potluck-token authenticates only against this authority's own
+// tokens table, so while the authority is down it serves nothing, and
+// RevokeTokenHash takes it back by its hash after a restart. A job's token
+// is therefore left valid at Close for the next Start to take back.
+func (b *potluckBackend) keeps() bool { return true }
 
 // settle revokes an earlier run's token by its hash: the tokens table
 // outlives the run, so nothing is left to lapse.

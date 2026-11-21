@@ -393,13 +393,15 @@ func TestPotluckTokenRenewal(t *testing.T) {
 }
 
 // After a crash, the next run revokes every potluck-token the earlier run
-// held (the tokens table outlives the run): none is left to lapse.
+// held whose box is gone (the tokens table outlives the run): none is left
+// to lapse.
 func TestPotluckTokenRevokedAfterCrash(t *testing.T) {
 	ctx := context.Background()
 	p := newPotluckEnv(t)
 	req := p.req(trustedBox)
 	p.mustIssue(req)
 	secret := p.bx.get(req.Box, "POTLUCK_TOKEN")
+	delete(p.alive, req.Box.key()) // the box ended while the authority was down
 	p.clk.add(time.Minute)
 	next := p.load() // the earlier issuer is never closed: a crash
 	if err := next.Start(ctx); err != nil {
@@ -418,12 +420,15 @@ func TestPotluckTokenRevokedAfterCrash(t *testing.T) {
 // conformance case): a box on a machine that is not trusted gets nothing;
 // a trusted box's credential works until any of its ends (the box's end,
 // its grant's removal, the authority stopping); the ledger and every error
-// never hold the value.
+// never hold the value. For a kind whose job credential is kept across a
+// stop (it serves nothing while the authority is down), the stop's end is
+// the stop and the next start, which finds the box gone.
 func TestEveryMintedKind(t *testing.T) {
 	type kind struct {
 		e     *env
 		req   func(Box) Request
 		works func(string) bool
+		keeps bool
 	}
 	kinds := map[string]func(t *testing.T) kind{
 		KindGitHubToken: func(t *testing.T) kind {
@@ -436,7 +441,7 @@ func TestEveryMintedKind(t *testing.T) {
 		},
 		KindPotluckToken: func(t *testing.T) kind {
 			p := newPotluckEnv(t)
-			return kind{e: p.env, req: p.req, works: p.works}
+			return kind{e: p.env, req: p.req, works: p.works, keeps: true}
 		},
 	}
 	for name, mk := range kinds {
@@ -451,7 +456,15 @@ func TestEveryMintedKind(t *testing.T) {
 			ends := []func(r Request){
 				func(r Request) { e.iss.End(ctx, r.Box, EndReleased) },
 				func(r Request) { e.iss.EndGrant(ctx, "g1") },
-				func(r Request) { e.iss.Close(ctx) },
+				func(r Request) {
+					e.iss.Close(ctx)
+					if k.keeps {
+						delete(e.alive, r.Box.key())
+						if err := e.load().Start(ctx); err != nil {
+							t.Fatal(err)
+						}
+					}
+				},
 			}
 			for i, end := range ends {
 				r := k.req([]Box{trustedBox, otherBox, thirdBox}[i])
