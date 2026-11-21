@@ -58,13 +58,20 @@ type Deps struct {
 	Events   *events.Bus
 	Log      *slog.Logger
 	Started  time.Time
+	// Parked: this daemon's home does not serve (kit/hometerm), so Store,
+	// Projects and Events are nil and only its listeners run (kit/server
+	// term.go). Set by server.New alone.
+	Parked bool
 	// Closing is closed when the daemon starts shutting down: long streams end.
 	Closing <-chan struct{}
 
 	// Handler is the daemon's full API handler (with middleware). The tailnet
 	// module serves it on its listener, with WithRemote (WhoIs) on each
 	// request. Requests reaching it are remote unless marked WithLocal, which
-	// only the Unix listener does: never call WithLocal from a module.
+	// only the Unix listener does: never call WithLocal from a module. On a
+	// serving daemon that named a successor it holds every call but health
+	// and the term until its first ask of the successor has its answer,
+	// which comes after every module's Start: a Start must not wait on it.
 	Handler http.Handler
 
 	// Net is the tailnet module (teams dial their authority through it);
@@ -97,6 +104,7 @@ type Deps struct {
 
 	hosts  hostNames  // OwnTailnetHost's cache of the node's MagicDNS names
 	tr     transports // team transport drivers (transport.go)
+	term   termLock   // ApplyTerm's (term.go)
 	schema schemas    // AddSchema (schema.go)
 	hooks  hooks      // health parts, notifiers, session hooks (hooks.go)
 
@@ -128,7 +136,12 @@ type NetService interface {
 
 // NetSelf is this daemon's tailnet node.
 type NetSelf struct {
-	Running  bool
+	Running bool
+	// Enabled: this run joins the tailnet (it came up from config or
+	// --tailnet, or by tailnet up; not since tailnet down), whether or not
+	// the node runs yet. A restart that keeps the daemon's listeners passes
+	// --tailnet when it is set.
+	Enabled  bool
 	NodeID   string // stable node ID ("" until logged in)
 	Hostname string // the hostname it asked for (zm-<machine>)
 	DNSName  string // the name the tailnet gave it (a taken name gets a suffix)

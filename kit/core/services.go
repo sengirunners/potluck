@@ -2,9 +2,24 @@ package core
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/sengirunners/potluck/kit/api"
 )
+
+// ParkedRoutesService names the routes a parked daemon's wiring provides
+// (Provide, from server.ParkedListeners' modules' New) beside the term's: a
+// ParkedRoutes. A parked daemon answers a call on this machine's socket
+// that they Serve with them, and nothing else of them (kit/server term.go).
+const ParkedRoutesService = "parked-routes"
+
+// ParkedRoutes are routes a parked daemon answers to its machine's owner on
+// its socket (ParkedRoutesService): teamlink's HQ routes there.
+type ParkedRoutes interface {
+	http.Handler
+	// Serves reports whether r is one of them.
+	Serves(r *http.Request) bool
+}
 
 // Provide publishes v as the service name (a module's New, before Start):
 // another module reaches it with Service(name) through the owner's typed

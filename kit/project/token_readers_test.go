@@ -42,6 +42,7 @@ var tokenReaders = map[string]string{
 	"kit/project/team.go MachineProjects": "node-bound only",
 	"kit/project/team.go MachineJoin":     "node-bound only",
 	"kit/project/team.go InvitedMachines": "node-bound only",
+	"kit/project/team.go HeldTokensIn":    "refuses it (route_limit = ''; a limited secret is skipped): a parked standby's owner, kit/teamlink home_owner.go",
 	"kit/project/admit.go Admit":          "node-bound only (Admit refuses an empty node)",
 	"kit/project/admit.go admitTx":        "writes a node-bound row",
 	"kit/project/admit.go freshJoin":      "node-bound only",

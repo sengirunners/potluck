@@ -41,7 +41,12 @@ type teamTransport struct{ s *Service }
 var (
 	_ core.TeamTransport = teamTransport{}
 	_ core.Sealer        = teamTransport{}
+	_ core.HomeKeyer     = teamTransport{}
 )
+
+// HomeFingerprint implements core.HomeKeyer: the pin of this home's tunnel
+// key.
+func (t teamTransport) HomeFingerprint(context.Context) (string, error) { return t.s.Fingerprint() }
 
 // SealTo implements core.Sealer (seal.go).
 func (t teamTransport) SealTo(peer string, key []byte, purpose string, ttl time.Duration, plaintext []byte) (string, error) {

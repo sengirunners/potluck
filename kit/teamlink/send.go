@@ -26,11 +26,12 @@ func Ended(r api.Remote) error {
 	return err.WithHint("ask its owner for a new invite (then " + config.Command("join", "<code>") + "); " + config.Command("leave", r.Project.Slug) + " forgets it")
 }
 
-// Send is every call to an authority: the token, the scope_version, the
-// header it answers with, 401 counting and the purge, one retry after 409
-// rescope (nothing ran: the authority refuses before the route).
+// Send is every call to an authority: the token, the scope_version (not on
+// a leave, nor on a heartbeat to a home whose epoch is recorded), the header it answers
+// with, 401 counting and the purge, one retry after 409 rescope (nothing
+// ran: the authority refuses before the route).
 func (s *Service) Send(ctx context.Context, x *Remote, req *http.Request, body []byte) (*http.Response, error) {
-	return s.SendWith(ctx, x, x.HC, req, body)
+	return s.SendWith(ctx, x, x.Client(), req, body)
 }
 
 // SendWith is Send through hc (a hedge's client: internal/team hedge.go).
@@ -47,7 +48,22 @@ func (s *Service) SendWith(ctx context.Context, x *Remote, hc *http.Client, req 
 			x.Mu.Unlock()
 			return nil, err
 		}
+		if err := x.homeRefusal(req); err != nil { // a home that lost its term (successor.go)
+			x.Mu.Unlock()
+			return nil, err
+		}
 		token, sv := x.Token, x.R.ScopeVersion
+		if leave || x.home.Epoch > 0 && isBeat(req) {
+			// A heartbeat to a home whose epoch is recorded carries no
+			// scope_version, so it is never refused 409 rescope: its answer
+			// is a 200 whose authority part unheard reads before anything of
+			// it is taken (a home that lost its term rescopes nothing), and a
+			// home behind hears the beat that finds it current again. A
+			// leave carries none either: it ends the token whatever scope the
+			// home holds (a home behind holds an older one), and a refused
+			// leave would leave the token valid there.
+			sv = 0
+		}
 		x.Mu.Unlock()
 		api.SetHeader(req.Header, api.HeaderProtocol, api.WireProtocol)
 		req.Header.Set(api.HeaderPersonalMail, api.PersonalMailProtocol)
@@ -60,6 +76,9 @@ func (s *Service) SendWith(ctx context.Context, x *Remote, hc *http.Client, req 
 		if err != nil {
 			return nil, s.Unreachable(x.Snapshot().Via, req.URL.Host, err)
 		}
+		if s.unheard(x, req, resp) {
+			return resp, nil // a home that lost its term changes nothing here (successor.go)
+		}
 		s.Observe(ctx, x, resp, seq, sv)
 		if resp.StatusCode == http.StatusConflict && attempt == 0 && isRescope(resp) {
 			resp.Body.Close()
@@ -68,6 +87,11 @@ func (s *Service) SendWith(ctx context.Context, x *Remote, hc *http.Client, req 
 		}
 		return resp, nil
 	}
+}
+
+// isBeat is whether req is a heartbeat (BeatRemote).
+func isBeat(req *http.Request) bool {
+	return req.Method == http.MethodPost && req.URL.Path == "/v0/team/presence"
 }
 
 // isRescope reads a 409's code, putting the body back.

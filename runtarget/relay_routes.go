@@ -9,7 +9,8 @@ package runtarget
 // none is hedged, and their answers (exec output, an acquire's url) are
 // never stored as a live write's record: a repeat is safe by request_id or
 // holder checks. Secrets and a jit_config cross the tunnel only sealed
-// (SPEC 17.11).
+// (SPEC 17.11). The database recipe rows ask no driver: they read and edit
+// the authority's project.toml, which is what its acquires resolve.
 
 import (
 	"bytes"
@@ -68,6 +69,9 @@ func RelayRoutes() []tl.RouteRule {
 		once("GET /v0/sealing", "the pool's sealing mode, as its machine heard its machines", h),
 		once("PUT /v0/sealing", "sets the pool's sealing mode once", h),
 		once("POST /v0/sealing/forget", "this machine's own record of its pools' machines", &tl.RouteHook{Local: func(*http.Request) bool { return true }}),
+		once("GET /v0/databases", "the project's database recipes, as its authority's project.toml says", nil),
+		once("PUT /v0/databases/{name}", "an admin's edit of project.toml, sent once", nil),
+		once("DELETE /v0/databases/{name}", "an admin's edit of project.toml, sent once", nil),
 		once("POST /v0/run_targets/{target}/handles/{id}/secrets", "a driver call, once; its values cross the tunnel only sealed and are never kept", h),
 	}
 }

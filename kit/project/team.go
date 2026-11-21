@@ -367,6 +367,63 @@ func (r *Registry) IsTeam(id string) bool {
 	return ok && e.team
 }
 
+// HeldToken is a live node-bound token of a registry.db that a home holds
+// the secret of (HeldTokensIn): whose it is, and the node and machine HQ
+// bound it to.
+type HeldToken struct {
+	Identity api.Identity
+	Node     string
+	Machine  string
+}
+
+// HeldTokensIn reads db, a registry.db (TuplesIn), for the tokens whose
+// secrets are held: each a plain (never limited) token with that secret's
+// hash, bound to a node, not a box's, unrevoked and unexpired. A secret
+// with no such row is left out.
+func HeldTokensIn(ctx context.Context, db *sql.DB, held []string) ([]HeldToken, error) {
+	now := store.Millis(time.Now())
+	var out []HeldToken
+	for _, secret := range held {
+		if !authz.LooksLikeToken(secret) {
+			continue
+		}
+		if _, limited := authz.TokenLimit(secret); limited {
+			continue
+		}
+		var h HeldToken
+		err := db.QueryRowContext(ctx, `SELECT t.node, t.machine, i.id, i.name FROM tokens t JOIN identities i ON i.id = t.identity
+			WHERE t.hash = ? AND t.node != '' AND t.box_key = '' AND t.route_limit = '' AND t.revoked IS NULL AND (t.expires IS NULL OR t.expires > ?)`,
+			authz.HashToken(secret), now).Scan(&h.Node, &h.Machine, &h.Identity.ID, &h.Identity.Name)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		case err != nil:
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, nil
+}
+
+// TeamProjectsIn lists the team projects db, a registry.db, holds, by slug
+// (TuplesIn): what IsTeam says of each project of a live registry.
+func TeamProjectsIn(ctx context.Context, db *sql.DB) ([]api.ProjectRef, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id, slug FROM projects WHERE team = 1 ORDER BY slug`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []api.ProjectRef
+	for rows.Next() {
+		var p api.ProjectRef
+		if err := rows.Scan(&p.ID, &p.Slug); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // SetTeam records project id as team (or solo) and switches its file's pool
 // (one writer, four readers). Moving the leases is the caller's (the work
 // module's MoveLeases); it calls this at the commit point of the move.
@@ -953,6 +1010,11 @@ type Member struct {
 // Members lists the grants in projects with their identities, ignoring
 // scope (daemon internal: the caller keeps what its reader shares).
 func (r *Registry) Members(ctx context.Context, projects []string) ([]Member, error) {
+	return MembersIn(ctx, r.st.Registry(), projects)
+}
+
+// MembersIn is Members read from db, a registry.db (TuplesIn).
+func MembersIn(ctx context.Context, db *sql.DB, projects []string) ([]Member, error) {
 	if len(projects) == 0 {
 		return nil, nil
 	}
@@ -960,7 +1022,7 @@ func (r *Registry) Members(ctx context.Context, projects []string) ([]Member, er
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.st.Registry().QueryContext(ctx, `SELECT i.id, i.name, i.kind, g.project, g.area, g.relation FROM grants g JOIN identities i ON i.id = g.subject
+	rows, err := db.QueryContext(ctx, `SELECT i.id, i.name, i.kind, g.project, g.area, g.relation FROM grants g JOIN identities i ON i.id = g.subject
 		WHERE g.project IN (SELECT value FROM json_each(?)) ORDER BY i.name, g.project, g.area`, string(js))
 	if err != nil {
 		return nil, err

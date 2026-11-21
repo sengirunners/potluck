@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/sengirunners/potluck/kit/atomicfile"
 )
@@ -45,13 +47,10 @@ const (
 	Standby State = "standby"
 )
 
-func (s State) valid() bool {
-	switch s {
-	case Serving, Frozen, Fenced, Standby:
-		return true
-	}
-	return false
-}
+// States are every term state.
+func States() []State { return []State{Serving, Frozen, Fenced, Standby} }
+
+func (s State) valid() bool { return slices.Contains(States(), s) }
 
 // Peer names another home by the key a member pins (SPEC 17.11): the
 // transport, the address, and the key's fingerprint.
@@ -88,6 +87,14 @@ type Term struct {
 	Predecessor *Peer `json:"predecessor,omitempty"`
 }
 
+// MaxEpoch is the highest epoch a term holds: the registry keeps epochs as
+// signed 64-bit integers. A standby serves only when promoted above its
+// epoch, so it is held below MaxEpoch (Check). A fenced term may be at
+// MaxEpoch: a successor that serves there still fences this home, which is
+// then retired (it can never be promoted above it), so the fence holds at
+// the very top instead of leaving two homes serving.
+const MaxEpoch = math.MaxInt64
+
 // Initial is the term of a home with no term file.
 func Initial() Term { return Term{State: Serving} }
 
@@ -110,6 +117,10 @@ func (t Term) Check() error {
 		}
 	}
 	switch {
+	case t.Epoch > MaxEpoch:
+		return fmt.Errorf("epoch %d is out of range (at most %d)", t.Epoch, uint64(MaxEpoch))
+	case t.State == Standby && t.Epoch == MaxEpoch:
+		return fmt.Errorf("a standby term at epoch %d could never be promoted above it", t.Epoch)
 	case t.State == Fenced && t.Successor == nil:
 		return errors.New("a fenced term names no successor")
 	case t.State == Fenced && t.Epoch == 0:
@@ -241,9 +252,20 @@ func (t Term) Designate(succ Peer) (Term, error) {
 	return t, nil
 }
 
-// Fence records that succ serves at epoch, which must be above this home's:
-// the term takes succ's epoch, and this home never serves below it. A home already fenced is fenced
-// again only by a higher epoch.
+// Undesignate withdraws the successor a serving or frozen home named: it
+// will not move there.
+func (t Term) Undesignate() (Term, error) {
+	if t.State != Serving && t.State != Frozen {
+		return Term{}, refuse(t, "only a serving or frozen home withdraws its successor")
+	}
+	t.Successor = nil
+	return t, nil
+}
+
+// Fence records that succ serves at epoch, which must be above this home's
+// and at most MaxEpoch: the term takes succ's epoch, and this home never
+// serves below it. A home fenced at MaxEpoch is retired: no promote is above
+// it. A home already fenced is fenced again only by a higher epoch.
 func (t Term) Fence(succ Peer, epoch uint64) (Term, error) {
 	if t.State == Standby {
 		return Term{}, refuse(t, "a standby has never served; there is nothing to fence")
@@ -251,10 +273,16 @@ func (t Term) Fence(succ Peer, epoch uint64) (Term, error) {
 	if epoch <= t.Epoch {
 		return Term{}, refuse(t, "the successor's epoch %d is not above this home's", epoch)
 	}
-	if err := succ.check("successor"); err != nil {
-		return Term{}, fmt.Errorf("%w: %v", ErrTransition, err)
+	return checked(t, Term{Epoch: epoch, State: Fenced, Successor: &succ, Predecessor: t.Predecessor})
+}
+
+// checked is next, the result of a transition from t, when it is whole
+// (Check); a refused transition otherwise.
+func checked(t, next Term) (Term, error) {
+	if err := next.Check(); err != nil {
+		return Term{}, refuse(t, "%v", err)
 	}
-	return Term{Epoch: epoch, State: Fenced, Successor: &succ, Predecessor: t.Predecessor}, nil
+	return next, nil
 }
 
 // NewStandby is the term of a fresh home that follows pred, holding its data
@@ -270,8 +298,10 @@ func NewStandby(pred Peer, epoch uint64) (Term, error) {
 
 // Promote makes a standby, or a fenced home taking its data back, serve at
 // epoch, which must be above both this home's epoch and the epoch of the
-// data it serves (setEpoch, from the backup set it restored). The successor
-// is cleared: a new one is designated later.
+// data it serves (setEpoch, from the backup set it restored), and at most
+// MaxEpoch (a standby is below it, so one is always left; a home fenced at
+// MaxEpoch is retired and never promoted). The successor is cleared: a new
+// one is designated later.
 func (t Term) Promote(epoch, setEpoch uint64) (Term, error) {
 	if t.State != Standby && t.State != Fenced {
 		return Term{}, refuse(t, "only a standby or a fenced home is promoted")
@@ -283,7 +313,22 @@ func (t Term) Promote(epoch, setEpoch uint64) (Term, error) {
 	if t.State == Fenced {
 		pred = t.Successor // the home that served after this one
 	}
-	return Term{Epoch: epoch, State: Serving, Predecessor: pred}, nil
+	return checked(t, Term{Epoch: epoch, State: Serving, Predecessor: pred})
+}
+
+// Why says, in a sentence without the home's path, why a home with term t
+// is not served ("" when it serves).
+func (t Term) Why() string {
+	switch t.State {
+	case Serving:
+		return ""
+	case Fenced:
+		return fmt.Sprintf("this home was fenced at epoch %d: %s serves its team projects now, so no daemon serves this copy", t.Epoch, t.Successor.URL)
+	case Frozen:
+		return fmt.Sprintf("this home is frozen at epoch %d for a move to another home: no daemon serves it while the move runs", t.Epoch)
+	default: // Standby
+		return fmt.Sprintf("this home is a standby at epoch %d for %s: it serves only once promoted", t.Epoch, t.Predecessor.URL)
+	}
 }
 
 // CheckServes is nil when home's term lets a daemon serve it. Every other
@@ -296,12 +341,5 @@ func CheckServes(home string) error {
 	if t.Serves() {
 		return nil
 	}
-	switch t.State {
-	case Fenced:
-		return fmt.Errorf("%s was fenced at epoch %d: %s serves its team projects now, so no daemon serves this copy", home, t.Epoch, t.Successor.URL)
-	case Frozen:
-		return fmt.Errorf("%s is frozen at epoch %d for a move to another home: no daemon serves it while the move runs", home, t.Epoch)
-	default: // Standby
-		return fmt.Errorf("%s is a standby at epoch %d for %s: it serves only once promoted", home, t.Epoch, t.Predecessor.URL)
-	}
+	return fmt.Errorf("%s: %s", home, t.Why())
 }

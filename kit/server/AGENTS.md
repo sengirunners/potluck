@@ -23,6 +23,17 @@ protocol, authenticates (`core.Authenticate`), and hands team-project calls to t
   `client.WithHandler(dm.SocketHandler())` is the machine owner, while `dm.Handler` is a network caller that gets
   401 without a token. Never hand `SocketHandler()` to a listener. One exception: `runners.listen` (loopback)
   serves only the runner broker's own public handlers, never `dm.Handler`.
+- A home whose term does not serve (`kit/hometerm`) gets a parked daemon (`term.go`): no store, no Wiring, no writer
+  lock, only the modules of `ParkedListeners` (their Start and Close, never their routes; `Deps.Store`, `Projects`
+  and `Events` are nil, so a caller of `New` checks them). The term for anyone; health, stop and unfreeze for the
+  socket's owner; `parked` for everything else. A route or loop added to the shell runs only on a serving daemon
+  unless it is added there on purpose.
+- `parkGate` is in front of `Handler` and of every module public host (`core.PublicIngress(d).Gate`): once a daemon
+  parks, and until its first ask of a named successor has an answer, nothing but health and the term reaches a route.
+  In-process callers of `d.Handler` are held too, and that ask runs after every module's `Start`: a `Start` must not
+  wait on a call through `d.Handler`. `Serve` waits for its own loops (the fence loop, the hourly optimize) before it
+  closes the modules and the store.
+- A serving daemon holds `config.LockWriter` from `New` to `Close`; every daemon's process holds `LockHome`.
 - Known drift: `server.go` reads the `events` table directly. Don't add more. That read becomes a `core`
   method.
 

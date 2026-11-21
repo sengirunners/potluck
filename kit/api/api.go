@@ -132,6 +132,11 @@ const (
 	CodeRateLimited = "rate_limited"
 	// CodeTooLarge (413): a request body over a route's limit; nothing ran.
 	CodeTooLarge = "too_large"
+	// CodeParked (503): this daemon's home does not serve (its term is
+	// frozen, fenced or standby, kit/hometerm), so it answers only its
+	// health and its term (GET /v0/authority/term); nothing ran. Data is a
+	// ServedBy: the machine, its state and, when fenced, where HQ is now.
+	CodeParked = "parked"
 )
 
 // Error is the one error shape on the wire: {"error": {...}}. It is also a Go
@@ -175,7 +180,7 @@ func (e *Error) Status() int {
 		return http.StatusNotImplemented
 	case CodeResync:
 		return http.StatusGone
-	case CodeUnavailable:
+	case CodeUnavailable, CodeParked:
 		return http.StatusServiceUnavailable
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
@@ -273,6 +278,24 @@ func DecodeJSONWithin(r *http.Request, v any, limit int64) error {
 	return nil
 }
 
+// DecodeOneJSON is DecodeJSON for a route whose body is one JSON value and
+// nothing after it (the HQ routes): a second value, or anything but white
+// space after the first, is a bad_request.
+func DecodeOneJSON(r *http.Request, v any) error {
+	dec := json.NewDecoder(io.LimitReader(r.Body, MaxBody))
+	dec.DisallowUnknownFields()
+	switch err := dec.Decode(v); {
+	case err == io.EOF:
+		return nil
+	case err != nil:
+		return Errorf(CodeBadRequest, "invalid JSON body: %v", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return Errorf(CodeBadRequest, "the body holds more than one JSON value")
+	}
+	return nil
+}
+
 // ProtocolMajor is "zm/v0" -> "zm/v0" (until v1, every v0 is its own major).
 func ProtocolMajor(p string) string {
 	p = strings.TrimSpace(p)
@@ -292,6 +315,11 @@ type Health struct {
 	Machine  string    `json:"machine,omitempty"`
 	PID      int       `json:"pid,omitempty"`
 	Started  time.Time `json:"started,omitzero"`
+	// Tailnet says this run of the daemon joins the tailnet (its tailnet
+	// module came up from config or --tailnet, or by tailnet up, and not
+	// since tailnet down), local callers only: a restart that keeps the
+	// daemon's listeners passes --tailnet again.
+	Tailnet bool `json:"tailnet,omitempty"`
 	// Hedges: a team replica's hedged reads (SPEC 17.3), local callers only.
 	Hedges *HedgeStats `json:"hedges,omitempty"`
 	// SelfCheck is the start-up self-check (SPEC 2, "Swaps"), local callers

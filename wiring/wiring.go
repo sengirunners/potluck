@@ -53,6 +53,18 @@ func Kit(d *core.Deps) ([]core.Module, error) {
 	return []core.Module{k.Net, k.Link, k.Own, k.Tun}, nil
 }
 
+// Parked is a parked daemon's wiring (server.ParkedListeners): the tailnet
+// and the tunnel alone, registered as the team transports in Kit's order, so
+// a home that does not serve answers its term over both. Their routes are
+// never mounted.
+func Parked(d *core.Deps) ([]core.Module, error) {
+	nt, tun := tailnet.New(d), tunnel.New(d)
+	d.Net = nt.Net()
+	d.AddTransport(tun.TeamTransport())
+	d.AddTransport(tailnet.TeamTransport(d, d.Net))
+	return []core.Module{nt, tun}, nil
+}
+
 // Compute is Kit plus run targets (with their relay across machines on
 // teamlink), the secrets issuer (when config.json names one), runners,
 // usage and the secret grants' routes.

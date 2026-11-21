@@ -78,7 +78,7 @@ func (d *drv) spawn(handle string, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := secretsListed(r, len(secrets)); err != nil {
+	if err := secretsListed(d.cfg, r, len(secrets)); err != nil {
 		return nil, err
 	}
 	if len(secrets) > 0 { // a guest that takes none answers forbidden now, not a process exiting 125 (secrets.go)

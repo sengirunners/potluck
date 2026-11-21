@@ -152,6 +152,10 @@ func TestDoorRefusals(t *testing.T) {
 		{"POST", "/v0/login/github/", "", 401},               //
 		{"DELETE", "/v0/join/github", "", 401},               //
 		{"GET", "/v0/grants/github?project=x", "", 401},      // nothing else of GitHub's
+		{"GET", "/v0/authority/term", "", 201},               // the home's term: signed, no token
+		{"POST", "/v0/authority/term", "", 401},              // only its GET
+		{"GET", "/v0/authority/standby", "", 401},            // nothing else of the authority's
+		{"GET", "/v0/authority/term/x", "", 401},             // exactly the term
 		{"GET", "/v0/events", "zm_tok", 400},                 // no live stream
 		{"GET", "/v0/events?live=0", "zm_tok", 201},
 	}
@@ -170,7 +174,7 @@ func TestDoorRefusals(t *testing.T) {
 	}
 	// Unsigned: 401 before anything (plain HTTP client), the GitHub join's
 	// calls included.
-	for _, c := range [][2]string{{"GET", "/v0/health"}, {"GET", "/v0/join/github"}, {"POST", "/v0/join/github"}, {"POST", "/v0/login/github/" + testLoginID}} {
+	for _, c := range [][2]string{{"GET", "/v0/health"}, {"GET", "/v0/authority/term"}, {"GET", "/v0/join/github"}, {"POST", "/v0/join/github"}, {"POST", "/v0/login/github/" + testLoginID}} {
 		seen.Store(nil)
 		req, _ := http.NewRequest(c[0], srv.URL+c[1], strings.NewReader("{}"))
 		resp, err := http.DefaultClient.Do(req)

@@ -49,16 +49,19 @@ func TestDescribeProtocolKeys(t *testing.T) {
 // checks.
 func TestDriverNamesEitherWay(t *testing.T) {
 	for _, variant := range []string{"zm-names", "potluck-names"} {
-		path, opt := fixture(t, "box", variant)
-		opt.Only = []string{"lifecycle", "procs"}
-		out := Format(Run(context.Background(), path, opt))
-		for _, want := range []string{"PASS  describe", "PASS  exec secrets", "PASS  spawn secrets"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("%s: no %q:\n%s", variant, want, out)
+		t.Run(variant, func(t *testing.T) {
+			t.Parallel()
+			path, opt := fixture(t, "box", variant)
+			opt.Only = []string{"lifecycle", "procs"}
+			out := Format(Run(context.Background(), path, opt))
+			for _, want := range []string{"PASS  describe", "PASS  exec secrets", "PASS  spawn secrets"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%s: no %q:\n%s", variant, want, out)
+				}
 			}
-		}
-		if strings.Contains(out, "FAIL") {
-			t.Errorf("%s fails:\n%s", variant, out)
-		}
+			if strings.Contains(out, "FAIL") {
+				t.Errorf("%s fails:\n%s", variant, out)
+			}
+		})
 	}
 }

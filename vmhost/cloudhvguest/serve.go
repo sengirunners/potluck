@@ -151,8 +151,11 @@ func serveExec(conn io.ReadWriter, req Request, prepare func(*exec.Cmd)) {
 	go pump(FrameStderr, er)
 
 	// Stdin goes through a queue, so the goroutine reading the host's frames
-	// is not stopped by a command that does not read its input: it must
-	// still see the host hang up.
+	// is not stopped at once by a command that does not read its input: it
+	// must still see the host hang up. The queue is 64 frames, so that holds
+	// for the first 2 MiB or so a command leaves unread; past it the reader
+	// waits for the command, and a hang-up is seen when the command reads on
+	// or ends.
 	var queue chan []byte
 	if stdin != nil {
 		queue = make(chan []byte, 64)

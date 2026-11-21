@@ -21,6 +21,7 @@ import (
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/server"
 	"github.com/sengirunners/potluck/kit/swap"
+	"github.com/sengirunners/potluck/wiring"
 )
 
 // EnvNoAutostart = 1 turns autostart off (scripts, tests that expect "not running").
@@ -81,12 +82,14 @@ func (a *app) daemonCmd() *cobra.Command {
 			return a.stopDaemon(cmd.Context(), cfg)
 		},
 	}
-	cmd.AddCommand(stop, a.preflightCmd())
+	cmd.AddCommand(stop, a.preflightCmd(), a.freezeCmd(), a.unfreezeCmd())
 	return cmd
 }
 
 // serve runs the daemon on cfg's home wired by w (Potluck's: the Compute
-// wiring, Program.wiring) until ctx ends.
+// wiring, Program.wiring) until ctx ends; a parked one listens on the
+// tailnet and the tunnel too (wiring.Parked), so its term is read from
+// other machines.
 func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, w server.Wiring) error {
 	if err := cfg.EnsureHome(); err != nil {
 		return err
@@ -96,7 +99,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, w server.W
 		return err
 	}
 	defer release()
-	dm, err := server.New(ctx, cfg, log, w)
+	dm, err := server.New(ctx, cfg, log, w, server.ParkedListeners(wiring.Parked))
 	if err == nil {
 		err = dm.Serve(ctx)
 	}
@@ -201,6 +204,12 @@ func (a *app) statusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A parked home serves no pool: its term says why (a daemon
+			// older than the term route answers not_found: it serves).
+			var parked *api.AuthorityTerm
+			if t, err := c.AuthorityTerm(ctx); err == nil && t.State != api.HQServing {
+				parked = &t
+			}
 			type poolView struct {
 				Pool     string   `json:"pool"`
 				Role     string   `json:"role"`
@@ -209,7 +218,7 @@ func (a *app) statusCmd() *cobra.Command {
 				Error    string   `json:"error,omitempty"`
 			}
 			var pools []poolView
-			if l, err := c.ProjectList(ctx); err == nil {
+			if l, err := c.ProjectList(ctx); err == nil && parked == nil {
 				for _, p := range l.Projects {
 					v := poolView{Pool: p.Slug, Role: p.Role}
 					names, err := poolMachines(ctx, inPool(c, p.Slug))
@@ -232,11 +241,12 @@ func (a *app) statusCmd() *cobra.Command {
 			}
 			if a.asJSON() {
 				if err := a.printJSON(struct {
-					Health api.Health  `json:"health"`
-					Home   string      `json:"home"`
-					Daemon *daemonView `json:"daemon_of,omitempty"`
-					Pools  []poolView  `json:"pools"`
-				}{h, cfg.Home, other, pools}); err != nil {
+					Health api.Health         `json:"health"`
+					Home   string             `json:"home"`
+					Daemon *daemonView        `json:"daemon_of,omitempty"`
+					Parked *api.AuthorityTerm `json:"parked,omitempty"`
+					Pools  []poolView         `json:"pools"`
+				}{h, cfg.Home, other, parked, pools}); err != nil {
 					return err
 				}
 			} else {
@@ -257,7 +267,13 @@ func (a *app) statusCmd() *cobra.Command {
 						s += "\n  - " + p
 					}
 				}
-				if len(pools) == 0 {
+				switch {
+				case parked != nil:
+					s += fmt.Sprintf("\nPARKED: this home is %s at epoch %d: its daemon answers only its health and term, and serves no pool", parked.State, parked.Epoch)
+					if parked.State == api.HQFrozen {
+						s += " (" + a.cmd("daemon unfreeze") + " serves it again)"
+					}
+				case len(pools) == 0:
 					s += "\nno pool yet: " + a.cmd("create <pool>") + ", or " + a.cmd("join '<invite code>'")
 				}
 				for _, p := range pools {
@@ -357,6 +373,10 @@ func (a *app) autostart(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
+// spawnDetached starts the daemon's process for startDetached. A test stands
+// a fake in: a command run in a test must never start the test binary.
+var spawnDetached = swap.StartDetached
+
 // startDetached runs `potluck daemon` in its own session, logging to
 // daemon.log, and waits until it answers. already: one was running.
 func (a *app) startDetached(ctx context.Context, cfg *config.Config, tailnet bool) (already bool, err error) {
@@ -375,7 +395,7 @@ func (a *app) startDetached(ctx context.Context, cfg *config.Config, tailnet boo
 	if tailnet {
 		argv = append(argv, "--tailnet")
 	}
-	p, err := swap.StartDetached(ctx, swap.Detach{Argv: argv, Env: daemonEnv(os.Environ(), cfg.Home),
+	p, err := spawnDetached(ctx, swap.Detach{Argv: argv, Env: daemonEnv(os.Environ(), cfg.Home),
 		Log: cfg.Path(config.FileLog), Home: cfg.Home})
 	if err != nil {
 		return false, err

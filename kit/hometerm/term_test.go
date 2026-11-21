@@ -42,6 +42,7 @@ func TestLoadRefusesWhatIsNotATerm(t *testing.T) {
 		"bad via":         `{"epoch":2,"state":"fenced","successor":{"via":"carrier pigeon","url":"u","fingerprint":"f"}}`,
 		"no fingerprint":  `{"epoch":2,"state":"fenced","successor":{"via":"tailnet","url":"u"}}`,
 		"negative epoch":  `{"epoch":-1,"state":"serving"}`,
+		"epoch too high":  `{"epoch":9223372036854775808,"state":"serving"}`,
 		"stray brace":     `{"epoch":1,"state":"serving"}}`,
 		"trailing text":   `{"epoch":1,"state":"serving"} x`,
 		"fenced at 0":     `{"epoch":0,"state":"fenced","successor":{"via":"tailnet","url":"u","fingerprint":"f"}}`,
@@ -116,6 +117,7 @@ func TestApplyRefusesAMoveThatBreaksTheRules(t *testing.T) {
 		"back to the start":               hometerm.Initial(),
 		"not whole":                       {Epoch: 6, State: hometerm.Fenced},
 		"become a standby":                {Epoch: 6, State: hometerm.Standby, Predecessor: &pred},
+		"fence above the top epoch":       {Epoch: hometerm.MaxEpoch + 1, State: hometerm.Fenced, Successor: &succ},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := hometerm.Apply(home, func(hometerm.Term) (hometerm.Term, error) { return next, nil })
@@ -186,6 +188,10 @@ func TestTransitions(t *testing.T) {
 			"serving": {Epoch: 3, State: hometerm.Serving, Successor: &succ},
 			"frozen":  {Epoch: 3, State: hometerm.Frozen, Successor: &succ},
 		}},
+		{"undesignate", hometerm.Term.Undesignate, map[string]hometerm.Term{
+			"serving": {Epoch: 3, State: hometerm.Serving},
+			"frozen":  {Epoch: 3, State: hometerm.Frozen},
+		}},
 		{"fence at 5", func(t hometerm.Term) (hometerm.Term, error) { return t.Fence(succ, 5) }, map[string]hometerm.Term{
 			"serving": {Epoch: 5, State: hometerm.Fenced, Successor: &succ},
 			"frozen":  {Epoch: 5, State: hometerm.Fenced, Successor: &succ},
@@ -248,6 +254,62 @@ func TestTransitionsRefuseABadPeer(t *testing.T) {
 	}
 }
 
+// A standby takes an epoch below MaxEpoch, so a promote above it is left,
+// and a promote goes up to MaxEpoch and no further. A successor serving at
+// MaxEpoch still fences the home it took over from: that home is retired
+// (no promote is above it), never left serving beside its successor.
+func TestEpochsAtTheTop(t *testing.T) {
+	top := uint64(hometerm.MaxEpoch)
+	serving := hometerm.Term{Epoch: 3, State: hometerm.Serving}
+	if got, err := hometerm.NewStandby(pred, top); err == nil {
+		t.Fatalf("NewStandby at MaxEpoch = %+v, want refused", got)
+	}
+	if err := (hometerm.Term{Epoch: top, State: hometerm.Standby, Predecessor: &pred}).Check(); err == nil {
+		t.Fatal("a standby term at MaxEpoch is whole")
+	}
+	retired, err := serving.Fence(succ, top)
+	if err != nil || retired.State != hometerm.Fenced || retired.Epoch != top {
+		t.Fatalf("Fence at MaxEpoch = %+v %v, want fenced there", retired, err)
+	}
+	if err := retired.Check(); err != nil {
+		t.Fatalf("a fenced term at MaxEpoch: %v", err)
+	}
+	if got, err := retired.Promote(top, 0); !errors.Is(err, hometerm.ErrTransition) {
+		t.Fatalf("a home fenced at MaxEpoch promoted = %+v %v, want refused", got, err)
+	}
+	if got, err := serving.Fence(succ, top+1); !errors.Is(err, hometerm.ErrTransition) {
+		t.Fatalf("Fence above MaxEpoch = %+v %v, want refused", got, err)
+	}
+	fenced, err := serving.Fence(succ, top-1)
+	if err != nil {
+		t.Fatalf("Fence just below MaxEpoch: %v", err)
+	}
+	if got, err := fenced.Promote(top, top-1); err != nil || got.Epoch != top || !got.Serves() {
+		t.Fatalf("a home fenced just below MaxEpoch promoted to it = %+v %v, want serving at MaxEpoch", got, err)
+	}
+	if got, err := fenced.Fence(succ, top); err != nil || got.Epoch != top {
+		t.Fatalf("a fenced home fenced again at MaxEpoch = %+v %v", got, err)
+	}
+	sb, err := hometerm.NewStandby(pred, top-1)
+	if err != nil {
+		t.Fatalf("NewStandby just below MaxEpoch: %v", err)
+	}
+	if _, err := sb.Promote(top, top-1); err != nil {
+		t.Fatalf("a standby just below MaxEpoch promoted to it: %v", err)
+	}
+	if got, err := sb.Promote(top+1, top-1); !errors.Is(err, hometerm.ErrTransition) {
+		t.Fatalf("Promote above MaxEpoch = %+v %v, want refused", got, err)
+	}
+	// Apply writes the retired term, and Load reads it back.
+	home := t.TempDir()
+	if _, err := hometerm.Apply(home, func(hometerm.Term) (hometerm.Term, error) { return serving.Fence(succ, top) }); err != nil {
+		t.Fatalf("Apply of a fence at MaxEpoch: %v", err)
+	}
+	if got, err := hometerm.Load(home); err != nil || got.Epoch != top || got.State != hometerm.Fenced {
+		t.Fatalf("Load of a term fenced at MaxEpoch = %+v %v", got, err)
+	}
+}
+
 func TestCheckServesSaysWhatTheHomeIs(t *testing.T) {
 	sb, err := hometerm.NewStandby(pred, 2)
 	if err != nil {
@@ -270,4 +332,16 @@ func TestCheckServesSaysWhatTheHomeIs(t *testing.T) {
 func same(a, b hometerm.Term) bool {
 	peq := func(x, y *hometerm.Peer) bool { return (x == nil) == (y == nil) && (x == nil || *x == *y) }
 	return a.Epoch == b.Epoch && a.State == b.State && peq(a.Successor, b.Successor) && peq(a.Predecessor, b.Predecessor)
+}
+
+// A serving home that named a successor withdraws it at the same epoch.
+func TestUndesignateClearsTheSuccessor(t *testing.T) {
+	named, err := hometerm.Term{Epoch: 3, State: hometerm.Serving}.Designate(succ)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := named.Undesignate()
+	if err != nil || got.Successor != nil || got.Epoch != 3 || got.State != hometerm.Serving {
+		t.Fatalf("undesignate: %+v %v", got, err)
+	}
 }

@@ -61,15 +61,34 @@ type cloudhvState struct {
 }
 
 const (
-	cloudhvWakeFor    = 20 * time.Second // a restore that takes longer has failed
-	cloudhvNapRetries = 3                // failed naps in a row before the monitor stops trying
+	cloudhvWakeFor = 20 * time.Second // a restore that takes longer has failed
+	// A shutdown: the hypervisor is asked, then given this long to write out
+	// what it holds of the disk and exit.
+	cloudhvShutdownAsk = 20 * time.Second
+	cloudhvShutdownFor = 30 * time.Second
+	// cloudhvStopFor is the longest a kept VM's monitor takes to stop it (end):
+	// reach the guest, sync it, shut the hypervisor down. Whoever asked for
+	// the stop waits this long before it kills anything, because a killed
+	// hypervisor loses disk writes.
+	cloudhvStopFor    = time.Second + syncFor + cloudhvShutdownAsk + cloudhvShutdownFor + 5*time.Second
+	cloudhvNapRetries = 3 // failed naps in a row before the monitor stops trying
 )
 
 // cloudhvSettle is the wait between the squeeze and the snapshot, while the
 // guest's freed pages reach the host. Tests shorten it.
 var cloudhvSettle = 3 * time.Second
 
-type chHold struct{ reply chan error }
+// chHold is a command's request to hold the VM awake. The monitor answers on
+// reply; a refusal is then written to the client, and sent is closed once it
+// has been, so a monitor that ends because of the refusal does not exit before
+// the client is told why.
+type chHold struct {
+	reply chan error
+	sent  chan struct{}
+}
+
+// cloudhvRefusalWait bounds the monitor's wait for a refusal to reach its client.
+const cloudhvRefusalWait = 2 * time.Second
 
 type chmon struct {
 	dir, mode string
@@ -169,6 +188,10 @@ func cloudhvMonitor(dir, mode string) int {
 				if err = m.wake(); err != nil {
 					m.logf("wake failed, the VM is lost: %v", err)
 					h.reply <- err
+					select {
+					case <-h.sent:
+					case <-time.After(cloudhvRefusalWait):
+					}
 					m.end(false)
 					return 1
 				}
@@ -458,12 +481,12 @@ func (m *chmon) shutdown() (clean bool) {
 		return false
 	}
 	g, cmd := m.gen, m.ch
-	if err := cloudhvAPI("PUT", "vmm.shutdown", nil, 20*time.Second); err != nil {
+	if err := cloudhvAPI("PUT", "vmm.shutdown", nil, cloudhvShutdownAsk); err != nil {
 		m.logf("the hypervisor refused to shut down: %v", err)
 		m.kill()
 		return false
 	}
-	for deadline := time.After(30 * time.Second); ; {
+	for deadline := time.After(cloudhvShutdownFor); ; {
 		select {
 		case e := <-m.exited:
 			if e == g {
@@ -483,6 +506,9 @@ func (m *chmon) shutdown() (clean bool) {
 func (m *chmon) nap() (lost bool, err error) {
 	t0 := time.Now()
 	if err := cloudhvAPI("PUT", "vm.pause", nil, 10*time.Second); err != nil {
+		// The call may have timed out here and still paused the VM: resume,
+		// which a VM that is still running refuses, and that is fine.
+		_ = cloudhvAPI("PUT", "vm.resume", nil, 10*time.Second)
 		return false, err
 	}
 	back := func(why error) (bool, error) { // resume: the nap is off
@@ -527,6 +553,9 @@ func (m *chmon) nap() (lost bool, err error) {
 func (m *chmon) wake() error {
 	t0 := time.Now()
 	napped := t0.Sub(m.st.Since)
+	if err := m.v.imageSame(); err != nil {
+		return err
+	}
 	snap := "snap"
 	if err := m.start(&snap); err != nil {
 		return err
@@ -535,7 +564,11 @@ func (m *chmon) wake() error {
 	deadline := time.Now().Add(cloudhvWakeFor)
 	var err error
 	for {
-		if err = cloudhvAPI("PUT", "vm.resume", nil, 5*time.Second); err == nil {
+		// One call waits out the restore: a hypervisor answers resume when
+		// the restore is done. A call given up early would still be carried
+		// out, and every later one refused as "already running". The loop
+		// is for the moments before the API socket is there.
+		if err = cloudhvAPI("PUT", "vm.resume", nil, max(time.Until(deadline), time.Second)); err == nil {
 			break
 		}
 		select {
@@ -623,10 +656,11 @@ func (m *chmon) serve(l net.Listener) {
 			if line, _ := bufio.NewReader(c).ReadString('\n'); strings.TrimSpace(line) != "hold" {
 				return
 			}
-			h := chHold{make(chan error, 1)}
+			h := chHold{make(chan error, 1), make(chan struct{})}
 			m.holds <- h
 			if err := <-h.reply; err != nil {
 				fmt.Fprintf(c, "err %v\n", err)
+				close(h.sent)
 				return
 			}
 			fmt.Fprintln(c, "ok")

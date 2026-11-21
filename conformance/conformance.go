@@ -74,7 +74,8 @@ type Options struct {
 	// SKIP (zm-eakh.12.5.13). NetPeers runs two at once and checks that
 	// neither reaches the other (IPv4 /24 and IPv6 link-local neighbours), on
 	// NetPeerPort (default 47123; the probe's own listeners take the three
-	// ports above it). NetResolve are DNS names (or name:port,
+	// ports above it; a guest that shares this machine's network wants
+	// LocalPeerPort). NetResolve are DNS names (or name:port,
 	// the port the probe opens where the guest has no getent; default 443) a
 	// run or box must resolve; unset, a guest NetAllow gives a network must
 	// resolve NetAllow's names, or github.com (zm-eakh.12.24.7). All empty

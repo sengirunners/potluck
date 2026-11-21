@@ -97,8 +97,18 @@ func fakeCloudHV(args []string) int {
 			w.WriteHeader(http.StatusNoContent)
 		}
 	}
-	mux.HandleFunc("PUT /api/v1/vm.pause", set(true))
-	mux.HandleFunc("PUT /api/v1/vm.resume", set(false))
+	// Files in the VM's directory are the test's switches and the fake's
+	// record: "paused" is there while the VM is paused, "snapshots" has a
+	// line per snapshot asked for, "fail-snapshot" makes each one fail and
+	// "dirty-shutdown" makes the hypervisor exit badly when shut down.
+	mux.HandleFunc("PUT /api/v1/vm.pause", func(w http.ResponseWriter, r *http.Request) {
+		_ = os.WriteFile("paused", nil, 0o600)
+		set(true)(w, r)
+	})
+	mux.HandleFunc("PUT /api/v1/vm.resume", func(w http.ResponseWriter, r *http.Request) {
+		_ = os.Remove("paused")
+		set(false)(w, r)
+	})
 	mux.HandleFunc("PUT /api/v1/vm.snapshot", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Dest string `json:"destination_url"`
@@ -108,6 +118,14 @@ func fakeCloudHV(args []string) int {
 		p := paused
 		mu.Unlock()
 		dir := strings.TrimPrefix(body.Dest, "file://")
+		if f, err := os.OpenFile("snapshots", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			fmt.Fprintln(f, "asked")
+			f.Close()
+		}
+		if _, err := os.Stat("fail-snapshot"); err == nil {
+			http.Error(w, "the test asked for a failed snapshot", http.StatusInternalServerError)
+			return
+		}
 		if !p || dir == body.Dest {
 			http.Error(w, "a snapshot is of a paused VM, to a file:// directory", http.StatusInternalServerError)
 			return
@@ -122,7 +140,11 @@ func fakeCloudHV(args []string) int {
 	mux.HandleFunc("PUT /api/v1/vmm.shutdown", func(w http.ResponseWriter, _ *http.Request) {
 		_ = os.WriteFile("flushed", nil, 0o600)
 		w.WriteHeader(http.StatusNoContent)
-		time.AfterFunc(10*time.Millisecond, func() { os.Exit(0) })
+		code := 0
+		if _, err := os.Stat("dirty-shutdown"); err == nil {
+			code = 1
+		}
+		time.AfterFunc(10*time.Millisecond, func() { os.Exit(code) })
 	})
 	go func() { _ = http.Serve(al, mux) }()
 	mark := func(name string) error {
@@ -209,6 +231,20 @@ func cloudhvFixture(t *testing.T, nap int) chTest {
 
 // boot clones and boots vm and waits for its guest to answer. The VM is
 // destroyed when the test ends.
+// made clones a VM and leaves switch files for the fake hypervisor in its
+// directory, before anything of it runs.
+func (c chTest) made(vm string, switches ...string) {
+	c.t.Helper()
+	if err := c.l.Clone("img", vm, 2, 512); err != nil {
+		c.t.Fatal(err)
+	}
+	for _, s := range switches {
+		if err := os.WriteFile(filepath.Join(c.l.dir(vm), s), nil, 0o600); err != nil {
+			c.t.Fatal(err)
+		}
+	}
+}
+
 func (c chTest) boot(vm string, kept bool) (*exec.Cmd, io.WriteCloser) {
 	c.t.Helper()
 	clone, boot := c.l.Clone, c.l.Boot
@@ -470,6 +506,170 @@ func TestCloudHVBootNeedsTheFence(t *testing.T) {
 	}
 }
 
+// A snapshot that fails leaves the VM running, as it was, and after three
+// failures in a row the monitor stops trying.
+func TestCloudHVFailedSnapshotLeavesTheVMAwake(t *testing.T) {
+	c := cloudhvFixture(t, 1)
+	c.made("vm1", "fail-snapshot")
+	c.boot("vm1", false)
+	asked := func() int {
+		b, _ := os.ReadFile(filepath.Join(c.l.dir("vm1"), "snapshots"))
+		return strings.Count(string(b), "asked")
+	}
+	c.until("the monitor has tried three naps", func() bool { return asked() >= cloudhvNapRetries })
+	time.Sleep(2500 * time.Millisecond) // a fourth try would come in about a second
+	if n := asked(); n != cloudhvNapRetries {
+		t.Errorf("%d snapshots asked for, want %d and no more", n, cloudhvNapRetries)
+	}
+	if st := c.state("vm1"); st.State != "awake" || st.Naps != 0 {
+		t.Errorf("state %+v, want awake with no naps", st)
+	}
+	if c.has("vm1", "paused") {
+		t.Error("the VM was left paused after a failed nap")
+	}
+	if got := c.run("vm1", "sh", "-c", "echo $FAKE_MEM"); got == "" {
+		t.Error("no command runs after the failed naps")
+	}
+}
+
+// A hypervisor that does not shut down cleanly after the snapshot may have
+// lost disk writes the saved guest holds: the VM is ended, not restored.
+func TestCloudHVUncleanShutdownAtANapLosesTheVM(t *testing.T) {
+	c := cloudhvFixture(t, 1)
+	c.made("vm1", "dirty-shutdown")
+	c.boot("vm1", false)
+	c.until("the VM is ended and removed", func() bool { return !c.has("vm1", "") })
+}
+
+// A VM's disk is only what it changed over its image. An image replaced or
+// rewritten since is refused, at a boot and at a wake.
+func TestCloudHVImageReplacedUnderAVM(t *testing.T) {
+	c := cloudhvFixture(t, 1)
+	raw := filepath.Join(c.l.c.Images, "img.raw")
+	replace := func() {
+		t.Helper()
+		if err := os.WriteFile(raw+".new", []byte("another disk"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(raw+".new", raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.l.CloneKept("img", "kept", 2, 512); err != nil {
+		t.Fatal(err)
+	}
+	c.boot("napper", false)
+	c.until("the idle VM naps", func() bool { return c.state("napper").State == "napping" })
+	replace()
+	if cmd, _, err := c.l.BootKept("kept", true, io.Discard); err == nil || cmd != nil || !strings.Contains(err.Error(), "made over") {
+		t.Errorf("boot over a replaced image: cmd %v, err %v", cmd, err)
+	}
+	var errb bytes.Buffer
+	cmd := c.l.Exec("napper", nil, io.Discard, &errb, "true")
+	if err := cmd.Run(); err == nil || cmd.ProcessState.ExitCode() != 255 || !strings.Contains(errb.String(), "made over") {
+		t.Errorf("a wake over a replaced image: %v (%s), want exit 255 naming the image", err, errb.String())
+	}
+	c.until("the VM that could not wake is removed", func() bool { return !c.has("napper", "") })
+}
+
+// The helper is given the network lock and holds it until it ends, though
+// the process that started it has let go.
+func TestCloudHVHelperHoldsTheNetworkLock(t *testing.T) {
+	dir := t.TempDir()
+	helper := filepath.Join(dir, "helper")
+	gate := filepath.Join(dir, "end")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nwhile [ ! -e '"+gate+"' ]; do sleep 0.05; done\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	held, locked := cloudhvNetLock(dir, time.Second)
+	if !locked {
+		t.Fatal("no lock")
+	}
+	cmd := cloudhvHelperCmd(helper, true, held, "up")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	held.Close()
+	if f, free := cloudhvNetLock(dir, 100*time.Millisecond); free {
+		t.Error("the lock is free while the helper runs")
+	} else if f != nil {
+		f.Close()
+	}
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	f, free := cloudhvNetLock(dir, time.Second)
+	if !free {
+		t.Error("the lock is still held after the helper ended")
+	}
+	if f != nil {
+		f.Close()
+	}
+	if c := cloudhvHelperCmd(helper, false, nil, "down", "pchd50002"); filepath.Base(c.Path) != "sudo" || c.Args[1] != "-n" || c.Args[2] != helper {
+		t.Errorf("not root: %v, want it run through sudo -n", c.Args)
+	}
+}
+
+// A VM naps as its binding says at each boot. One still running under an
+// older setting takes no secrets though the binding now serves them.
+func TestCloudHVAVMNapsAsItsBindingSaysNow(t *testing.T) {
+	c := cloudhvFixture(t, 0)
+	if err := c.l.CloneKept("img", "vm1", 2, 512); err != nil {
+		t.Fatal(err)
+	}
+	c.l.c.NapIdleS = 60
+	cmd, _ := c.start("vm1", c.l.BootKept)
+	if v, err := cloudhvLoad(c.l.dir("vm1")); err != nil || v.NapIdleS != 60 {
+		t.Fatalf("after a boot under ch_nap_idle_s=60: %+v, %v", v, err)
+	}
+	now := config{VM: "cloudhv", Kind: "box", CloudHV: cloudhvConfig{Dir: c.l.c.Dir}} // the binding's key set back to 0
+	r := record{Handle: "box:a/r1", OS: "linux", VM: "vm1"}
+	if !boxSecretsServed(now, "linux") {
+		t.Fatal("the binding serves no secrets with naps off")
+	}
+	if err := secretsListed(now, r, 1); code(err) != "forbidden" {
+		t.Errorf("a secret for a VM that still naps: %v, want forbidden", err)
+	}
+	c.l.PowerOff("vm1", cmd.Process.Pid)
+	c.l.c.NapIdleS = 0
+	c.start("vm1", c.l.BootKept)
+	if err := secretsListed(now, r, 1); err != nil {
+		t.Errorf("a secret once the VM was started again with naps off: %v", err)
+	}
+}
+
+// What decides that a binding which naps its boxes takes no secrets: the
+// functions describe, exec, spawn and the secrets verb all ask. A nap saves a
+// box's memory to the host's disk.
+func TestCloudHVNappingBindingTakesNoSecrets(t *testing.T) {
+	for nap, want := range map[int]bool{0: true, 60: false} {
+		c := config{VM: "cloudhv", Kind: "box", CloudHV: cloudhvConfig{NapIdleS: nap}}
+		if got := boxSecretsServed(c, "linux"); got != want {
+			t.Errorf("ch_nap_idle_s=%d: secrets served %v, want %v", nap, got, want)
+		}
+		err := secretsListed(c, record{Handle: "box:a/r1", OS: "linux"}, 1)
+		if (err == nil) != want || (err != nil && code(err) != "bad_request") {
+			t.Errorf("ch_nap_idle_s=%d: an exec with a secret: %v", nap, err)
+		}
+		if err := secretsListed(c, record{Handle: "box:a/r1", OS: "linux"}, 0); err != nil {
+			t.Errorf("ch_nap_idle_s=%d: an exec with no secret: %v", nap, err)
+		}
+	}
+	if boxSecretsServed(config{VM: "tart", Kind: "box", CloudHV: cloudhvConfig{NapIdleS: 60}}, "linux") != true {
+		t.Error("another layer was refused secrets for a cloudhv key")
+	}
+	// A runner's registration is a credential in the box's memory too.
+	m := map[string]string{"vm": "cloudhv", "ch_firmware": "/fw/CLOUDHV.fd", "ch_images": "/images", "ch_nap_idle_s": "60", "runner_dir": "/opt/runner"}
+	for k, v := range cfg(t) {
+		m[k] = v
+	}
+	m["kind"] = "box"
+	if _, err := parseConfig(m); err == nil || !strings.Contains(err.Error(), "runner_dir") {
+		t.Errorf("ch_nap_idle_s with runner_dir: %v, want it refused", err)
+	}
+}
+
 // A cancelled boot's helper runs as root and outlives the boot. A destroy
 // waits for it, so the tap it was still making is removed and not left.
 func TestCloudHVDestroyWaitsForABootsHelper(t *testing.T) {
@@ -659,14 +859,17 @@ func TestCloudHVFenceAndHelperArguments(t *testing.T) {
 			t.Errorf("the fence lacks %q", want)
 		}
 	}
-	for _, good := range [][]string{{"up", "pch0a0b02", "1000", "10.213.0.1"}, {"down", "pchfefe02"}} {
+	for _, good := range [][]string{{"up", "pchd50002", "1000", "10.213.0.1"}, {"down", "pchfefe02"}} {
 		if _, _, _, _, err := cloudhvNetArgs(good); err != nil {
 			t.Errorf("%v: %v", good, err)
 		}
 	}
+	// Each bad case names the tap that goes with its address, so it is its
+	// own fault that is refused.
 	for _, bad := range [][]string{nil, {"up"}, {"down", "eth0"}, {"down", "pch0a0b02", "extra"}, {"up", "docker0", "1000", "10.213.0.1"},
-		{"up", "pch0a0b02", "root", "10.213.0.1"}, {"up", "pch0a0b02", "1000", "192.168.1.1"}, {"up", "pch0a0b02", "1000", "10.213.0.2"},
-		{"up", "pch0a0b0g", "1000", "10.213.0.1"}, {"flush", "pch0a0b02"}} {
+		{"up", "pchd50002", "root", "10.213.0.1"}, {"up", "pcha80102", "1000", "192.168.1.1"}, {"up", "pchd50003", "1000", "10.213.0.2"},
+		{"up", "pch0a0b0g", "1000", "10.213.0.1"}, {"flush", "pch0a0b02"},
+		{"up", "pchd50006", "1000", "10.213.0.1"}} { // the last: another link's tap with this link's address
 		if _, _, _, _, err := cloudhvNetArgs(bad); err == nil {
 			t.Errorf("the helper took %v", bad)
 		}

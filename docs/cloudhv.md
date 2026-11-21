@@ -34,14 +34,26 @@ The helper takes two forms and refuses everything else (`cloudhvNetArgs` in `vmh
 | `up <tap> <uid> <host address>` | loads the fence (below), makes the tap `<tap>` owned by `<uid>`, deletes the kernel's connection records for the link's guest address, gives the tap the address, turns on IPv4 forwarding, and on a host with Docker adds two accepts for the layer's taps to Docker's `DOCKER-USER` chain |
 | `down <tap>` | deletes the tap |
 
-`<tap>` must be one of the layer's own names (`pch` and six hex digits) and `<host address>` the first address of a
-/30 inside `10.0.0.0/8`. `up` refuses a link whose guest address the host already routes somewhere else (its LAN, a
-VPN): give the binding another `ch_net`. It also refuses when `conntrack` is not installed. A VM whose `up` call
-fails is not started.
+`<tap>` must be one of the layer's own names (`pch` and six hex digits), `<host address>` the first address of a
+/30 inside `10.0.0.0/8`, and the name the one that goes with the address. A VM whose `up` call fails is not
+started. The helper refuses:
+
+- a tap a running VM's hypervisor holds open, for `up` and for `down` (a `down` first waits 10 seconds for it
+  to be let go of): a running VM's link is never taken over or removed;
+- a link whose guest address the host's main routing table already sends somewhere else (a LAN, a VPN's route):
+  give the binding another `ch_net`. Routes a VPN keeps in a table of its own are not seen; the fence then drops
+  the guest's packets, so such a VM has no network and reaches nothing it should not;
+- a host with no `conntrack`.
+
+What the helper still lets its caller do: route any free /30 inside `10.0.0.0/8` to a tap of any user, delete any
+of the layer's taps that no process holds open (a napping VM's), reload the fence, and delete connection records
+for those addresses. Allow it only for the user the driver runs as.
 
 The helper runs as root, so the driver cannot end it. A start that is cancelled can leave a helper still making
-its tap. Each VM has a lock the helper holds until it ends, and whatever stops the VM waits for that lock before
-it removes the tap, so a cancelled start leaves no tap behind (measured: 108 cancelled starts, none left).
+its tap. Each VM has a lock the helper holds until it ends, and whatever stops the VM waits up to 15 seconds for
+that lock before it removes the tap (measured: 108 cancelled starts, no tap left). A tap can still be left: by a
+helper stuck longer than that, or by a killed hypervisor that takes more than 10 seconds to let go of it. Nothing
+removes such a tap, and its link is not handed out again: delete it with `ip link del <tap>`.
 
 Keep the driver binary owned by root and not writable by the driver's user: whoever can replace the binary can run
 anything as root through this line.
@@ -64,8 +76,17 @@ scripts/cloudhv-image.sh /var/lib/potluck/images/box.raw ./potluck-guest /usr/sh
 
 It prints the pin to use. A box binding's `images` are pinned by digest (`<name>@sha256:<hex>`), and the digest is
 the image file's own sha256, which the script writes beside it in `<name>.raw.sha256`. Hashing a 20 GB file at
-every acquire is too slow, so the layer checks the pin against that file, and refuses an image that was modified
-after the digest was written. The driver never writes to an image: each VM's disk is a qcow2 overlay over it.
+every acquire is too slow, so the layer checks the pin against that file, and refuses an image whose modification
+time is later than the digest file's. That catches an image rebuilt or edited without a new digest. It is not a
+check against someone who can write the images directory: keep that directory writable only by the owner.
+
+The driver never writes to an image: each VM's disk is a qcow2 overlay over it, holding only what the VM changed.
+A VM records which file its image was (size and modification time) and is refused, at a start and at a wake,
+once that file has been rebuilt or rewritten. A rebuilt image is for new VMs; a kept box made over the old one
+must be made again. A VM made by a driver older than this check has no such record and is not checked.
+
+`potluck-guest` in the image and the driver must be built from the same source: they agree on a port and a
+protocol. Rebuild the image, and pin its new digest, when the driver is upgraded.
 
 `potluck-guest` sets the guest's address itself. The host makes each VM's vsock context id from the guest's IPv4
 address, and the guest reads it back, so one image serves every VM with nothing written into it per VM. The image
@@ -84,13 +105,22 @@ MiB when unset).
 | `ch` | `cloud-hypervisor` on PATH | the cloud-hypervisor binary |
 | `ch_qemu_img` | `qemu-img` on PATH | the qemu-img binary |
 | `ch_dir` | `<state_dir>/cloudhv` | where each VM's directory is made: its disk, and its saved memory while it naps |
-| `ch_net` | `10.213.0.0/16` | the private range each VM's link is cut from, a /30 each; inside `10.0.0.0/8`. Two bindings on one host need two ranges |
+| `ch_net` | `10.213.0.0/16` | the private range each VM's link is cut from, a /30 each; inside `10.0.0.0/8`. Two bindings on one host need two ranges. Given one range they can pick the same link, and the second VM to start on it is not started |
 | `ch_nap_idle_s` | `0` | nap a VM that has run no command for this many seconds; `0` never naps |
 | `ch_console` | `off` | `on` writes the guest's serial console to `console.log` in the VM's directory. Off by default because a guest can fill the host's disk through it |
 
 `network=nat` is refused: the layer has one network, the fenced one.
 
 ## The nap
+
+A binding with `ch_nap_idle_s` set serves no secrets: it lists neither the `secrets` nor the `box-secrets`
+capability, refuses both, and cannot have a `runner_dir` (a runner's registration is a credential). A nap writes
+the whole of a guest's memory to a file on the host, and secrets are files in the guest's memory, which the
+protocol says never reach a disk. The saved file is not encrypted. Use naps for boxes that hold nothing secret in
+memory, or leave them off.
+
+A VM naps as its binding says when the VM starts. Set `ch_nap_idle_s` to 0 and a VM already running still naps,
+and is refused secrets, until it is started again.
 
 With `ch_nap_idle_s` set, each VM's monitor (one host process per VM, the driver run as `--cloudhv-vm`) watches for
 the VM being idle: no `exec` or `spawn` command in flight. When it has been idle that long the monitor:
@@ -110,15 +140,16 @@ resumes it, tells the guest the time (a guest's clock stops while it naps) and h
 deletes the saved state. Then the command runs. One nap is restored once: two guests never start from the same
 memory.
 
-What a guest sees: its programs, files, memory and open sockets are as they were. Its clock jumps forward by the
-length of the nap. A TCP connection whose other end gave up during the nap is dead when the guest wakes. Timers
-that were due during the nap fire at the wake.
+What a guest sees: its programs, files, memory and open sockets are as they were. A program left running in the
+background by an `exec` (not a `spawn`) does not keep the VM awake: it stops at the nap and goes on at the wake.
+Its clock jumps forward by the length of the nap. A TCP connection whose other end gave up during the nap is dead
+when the guest wakes. Timers that were due during the nap fire at the wake.
 
-A nap that fails before the VM is saved (the guest does not answer, the snapshot fails) leaves the VM awake; after
-three failures in a row the monitor stops trying for that VM. A VM is lost, and is ended and removed, when it can
-neither go on nor be woken: its hypervisor did not shut down cleanly after the snapshot, it could not be resumed
-after a failed snapshot, or its saved state is damaged or gone at the wake. A command that asked for a lost VM
-answers exit 255.
+A nap that fails before the VM is saved (the guest does not answer, the snapshot fails) leaves the VM awake when
+the hypervisor still answers; after three failures in a row the monitor stops trying for that VM. A VM is lost, and
+is ended and removed, when it can neither go on nor be woken: its hypervisor did not shut down cleanly after the
+snapshot, it could not be resumed after a failed snapshot, or its saved state is damaged or gone at the wake. A
+command that asked for a lost VM answers exit 255.
 
 Each VM's directory has `state.json` (awake or napping, since when, naps so far, total time awake and napping) and
 `events.jsonl` (one line per nap and wake, with how long each step took and the snapshot's size).
@@ -162,14 +193,18 @@ On one host (2026-11-21; Ubuntu 24.04, kernel 6.8, cloud-hypervisor v53.0, nftab
 
 - `potluck-conformance --kind box --remote` with `ch_nap_idle_s=2`, so VMs napped and woke during the suite, and
   with `--net-allow`, four `--net-forbid` addresses (the host's LAN address, its tailnet address, another bridge's
-  address and the LAN's router), `--net-mail` and `--net-peers`: 121 checks passed and none failed;
+  address and the LAN's router), `--net-mail` and `--net-peers`: 100 checks passed and none failed (the secrets
+  checks are skipped: a binding that naps serves none), and no tap was left on the host;
 - the same suite with naps off and no net flags: 107 passed and none failed;
 - a guest writing 45 files of 20 MB straight to its disk while it was napped part-way through: every file read
   back whole after the wake;
-- 108 starts cancelled part-way, at varied moments: no tap and no VM directory left.
+- 168 starts cancelled part-way, at varied moments, over two runs: no tap and no VM directory left;
+- on a running VM's tap the helper refused both `up` and `down`, and the box's user could not bind the agent's
+  port.
 
-Skipped by the suite, and so not proven: terminals, volumes, the shelf, warm boxes, a checkout, reclaim, box
-authority, root, and mail over IPv6 (those addresses do not open from the host either, so nothing was shown).
+Skipped by the suite, and so not proven: secrets on a binding that naps, terminals, volumes, the shelf, warm
+boxes, a checkout, reclaim, box authority, root, and mail over IPv6 (those addresses do not open from the host
+either, so nothing was shown).
 
 Not tested: arm64, a host without Docker, any other cloud-hypervisor version, and more than a few VMs at once
 through the driver.
@@ -177,6 +212,7 @@ through the driver.
 ## What it does not do
 
 - No terminal (`spawn` with `pty`), no `root` or `docker` capability, no volumes, no shelf.
+- No secrets on a binding that naps (above).
 - A napping box still holds its slot and its lease: napping frees memory, not a place in the binding.
 - A box with a `spawn`ed process still running is not idle, so it never naps.
 - Stopping a kept box (`persist`) that is napping discards its saved memory: it starts again from its disk.

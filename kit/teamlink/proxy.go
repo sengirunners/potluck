@@ -426,6 +426,7 @@ func (s *Service) relay(w http.ResponseWriter, r *http.Request, resp *http.Respo
 // ForwardResp builds and sends the forwarded request. body, when not nil,
 // is the already-read request body.
 func (s *Service) ForwardResp(r *http.Request, x *Remote, area string, explicit bool, body []byte) (*http.Response, error) {
+	moved := x.homeChanged() // before the fence: a home left after it ends this call
 	fence := x.RoleReply()
 	snap := fence.Snap
 	if err := Ended(snap); err != nil {
@@ -468,6 +469,14 @@ func (s *Service) ForwardResp(r *http.Request, x *Remote, area string, explicit 
 		wait = max(wait, h.AnswerWithin(r, body))
 	}
 	ctx, cancel := context.WithCancel(r.Context())
+	done := ctx.Done() // read here: ctx is reassigned below while the goroutine runs
+	go func() {        // a live answer (an event stream) ends when this machine leaves the home or it falls behind
+		select {
+		case <-moved:
+			cancel()
+		case <-done:
+		}
+	}()
 	timer := time.AfterFunc(wait, cancel)
 	stop := func() { timer.Stop(); cancel() }
 	ctx = core.WithReadProgress(ctx, func() { timer.Reset(wait) })

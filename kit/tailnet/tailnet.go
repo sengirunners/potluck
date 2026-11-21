@@ -484,6 +484,9 @@ func (s *Service) setErr(err error) {
 }
 
 func (s *Service) publish(ctx context.Context, typ string) {
+	if s.d.Events == nil {
+		return // a parked daemon has no event log (kit/server term.go)
+	}
 	st := s.Status(ctx)
 	if _, err := s.d.Events.Publish(ctx, events.Input{Type: typ, Subject: s.d.Config.Machine, Data: st}); err != nil {
 		s.d.Log.Warn("tailnet: publish", "type", typ, "err", err)

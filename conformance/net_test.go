@@ -3,7 +3,6 @@ package conformance
 import (
 	"context"
 	"fmt"
-	"math/rand/v2"
 	"net"
 	"os"
 	"os/exec"
@@ -11,7 +10,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -203,46 +201,6 @@ func TestNetChecksNeedACurrentProbe(t *testing.T) {
 	}
 	_ = os.RemoveAll(dir)
 }
-
-// peerPorts answers a NetPeerPort whose span (the peerPortSpan ports from it
-// up, each an nc listener in the probe) nothing holds now, and that no other
-// test in this process was given; fixture sets it. A port in the kernel's
-// ephemeral range will not do: on a busy test machine an outbound connection
-// can hold it, nc then cannot bind it and exits at once, and the probe
-// answers 66, failing the check as "cannot listen" (zm-4dm4). So the span is
-// below the default ephemeral ranges (Linux 32768-60999, macOS 49152-65535),
-// and each port must bind on all addresses as nc's listener does.
-func peerPorts(t *testing.T) int {
-	t.Helper()
-	const lo, hi = 20000, 32768
-	givenPorts.Lock()
-	defer givenPorts.Unlock()
-	for range 200 {
-		p := lo + rand.IntN(hi-lo-peerPortSpan)
-		free := true
-		for i := 0; free && i < peerPortSpan; i++ {
-			l, err := net.Listen("tcp", ":"+strconv.Itoa(p+i))
-			free = err == nil && !givenPorts.m[p+i]
-			if err == nil {
-				l.Close()
-			}
-		}
-		if free {
-			for i := range peerPortSpan {
-				givenPorts.m[p+i] = true
-			}
-			return p
-		}
-	}
-	t.Fatalf("no %d free ports in a row in %d-%d", peerPortSpan, lo, hi)
-	return 0
-}
-
-// givenPorts are the ports peerPorts gave out: parallel tests never share one.
-var givenPorts = struct {
-	sync.Mutex
-	m map[int]bool
-}{m: map[int]bool{}}
 
 // listeners answers an address that accepts and one that is closed.
 func listeners(t *testing.T) (open, closed string) {
@@ -480,6 +438,7 @@ func TestNetSlowListener(t *testing.T) {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	for kind, peers := range map[string]string{"box": "boxes", "run": "runs"} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel() // the slow nc on PATH above serves both
 			path, opt := fixture(t, kind, "")
 			_, closed := listeners(t)
 			opt.Only, opt.NetForbid, opt.NetPeers = []string{"net"}, []string{closed}, true

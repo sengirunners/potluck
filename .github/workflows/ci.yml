@@ -7,6 +7,11 @@ on:
 # (internal/workflowlint holds this); the guard is false on push, so main and same-repository PRs take route's label.
 permissions:
   contents: read
+# A newer push to a pull request cancels that pull request's older run; a push to main never cancels (each commit's
+# run decides whether release.yml publishes it).
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # Where go runs: the self-hosted scale set CI_ROUTE_LABEL (a repository variable) when the capacity report at
   # CI_CAPACITY_URL (a repository secret, so public logs do not print it) says it has a free runner, else the
@@ -36,8 +41,7 @@ jobs:
     needs: route
     # A failed or skipped route still runs go, on the fallback.
     if: ${{ !cancelled() }}
-    # Four cores: the kit and compute packages (moved from zm) test beside conformance, which
-    # alone took 590 s; on two cores the whole suite queues behind it.
+    # Four cores: the kit, compute and vmhost packages test beside conformance.
     runs-on: ${{ github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || needs.route.outputs.label || 'sengi-standard-4-ubuntu-2404' }}
     timeout-minutes: 40
     steps:
@@ -59,15 +63,36 @@ jobs:
       # A throwaway HOME and ZM_HOME, as zm's own suite runs: no test can touch real dotfiles and pass silently.
       # The whole suite runs on every PR and on main; internal/layers checks the layer rule and that nothing
       # here depends on zm.
+      #
+      # Two go test runs at once. The conformance package alone took 15 of this job's 16 minutes at go test's
+      # default -parallel (the core count, 4): its drivers mostly wait on shell scripts and deadlines, so it runs at
+      # -parallel 16 in one go test while every other package runs in a second, the slowest of them listed first so
+      # none starts last and runs alone (a package missing from that list only starts later; go test refuses a name
+      # that is no package). The step fails if either fails.
       - name: go test
         # umask 022: the runner's shell has 077, under which boxcp's TestDirRoundTrip fails (the reference box's
         # tar extracts through the umask). It fails the same way in zm under 077 and passes in zm's CI.
         run: |
+          set -o pipefail
           umask 022
           tmp=$(mktemp -d)
           for v in $(env | grep -E '^ZM_' | cut -d= -f1); do unset "$v"; done
-          env GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" GOPATH="$(go env GOPATH)" \
-            HOME="$tmp/home" ZM_HOME="$tmp/zm" go test -timeout 30m ./...
+          export GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)" GOPATH="$(go env GOPATH)" \
+            HOME="$tmp/home" ZM_HOME="$tmp/zm"
+          mod=github.com/sengirunners/potluck
+          slow="$mod/vmhost $mod/runners $mod/scripts/release $mod/runtarget $mod/kit/owners"
+          rest=$(go list ./... | grep -vxF "$mod/conformance")
+          for p in $slow; do rest=$(printf '%s\n' "$rest" | grep -vxF "$p"); done
+          [ "$(printf '%s\n' "$rest" | wc -l)" -gt 10 ] || { echo "go list named too few packages"; exit 1; }
+          # conformance's lines come as they are written, each starting "conformance: ", so a timeout or a cancel
+          # still shows them.
+          # Under pipefail the pipeline's status is go test's, and waiting on it waits for sed's last line too.
+          go test -timeout 30m -parallel 16 ./conformance/ 2>&1 | sed -u 's/^/conformance: /' &
+          conf=$!
+          code=0
+          go test -timeout 30m $slow $rest || code=$?
+          wait "$conf" || code=$?
+          exit "$code"
   # Conformance as a report: potluck-conformance against potluck-driver-local (scripts/ci/conformance-report.sh), its
   # results written as JSON with the skipped checks' names (--json-out) and uploaded as the conformance-results
   # artifact. Report only: no required check names it, no job needs it, and the conformance step does not fail the

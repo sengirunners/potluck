@@ -847,3 +847,42 @@ func TestMachineFromHost(t *testing.T) {
 		}
 	}
 }
+
+// A parked daemon (kit/server term.go) runs the tailnet with no store,
+// registry or event log: the node comes up and goes down, and its up and
+// down are published nowhere instead of failing.
+func TestParkedDaemonsTailnetHasNoEventLog(t *testing.T) {
+	home, err := os.MkdirTemp("", "zm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	if err := os.WriteFile(filepath.Join(home, config.FileConfig), []byte(`{"tailnet": {"enabled": true, "hostname": "zm-mini2"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.EnvMachine, "mini")
+	t.Setenv(config.EnvHuman, "ana")
+	t.Setenv("TS_AUTHKEY", "")
+	cfg, err := config.LoadFrom(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &core.Deps{Config: cfg, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Started: time.Now(),
+		Handler: http.NotFoundHandler()}
+	node := newFakeNode()
+	e := &env{d: d, node: node, home: home, s: New(d)}
+	e.s.NewNode = func(c NodeConfig) Node { node.set(func(n *fakeNode) { n.cfg = c }); return node }
+	if err := e.s.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	node.set(func(n *fakeNode) { n.state = StateRunning })
+	e.waitRunning(t)
+	// Its health tells the owner this run joins the tailnet (kit/server).
+	if self, err := e.s.Self(context.Background()); err != nil || !self.Enabled {
+		t.Fatalf("Self of a node that came up: %+v %v", self, err)
+	}
+	e.s.Close()
+	if !node.get().closed {
+		t.Fatal("Close left the node open")
+	}
+}

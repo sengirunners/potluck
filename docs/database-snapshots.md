@@ -14,8 +14,26 @@ proxy requirements, but does not select the default agent template when a
 database recipe supplies the image. That image must include the selected agent.
 The automatic Git base and disjoint dependency layers remain available.
 
-A box acquire can name a database recipe with `"database":"example-db"`. The
-project owner configures that name in `project.toml`:
+A box acquire can name a database recipe with `"database":"example-db"`. An
+owner or admin of the whole project sets that name, live, on the project's
+daemon (through the pool with `-P <pool>`):
+
+```sh
+potluck sandbox database set example-db \
+  --image registry.example/team/example-db@sha256:<64 lowercase hex digits> \
+  --manifest-file manifest.json            # the image's manifest.json, byte for byte; - reads stdin
+potluck sandbox database                   # name and image of each; --json adds the manifest
+potluck sandbox database rm example-db
+```
+
+The daemon checks the recipe with the same rules as below and rewrites
+`project.toml`; the very next acquire naming it resolves the new recipe, with
+no daemon restart. Setting the recipe the project already has writes nothing
+(`"changed": false`). `--if-image <old pin>` sets it only while the recipe still
+has that image, else answers a conflict, so a job that read the old pin never
+overwrites a newer one. The HTTP routes are `GET /v0/databases` (read on the
+project) and `PUT` / `DELETE /v0/databases/{name}` (body `image`, `manifest`,
+optional `if_image`). In `project.toml` a recipe reads:
 
 ```toml
 [[databases]]
@@ -23,6 +41,9 @@ name = "example-db"
 image = "registry.example/team/example-db@sha256:<64 lowercase hex digits>"
 manifest = "<the exact JSON text of the image's manifest.json, TOML-escaped>"
 ```
+
+An edit of `project.toml` by hand is read only when the daemon starts, and a
+`set` after one is refused until it restarts.
 
 The image must also be lent by the chosen box binding, pinned to that same
 immutable digest. A binding that does not lend it refuses before it makes

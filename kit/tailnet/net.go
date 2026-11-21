@@ -62,16 +62,16 @@ func (s *Service) Peer(ctx context.Context, remoteAddr string) (core.Remote, err
 // Self implements core.NetService.
 func (s *Service) Self(ctx context.Context) (core.NetSelf, error) {
 	s.mu.Lock()
-	r := s.run
+	r, enabled := s.run, s.enabled
 	s.mu.Unlock()
 	if r == nil {
-		return core.NetSelf{}, nil
+		return core.NetSelf{Enabled: enabled}, nil
 	}
 	st, err := r.node.Status(ctx)
 	if err != nil {
-		return core.NetSelf{Hostname: r.cfg.Hostname}, err
+		return core.NetSelf{Enabled: enabled, Hostname: r.cfg.Hostname}, err
 	}
-	out := core.NetSelf{Running: st.State == StateRunning && r.serving.Load(), NodeID: st.SelfID, Hostname: r.cfg.Hostname,
+	out := core.NetSelf{Running: st.State == StateRunning && r.serving.Load(), Enabled: enabled, NodeID: st.SelfID, Hostname: r.cfg.Hostname,
 		DNSName: st.SelfDNS, HTTPS: r.https.Load()}
 	if st.State != StateRunning {
 		out.AuthURL = st.AuthURL

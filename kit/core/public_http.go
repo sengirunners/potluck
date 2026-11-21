@@ -13,6 +13,7 @@ import (
 type PublicHTTP struct {
 	mu      sync.RWMutex
 	dynamic []publicHostSource
+	gate    func(http.Handler) http.Handler
 }
 
 const PublicHTTPService = "kit.public-http"
@@ -46,6 +47,16 @@ func (p *PublicHTTP) RegisterHostSource(matches func(string) bool, h http.Handle
 	defer p.mu.Unlock()
 	p.dynamic = append(p.dynamic, publicHostSource{matches, h})
 }
+
+// Gate puts g in front of every matched hostname's handler: the daemon's
+// own gate (kit/server parkGate: a home that parks serves no module's
+// public host either).
+func (p *PublicHTTP) Gate(g func(http.Handler) http.Handler) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.gate = g
+}
+
 func (p *PublicHTTP) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.RLock()
@@ -61,8 +72,12 @@ func (p *PublicHTTP) Wrap(next http.Handler) http.Handler {
 				break
 			}
 		}
+		gate := p.gate
 		p.mu.RUnlock()
 		if handler != nil {
+			if gate != nil {
+				handler = gate(handler)
+			}
 			handler.ServeHTTP(w, r)
 			return
 		}

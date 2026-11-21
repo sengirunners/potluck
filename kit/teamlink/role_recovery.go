@@ -42,11 +42,15 @@ func (x *Remote) RoleReply() RoleReplyFence {
 
 // No network or SQL while guarded. A revocation/leave transition waits for
 // admitted metadata publication, then purges it; an old lifetime cannot
-// publish after recovery even if its scope/cap happen to match again.
+// publish after recovery even if its scope/cap happen to match again, nor
+// after a repoint, nor while the home is behind.
 func (f RoleReplyFence) Guard() (func(), bool) {
 	f.X.PublicationMu.RLock()
 	f.X.Mu.Lock()
 	current := !f.X.Left && !f.X.Recovery.Closing && f.X.R.State == api.RemoteOK && f.X.R.ScopeVersion == f.Snap.ScopeVersion && f.X.R.Cap == f.Snap.Cap && f.X.Recovery.Generation == f.generation
+	// The same home (a repoint makes another: an old home's answer is not
+	// the new one's), and one that has not lost its term (successor.go).
+	current = current && f.X.R.URL == f.Snap.URL && f.X.R.Fingerprint == f.Snap.Fingerprint && !f.X.home.Behind
 	f.X.Mu.Unlock()
 	if !current {
 		f.X.PublicationMu.RUnlock()

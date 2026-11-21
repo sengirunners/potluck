@@ -1016,13 +1016,7 @@ func (s *Service) OpsLoop(ctx context.Context, x *Remote) {
 			}
 			continue
 		}
-		fence := x.RoleReply()
-		q := url.Values{"project": {id}, "wait_ms": {strconv.Itoa(int(OpsWait / time.Millisecond))}}
-		cctx, cancel := context.WithTimeout(ctx, OpsWait+CallTimeout)
-		var out api.MachineOpList
-		err := s.CallRemote(cctx, x, http.MethodGet, "/v0/team/ops?"+q.Encode(), nil, &out)
-		cancel()
-		if err != nil {
+		if err := s.pollOps(ctx, x, id); err != nil {
 			wait := backoff
 			if OlderAuthority(err) {
 				wait = opsOlder
@@ -1035,13 +1029,29 @@ func (s *Service) OpsLoop(ctx context.Context, x *Remote) {
 			continue
 		}
 		backoff = opsRetryMin
-		for _, op := range out.Ops {
-			if !fence.Current() {
-				break // a later role lifetime cannot admit an older answer's operations
-			}
-			s.TakeOps(ctx, id, []api.MachineOp{op})
-		}
 	}
+}
+
+// pollOps is one GET /v0/team/ops at x's home for project id: it takes the
+// ops the home answers while the role lifetime and the home it was asked
+// of still stand (RoleReplyFence).
+func (s *Service) pollOps(ctx context.Context, x *Remote, id string) error {
+	fence := x.RoleReply()
+	q := url.Values{"project": {id}, "wait_ms": {strconv.Itoa(int(OpsWait / time.Millisecond))}}
+	cctx, cancel := context.WithTimeout(ctx, OpsWait+CallTimeout)
+	var out api.MachineOpList
+	err := s.CallRemote(cctx, x, http.MethodGet, "/v0/team/ops?"+q.Encode(), nil, &out)
+	cancel()
+	if err != nil {
+		return err
+	}
+	for _, op := range out.Ops {
+		if !fence.Current() {
+			break // a later role lifetime, or another home, cannot admit an older answer's operations
+		}
+		s.TakeOps(ctx, id, []api.MachineOp{op})
+	}
+	return nil
 }
 
 // wakes are one-shot signals by key: ch is closed by the next signal.

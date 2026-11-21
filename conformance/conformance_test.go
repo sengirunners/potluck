@@ -96,7 +96,11 @@ func fixture(t *testing.T, kind, bug string) (string, Options) {
 		opt.LeftoverRoots = []string{tmp}
 		opt.Config = map[string]string{"remote": repo.Remote, "host_tmp": tmp}
 	}
-	opt.NetPeerPort = peerPorts(t)
+	port, err := LocalPeerPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt.NetPeerPort = port
 	return path, opt
 }
 
@@ -249,6 +253,7 @@ func TestStrict(t *testing.T) {
 		{"not strict", func(o *Options) { withNet("127.0.0.1:" + fport)(o); o.Strict = false }, []string{"SKIP  a short ttl ends the resource with no release", "is this machine's loopback address"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel() // each case is its own driver; PATH above is the same for all
 			path, opt := fixture(t, "box", "")
 			opt.Only, opt.Strict = []string{"net", "expiry"}, true
 			if c.edit != nil {

@@ -2,6 +2,7 @@
 // registry, lets the binary's Wiring construct the modules into core.Deps,
 // mounts their routes on one guarded router and serves the API on the
 // home's socket (config.Names: the program's first socket name). It imports no module (internal/wiring has the lists).
+// A home whose term does not serve gets a parked daemon instead (term.go).
 // Owned by the integrator.
 package server
 
@@ -32,7 +33,9 @@ import (
 	"github.com/sengirunners/potluck/kit/store"
 )
 
-// Daemon is a wired, not yet listening daemon.
+// Daemon is a wired, not yet listening daemon. A parked one (a home whose
+// term does not serve: term.go) has no Deps.Store, Projects or Events and
+// no modules but its ParkedListeners'.
 type Daemon struct {
 	Deps *core.Deps
 	// Handler is the full API with middleware. Requests reaching it are
@@ -53,6 +56,23 @@ type Daemon struct {
 	// program is config.Program when New ran: the program whose daemon
 	// this is (its home's owner, its machine record).
 	program string
+	// parked is the term of a home this daemon does not serve (term.go):
+	// nil for a serving daemon.
+	parked *hometerm.Term
+	// parking is set once a serving daemon starts to park (freeze, fence):
+	// from then on every request but health and the term answers parked.
+	parking atomic.Bool
+	// firstFence is closed once a serving daemon's first ask of its named
+	// successor has its answer (fenceLoop); nil = no Serve yet, so nothing
+	// waits (parkGate).
+	firstFence atomic.Pointer[chan struct{}]
+	// loops are the serving daemon's own loops (start); Serve waits for them
+	// to end before it closes the modules and the store.
+	loops sync.WaitGroup
+	// unlockWriter releases the home's writer lock (config.LockWriter),
+	// which a serving daemon holds from New to Close; nil when parked.
+	unlockWriter func()
+	closeOnce    sync.Once
 }
 
 // startGate bounds how long a socket call waits for the modules to start.
@@ -64,8 +84,11 @@ const startGate = 30 * time.Second
 // must not find one half started (a restarted replica's GET
 // /v0/team/remotes listed a joined project with no copy, or none at all,
 // and its first `bd` call could miss the project). Starting never waits on
-// the network, so the wait is the modules' few milliseconds; in-process
-// callers (d.Handler) never wait.
+// the network, so the wait is the modules' few milliseconds. In-process
+// callers (d.Handler) do not wait here, but Handler itself holds them
+// like every caller until the first ask of a named successor has its answer
+// (parkGate), which runs after every module has started: a module's Start
+// must not wait on a call through d.Handler.
 func (dm *Daemon) gate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if ch := dm.started.Load(); ch != nil && r.URL.Path != "/v0/health" {
@@ -101,11 +124,35 @@ func (dm *Daemon) KeepSessions() {
 // (closed in reverse). internal/wiring has the lists; nil wires none.
 type Wiring func(d *core.Deps) ([]core.Module, error)
 
+// Option changes how New builds a daemon.
+type Option func(*options)
+
+type options struct {
+	parked Wiring // ParkedListeners
+}
+
+// ParkedListeners gives a parked daemon (term.go) the modules w returns,
+// built over its parked Deps: the transports that put its term on the
+// network (Potluck's wiring.Parked: the tailnet and the tunnel). Only their
+// Start and Close run; none of their routes is mounted, and the Deps they
+// get has no store, registry or event bus. Without it a parked daemon
+// listens on its socket alone.
+func ParkedListeners(w Wiring) Option { return func(o *options) { o.parked = w } }
+
 // New opens the store in cfg.Home and wires the modules w returns. The
 // store opens with the shell's tables alone (store.OpenForWiring: kit/project
 // and kit/events read them below); every other migration, registered or
 // added by w's modules, runs in one name order pass once w has built.
-func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring) (*Daemon, error) {
+//
+// A home whose term does not serve gets a parked daemon (term.go): its Deps
+// has no Store, Projects or Events, and it has no modules but those of
+// ParkedListeners, so a caller that reaches into a daemon New returned
+// checks for them.
+func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring, opts ...Option) (*Daemon, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	if log == nil {
 		log = slog.Default()
 	}
@@ -116,11 +163,28 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring) (*
 		return nil, err
 	}
 	// One authority per team project: a home that moved away, is frozen for
-	// a move, or is a standby is not served (kit/hometerm).
-	if err := hometerm.CheckServes(cfg.Home); err != nil {
+	// a move, or is a standby is not served (kit/hometerm). Its daemon
+	// parks: it claims, opens and wires nothing (term.go).
+	program := config.Program
+	t, err := hometerm.Load(cfg.Home)
+	if err != nil {
+		return nil, fmt.Errorf("%v: no daemon serves this home until its term can be read", err)
+	}
+	if !t.Serves() {
+		return newParked(cfg, log, program, t, o.parked)
+	}
+	// A serving daemon changes the home's data for its whole life: it holds
+	// the writer lock until Close (a parked one does not).
+	unlock, err := config.LockWriter(cfg.Home)
+	if err != nil {
 		return nil, err
 	}
-	program := config.Program
+	ok := false
+	defer func() {
+		if !ok {
+			unlock()
+		}
+	}()
 	if err := config.ClaimHome(cfg.Home, program); err != nil {
 		return nil, err
 	}
@@ -148,7 +212,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring) (*
 		return nil, err
 	}
 	d := &core.Deps{Config: cfg, Store: st, Projects: reg, Events: bus, Log: log, Started: time.Now().UTC()}
-	dm := &Daemon{Deps: d, stop: make(chan struct{}), closing: make(chan struct{}), program: program}
+	dm := &Daemon{Deps: d, stop: make(chan struct{}), closing: make(chan struct{}), program: program, unlockWriter: unlock}
 	d.Closing = dm.closing
 	d.Zm = dm.zmState
 	if err := dm.wire(ctx, w); err != nil {
@@ -157,6 +221,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, w Wiring) (*
 	}
 	dm.loadLastSwap()
 	bus.SetVisibility(func(ctx context.Context, sc authz.Scope, addr string) bool { return d.Visible(ctx, sc, addr) })
+	ok = true
 	return dm, nil
 }
 
@@ -196,8 +261,9 @@ func (dm *Daemon) wire(ctx context.Context, w Wiring) error {
 		return err
 	}
 	dm.Router = r
-	dm.Handler = dm.middleware(r)
+	dm.Handler = dm.parkGate(dm.middleware(r), true)
 	d.Handler = dm.Handler
+	core.PublicIngress(d).Gate(func(h http.Handler) http.Handler { return dm.parkGate(h, false) })
 	return nil
 }
 
@@ -263,6 +329,12 @@ func (dm *Daemon) Serve(ctx context.Context) error {
 	d := dm.Deps
 	started := make(chan struct{})
 	dm.started.Store(&started)
+	first := make(chan struct{})
+	fenceAsked := sync.OnceFunc(func() { close(first) })
+	defer fenceAsked() // a failed start: nothing waits on it
+	if dm.parked == nil {
+		dm.firstFence.Store(&first)
+	}
 	defer func() {
 		select {
 		case <-started:
@@ -295,15 +367,43 @@ func (dm *Daemon) Serve(ctx context.Context) error {
 
 	mctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	for _, mod := range dm.modules {
-		if st, ok := mod.(core.Starter); ok {
-			if err := st.Start(mctx); err != nil {
-				d.Log.Error("module start", "module", fmt.Sprintf("%T", mod), "err", err)
-			}
-		}
+	if dm.parked != nil {
+		dm.startModules(mctx)
+		close(started)
+		d.Log.Warn(config.Program+" daemon parked: it answers only its term, and its owner's health, stop and unfreeze", "socket", sock, "machine", d.Config.Machine,
+			"state", dm.parked.State, "epoch", dm.parked.Epoch)
+	} else {
+		dm.start(ctx, mctx, sock, started, fenceAsked)
 	}
+
+	select {
+	case <-ctx.Done():
+	case <-dm.stop:
+	case err = <-errc:
+	}
+	cancel()
+	dm.loops.Wait() // none of them outlives Serve, nor writes after Close
+	if dm.parked == nil {
+		_, _ = d.Events.Publish(context.Background(), events.Input{Type: api.EventDaemonStopping, Subject: d.Config.Machine, Data: dm.stopBy})
+	}
+	sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer scancel()
+	close(dm.closing) // live SSE streams end now instead of holding Shutdown for 5 s
+	_ = srv.Shutdown(sctx)
+	dm.Close()
+	if errors.Is(err, http.ErrServerClosed) {
+		err = nil
+	}
+	return err
+}
+
+// start starts a serving daemon's modules and its own loops once its socket
+// listens (Serve), and closes started.
+func (dm *Daemon) start(ctx, mctx context.Context, sock string, started chan struct{}, fenceAsked func()) {
+	d := dm.Deps
+	dm.startModules(mctx)
 	close(started)
-	go func() { // planner statistics stay fresh on a daemon that runs for weeks
+	dm.loops.Go(func() { // planner statistics stay fresh on a daemon that runs for weeks
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		for {
@@ -314,27 +414,22 @@ func (dm *Daemon) Serve(ctx context.Context) error {
 				d.Store.Optimize(mctx)
 			}
 		}
-	}()
+	})
 	_, _ = d.Events.Publish(ctx, events.Input{Type: api.EventDaemonStarted, Subject: d.Config.Machine, Data: dm.healthBody(ctx, true)})
 	d.Log.Info(config.Program+" daemon listening", "socket", sock, "machine", d.Config.Machine)
 	go dm.selfCheckLoop(mctx)
+	dm.loops.Go(func() { dm.fenceLoop(mctx, fenceAsked) })
+}
 
-	select {
-	case <-ctx.Done():
-	case <-dm.stop:
-	case err = <-errc:
+// startModules starts every module that starts, in order.
+func (dm *Daemon) startModules(ctx context.Context) {
+	for _, mod := range dm.modules {
+		if st, ok := mod.(core.Starter); ok {
+			if err := st.Start(ctx); err != nil {
+				dm.Deps.Log.Error("module start", "module", fmt.Sprintf("%T", mod), "err", err)
+			}
+		}
 	}
-	cancel()
-	_, _ = d.Events.Publish(context.Background(), events.Input{Type: api.EventDaemonStopping, Subject: d.Config.Machine, Data: dm.stopBy})
-	sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer scancel()
-	close(dm.closing) // live SSE streams end now instead of holding Shutdown for 5 s
-	_ = srv.Shutdown(sctx)
-	dm.Close()
-	if errors.Is(err, http.ErrServerClosed) {
-		err = nil
-	}
-	return err
 }
 
 // removeIfOurs removes the socket at path only if it is still the one this
@@ -389,16 +484,24 @@ func (dm *Daemon) SocketHandler() http.Handler {
 // a fake GitHub publisher, by type assertion).
 func (dm *Daemon) Modules() []core.Module { return append([]core.Module(nil), dm.modules...) }
 
-// Close closes modules (reverse order) and the store.
+// Close closes modules (reverse order) and the store, and releases the
+// writer lock (a parked daemon has none of them). Only the first call does.
 func (dm *Daemon) Close() {
-	for i := len(dm.modules) - 1; i >= 0; i-- {
-		if c, ok := dm.modules[i].(core.Closer); ok {
-			if err := c.Close(); err != nil {
-				dm.Deps.Log.Warn("module close", "err", err)
+	dm.closeOnce.Do(func() {
+		for i := len(dm.modules) - 1; i >= 0; i-- {
+			if c, ok := dm.modules[i].(core.Closer); ok {
+				if err := c.Close(); err != nil {
+					dm.Deps.Log.Warn("module close", "err", err)
+				}
 			}
 		}
-	}
-	_ = dm.Deps.Store.Close()
+		if dm.Deps.Store != nil {
+			_ = dm.Deps.Store.Close()
+		}
+		if dm.unlockWriter != nil {
+			dm.unlockWriter()
+		}
+	})
 }
 
 // ListenUnix listens on path with mode 0600. A stale socket (nobody
@@ -435,6 +538,10 @@ func (dm *Daemon) healthBody(ctx context.Context, full bool) api.Health {
 	h := api.Health{OK: true, Protocol: api.WireProtocol, Version: api.Version, Commit: api.Commit, Machine: dm.Deps.Config.Machine}
 	if full {
 		h.PID, h.Started = os.Getpid(), dm.Deps.Started
+		if n := dm.Deps.Net; n != nil {
+			self, _ := n.Self(ctx) // Enabled is the module's own, whatever its node says
+			h.Tailnet = self.Enabled
+		}
 		if hr, ok := dm.Deps.Team.(core.HedgeReporter); ok {
 			if st := hr.HedgeStats(); st.Reads > 0 {
 				h.Hedges = &st

@@ -239,7 +239,7 @@ func (d *drv) describe() map[string]any {
 		if d.persists() {
 			verbs = append(verbs, "stop", "start") // persist.go
 		}
-		if boxSecretsServed(os) {
+		if boxSecretsServed(d.cfg, os) {
 			verbs = append(verbs, "secrets") // secrets.go
 		}
 	}
@@ -280,7 +280,7 @@ func (d *drv) describe() map[string]any {
 	if d.cfg.Kind == "box" && d.cfg.JITRunnerDir != "" {
 		// jit_guard: the runner stops a job the broker would not serve
 		caps = append(caps, "github-jit", "github-jit-guard", protocol.CapJITGuardPrivate)
-		if boxSecretsServed(os) {
+		if boxSecretsServed(d.cfg, os) {
 			// jit_guard.run: the hook holds the job for the door's ready
 			// marker, a box secret, so only where box secrets are served.
 			caps = append(caps, protocol.CapJITGuardRun)
@@ -292,7 +292,7 @@ func (d *drv) describe() map[string]any {
 	if d.cfg.Kind == "box" {
 		caps = append(caps, "base64")             // exec's encoding (exec.go): every box serves it
 		caps = append(caps, protocol.CapHostLend) // room and the disk floor read the dials at every acquire (lend.go)
-		if boxSecretsServed(os) {
+		if boxSecretsServed(d.cfg, os) {
 			// exec's secrets and the secrets verb (exec.go, secrets.go): only
 			// where the guest has a memory filesystem to put them in.
 			caps = append(caps, "secrets", "box-secrets")

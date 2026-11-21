@@ -1,6 +1,7 @@
 package vmhost
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -42,6 +43,20 @@ import (
 // without the fence the VM must not start.
 
 var cloudhvTapName = regexp.MustCompile(`^pch[0-9a-f]{6}$`)
+
+// cloudhvTapOf names the tap of the link whose guest address is guest: the
+// address's low 24 bits, so the name and the address cannot be mixed.
+func cloudhvTapOf(guest uint32) string { return fmt.Sprintf("pch%06x", guest&0xffffff) }
+
+// cloudhvTapLetGo is how long a down waits for a tap to be let go of.
+const cloudhvTapLetGo = 10 * time.Second
+
+// cloudhvTapBusy says whether a process holds the tap open: a tap has a
+// carrier only while one does.
+func cloudhvTapBusy(tap string) bool {
+	b, err := os.ReadFile("/sys/class/net/" + tap + "/carrier")
+	return err == nil && strings.TrimSpace(string(b)) == "1"
+}
 
 // cloudhvNetUp makes the VM's tap and loads the fence; cloudhvNetDown
 // removes the tap. Tests replace them. held is the VM's network lock
@@ -85,20 +100,27 @@ func cloudhvNetLock(dir string, wait time.Duration) (f *os.File, locked bool) {
 // work. Tests shorten it.
 var cloudhvNetWait = 15 * time.Second
 
-func cloudhvHelper(held *os.File, args ...string) error {
-	self, err := os.Executable()
-	if err != nil {
-		return err
-	}
+// cloudhvHelperCmd is the helper's command: the driver itself when it is
+// already root, through sudo when not, with the network lock as its standard
+// input.
+func cloudhvHelperCmd(self string, root bool, held *os.File, args ...string) *exec.Cmd {
 	a := append([]string{flagCloudHVNet}, args...)
 	cmd := exec.Command(self, a...)
-	if os.Geteuid() != 0 {
+	if !root {
 		cmd = exec.Command("sudo", append([]string{"-n", self}, a...)...)
 	}
 	if held != nil {
 		cmd.Stdin = held
 	}
-	out, err := cmd.CombinedOutput()
+	return cmd
+}
+
+func cloudhvHelper(held *os.File, args ...string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	out, err := cloudhvHelperCmd(self, os.Geteuid() == 0, held, args...).CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if strings.Contains(msg, "a password is required") || strings.Contains(msg, "not allowed") {
@@ -175,6 +197,9 @@ func cloudhvNetArgs(args []string) (op, tap string, uid int, host net.IP, err er
 	if host == nil || host[0] != 10 || host[3]&3 != 1 {
 		return "", "", 0, nil, errors.New("bad address: the host's end must be the first address of a /30 inside 10.0.0.0/8")
 	}
+	if args[1] != cloudhvTapOf(binary.BigEndian.Uint32(host)+1) {
+		return "", "", 0, nil, errors.New("bad tap: a link's tap is named for its guest address")
+	}
 	return "up", args[1], uid, host, nil
 }
 
@@ -198,6 +223,17 @@ func cloudhvNetHelper(args []string) int {
 			return fmt.Errorf("%s %s: %v: %s", name, strings.Join(a, " "), err, strings.TrimSpace(string(out)))
 		}
 		return nil
+	}
+	// A tap a hypervisor holds open is a running VM's link. It is never
+	// taken over or removed, whoever asks: two bindings given one range
+	// would otherwise cut each other's VMs off.
+	// A hypervisor that was just killed lets go of its tap a moment after
+	// its process is seen gone, so a down waits for that.
+	for end := time.Now().Add(cloudhvTapLetGo); op == "down" && cloudhvTapBusy(tap) && time.Now().Before(end); {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if cloudhvTapBusy(tap) {
+		return fail("%s is the link of a running VM. Two bindings on one host need two ranges (ch_net)", tap)
 	}
 	if op == "down" {
 		if cloudhvTapExists(tap) {

@@ -645,7 +645,8 @@ func TestTakenRunnerBoxLivesForTheTakenJobsLimit(t *testing.T) {
 	other := map[string]string{"a": "b", "b": "a"}[f.jobs(t)[short].Target]
 	f.svc.HideTargets(other)
 	f.deliver(t, "workflow_job", jobEvent("queued", long, 9932, "acme/app", true, "pool:sa"))
-	eventually(t, "long job waits", func() bool { j := f.jobs(t)[long]; return j.State == "waiting" && j.LimitS == 1200 })
+	// Waiting is decided after asking the targets for room, through the driver: a box step.
+	eventuallyBox(t, "long job waits", func() bool { j := f.jobs(t)[long]; return j.State == "waiting" && j.LimitS == 1200 })
 
 	// GitHub gives the short job's runner the long job.
 	elapsed.Store(60)

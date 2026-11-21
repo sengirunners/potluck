@@ -31,5 +31,8 @@ func (s *Service) Routes(r *core.Router) {
 	r.HandleFunc("GET /v0/sealing", core.Authed, "read on the resolved project: its sealing mode and the machines heard from", s.handle(s.getSealing))
 	r.HandleFunc("POST /v0/sealing/forget", core.Local, "this machine's owner only: forget that a pool's machine named a seal key", s.handle(s.forgetSealedHome))
 	r.HandleFunc("PUT /v0/sealing", core.Authed, "admin on the resolved project; required refused while a machine heard from cannot seal, unless force", s.handle(s.setSealing))
+	r.HandleFunc("GET /v0/databases", core.Authed, "read on the resolved project: its database recipes", s.handle(s.listDatabases))
+	r.HandleFunc("PUT /v0/databases/{name}", core.Authed, "admin on the whole resolved project: create or replace a database recipe", s.handle(s.setDatabase))
+	r.HandleFunc("DELETE /v0/databases/{name}", core.Authed, "admin on the whole resolved project: remove a database recipe", s.handle(s.removeDatabase))
 	r.HandleFunc("POST /v0/run_targets/{target}/handles/{id}/secrets", core.Authed, "operate on the resolved project; a box's holder, on a trusted host, under a secrets grant", s.handle(s.boxSecrets))
 }

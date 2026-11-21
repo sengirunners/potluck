@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"time"
 
 	"modernc.org/sqlite"
@@ -48,6 +51,69 @@ func OpenFile(ctx context.Context, path string, maxConns int, busy time.Duration
 	}
 	_ = os.Chmod(path, 0o600)
 	return db, nil
+}
+
+// OpenCopy opens a private copy of the SQLite file at path, which must be
+// a regular file: path and its -wal, when there is one, are copied into a
+// new directory of the system's temporary directory (0700, files 0600) and
+// the copy is opened read only (query_only). Nothing is created, changed or
+// locked beside path: SQLite's own -wal and -shm, even for a read, are the
+// copy's. A daemon that opened no store (a parked one) reads its home's
+// registry.db this way. The copy is as consistent as the files were while
+// copied, so it is for a file nothing writes now. done closes the copy and
+// removes its directory; the caller calls it once.
+func OpenCopy(ctx context.Context, path string) (db *sql.DB, done func(), err error) {
+	st, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	dir, err := os.MkdirTemp("", "potluck-copy-*")
+	if err != nil {
+		return nil, nil, err
+	}
+	gone := func() { _ = os.RemoveAll(dir) }
+	cp := filepath.Join(dir, filepath.Base(path))
+	for _, suffix := range []string{"", "-wal"} {
+		if err := copyRegular(path+suffix, cp+suffix); err != nil {
+			if suffix != "" && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			gone()
+			return nil, nil, err
+		}
+	}
+	db, err = OpenFile(ctx, cp, 1, time.Second, true)
+	if err != nil {
+		gone()
+		return nil, nil, err
+	}
+	return db, func() { db.Close(); gone() }, nil
+}
+
+// copyRegular copies the regular file from to a new file to (0600).
+func copyRegular(from, to string) error {
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if st, err := in.Stat(); err != nil {
+		return err
+	} else if !st.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", from)
+	}
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // AppliedIn lists the migrations recorded in path's schema_migrations,

@@ -11,9 +11,17 @@ import (
 	"syscall"
 )
 
-// FileHomeLock is held by the running daemon for its whole life, and by a
-// restore into the home for all of it (zm-c339).
+// FileHomeLock is held by the running daemon for its whole life, a parked
+// one too (kit/server), and by a restore into the home for all of it
+// (zm-c339): one daemon per home, whatever it serves.
 const FileHomeLock = "daemon.lock"
+
+// FileWriterLock is held by whatever may change the home's data: a serving
+// daemon for its whole life, and a change made with no serving daemon (the
+// term's offline freeze and unfreeze, a parked daemon's unfreeze). A parked
+// daemon does not hold it, so a tool that changes a parked home's data
+// takes it while that daemon runs.
+const FileWriterLock = "writer.lock"
 
 // LockHome takes the one-daemon-per-home lock (an flock, so a crashed
 // holder never leaves it held) and records the pid in it. A second daemon on
@@ -21,7 +29,25 @@ const FileHomeLock = "daemon.lock"
 // (dogfood: three daemons ran on one registry.db after a stop/start race
 // unlinked the socket of the newest). release drops it.
 func LockHome(home string) (release func(), err error) {
-	path := filepath.Join(home, FileHomeLock)
+	return lockFile(home, FileHomeLock, func(pid string) error {
+		return fmt.Errorf("a %s daemon already runs for %s (pid %s); if `%s` cannot reach it, its socket is gone: kill %s, then start again", Program, home, pid, Command("status"), pid)
+	})
+}
+
+// LockWriter takes the home's writer lock (FileWriterLock) and records the
+// pid in it; release drops it. It never waits: a home another process
+// changes now is refused.
+func LockWriter(home string) (release func(), err error) {
+	return lockFile(home, FileWriterLock, func(pid string) error {
+		return fmt.Errorf("another process (pid %s) is changing %s now; try again once it has finished", pid, home)
+	})
+}
+
+// lockFile takes an exclusive flock on name in home without waiting and
+// writes this process's pid into it; busy is the error when another
+// process holds it (given the pid it recorded, "unknown" if none).
+func lockFile(home, name string, busy func(pid string) error) (release func(), err error) {
+	path := filepath.Join(home, name)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -33,7 +59,7 @@ func LockHome(home string) (release func(), err error) {
 		if _, perr := strconv.Atoi(pid); perr != nil {
 			pid = "unknown"
 		}
-		return nil, fmt.Errorf("a %s daemon already runs for %s (pid %s); if `%s` cannot reach it, its socket is gone: kill %s, then start again", Program, home, pid, Command("status"), pid)
+		return nil, busy(pid)
 	}
 	_ = f.Truncate(0)
 	_, _ = f.WriteAt([]byte(strconv.Itoa(os.Getpid())+"\n"), 0)

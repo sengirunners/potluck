@@ -43,7 +43,27 @@ type teamTransport struct {
 	started time.Time
 }
 
-var _ core.TeamTransport = (*teamTransport)(nil)
+var (
+	_ core.TeamTransport = (*teamTransport)(nil)
+	_ core.HomeKeyer     = (*teamTransport)(nil)
+)
+
+// HomeFingerprint implements core.HomeKeyer: the pin of this daemon's
+// tailnet node, which a member checks on every connection (Client). An
+// error while the node is not running.
+func (t *teamTransport) HomeFingerprint(ctx context.Context) (string, error) {
+	if t.net == nil {
+		return "", errors.New("no tailnet module")
+	}
+	self, err := t.net.Self(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !self.Running || self.NodeID == "" {
+		return "", errors.New("this machine's tailnet node is not running")
+	}
+	return project.NodeFingerprint(self.NodeID), nil
+}
 
 func (t *teamTransport) Via() string { return core.ViaTailnet }
 

@@ -121,6 +121,9 @@ func (cloudhvCLI) ParseConfig(m map[string]string, c *config) (bad []string) {
 		return n
 	}
 	h.NapIdleS = num("ch_nap_idle_s", 0, 0, 30*24*3600)
+	if h.NapIdleS > 0 && m["runner_dir"] != "" {
+		bad = append(bad, "ch_nap_idle_s with runner_dir: a nap saves the box's memory to the host's disk, and a runner's registration is a credential held in it")
+	}
 	c.CloudHV = h
 	return bad
 }
@@ -152,8 +155,12 @@ func cloudhvRange(s string) (base uint32, links int, err error) {
 // cloudhvVM is a VM's own record (vm.json in its directory): what Clone
 // chose, read by Boot, by the monitor and by the network helper's caller.
 type cloudhvVM struct {
-	Name     string `json:"name"`
-	Image    string `json:"image"`
+	Name  string `json:"name"`
+	Image string `json:"image"`
+	// ImageID is which file the image was when the VM's disk was made over
+	// it (cloudhvImageID). The disk is only the blocks the VM changed, so
+	// over any other file it is garbage.
+	ImageID  string `json:"image_id,omitempty"`
 	CPU      int    `json:"cpu"`
 	MemoryMB int    `json:"memory_mib"`
 	// The VM's link: the guest's address (its vsock context id is the same
@@ -169,6 +176,40 @@ type cloudhvVM struct {
 	Firmware string `json:"firmware"`
 	NapIdleS int    `json:"nap_idle_s,omitempty"`
 	Console  bool   `json:"console,omitempty"`
+}
+
+// cloudhvStore writes a VM's record, whole or not at all.
+func cloudhvStore(dir string, v cloudhvVM) error {
+	b, _ := json.MarshalIndent(v, "", " ")
+	tmp := filepath.Join(dir, "vm.json.tmp")
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "vm.json"))
+}
+
+// cloudhvImageID names an image file as it is now: its size and modification
+// time. Not a digest: it tells a rebuilt or rewritten file from the one a
+// VM's disk was made over, without reading 20 GB. A copy that keeps the time
+// (a restored backup) is the same image.
+func cloudhvImageID(path string) (string, error) {
+	st, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d-%d", st.Size(), st.ModTime().UnixNano()), nil
+}
+
+// imageSame refuses a VM whose image is no longer the file its disk was made
+// over: replaced by a rebuild, or written to.
+func (v cloudhvVM) imageSame() error {
+	if v.ImageID == "" {
+		return nil
+	}
+	if id, err := cloudhvImageID(v.Image); err != nil || id != v.ImageID {
+		return fmt.Errorf("image %s is not the file VM %s's disk was made over (it was replaced or changed), so the disk cannot be used: the VM must be made again", v.Image, v.Name)
+	}
+	return nil
 }
 
 // CID is the VM's vsock context id: its guest address as a number.
@@ -281,7 +322,11 @@ func (l cloudhvCLI) clone(image, vm string, cpu, memory int, kept bool) error {
 			taken[v.GuestIP] = true
 		}
 	}
-	v := cloudhvVM{Name: vm, Image: img, CPU: cpu, MemoryMB: memory, Net: l.c.Net, Kept: kept,
+	imgID, err := cloudhvImageID(img)
+	if err != nil {
+		return err
+	}
+	v := cloudhvVM{Name: vm, Image: img, ImageID: imgID, CPU: cpu, MemoryMB: memory, Net: l.c.Net, Kept: kept,
 		Bin: l.c.Bin, Firmware: l.c.Firmware, NapIdleS: l.c.NapIdleS, Console: l.c.Console}
 	// Links are handed out in turn, not lowest first, so an address a VM
 	// just gave up is the last to be used again.
@@ -294,7 +339,7 @@ func (l cloudhvCLI) clone(image, vm string, cpu, memory int, kept bool) error {
 		n := (max(first, 0) + i) % links
 		host, guest := base+uint32(4*n)+1, base+uint32(4*n)+2
 		g := cloudhvIP(guest)
-		tap := fmt.Sprintf("pch%06x", guest&0xffffff)
+		tap := cloudhvTapOf(guest)
 		if taken[g] || cloudhvTapExists(tap) { // a tap with no VM here is another binding's, or not yet cleaned up
 			continue
 		}
@@ -315,8 +360,7 @@ func (l cloudhvCLI) clone(image, vm string, cpu, memory int, kept bool) error {
 		os.RemoveAll(dir)
 		return fmt.Errorf("%s create: %v: %s", l.c.QemuImg, err, strings.TrimSpace(string(out)))
 	}
-	b, _ := json.MarshalIndent(v, "", " ")
-	if err := os.WriteFile(filepath.Join(dir, "vm.json"), b, 0o600); err != nil {
+	if err := cloudhvStore(dir, v); err != nil {
 		os.RemoveAll(dir)
 		return err
 	}
@@ -362,6 +406,23 @@ func (l cloudhvCLI) boot(vm, mode string, log io.Writer) (*exec.Cmd, io.WriteClo
 			held.Close()
 		}
 		return nil, nil, fmt.Errorf("VM %s: an earlier start is still setting up its network", vm)
+	}
+	if v, err = cloudhvLoad(dir); err != nil { // destroyed while this boot waited for the lock
+		held.Close()
+		return nil, nil, fmt.Errorf("no VM %s: %v", vm, err)
+	}
+	if err := v.imageSame(); err != nil {
+		held.Close()
+		return nil, nil, err
+	}
+	// A VM naps as its binding says now, not as it said when the VM was
+	// made: secrets are served by the binding's setting (secrets.go).
+	if v.NapIdleS != l.c.NapIdleS {
+		v.NapIdleS = l.c.NapIdleS
+		if err := cloudhvStore(dir, v); err != nil {
+			held.Close()
+			return nil, nil, err
+		}
 	}
 	err = cloudhvNetUp(v, held)
 	held.Close()
@@ -466,11 +527,23 @@ func (l cloudhvCLI) Destroy(vm string, runPID int) {
 	dir := l.dir(vm)
 	v, err := cloudhvLoad(dir)
 	l.stop(dir, runPID, 0)
-	if err == nil {
-		l.netDown(dir, v)
+	// The network lock is held until the directory is gone, so a boot that
+	// was waiting for it finds no VM and makes no tap.
+	held, _ := cloudhvNetLock(dir, cloudhvNetWait)
+	ours := strings.HasPrefix(dir, l.c.Dir+string(filepath.Separator)) && vm != ""
+	if ours {
+		// The record first: a boot that opens the lock file from here on
+		// finds no VM, whatever else of the directory is still there.
+		_ = os.Remove(filepath.Join(dir, "vm.json"))
 	}
-	if strings.HasPrefix(dir, l.c.Dir+string(filepath.Separator)) && vm != "" {
+	if err == nil {
+		cloudhvNetDown(v)
+	}
+	if ours {
 		_ = os.RemoveAll(dir)
+	}
+	if held != nil {
+		held.Close()
 	}
 }
 
@@ -492,7 +565,7 @@ func (l cloudhvCLI) PowerOff(vm string, runPID int) {
 	if err != nil {
 		return
 	}
-	l.stop(dir, runPID, syncFor+5*time.Second)
+	l.stop(dir, runPID, cloudhvStopFor)
 	l.netDown(dir, v)
 	cloudhvClearRuntime(dir)
 }

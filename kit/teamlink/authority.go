@@ -60,6 +60,7 @@ func (s *Service) Routes(r *core.Router) {
 	s.classRoutes(r)      // operator classes (SPEC 8, zm-eakh.12.3)
 	s.opsRoutes(r)        // machine ops without the heartbeat's wait (ops.go)
 	s.beatRoutes(r)       // the heartbeat and machine numbers (beat.go, machine.go)
+	s.homeRoutes(r)       // HQ: its status, standby, moves and takeovers (home_control.go)
 }
 
 // ---- zm project team | solo ----

@@ -112,12 +112,12 @@ func TestDaemonOverSocket(t *testing.T) {
 		t.Fatalf("404: %v", err)
 	}
 
-	// A second daemon on the same home refuses to start.
-	dm2, err := New(ctx, cfg, nil, wiring.Kit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dm2.Serve(ctx); err == nil || !strings.Contains(err.Error(), "already running") {
+	// A second daemon on the same home refuses to start: the first holds
+	// the home's writer lock.
+	if dm2, err := New(ctx, cfg, nil, wiring.Kit); err == nil || !strings.Contains(err.Error(), "is changing") {
+		if dm2 != nil {
+			dm2.Close()
+		}
 		t.Fatalf("second daemon: %v", err)
 	}
 

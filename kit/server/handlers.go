@@ -20,6 +20,7 @@ func (dm *Daemon) coreRoutes(r *core.Router) {
 	r.Admit(core.AnyLimit, "GET /v0/whoami")
 	r.HandleFunc("POST /v0/daemon/stop", core.Local, "local; refuses while sessions that would end run (none with holders) unless force, and during another caller's swap", dm.daemonStop)
 	r.HandleFunc("GET /v0/daemon/manifest", core.Local, "local", dm.manifest)
+	dm.termRoutes(r)
 	r.HandleFunc("POST /v0/daemon/swaps", core.Local, "local; the caller is recorded as who swapped", dm.recordSwap)
 	r.Handle("GET /v0/events", core.Authed, "read: per-event Scope.Can(read, project/area); mentions redacted", d.Events.Handler(events.HandlerOptions{
 		Subject: func(r *http.Request) *authz.Subject { return core.SubjectOf(r.Context()) },
@@ -293,13 +294,19 @@ func (dm *Daemon) daemonStop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	api.WriteJSON(w, http.StatusOK, api.DaemonStopResponse{Stopping: true, ManagedSessions: n, Ended: req.Force, NotEnded: notEnded})
+	by := caller(r)
+	attrs := []any{"by", by, "what", req.What, "force", req.Force}
+	if sh != nil { // a daemon with sessions (zm), not potluck
+		attrs = append(attrs, "managed_sessions", n)
+	}
+	dm.requestStop(stopNote{By: by, What: req.What, Force: req.Force}, attrs...)
+}
+
+// requestStop stops the daemon (Serve returns) once, noting who asked and
+// why (the stopping event's data).
+func (dm *Daemon) requestStop(note stopNote, attrs ...any) {
 	dm.once.Do(func() {
-		by := core.SubjectOf(r.Context()).Address
-		dm.stopBy = &stopNote{By: by, What: req.What, Force: req.Force}
-		attrs := []any{"by", by, "what", req.What, "force", req.Force}
-		if sh != nil { // a daemon with sessions (zm), not potluck
-			attrs = append(attrs, "managed_sessions", n)
-		}
+		dm.stopBy = &note
 		dm.Deps.Log.Warn("daemon stop requested", attrs...)
 		close(dm.stop)
 	})

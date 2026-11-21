@@ -18,8 +18,10 @@ import (
 	"net"
 )
 
-// Port is the vsock port the agent listens on.
-const Port = 1024
+// Port is the vsock port the agent listens on. Below 1024, so only root in
+// the guest can bind it: if the agent ever stops, the box's user cannot
+// answer the host in its place.
+const Port = 1000
 
 // Frame types.
 const (

@@ -65,7 +65,7 @@ at its deadline, or when its machine's owner takes the machine back. Each
 command names it by the id sandbox create printed (sandbox ls lists them).`}
 	sb.AddCommand(a.sandboxCreateCmd(), a.sandboxLsCmd(), a.sandboxExecCmd(), a.sandboxLogsCmd(), a.sandboxShellCmd(),
 		a.sandboxCpCmd(), a.sandboxPushCmd(), a.sandboxExtendCmd(), a.sandboxRmCmd(), a.sandboxSignalCmd(), a.sandboxPreviewCmd(),
-		a.sandboxStopCmd(), a.sandboxStartCmd())
+		a.sandboxStopCmd(), a.sandboxStartCmd(), a.sandboxDatabaseCmd())
 	sb.AddCommand(a.sandboxOldSpellings()...)
 	return sb
 }

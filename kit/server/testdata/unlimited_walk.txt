@@ -40,6 +40,24 @@ DELETE /v0/tokens/x [token-no-whois] 403 {"error":{"code":"forbidden","message":
 DELETE /v0/tokens/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 DELETE /v0/tokens/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 DELETE /v0/tokens/x [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+GET /v0/authority [owner-token] 403 {"error":{"code":"forbidden","message":"HQ's status is for this machine's owner and the machines of its team projects"}}
+GET /v0/authority [guest-token] 403 {"error":{"code":"forbidden","message":"HQ's status is for this machine's owner and the machines of its team projects"}}
+GET /v0/authority [token-no-whois] 403 {"error":{"code":"forbidden","message":"HQ's status is for this machine's owner and the machines of its team projects"}}
+GET /v0/authority [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/authority [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/authority [socket-token] 403 {"error":{"code":"forbidden","message":"HQ's status is for this machine's owner and the machines of its team projects"}}
+GET /v0/authority/candidates [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+GET /v0/authority/candidates [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+GET /v0/authority/candidates [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+GET /v0/authority/candidates [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/authority/candidates [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+GET /v0/authority/candidates [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+GET /v0/authority/term [owner-token] 200 {"state":"serving","epoch":0}
+GET /v0/authority/term [guest-token] 200 {"state":"serving","epoch":0}
+GET /v0/authority/term [token-no-whois] 200 {"state":"serving","epoch":0}
+GET /v0/authority/term [token-tunnel] 200 {"state":"serving","epoch":0,"fingerprint":"<tunnel-key>"}
+GET /v0/authority/term [bad-token] 200 {"state":"serving","epoch":0}
+GET /v0/authority/term [socket-token] 200 {"state":"serving","epoch":0}
 GET /v0/daemon/manifest [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 GET /v0/daemon/manifest [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 GET /v0/daemon/manifest [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
@@ -216,6 +234,48 @@ PATCH /v0/projects/x/areas/x [token-no-whois] 404 {"error":{"code":"not_found","
 PATCH /v0/projects/x/areas/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 PATCH /v0/projects/x/areas/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 PATCH /v0/projects/x/areas/x [socket-token] 404 {"error":{"code":"not_found","message":"no project \"x\""}}
+POST /v0/authority/move [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/move [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/move [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/abort [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/abort [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/abort [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/abort [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/move/abort [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/move/abort [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/resume [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/resume [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/resume [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/move/resume [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/move/resume [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/move/resume [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/promote [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/promote [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/promote [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/promote [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/promote [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/promote [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/retire [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/retire [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/retire [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/retire [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/retire [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/retire [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/standby [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/standby [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby/release [owner-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby/release [guest-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby/release [token-no-whois] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
+POST /v0/authority/standby/release [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/standby/release [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+POST /v0/authority/standby/release [socket-token] 403 {"error":{"code":"forbidden","message":"only an owner of every team project this home holds moves HQ","hint":"press it on the HQ machine's own socket, or from an owner's machine that joined its projects","data":{"reason":"not_owner"}}}
 POST /v0/daemon/swaps [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 POST /v0/daemon/swaps [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 POST /v0/daemon/swaps [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}

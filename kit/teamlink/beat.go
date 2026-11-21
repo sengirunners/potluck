@@ -350,9 +350,10 @@ func (s *Service) BeatRemote(ctx context.Context, x *Remote) {
 	}
 	b := Beat{Remote: x, Snap: snap, Fence: fence}
 	req := api.PresenceRequest{Project: snap.Project.ID}
+	behind := x.Home().Behind // a home that lost its term hears only whether it is current again (successor.go)
 	var answers []partAnswer
 	for _, p := range parts {
-		if p.Request == nil {
+		if p.Request == nil || behind && p.name != AuthorityPart {
 			continue
 		}
 		v, apply, err := p.Request(ctx, b)
@@ -371,8 +372,10 @@ func (s *Service) BeatRemote(ctx context.Context, x *Remote) {
 		}
 	}
 	var finals []string
-	req.Ops, finals = s.OpReports(ctx, snap.Project.ID) // machine ops' reports (SPEC 8 "Machine choice")
-	req.Took = s.TookOps(ctx, snap.Project.ID)          // the ops this machine has: never sent again
+	if !behind {
+		req.Ops, finals = s.OpReports(ctx, snap.Project.ID) // machine ops' reports (SPEC 8 "Machine choice")
+		req.Took = s.TookOps(ctx, snap.Project.ID)          // the ops this machine has: never sent again
+	}
 	if len(req.Ops) > len(finals) {
 		s.BeatFast() // a task runs here for an authority: beat fast
 	}
@@ -387,11 +390,15 @@ func (s *Service) BeatRemote(ctx context.Context, x *Remote) {
 	if err := s.CallRemote(cctx, x, http.MethodPost, "/v0/team/presence", json.RawMessage(body), &resp); err != nil {
 		if ctx.Err() == nil {
 			s.d.Log.Debug("teamlink: heartbeat", "project", snap.Project.Slug, "authority", snap.Authority, "err", err)
+			s.homeSilent(ctx, x, err) // the successor its home named may serve now (successor.go)
 		}
 		return
 	}
 	if current := x.Snapshot(); Ended(current) != nil || current.ScopeVersion != snap.ScopeVersion {
 		return // an answer from before revocation cannot repopulate anything
+	}
+	if !s.homeCurrent(ctx, x, resp.Parts[AuthorityPart]) {
+		return // a home below the epoch this machine recorded (successor.go)
 	}
 	s.AckOps(ctx, finals)
 	for _, a := range answers {
@@ -403,6 +410,7 @@ func (s *Service) BeatRemote(ctx context.Context, x *Remote) {
 		}
 		s.TakeOps(ctx, snap.Project.ID, []api.MachineOp{op})
 	}
+	s.followIfAway(ctx, x) // the home answered it does not serve (successor.go)
 	s.reportMachine(ctx, x, snap)
 }
 

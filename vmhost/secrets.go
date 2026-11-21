@@ -150,15 +150,46 @@ func frameBoxSecrets(a protocol.BoxSecretsArgs) []byte {
 // boxSecretsServed says whether a box of this binding takes the secrets
 // verb: one whose image is a Linux guest's (a macOS guest has no memory
 // filesystem the driver can prove: it refuses, and describe does not list
-// the capability).
-func boxSecretsServed(os string) bool { return os == "linux" }
+// the capability), on a binding that never writes a guest's memory to the
+// host's disk.
+func boxSecretsServed(c config, os string) bool { return noSecrets(c, os) == "" }
+
+// noSecrets is why a box of this binding takes no secrets; empty: it does.
+// Secrets are files in the guest's memory, and a binding that naps its VMs
+// (cloudhv.go) saves that memory to a file on the host, so it serves none:
+// the protocol's "never on a disk" covers the host's disk too.
+func noSecrets(c config, os string) string {
+	if os != "linux" {
+		return "is a " + os + " guest, which has no memory filesystem for secrets"
+	}
+	if c.VM == "cloudhv" && c.CloudHV.NapIdleS > 0 {
+		return "is on a binding that naps its boxes (ch_nap_idle_s), and a nap saves the box's memory to the host's disk"
+	}
+	return ""
+}
 
 // secretsListed refuses an exec's or spawn's secrets (n of them) in a box
-// whose binding lists no secrets capability (a macOS guest): bad_request, as
+// whose binding lists no secrets capability (noSecrets): bad_request, as
 // the protocol says for secrets without the capability, before anything runs.
-func secretsListed(r record, n int) error {
-	if n > 0 && !boxSecretsServed(r.OS) {
-		return refuse("bad_request", "%s is a %s guest, which has no memory filesystem for secrets: this binding lists no secrets capability", r.Handle, r.OS)
+func secretsListed(c config, r record, n int) error {
+	if why := noSecrets(c, r.OS); n > 0 && why != "" {
+		return refuse("bad_request", "%s %s: this binding lists no secrets capability", r.Handle, why)
+	}
+	if n > 0 {
+		return napsAnyway(c, r)
+	}
+	return nil
+}
+
+// napsAnyway refuses secrets for a box whose VM naps though the binding no
+// longer does: a VM keeps the nap setting it last booted with, so a box
+// started before ch_nap_idle_s was set to 0 still saves its memory to disk.
+func napsAnyway(c config, r record) error {
+	if c.VM != "cloudhv" {
+		return nil
+	}
+	if v, err := cloudhvLoad(filepath.Join(c.CloudHV.Dir, r.VM)); err == nil && v.NapIdleS > 0 {
+		return refuse("forbidden", "%s was started when its binding napped its boxes, and still naps (its memory is saved to the host's disk): it takes no secrets until it is started again", r.Handle)
 	}
 	return nil
 }
@@ -173,8 +204,11 @@ func (d *drv) boxSecrets(handle string, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !boxSecretsServed(r.OS) { // describe lists no box-secrets: the protocol's bad_request
-		return nil, refuse("bad_request", "%s is a %s guest, which has no memory filesystem for secrets: this binding lists no box-secrets capability", r.Handle, r.OS)
+	if why := noSecrets(d.cfg, r.OS); why != "" { // describe lists no box-secrets: the protocol's bad_request
+		return nil, refuse("bad_request", "%s %s: this binding lists no box-secrets capability", r.Handle, why)
+	}
+	if err := napsAnyway(d.cfg, r); err != nil {
+		return nil, err
 	}
 	var out, errb capped
 	var res protocol.BoxSecretsResult

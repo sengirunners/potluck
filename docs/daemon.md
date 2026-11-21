@@ -66,11 +66,122 @@ its daemon is not running, potluck starts no daemon there and refuses the comman
 
 **A home has a term.** `<home>/term.json` (`kit/hometerm`) holds an epoch and a state: `serving`, `frozen` (stopped
 for a move to another home), `fenced` (a named successor serves at a higher epoch) or `standby` (a copy that serves
-only once promoted). A home with no file serves at epoch 0. A daemon starts only on a serving home, before it claims
-the home or opens its store; a term file it cannot read counts as not serving. The file is not on the list of files an off-site
+only once promoted). A home with no file serves at epoch 0. The file is not on the list of files an off-site
 backup set holds (zm `offsite.HomeFile`, an allow-list), so a home restored on another machine does not take the old machine's
-term. Nothing in this build writes a
-term other than tests: the commands that move a home and promote a standby are planned on bead zm-d3cnz.
+term. Every daemon answers `GET /v0/authority/term` to anyone, over the tunnel with no token too (a signed request still):
+its state and epoch, the fingerprint of the key the caller reached it by (none on the socket), and the key of the home it
+took over from (`predecessor`). An epoch is at most 2^63-1; a term or an answer above it is refused, and so is a
+standby term at it (it could never be promoted above it). A home fenced at it is retired: nothing serves after it.
+
+**A home that does not serve gets a parked daemon** (`kit/server/term.go`). The daemon reads the term at start, before
+it claims the home or opens anything; a term file it cannot read starts no daemon. A frozen, fenced or standby home's
+daemon claims nothing, opens no store and wires no module, so nothing of it writes to the home's data. It listens on
+the home's socket and, as the home did, on the tailnet and the tunnel (`wiring.Parked`, given by
+`server.ParkedListeners`), so other machines read its term. It answers `GET /v0/authority/term` to anyone; to the
+machine's owner on the socket also `GET /v0/health`, `POST /v0/daemon/stop` and, on a frozen home,
+`POST /v0/authority/unfreeze`; and when its program provides them (teamlink `ProvideParkedRoutes`, with its move
+engine), HQ's status and the presses that belong to a parked machine (abort and resume of a stopped move, promote,
+retire; see "Owners move HQ" below). Every other call, the health over the network too, is refused with one code, `parked`
+(503), whose data says the machine, its state and, for the owner of a fenced home, where HQ is now. A member whose
+home answers `parked` asks the successor it named at once, and follows it when it serves at a higher epoch.
+`potluck status` says when the home is parked.
+
+**Two locks.** Every daemon, a parked one too, holds `daemon.lock` (one daemon per home) for its whole life. A serving
+daemon also holds `writer.lock` (`config.LockWriter`) from start to stop; a parked one does not, so a tool that
+changes a parked home (a move's copy, an offline backup) takes `writer.lock` while it runs. A parked daemon's unfreeze
+takes `writer.lock` for the change and is refused while another process holds it.
+
+`potluck daemon freeze` stops a serving home for a move at its epoch (`POST /v0/authority/freeze`, the owner on the
+socket; refused during another caller's swap and while managed sessions would end): from its answer on every call but
+health and the term is parked (a module's public hosts, such as previews, too), the daemon stops, and the command starts
+it again, parked, with the same listeners (`--tailnet` when the daemon had it). `potluck daemon unfreeze` serves a
+frozen home again at the same epoch the same way. With no daemon running, both change the term under `daemon.lock` and
+`writer.lock`.
+
+**A serving home fences itself** when the successor it named has taken over. At start and every 15 s (the heartbeat
+period) it asks that successor for its term, over the transport's client pinned to the successor's key. Until the
+first ask has its answer (at most 10 s), every call but health and the term waits, so a home that comes back while
+its successor serves takes no write first. When the
+successor serves at an epoch above this home's and names this home's own key on that transport as the home it took
+over from, this home writes `fenced` at the successor's epoch and its daemon stops; the next one is parked. A successor
+that does not answer, serves at no higher epoch, does not serve, or took over from another key changes nothing; the
+daemon logs why (a warning when it cannot ask) once each time the reason changes.
+
+**Members follow a moved home by introduction** (`kit/teamlink/successor.go`). A serving home can name the home that
+serves after it (teamlink `Designate`: the term's successor, its transport, address and key fingerprint, plus a
+machine name kept for display) and withdraw it (`Undesignate`). Every heartbeat's `authority` part answers the home's
+epoch, state and named successor; a member records them (`team_remotes.term`, `team_successors`, dropped when the home
+names none) and when the home last answered (`team_remotes.heard`). A home that answers an epoch below the one recorded
+has lost its term: the remote is marked behind (`team_remotes.behind`; `remotes` shows "the home of <project> is
+behind" as its last error), nothing of its answers is taken (no header, role or 401 either), the heartbeat to it carries
+only the authority part, no other call but a leave goes to it, and an answer asked before (an ops poll, a forwarded
+call, a live event stream) is not admitted or is ended, until it answers the recorded epoch again. Only the member
+machine's owner lowers the recorded epoch, and only to the one that same home fell behind to (teamlink `Follow` with
+`ResetEpoch`, logged), or a new join starts it again. A repoint ends the old home's live answers the same way. When no heartbeat of this daemon got any answer from the home for `HomeSilentAfter` (2 minutes,
+counted from the first that got none; any answer in the home's own words starts it again), or the home answers that
+it no longer serves, the member asks the named successor for its term: a heartbeat with only that part, sent with the member's own
+token over a client pinned to the key the home named, so the token reaches that key or nothing. It repoints only when
+that home answers, for the same project, that it serves at an epoch above the one recorded: the project key is rebound
+to the new key and logged, and the remote's address, key and transport change in the same transaction. The token file,
+the copy and what the machine keeps as a host stay. Without a named successor, only the member machine's owner repoints
+(teamlink `Follow`, which must name the key the project id is bound to now), and the successor must still serve at a
+higher epoch. Potluck itself calls none of `Designate`, `Undesignate` or `Follow`: a program's move engine does (below).
+Changes a daemon makes to its home's term go one at a time through `core.Deps.ApplyTerm`.
+
+**Owners move HQ** (`kit/teamlink/home_control.go`, `potluck authority`). `GET /v0/authority` is HQ's status: its
+machine, state and epoch, the standby, a move running or stopped, and `can_manage`. This machine's owner on its
+socket and a member machine's node-bound token (a team replica's) may read it, no other token or login; a member
+forwards it to the home of its joined team projects (the command's project option picks one when there are several:
+`--pool` in potluck) and, when that home does not answer, fills it from what it recorded (the home's epoch and named
+successor) and marks it `silent`. The presses are `GET /v0/authority/candidates` and `POST` `standby`,
+`standby/release`, `move` (with `check_only`, the preflight), `move/abort`, `move/resume`, `promote` and `retire` under
+`/v0/authority`. Each runs in this order: who pressed, that a move engine is here, the body decoded (one JSON value and
+nothing after it) and its `Check` (an empty body is `bad_request`), the checks of what the screen showed, then one
+method of the engine. Nothing acts on a request before its `Check`.
+
+Who pressed is one function (`kit/teamlink/home_owner.go`). On a serving daemon: this machine's owner on its own socket
+with no token, or, from the network, a member machine's node-bound token (a team replica's) whose identity owns every
+team project this home holds by its own grants. A minted token, a box's token, a limited token, a tailnet login, a token
+on the socket and an area's owner never pass, nor does anyone when the home holds no team project; the refusal
+(`forbidden`, reason `not_owner`) names the projects the caller can see and their owners, and counts the rest. On a
+parked daemon (abort, resume, promote and retire, on its socket only, with no token): the caller is this home's owner by
+its `registry.db`, read from a private copy (the file and its `-wal` copied into a new 0700 directory of the system's
+temporary directory, opened there and removed: nothing in the home is created or changed, SQLite's `-wal` and `-shm`
+included), and must own every team project it holds. On a standby that file is its restored copy of HQ's, so an owner
+HQ added after the copy counts for nothing, and the owner is the one identity whose live node-bound tokens (unrevoked,
+unexpired, not a box's, not limited) the standby home holds the secrets of, in its `remotes` directory: the engine's
+standby setup puts the tokens the machine's own home joined with there. A machine name says nothing: tokens of two
+identities, or bound to two nodes, refuse, and so does a standby that holds none. On a frozen or fenced old HQ the
+owner is the identity its registry marks local and names as this machine's human. A copy, term or token file that
+cannot be read refuses everyone. What a parked check promises is only that a press is made in an owner's name as the
+home's own files say: it cannot stop the machine's own administrator, who can change those files or the daemon, and
+who pressed, as the engine records it, is that owner on this machine's word. Moving HQ,
+naming or releasing the standby, a move's preflight, promote and retire are a person's own press, never a session's;
+a session may abort or resume a stopped move.
+
+A press on an out-of-date screen (another HQ or epoch than the one serving, a promote or retire naming another machine)
+is `conflict` with reason `stale`, and so is a promote anywhere but on a standby or a fenced home, and a retire anywhere
+but on a fenced home: neither reaches the engine of a serving HQ. The routes hold no state and write no term: each
+calls one method of the program's move engine (teamlink `Hooks.Home`, `HomeEngine`) with who pressed (identity,
+machine, time); the engine serializes all presses and is idempotent per move id. With no engine every press answers
+`unavailable` with reason `no_engine`, and the status is what the term says.
+
+What leaves of the engine's answers is checked (`kit/teamlink/home_answer.go`). An engine's error is answered with
+fixed words chosen by its code (one of `bad_request`, `forbidden`, `not_found`, `conflict`, `unavailable`, else
+`internal`) and its reason (one of the reason codes, else none); its own message, hint and data never leave. Codes
+(states, steps, reasons, checks, kinds) outside their vocabulary, ids that are neither a ULID nor a short lower-case
+word that looks like no key, machine names other than letters, digits and `-` (so no host name or address), identity
+names, project slugs and secret names of the wrong shape or that look like a key, and a
+public address that is not a bare host or host:port are answered `unknown`. Free text (reasons, checks and their fixes,
+steps, a failure) leaves only when it is at most 300 bytes of printable ASCII with none of
+``/ \ @ = & # < > [ ] { } | ` ^ ~ $ * +``, no `%` before a hex digit, no `?` before anything but a space, no `.`
+directly before a letter or digit (so no host name, IP address or file name, and no "1.5"), no `:` directly before
+anything but a space except in a clock time (9:05, 14:05:30), no token prefix, no word that starts as a known key does
+(`sk-`, `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`, `glpat-`, `xoxb-`, `xoxp-`, `xoxa-`, `xoxs-`,
+`age-secret-key-`, in any case) and no run of 20 or more letters and digits with
+both in it, or of 32 or more, and no run of letters, digits, `_` and `-` with 20 or more letters and digits, 6 or more of
+them digits and 2 or more letters (a UUID, a key in short segments); otherwise it is replaced by a sentence saying it was withheld. A replaced field's name and
+length are logged, never its text. Nothing moves HQ on its own: every move and takeover is an owner's press.
 
 ## project.toml and settings this build does not read
 

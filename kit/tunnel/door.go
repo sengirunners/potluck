@@ -153,8 +153,11 @@ func (d *door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Replays are refused for token callers only, so only a member's key
 	// can put nonces in the cache (anyone can make a key). A replayed
 	// redemption gets the same key-bound token again, useless to whoever
-	// replays it.
-	if r.Header.Get(api.HeaderAuthorization) != "" {
+	// replays it. A parked home (core.Deps.Parked) checks no token and
+	// records no nonce: it answers its term and "parked" to everything else,
+	// nothing a replay could repeat, so a token it cannot check must not
+	// grow its journal.
+	if r.Header.Get(api.HeaderAuthorization) != "" && !d.s.d.Parked {
 		switch d.nonces.add(caller, nonce, sec, now) {
 		case nonceNoJournal:
 			api.WriteError(bw, api.Errorf(api.CodeUnavailable, "the home cannot record this request against replays now").
@@ -233,12 +236,17 @@ func (d *door) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // tokenless says whether a signed request may pass with no token: the
-// calls of joining, never anything of a member's. Redemption; and the
-// GitHub join (SPEC 22 over https): discover, start, and collect (the poll
-// route answers only the key that started that login, with its secret).
-// Every one is still signed, fresh, and under the routes' own limits.
+// calls of joining and the home's term, never anything of a member's.
+// Redemption; the GitHub join (SPEC 22 over https): discover, start, and
+// collect (the poll route answers only the key that started that login,
+// with its secret); and reading the home's term (api.AuthorityTerm, no
+// secret in it), which a home that named this one its successor reads
+// with no token of this home's to decide whether to fence itself
+// (kit/server term.go). Every one is still signed, fresh, and under the
+// routes' own limits.
 func tokenless(method, path string) bool {
-	return method == http.MethodPost && path == "/v0/invites/redeem" || githubJoinCall(method, path)
+	return method == http.MethodPost && path == "/v0/invites/redeem" || githubJoinCall(method, path) ||
+		method == http.MethodGet && path == api.TermPath
 }
 
 // githubJoinCall is one of the GitHub join's three calls. The collect path

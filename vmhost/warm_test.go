@@ -205,7 +205,7 @@ func TestWarmConformanceOverAFakeLayer(t *testing.T) {
 	forbid := guestForbid(t)
 	opt := conformance.Options{Kind: "box", Target: "fake", Config: m, Ref: "main", Commit: repo.Commit, Repo: repo.Remote, LeftoverRoots: []string{fakeRoot},
 		ShortTTL: 2, Grace: 3 * time.Second, RunWait: 30 * time.Second, Only: []string{"warm", "lifecycle", "net"},
-		NetAllow: []string{open.Addr().String()}, NetForbid: []string{forbid},
+		NetAllow: []string{open.Addr().String()}, NetForbid: []string{forbid}, NetPeerPort: guestPeerPort(t),
 		NetResolve: []string{"localhost:" + strconv.Itoa(open.Addr().(*net.TCPAddr).Port)}}
 	res := conformance.Run(context.Background(), drv, opt)
 	out := conformance.Format(res)

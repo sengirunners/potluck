@@ -251,7 +251,7 @@ func (d *drv) exec(handle string, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := secretsListed(r, len(secrets)); err != nil {
+	if err := secretsListed(d.cfg, r, len(secrets)); err != nil {
 		return nil, err
 	}
 	var stdin io.Reader = bytes.NewReader(a.stdin)

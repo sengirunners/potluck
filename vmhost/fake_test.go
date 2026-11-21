@@ -487,6 +487,18 @@ func guestForbid(t *testing.T) string {
 	return l.Addr().String()
 }
 
+// guestPeerPort is the net group's NetPeerPort over the fake layer: its guest
+// is this machine, where the default sits in the ephemeral range and a busy
+// machine's outbound connection can hold it (conformance.LocalPeerPort).
+func guestPeerPort(t *testing.T) int {
+	t.Helper()
+	p, err := conformance.LocalPeerPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 // reclaimIn is the fake layer's reclaim window: it must outlast an acquire
 // and a status on a loaded CI runner (a 3 s window closed first there), and
 // the layer reads it to the second, so it may close up to 1 s early.
@@ -520,7 +532,7 @@ func TestConformanceOverAFakeLayer(t *testing.T) {
 	opt := conformance.Options{Kind: "run", Target: "fake", Config: m, Ref: "main", Commit: repo.Commit,
 		Repo: repo.Remote, Script: "probe.sh", ShortTTL: 2, Grace: 3 * time.Second, RunWait: 30 * time.Second,
 		ReclaimConfig: map[string]string{"window": "{window}", "drain_deadline_s": "0"}, ReclaimIn: reclaimIn,
-		NetAllow: []string{open.Addr().String()}, NetForbid: []string{forbid},
+		NetAllow: []string{open.Addr().String()}, NetForbid: []string{forbid}, NetPeerPort: guestPeerPort(t),
 		NetResolve: []string{"localhost:" + strconv.Itoa(open.Addr().(*net.TCPAddr).Port)}} // hermetic: no github.com
 	for _, g := range conformance.Groups { // acquire-progress needs a slow boot: TestAcquireProgressOverAFakeLayer
 		if g != "boot" && g != "acquire-progress" {
@@ -685,7 +697,7 @@ func TestBoxConformanceOverAFakeLayer(t *testing.T) {
 	opt := conformance.Options{Kind: "box", Target: "fake", Config: m, Ref: "main", Commit: repo.Commit,
 		Repo: repo.Remote, LeftoverRoots: []string{fakeRoot}, ShortTTL: 2, Grace: 3 * time.Second, RunWait: 30 * time.Second,
 		ReclaimConfig: map[string]string{"window": "{window}", "drain_deadline_s": "0"}, ReclaimIn: reclaimIn,
-		NetAllow: []string{open.Addr().String()}, NetForbid: []string{forbid},
+		NetAllow: []string{open.Addr().String()}, NetForbid: []string{forbid}, NetPeerPort: guestPeerPort(t),
 		NetResolve: []string{"localhost:" + strconv.Itoa(open.Addr().(*net.TCPAddr).Port)}} // hermetic: no github.com
 	res := conformance.Run(context.Background(), drv, opt)
 	out := conformance.Format(res)

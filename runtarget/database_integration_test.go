@@ -119,7 +119,8 @@ func TestDatabaseProtocolDriver(t *testing.T) {
 		if req.Config["mode"] == "missing-database" {
 			a.Database = nil
 		}
-		result = map[string]any{"handle": "box:" + req.Config["target"] + "/box1", "ttl_s": 120, "expires_at": time.Now().Add(120 * time.Second).UTC(), "image_digest": imageDigest, "database": a.Database, "size": "test"}
+		// One sandbox per request id, so a test may hold more than one.
+		result = map[string]any{"handle": "box:" + req.Config["target"] + "/box-" + a.RequestID, "ttl_s": 120, "expires_at": time.Now().Add(120 * time.Second).UTC(), "image_digest": imageDigest, "database": a.Database, "size": "test"}
 	case "release":
 		result = map[string]any{"released": true}
 	case "list":

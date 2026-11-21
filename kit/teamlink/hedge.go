@@ -128,7 +128,7 @@ func (s *Service) hedged(ctx context.Context, x *Remote, req *http.Request, body
 		}()
 	}
 	s.hedgeB.read(time.Now())
-	start(0, x.HC)
+	start(0, x.Client())
 	live, hedges := 1, 0
 	var firstErr error
 	t := time.NewTimer(HedgeAfter)

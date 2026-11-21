@@ -149,6 +149,14 @@ type Hooks struct {
 	// Relay copies a forwarded answer to the caller (and reads it); nil:
 	// copied as it came.
 	Relay func(w http.ResponseWriter, r *http.Request, resp *http.Response)
+	// Repointed runs once x follows its project's new home (successor.go):
+	// its address, key and client are the new home's and saved; old is the
+	// remote as it was. The token, the copy and the host state are as they
+	// were. It runs with x.BeatMu held: it must not beat x.
+	Repointed func(x *Remote, old api.Remote)
+	// Home is the move engine behind the HQ routes (home_control.go); nil:
+	// every press answers api.ReasonNoEngine.
+	Home HomeEngine
 }
 
 // Service is the teamlink module.
@@ -162,7 +170,7 @@ type Service struct {
 	n       atomic.Int32       // len(remotes), read on every request
 	loaded  atomic.Bool        // Load read every recorded join (Loaded)
 
-	keyMu sync.Mutex // a join's bind and save of a project key, and a forget (project_keys.go)
+	keyMu sync.Mutex // a join's bind and save of a project key, a forget (project_keys.go), and a repoint (successor.go)
 
 	limMu sync.Mutex
 	lims  map[string]*limiter // redemption limits, per transport
@@ -200,7 +208,7 @@ func From(d *core.Deps) *Service {
 }
 
 // Migrations are teamlink's tables in registry.db (New adds them).
-var Migrations = slices.Concat(remoteMigrations, opMigrations, machineClassMigrations, projectKeyMigrations)
+var Migrations = slices.Concat(remoteMigrations, opMigrations, machineClassMigrations, projectKeyMigrations, successorMigrations)
 
 // New returns the teamlink module with its own route rows. Remotes load in
 // Start.
@@ -208,7 +216,9 @@ func New(d *core.Deps) *Service {
 	d.AddMigrations(Migrations...)
 	s := &Service{d: d, remotes: map[string]*Remote{}}
 	s.beat.kick = make(chan struct{}, 1)
+	s.RegisterBeatPart(AuthorityPart, BeatPart{Request: s.requestAuthority, Serve: s.serveAuthority}) // successor.go
 	s.RegisterRoutes("teamlink", s.kitRows()...)
+	s.RegisterRoutes("teamlink", s.homeRows()...)
 	if d.Projects != nil {
 		d.Projects.OnFreshJoin(forgetClass)
 		d.Projects.OnRemove(dropRemoved)
@@ -287,7 +297,8 @@ type Remote struct {
 	HeaderSeq     uint64        // the sent number of the call headerB64 came with
 	Sent          atomic.Uint64 // calls sent to the authority, numbered (observe)
 	binds         []project.Binding
-	bindsOf       string // the headerRaw and paths binds was made from
+	bindsOf       string     // the headerRaw and paths binds was made from
+	home          memberHome // what this machine knows of the project's home (successor.go)
 
 	// The layer above's local copy (internal/team: *replica, nil when there
 	// is none) and its loops; Copy is guarded by Mu.
@@ -402,6 +413,10 @@ func (s *Service) Load(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
+	if err := s.loadHomes(ctx, m); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	s.remotes = m
 	s.n.Store(int32(len(m)))
@@ -511,7 +526,11 @@ func (x *Remote) Slug() string {
 // Save writes x's record to registry.db. Every column is the remote's as
 // it is in memory: a re-join that replaces a revoked or purged record
 // (finishJoin) has a new URL, key, identity and transport, and a restart
-// must load those.
+// must load those. Except the home's epoch and when it last answered
+// (successor.go), which never go down within one join (a save that read
+// them before a beat raised them lands after), and whether it is behind,
+// which only the beat writes; a re-join (another joined time) starts them
+// again from its own memory.
 func (s *Service) Save(ctx context.Context, x *Remote) error {
 	// One save at a time, reading the remote and its header under one lock:
 	// otherwise two saves (or a header taken between the reads) can store an
@@ -520,7 +539,7 @@ func (s *Service) Save(ctx context.Context, x *Remote) error {
 	x.saveMu.Lock()
 	defer x.saveMu.Unlock()
 	x.Mu.Lock()
-	r, header := x.R, x.HeaderRaw
+	r, header, home := x.R, x.HeaderRaw, x.home
 	capJS, _ := json.Marshal(r.Cap)
 	paths, _ := json.Marshal(nonNil(r.Paths))
 	x.Mu.Unlock()
@@ -532,13 +551,16 @@ func (s *Service) Save(ctx context.Context, x *Remote) error {
 		via = api.ViaTailnet
 	}
 	_, err := s.d.Store.Registry().ExecContext(ctx, `INSERT INTO team_remotes (project, slug, authority, url, fingerprint, machine, identity,
-		cap, scope_version, header, paths, joined, state, last_error, via) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		cap, scope_version, header, paths, joined, state, last_error, via, term, heard) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (project) DO UPDATE SET slug = excluded.slug, authority = excluded.authority, url = excluded.url,
 			fingerprint = excluded.fingerprint, machine = excluded.machine, identity = excluded.identity, cap = excluded.cap,
 			scope_version = excluded.scope_version, header = excluded.header, paths = excluded.paths, joined = excluded.joined,
-			state = excluded.state, last_error = excluded.last_error, via = excluded.via`,
+			state = excluded.state, last_error = excluded.last_error, via = excluded.via,
+			term = CASE WHEN team_remotes.joined = excluded.joined THEN MAX(team_remotes.term, excluded.term) ELSE excluded.term END,
+			heard = CASE WHEN team_remotes.joined = excluded.joined THEN MAX(team_remotes.heard, excluded.heard) ELSE excluded.heard END,
+			behind = CASE WHEN team_remotes.joined = excluded.joined THEN team_remotes.behind END`,
 		r.Project.ID, r.Project.Slug, r.Authority, r.URL, r.Fingerprint, r.Machine, r.Identity, string(capJS), r.ScopeVersion,
-		header, string(paths), store.Millis(r.Joined), r.State, r.LastError, via)
+		header, string(paths), store.Millis(r.Joined), r.State, r.LastError, via, home.Epoch, heardMillis(home.Heard))
 	return err
 }
 
@@ -553,13 +575,17 @@ func (s *Service) Remove(ctx context.Context, x *Remote) []string {
 			removed = append(removed, p)
 		}
 	}
-	_, _ = s.d.Store.Registry().ExecContext(ctx, `DELETE FROM team_remotes WHERE project = ?`, id)
+	if tx, err := s.d.Store.Registry().BeginTx(ctx, nil); err == nil {
+		_, _ = tx.ExecContext(ctx, `DELETE FROM team_remotes WHERE project = ?`, id)
+		_, _ = tx.ExecContext(ctx, `DELETE FROM team_successors WHERE project = ?`, id)
+		_ = tx.Commit()
+	}
 	s.mu.Lock()
 	delete(s.remotes, id)
 	s.n.Store(int32(len(s.remotes)))
 	s.mu.Unlock()
 	s.unwatch(x)
-	x.HC.CloseIdleConnections()
+	x.Client().CloseIdleConnections()
 	if s.Hooks.Removed != nil {
 		removed = append(removed, s.Hooks.Removed(x)...)
 	}

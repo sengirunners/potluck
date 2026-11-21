@@ -147,7 +147,10 @@ func TestSwapRecorded(t *testing.T) {
 	if _, err := c.RecordSwap(ctx, api.SwapRecord{What: "dance"}); err == nil {
 		t.Fatal("unknown what accepted")
 	}
-	dm2 := swapDaemon(t, home) // the next daemon on this home
+	// The next daemon on this home, once this one stopped (it held the
+	// home's writer lock).
+	dm.Close()
+	dm2 := swapDaemon(t, home)
 	h, _ := client.WithHandler(dm2.SocketHandler()).Health(ctx)
 	if h.LastSwap == nil || h.LastSwap.To != "v2 (b)" || !h.LastSwap.Forced {
 		t.Fatalf("last swap after a restart: %+v", h.LastSwap)
@@ -202,7 +205,10 @@ func TestZmStateInMachineNumbers(t *testing.T) {
 	if z := l.Machines[0].Stats.Build(); z == nil || l.Machines[0].Stats.Zm != nil || z.Held != "testing a fix" || z.HeldSince.IsZero() || z.Last == nil || z.Last.Result != "held" || z.Last.Reason != "hold file exists" {
 		t.Fatalf("machine numbers zm %+v", z)
 	}
-	dm2 := swapDaemon(t, home) // the next daemon on this home
+	// The next daemon on this home, once this one stopped (it held the
+	// home's writer lock).
+	dm.Close()
+	dm2 := swapDaemon(t, home)
 	if z := dm2.ZmState(); z.Last == nil || z.Last.Result != "held" {
 		t.Fatalf("last check after a restart: %+v", z.Last)
 	}

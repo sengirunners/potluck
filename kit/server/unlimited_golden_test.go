@@ -53,7 +53,13 @@ func TestUnlimitedTokenGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mask := masker(cfg.Home, owner.Secret, guest.Secret)
+	// The tunnel key is made fresh for each home: its fingerprint, which the
+	// term names to a tunnel caller, is masked by value.
+	tunnelKey, err := dm.Deps.HomeFingerprint(ctx, core.ViaTunnel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mask := masker(cfg.Home, map[string]string{owner.Secret: "<secret>", guest.Secret: "<secret>", tunnelKey: "<tunnel-key>"})
 	callers := []struct {
 		name   string
 		secret string
@@ -70,8 +76,8 @@ func TestUnlimitedTokenGolden(t *testing.T) {
 	var b strings.Builder
 	for _, rt := range dm.Router.Routes() {
 		method, path, _ := strings.Cut(rt.Pattern, " ")
-		if path == "/v0/daemon/stop" || strings.Contains(path, "/tailnet/") || strings.Contains(path, "/join") {
-			continue // stops the daemon; or reaches for a tailnet or the network
+		if path == "/v0/daemon/stop" || path == "/v0/authority/freeze" || strings.Contains(path, "/tailnet/") || strings.Contains(path, "/join") {
+			continue // stops the daemon (a freeze parks its home too); or reaches for a tailnet or the network
 		}
 		path = goldenPath(path)
 		for _, c := range callers {
@@ -134,8 +140,8 @@ func goldenPath(p string) string {
 }
 
 // masker hides what differs between runs: ULIDs, times, numbers that count
-// time, the home path and the secrets.
-func masker(home string, secrets ...string) func(string) string {
+// time, the home path, and each value in made (secrets, keys) by its mask.
+func masker(home string, made map[string]string) func(string) string {
 	ulid := regexp.MustCompile(`\b[0-9A-HJKMNP-TV-Z]{26}\b`)
 	ts := regexp.MustCompile(`\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)`)
 	nums := regexp.MustCompile(`"(pid|uptime_s|uptime|age_s|ms|dur_ms|version|commit)":("[^"]*"|-?\d+(\.\d+)?)`)
@@ -144,8 +150,8 @@ func masker(home string, secrets ...string) func(string) string {
 		if r, err := filepath.EvalSymlinks(home); err == nil {
 			s = strings.ReplaceAll(s, r, "<home>")
 		}
-		for _, x := range secrets {
-			s = strings.ReplaceAll(s, x, "<secret>")
+		for x, m := range made {
+			s = strings.ReplaceAll(s, x, m)
 		}
 		s = ulid.ReplaceAllString(s, "<id>")
 		s = ts.ReplaceAllString(s, "<time>")

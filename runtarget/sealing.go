@@ -348,11 +348,7 @@ func (s *Service) setSealing(r *http.Request) (any, error) {
 	s.seal.mu.Lock()
 	s.seal.reported = "" // the next answer reports the new mode
 	s.seal.mu.Unlock()
-	by := sub.Identity.Name
-	if by == "" {
-		by = sub.Machine
-	}
-	ch := computeapi.SealingChanged{Project: t.Project.Slug, From: from, To: req.Mode, By: by, Forced: req.Force}
+	ch := computeapi.SealingChanged{Project: t.Project.Slug, From: from, To: req.Mode, By: askedBy(ctx), Forced: req.Force}
 	s.d.Log.Warn("sealing: the pool's mode changed", "project", ch.Project, "from", ch.From, "to", ch.To, "by", ch.By, "forced", ch.Forced)
 	if s.d.Events != nil {
 		if _, err := s.d.Events.Publish(ctx, events.Input{Type: computeapi.EventSealingChanged, Subject: t.Project.ID, Project: t.Project.ID, Data: ch}); err != nil {

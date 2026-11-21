@@ -749,7 +749,13 @@ func (r *Registry) identity(ctx context.Context, ref string) (api.Identity, erro
 
 // Tuples returns an identity's grant tuples.
 func (r *Registry) Tuples(ctx context.Context, identityID string) ([]authz.Tuple, error) {
-	rows, err := r.st.Registry().QueryContext(ctx, `SELECT relation, object FROM grants WHERE subject = ?`, identityID)
+	return TuplesIn(ctx, r.st.Registry(), identityID)
+}
+
+// TuplesIn is Tuples read from db, a registry.db: this daemon's, or one a
+// daemon with no store opened as a private copy (store.OpenCopy).
+func TuplesIn(ctx context.Context, db *sql.DB, identityID string) ([]authz.Tuple, error) {
+	rows, err := db.QueryContext(ctx, `SELECT relation, object FROM grants WHERE subject = ?`, identityID)
 	if err != nil {
 		return nil, err
 	}
