@@ -424,6 +424,28 @@ func (s *Store) CreateProject(ctx context.Context, id string) (*sql.DB, error) {
 	return db, nil
 }
 
+// DropProject forgets project id's database and removes its folder
+// (projects/<id>: project.db, its WAL files and project.toml). The handles
+// stay open until Close, as SetTeam's do, so a request already holding one
+// finishes on the removed file. Only kit/project calls it, once the
+// project's registry rows are gone. A project never opened is not an error.
+func (s *Store) DropProject(id string) error {
+	if !ids.Valid(id) {
+		return fmt.Errorf("store: bad project id %q", id)
+	}
+	s.mu.Lock()
+	if db, ok := s.projects[id]; ok {
+		s.retired = append(s.retired, db)
+		delete(s.projects, id)
+	}
+	if db, ok := s.writers[id]; ok {
+		s.retired = append(s.retired, db)
+		delete(s.writers, id)
+	}
+	s.mu.Unlock()
+	return os.RemoveAll(s.ProjectDir(id))
+}
+
 // Project returns a project's database if sc may do a somewhere in it, else
 // api.NotFound("project", id), identical to a missing project. Area-level
 // filtering is still the caller's job: use sc.AreaSQL on every query.

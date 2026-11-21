@@ -128,6 +128,9 @@ var Migrations = slices.Concat(linkMigrations, grantMigrations, admissionMigrati
 // turns logins off until github.client_id is set.
 func New(d *core.Deps, acc Accounts, dev Device) *Service {
 	d.AddMigrations(Migrations...)
+	if d.Projects != nil {
+		d.Projects.OnRemove(dropRemoved)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{d: d, acc: acc, dev: dev, MaxLogins: 64, MaxLocal: 4, MaxPerOwner: 4, MaxStarts: 20, MaxTunnel: 8, MaxPerAddr: 4, MaxAddrStarts: 20, Collect: 2 * time.Minute,
 		RecheckEvery: time.Hour, DecideFloor: 1500 * time.Millisecond, OrgFailGrace: 24 * time.Hour,
@@ -145,7 +148,7 @@ func (s *Service) Close() error {
 // Routes registers the owners routes (API.md "Owners").
 func (s *Service) Routes(r *core.Router) {
 	r = r.For("owners")
-	r.HandleFunc("POST /v0/login/github/start", core.Authed, "link: the caller's own human identity, by the socket owner or a replica's node-bound token only (never a minted token or a tailnet login); at most 4 logins in flight per identity; bind: admin on the project, the approver must be the identity's linked account; key: a person's own identity as for link, read on ?project=, and core.Deps.KeyLogin's check (else unknown purpose)", jsonH(s.handleStart))
+	r.HandleFunc("POST /v0/login/github/start", core.Authed, "link: the caller's own human identity, by the socket owner or a replica's node-bound token only (never a minted token or a tailnet login); at most 4 logins in flight per identity; bind: admin on the project, the approver must be the identity's linked account; key: a person's own identity as for link, read on ?project=, and core.Deps.KeyLogin's check (else unknown purpose); invite: a replica's node-bound token from its own node (a key-bound one over the tunnel), a person's identity, the team project the token is capped to; collecting links the identity and admits the node at its GitHub grants, if any", jsonH(s.handleStart))
 	r.HandleFunc("GET /v0/owner", core.Authed, "read on the project named by ?project= (else not_found); answers the caller's own owner right (core.Deps.ProjectAdmin) and GitHub link", jsonH(s.handleOwner))
 	s.grantRoutes(r)
 	s.joinRoutes(r)

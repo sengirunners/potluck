@@ -43,6 +43,15 @@ func Main(argv []string) int {
 	if len(argv) == 3 && argv[0] == flagHold {
 		return hold(argv[1], argv[2])
 	}
+	if len(argv) == 3 && argv[0] == flagCloudHVVM { // cloudhv_mon.go: one VM's monitor
+		return cloudhvMonitor(argv[1], argv[2])
+	}
+	if len(argv) >= 3 && argv[0] == flagCloudHVExec { // one command in a cloud-hypervisor guest
+		return cloudhvExec(argv[1], argv[2:])
+	}
+	if len(argv) > 0 && argv[0] == flagCloudHVNet { // cloudhv_net.go: the root helper
+		return cloudhvNetHelper(argv[1:])
+	}
 	if len(argv) > 0 && argv[0] == "host" { // hostset.go: the owner's override
 		return hostCmd(argv[1:], os.Stdin, os.Stdout, os.Stderr)
 	}

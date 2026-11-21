@@ -49,6 +49,18 @@ func (c *Client) UpdateProject(ctx context.Context, ref string, req api.UpdatePr
 	return p, c.Do(ctx, http.MethodPatch, "/v0/projects/"+Seg(ref), req, &p)
 }
 
+// RemoveProject is DELETE /v0/projects/{project}: remove a project this
+// machine runs (local callers only). force removes it although work still
+// runs in it (the daemon refuses that otherwise).
+func (c *Client) RemoveProject(ctx context.Context, ref string, force bool) (api.RemoveProjectResponse, error) {
+	var r api.RemoveProjectResponse
+	path := "/v0/projects/" + Seg(ref)
+	if force {
+		path += "?force=1"
+	}
+	return r, c.Do(ctx, http.MethodDelete, path, nil, &r)
+}
+
 // Areas is GET /v0/projects/{project}/areas.
 func (c *Client) Areas(ctx context.Context, ref string) ([]api.Area, error) {
 	var l api.AreaList

@@ -1,14 +1,31 @@
 package teamlink
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/project"
 )
+
+// poolRemoved reads a 401's message, putting the body back: the authority
+// says the pool this machine joined was removed by its owner
+// (project.PoolRemovedPrefix, then the pool's name).
+func poolRemoved(resp *http.Response) (pool string, ok bool) {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(b))
+	var er api.ErrorResponse
+	if json.Unmarshal(b, &er) != nil || er.Error == nil {
+		return "", false
+	}
+	return strings.CutPrefix(er.Error.Message, project.PoolRemovedPrefix)
+}
 
 // staleHeader reports whether a header's scope_version is older than what
 // this replica holds, for a request that did not send more than it: the
@@ -40,6 +57,11 @@ func takeHeader(version, held, sent int64, seq, headerSeq uint64) bool {
 func (s *Service) Observe(ctx context.Context, x *Remote, resp *http.Response, seq uint64, sent int64) {
 	now := time.Now()
 	changed, moved := false, false
+	var removedPool string
+	var ok bool
+	if resp.StatusCode == http.StatusUnauthorized { // read before any lock: it reads the body
+		removedPool, ok = poolRemoved(resp)
+	}
 	x.PublicationMu.Lock()
 	x.Mu.Lock()
 	if x.Left || x.Recovery.Closing {
@@ -87,8 +109,18 @@ func (s *Service) Observe(ctx context.Context, x *Remote, resp *http.Response, s
 	purge := false
 	if resp.StatusCode == http.StatusUnauthorized {
 		x.Unauth = append(x.Unauth, now)
-		if n := len(x.Unauth); n >= unauthorizedLimit && now.Sub(x.Unauth[n-unauthorizedLimit]) >= PurgeAfter && (x.R.State == api.RemoteOK || x.R.State == api.RemoteRevoked) {
-			x.R.State, x.R.LastError = api.RemotePurged, "the authority refused the token 3 times over "+PurgeAfter.String()
+		n := len(x.Unauth)
+		live := x.R.State == api.RemoteOK || x.R.State == api.RemoteRevoked
+		why := ""
+		if ok && live {
+			// The owner removed the pool: nothing to wait out, no later call
+			// will be answered.
+			why = "the pool's owner removed pool " + removedPool
+		} else if n >= unauthorizedLimit && now.Sub(x.Unauth[n-unauthorizedLimit]) >= PurgeAfter && live {
+			why = "the authority refused the token 3 times over " + PurgeAfter.String()
+		}
+		if why != "" {
+			x.R.State, x.R.LastError = api.RemotePurged, why
 			x.Recovery.Ready, x.Recovery.Drop = false, true
 			x.Recovery.Generation++
 			x.Recovery.Revision++

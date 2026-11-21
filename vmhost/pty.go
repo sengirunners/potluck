@@ -115,6 +115,9 @@ func holdPTY(pd boxproc.Dir, r record, cfg config, spec boxproc.Spec, pid string
 
 // input writes to a process's terminal and resizes it (boxproc.Input).
 func (d *drv) input(handle string, raw json.RawMessage) (any, error) {
+	if !d.ptyVerbs() { // describe lists no input: a layer with no terminal exec
+		return nil, refuse("not_implemented", "the %s layer gives no terminal", d.cfg.VM)
+	}
 	a, data, err := boxproc.ParseInput(raw)
 	if err != nil {
 		return nil, asRefusal(err)

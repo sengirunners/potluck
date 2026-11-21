@@ -1,8 +1,8 @@
 # Adding a VM layer
 
 A VM layer is how Potluck's VM driver (`vmhost/`, built as `cmd/potluck-driver-tart`) talks to one hypervisor or
-sandbox runtime. Tart (`vmhost/vm.go`), Incus (`vmhost/incus.go`) and OCI runtimes such as Kata and gVisor
-(`vmhost/oci.go`) are layers. To support another hypervisor, write one more: a Go file that implements one interface
+sandbox runtime. Tart (`vmhost/vm.go`), Incus (`vmhost/incus.go`), OCI runtimes such as Kata and gVisor
+(`vmhost/oci.go`) and cloud-hypervisor (`vmhost/cloudhv.go`, [cloudhv.md](cloudhv.md)) are layers. To support another hypervisor, write one more: a Go file that implements one interface
 and is listed in one map. The driver does the rest.
 
 ## What a layer is, and is not

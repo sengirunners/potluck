@@ -211,6 +211,7 @@ func New(d *core.Deps) *Service {
 	s.RegisterRoutes("teamlink", s.kitRows()...)
 	if d.Projects != nil {
 		d.Projects.OnFreshJoin(forgetClass)
+		d.Projects.OnRemove(dropRemoved)
 	}
 	return s
 }

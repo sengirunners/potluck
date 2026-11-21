@@ -257,6 +257,13 @@ there (Potluck alone makes no such grants): that machine asks GitHub to
 admit you (open the link printed and enter the code). <project>/<area>
 with --from joins one area of it, over https too.
 
+--github with an invite also signs you in with GitHub at the project's
+machine once the invite is redeemed: open the link printed and enter the
+code. Your identity there is then linked to your GitHub account, so a
+grant its owner makes to your GitHub login (` + a.cmd("grant") + ` @<login> ...)
+applies to you as it does to a GitHub join. It is optional: declined,
+expired or with no grant yet, the invite's join goes on as it is.
+
 --json prints what was joined (the remote); a join by name that needs
 you first prints that first answer instead (the machines found, or the
 code to enter). A tailnet login is waited for either way, its link on
@@ -275,8 +282,8 @@ stderr.`,
 			if err != nil {
 				return err
 			}
-			if r.Remote == nil {
-				if a.asJSON() { // a join by name waiting for a person: the first answer
+			if r.Remote == nil || (a.asJSON() && r.GitHub != nil) {
+				if a.asJSON() { // a join waiting for a person (by name, or --github's sign-in): the first answer
 					return a.printJSON(r)
 				}
 				return errors.New("nothing joined")
@@ -322,6 +329,9 @@ func (a *app) join(ctx context.Context, c *client.Client, req api.JoinRequest) (
 		where += "/" + x.Cap.Area
 	}
 	a.say("joined %s %s on %s as %s (%s), machine %s", kind, where, x.Authority, x.Identity, x.Cap.Role, x.Machine)
+	if r.SignIn != "" {
+		a.say("  GitHub: %s", r.SignIn)
+	}
 	return r, nil
 }
 

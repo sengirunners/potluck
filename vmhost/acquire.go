@@ -290,6 +290,9 @@ func (d *drv) rawConfig() map[string]string {
 	if c.VM == "incus" {
 		m["incus"], m["incus_remote"], m["incus_project"], m["incus_profile"], m["incus_conf"] = c.IncusBin, c.IncusRemote, c.IncusProject, c.IncusProfile, c.IncusConf
 	}
+	if c.VM == "cloudhv" {
+		c.CloudHV.raw(m)
+	}
 	if c.VM == "oci" {
 		m["oci_cli"], m["oci_runtime"], m["oci_network"] = c.OCICLI, c.OCIRuntime, c.OCINetwork
 		if c.OCIHostProfile != "" {

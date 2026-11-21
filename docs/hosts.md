@@ -513,8 +513,10 @@ How pools, invites and machine classes work is in `docs/daemon.md`.
 ### After an update: the daemon moves a host to the new pins
 
 A binding keeps the pins it was bound with, so a host lends the images of the build that shared it until something
-rebinds it. The daemon does that itself for its own machine-level box bindings (`runtarget/hostimages.go`), at start
-(an update restarts it) and every 10 minutes after:
+rebinds it. The daemon does that itself for its own box bindings (`runtarget/hostimages.go`), at start (an update
+restarts it) and every 10 minutes after. They are the machine-level ones in `run_targets.toml` (a host in a pool) and
+the project-level ones in each project's `project.toml` (what `potluck host` binds with no `--pool`); both follow the
+same rules:
 
 - It moves only a binding whose images Potluck chose (`imagepins.Current`). `potluck host` records who chose them in
   `image_default`: `true` when it lends with no `--image` or `--with`, `named` for `--with NAME`, `false` for the
@@ -534,11 +536,14 @@ rebinds it. The daemon does that itself for its own machine-level box bindings (
   keeps the old pins.
 - It rebinds only while the binding has no live handles, stopped boxes among them, and no acquire or start has come
   in since it began listing them (an acquire counts itself in before it reads the binding), so no box is dropped and
-  none boots the old pin unseen. Warm boxes of the old pin are ended, never handed out. The next heartbeat (asked for
-  at once) advertises the new pins.
+  none boots the old pin unseen: a project binding's acquire counts itself in the same way (a start needs a stopped box, which already holds the rebind off). Warm boxes of the old pin
+  are ended, never handed out. A rebind of a project binding is written to `project.toml` as the owner's bind with
+  replace would be (the binding checked again), and only if it is still as the refresh read it. A machine-level one's
+  next heartbeat (asked for at once) advertises the new pins.
 - Until then the binding lends the pins it has. The owner's host list carries `images_behind` (what it lends, what
   this build pins, and why: pulling, waiting for its boxes, a failed pull, or the command for its owner), and
-  `potluck host status` prints a line for each such size.
+  `potluck host status` prints a line for each such size, project-level ones included (a project's list shows it to
+  the machine's owner only).
 
 Conformance does not run again for the move: the driver, layer, runtime and every config key stay as the owner's
 share checked them, and only the digests of Potluck's own images change. `potluck host` run again checks it all.

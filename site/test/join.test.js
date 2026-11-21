@@ -15,6 +15,7 @@ test("a valid fragment on a computer gives the exact install command and the man
     const v = joinView(hash, ORIGIN, "mac");
     assert.equal(v.kind, "command");
     assert.equal(v.command, `curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '${ORIGIN}/join#${FRAG}'`);
+    assert.equal(v.github, `curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '${ORIGIN}/join#${FRAG}' --github`);
     assert.equal(v.link, `${ORIGIN}/join#${FRAG}`);
     assert.equal(v.mac, true);
   }
@@ -69,7 +70,7 @@ test("with scripts off the page holds the manual line, and script-only blocks st
 test("the page says what it should", () => {
   for (const s of [
     "You have an invite to a Potluck pool.", "On the Mac or Linux machine you want to use, paste this in a terminal.",
-    "Terminal is in Applications, then Utilities.", "Already have Potluck?", "Open this link on the Mac or Linux machine you want to join with.",
+    "Terminal is in Applications, then Utilities.", "Already have Potluck?", "Optional: to also sign in with GitHub", "Open this link on the Mac or Linux machine you want to join with.",
     "This link is incomplete.", "Ask for it again.",
     "The invite works once and expires. If it is refused, ask whoever sent it for a new one. Only use a link from someone you know.",
   ]) assert.ok(HTML.includes(s), s);

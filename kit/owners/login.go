@@ -37,6 +37,10 @@ const (
 	PurposeJoin = "join" // admit the starting tailnet node to a project (join.go)
 	PurposeBind = "bind" // bind @owner/name to a project (names.go)
 	PurposeKey  = "key"  // bind a signing key to the starting identity (keylogin.go)
+	// PurposeInvite links the identity an invite admitted to the approving
+	// account and applies its GitHub grants to the starting node
+	// (invitebind.go).
+	PurposeInvite = "invite"
 )
 
 // login is one login in flight.
@@ -63,14 +67,17 @@ type login struct {
 	bindOwnerAcc                     Account
 	bindMember                       bool
 	bindErr                          error
-	key                              *core.KeyStart // key: the key to bind, and where from
-	keySeq                           uint64         // key: start order, for latest wins
-	started                          bool           // GitHub gave it a code (begin)
-	expires                          time.Time      // the device code's (a reservation's until GitHub answers)
-	done                             chan struct{}
-	ctx                              context.Context    // ends when the login is dropped or replaced
-	stop                             context.CancelFunc // ends ctx
-	act                              sync.Mutex         // one collector at a time
+	// invite: the token that started it (left live by the admission until
+	// the member gives it back) and its cap's area and role.
+	keep, capArea, capRole string
+	key                    *core.KeyStart // key: the key to bind, and where from
+	keySeq                 uint64         // key: start order, for latest wins
+	started                bool           // GitHub gave it a code (begin)
+	expires                time.Time      // the device code's (a reservation's until GitHub answers)
+	done                   chan struct{}
+	ctx                    context.Context    // ends when the login is dropped or replaced
+	stop                   context.CancelFunc // ends ctx
+	act                    sync.Mutex         // one collector at a time
 
 	// Set once, before done closes: who GitHub says approved, which of the
 	// join's candidate orgs it is an active member of, or why not.
@@ -156,6 +163,8 @@ func (s *Service) startLogin(ctx context.Context, sub *authz.Subject, hdr http.H
 		}
 		return s.begin(ctx, &login{purpose: PurposeBind, identity: sub.Identity, from: sub.Address,
 			local: sub.Via == authz.ViaLocal && sub.TokenID == "", bindProject: p.ID, bindOwner: owner, bindName: name})
+	case PurposeInvite:
+		return s.startInvite(ctx, sub)
 	case PurposeKey:
 		if s.d.KeyLogin != nil {
 			return s.startKey(ctx, sub, hdr, req)
@@ -196,6 +205,13 @@ func (l *login) owner() string {
 
 // who names the login's requester for the person approving it.
 func (l *login) who() string {
+	if l.purpose == PurposeInvite {
+		via := "tailnet node " + l.node
+		if strings.HasPrefix(l.node, "zmkey:") {
+			via = "key " + l.node + " over https"
+		}
+		return "identity " + l.identity.Name + " on machine " + l.machine + " (" + via + "), to sign in with GitHub after an invite"
+	}
 	if l.node != "" {
 		who := "node " + l.nodeName + " (" + l.node + ") as machine " + l.machine
 		if strings.HasPrefix(l.node, "zmkey:") {
@@ -373,6 +389,9 @@ func (s *Service) run(l *login, code DeviceCode) {
 		if l.purpose == PurposeBind && acc.Kind == KindUser {
 			s.bindFacts(ctx, l, acc, token)
 		}
+		if l.purpose == PurposeInvite && acc.Kind == KindUser {
+			orgs = s.memberships(ctx, l.project, token) // the project's granted orgs, live
+		}
 		if l.purpose == PurposeJoin {
 			// The only thing a join needs the token for, live: which of the
 			// project's granted orgs the person is an active member of. Every
@@ -496,6 +515,9 @@ func (s *Service) act(ctx context.Context, l *login, acc Account) (api.GitHubLog
 	}
 	if l.purpose == PurposeKey {
 		return s.bindKey(ctx, l, acc)
+	}
+	if l.purpose == PurposeInvite {
+		return s.bindInvite(ctx, l, acc)
 	}
 	if l.purpose == PurposeJoin {
 		join, err := s.admit(ctx, l, acc)

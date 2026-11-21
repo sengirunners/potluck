@@ -73,9 +73,10 @@ die() {
 }
 
 usage() {
-	say "usage: install.sh [--join <invite code>] [--version <release>] [--from <release dir>] [--menubar] [--no-modify-path] [--unsafe-skip-signature-check]"
+	say "usage: install.sh [--join <invite code> [--github]] [--version <release>] [--from <release dir>] [--menubar] [--no-modify-path] [--unsafe-skip-signature-check]"
 	say "Installs potluck into \$POTLUCK_INSTALL_DIR (default ~/.local/bin), checking the release's signature first."
 	say "--join joins the pool of that invite link or code once potluck is installed (potluck join)."
+	say "--github with --join also signs you in with GitHub there (optional; potluck join --github)."
 	say "--no-modify-path leaves shell startup files alone (by default a line putting the install directory on PATH is added)."
 	say "--version takes a release (potluck-main-<12 hex>) instead of the newest."
 	say "--from installs from a directory holding a release's files (its manifest, signatures and tarball)."
@@ -519,7 +520,11 @@ next_steps() {
 		say ""
 		say "joining the pool of your invite code"
 		# stdin is the script itself under curl | sh: join must not read it.
-		if ! "$INSTALL_DIR/potluck" join "$JOIN" </dev/null; then
+		set -- "$JOIN"
+		if [ "$JOIN_GITHUB" = 1 ]; then
+			set -- "$JOIN" --github
+		fi
+		if ! "$INSTALL_DIR/potluck" join "$@" </dev/null; then
 			die "potluck is installed, but joining the pool failed (see above). Fix that, then run: \"$INSTALL_DIR/potluck\" join '<your invite code>'"
 		fi
 		if [ "$PATH_ADDED" = 1 ]; then
@@ -550,6 +555,7 @@ main() {
 	MENUBAR=0
 	UNSAFE=0
 	JOIN=""
+	JOIN_GITHUB=0
 	MODIFY_PATH=1
 	PATH_ADDED=0
 	while [ $# -gt 0 ]; do
@@ -588,6 +594,10 @@ main() {
 			[ -n "$JOIN" ] || die "--join needs the invite code the pool's owner sent you"
 			shift
 			;;
+		--github)
+			JOIN_GITHUB=1
+			shift
+			;;
 		--no-modify-path)
 			MODIFY_PATH=0
 			shift
@@ -612,6 +622,7 @@ main() {
 	case "$VERSION" in
 	*[!A-Za-z0-9._-]* | [._-]*) die "--version $VERSION is not a release (potluck-main-<12 hex>)" ;;
 	esac
+	[ "$JOIN_GITHUB" = 0 ] || [ -n "$JOIN" ] || die "--github goes with --join '<invite link>': it signs you in with GitHub when you join"
 	[ "$UNSAFE" != 1 ] || [ -z "$FROM" ] ||
 		die "--unsafe-skip-signature-check is only for a download from GitHub over HTTPS, not --from: a directory has nothing else vouching for it"
 

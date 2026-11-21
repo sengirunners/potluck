@@ -74,6 +74,7 @@ var layers = map[string]func(c config) vmLayer{
 	"incus": func(c config) vmLayer {
 		return incusCLI{c.IncusBin, c.IncusRemote, c.IncusProject, c.IncusProfile, c.IncusConf}
 	},
+	"cloudhv": func(c config) vmLayer { return cloudhvCLI{c.CloudHV, c.StateDir} },
 }
 
 func layerNames() string {

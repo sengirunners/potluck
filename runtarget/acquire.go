@@ -33,10 +33,11 @@ var jitRepoRe = regexp.MustCompile(`^[A-Za-z0-9-]{1,100}/[A-Za-z0-9._-]{1,100}$`
 var jitEventRe = regexp.MustCompile(`^[a-z_]{1,64}$`)
 
 func (s *Service) acquire(r *http.Request) (any, error) {
-	t, b, db, err := s.target(r, authz.Operate) // before the body: only a caller who may acquire sends a large one
+	t, b, db, leave, err := s.targetStarting(r, authz.Operate) // before the body: only a caller who may acquire sends a large one
 	if err != nil {
 		return nil, err
 	}
+	defer leave()
 	var req computeapi.AcquireRunTargetRequest
 	if err := api.DecodeJSONWithin(r, &req, depsBodyMax); err != nil { // deps.go: a layer's files ride in the body
 		return nil, err

@@ -32,6 +32,13 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "--fake-native-journal" {
 		os.Exit(fakeNativeJournal(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "--api-socket" && os.Getenv(envFakeCloudHV) != "" {
+		os.Exit(fakeCloudHV(os.Args[1:])) // cloudhv_test.go: the tests' hypervisor
+	}
+	cloudhvTestStubs() // no test, and no monitor a test starts, runs the root helper
+	if len(os.Args) >= 4 && (os.Args[1] == flagCloudHVVM || os.Args[1] == flagCloudHVExec) {
+		os.Exit(Main(os.Args[1:]))
+	}
 	// Test sockets are served by this test process, never a real dockerd.
 	verifyDockerPeer = func(net.Conn) (dockerEngineOwner, error) { return dockerEngineOwner{}, nil }
 	if hostOverridePath = os.Getenv(envHostOverride); hostOverridePath == "" {

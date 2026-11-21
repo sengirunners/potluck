@@ -45,11 +45,14 @@ var tokenReaders = map[string]string{
 	"kit/project/admit.go Admit":          "node-bound only (Admit refuses an empty node)",
 	"kit/project/admit.go admitTx":        "writes a node-bound row",
 	"kit/project/admit.go freshJoin":      "node-bound only",
+	// Pool removal: ends every live token of the pool, a limited one too.
+	"kit/project/remove.go Remove": "ends it with the pool's other tokens (by project)",
 	// Schema.
 	"kit/project/registry.go init": "schema",
 	"kit/project/team.go init":     "schema",
 	"kit/project/boxkey.go init":   "schema",
 	"kit/project/limited.go init":  "schema",
+	"kit/project/remove.go init":   "schema",
 }
 
 var tokensSQL = regexp.MustCompile(`(?i)\b(from|join|update|into|table)\s+tokens\b`)

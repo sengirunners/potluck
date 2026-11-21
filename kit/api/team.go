@@ -183,6 +183,12 @@ type JoinRequest struct {
 	// with the home's key fingerprint: https://<host>#<fingerprint>.
 	Area string `json:"area,omitempty"`
 	Role string `json:"role,omitempty"`
+	// GitHub, with an invite code (either transport; SPEC 17.11): after
+	// redemption, sign in with GitHub at the home (its device flow) so the
+	// identity is linked to the account and the account's GitHub grants in
+	// the project apply to this machine. Optional: a sign-in that is
+	// declined, expires or binds nothing leaves the invite's join as it is.
+	GitHub bool `json:"github,omitempty"`
 }
 
 // Remote is a team project this machine has joined (its replica's record).
@@ -235,7 +241,7 @@ type TeamJoined struct {
 // Remote states.
 const (
 	RemoteOK      = "ok"
-	RemotePurged  = "purged"  // the authority refused the token 3 times over 10 minutes
+	RemotePurged  = "purged"  // the authority refused the token 3 times over 10 minutes, or said the pool was removed
 	RemoteRevoked = "revoked" // the identity has no grant left in the project
 )
 
@@ -254,6 +260,10 @@ type JoinResponse struct {
 	// other zm peers and why. Nothing is started until From names one.
 	Authorities []JoinAuthority `json:"authorities,omitempty"`
 	Skipped     []JoinSkipped   `json:"skipped,omitempty"`
+	// SignIn says how an invite's join --github sign-in ended: signed in
+	// (and what its GitHub grant gave), linked with no grant yet, or why it
+	// did not bind (the join then has what the invite gave).
+	SignIn string `json:"sign_in,omitempty"`
 }
 
 // JoinAuthority is a zm authority a join with no code could use.

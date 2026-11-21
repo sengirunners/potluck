@@ -14,6 +14,8 @@ package teamlink
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"github.com/sengirunners/potluck/kit/config"
@@ -47,6 +49,12 @@ type ghJoin struct {
 	project    string
 	expires    time.Time
 	view       api.JoinGitHub
+	// remote is the project an invite's join --github already joined
+	// (inviteGitHub): its sign-in only swaps in a stronger token when the
+	// home admits one, so --github never costs the invite; joined is what
+	// that join answered.
+	remote *Remote
+	first  api.JoinResponse
 
 	done chan struct{} // closed once res and err are set
 	mu   sync.Mutex
@@ -381,6 +389,8 @@ func (s *Service) collectGitHub(base, ctx context.Context, j *ghJoin) (any, erro
 		away := j.away
 		j.mu.Unlock()
 		switch {
+		case err == nil && out.Join != nil && j.remote != nil: // an invite's sign-in admitted a stronger token
+			return s.takeSignIn(base, j, *out.Join, out.Link)
 		case err == nil && out.Join != nil: // admitted, even at the deadline: the authority spent it
 			j.mu.Lock()
 			j.finishing = true
@@ -389,27 +399,30 @@ func (s *Service) collectGitHub(base, ctx context.Context, j *ghJoin) (any, erro
 			fctx, cancel := context.WithTimeout(base, 2*time.Minute)
 			defer cancel()
 			return s.finishJoin(fctx, req, *out.Join, j.hc, j.base, j.fp, j.owner, j.via, j.extra)
+		case err == nil && out.Link != nil && j.remote != nil: // linked; no GitHub grant here wider than the invite
+			return j.signedIn(fmt.Sprintf("signed in with GitHub @%s: identity %s is linked to it; it holds no GitHub grant in %s that gives more than the invite, so this machine keeps what the invite gave",
+				out.Link.Login, out.Link.Identity, j.project)), nil
 		case ctx.Err() != nil && time.Now().After(j.expires):
-			return nil, api.Errorf(api.CodeForbidden, "the GitHub login expired%s", lastAway(away)).WithHint(start())
+			return s.inviteOr(base, j, api.Errorf(api.CodeForbidden, "the GitHub login expired%s", lastAway(away)).WithHint(start()))
 		case ctx.Err() != nil:
 			return nil, api.Errorf(api.CodeUnavailable, "this daemon stopped before the GitHub login ended").WithHint(start())
 		case err == nil && out.Pending:
 			last = nil
 		case err == nil:
-			return nil, api.Errorf(api.CodeInternal, "the authority answered no admission")
+			return s.inviteOr(base, j, api.Errorf(api.CodeInternal, "the authority answered no admission"))
 		case api.IsCode(err, api.CodeNotFound):
 			why := "it restarted, or the code expired"
 			if last != nil {
 				why = "it answered " + last.Error() + " before" // and spent the outcome with it
 			}
-			return nil, api.Errorf(api.CodeNotFound, "the authority no longer has this GitHub login (%s)", why).WithHint(start())
+			return s.inviteOr(base, j, api.Errorf(api.CodeNotFound, "the authority no longer has this GitHub login (%s)", why).WithHint(start()))
 		case api.IsCode(err, api.CodeUnavailable) || api.IsCode(err, api.CodeInternal):
 			// Unreachable, or not spent (collect again): ask again shortly.
 			if own {
 				last = err
 			}
 		default:
-			return nil, err
+			return s.inviteOr(base, j, err)
 		}
 		if gap := GitHubPollGap - time.Since(began); gap > 0 {
 			select {
@@ -418,6 +431,114 @@ func (s *Service) collectGitHub(base, ctx context.Context, j *ghJoin) (any, erro
 			}
 		}
 	}
+}
+
+// signedIn is how an invite's sign-in ended, to the member: the project
+// joined (as it is now) and note.
+func (j *ghJoin) signedIn(note string) api.JoinResponse {
+	r := j.first
+	r.GitHub, r.Notes = nil, nil
+	snap := j.remote.Snapshot()
+	r.Remote, r.SignIn = &snap, note
+	return r
+}
+
+// inviteOr is how a GitHub login that ended with err ends j: an invite's
+// sign-in leaves the join as the invite made it (the sign-in was
+// optional) and says why; any other join fails with err.
+func (s *Service) inviteOr(_ context.Context, j *ghJoin, err error) (any, error) {
+	if j.remote == nil {
+		return nil, err
+	}
+	return j.signedIn("GitHub sign-in did not bind (" + err.Error() + "): this machine keeps what the invite gave"), nil
+}
+
+// takeSignIn swaps the stronger token an invite's sign-in admitted (red)
+// into j's remote, then gives the invite's token back (the home left it
+// live until now, so a lost answer never leaves this machine with none).
+func (s *Service) takeSignIn(base context.Context, j *ghJoin, red api.RedeemResponse, link *api.GitHubIdentity) (any, error) {
+	ctx, cancel := context.WithTimeout(base, 30*time.Second)
+	defer cancel()
+	j.mu.Lock()
+	j.finishing = true
+	j.mu.Unlock()
+	x := j.remote
+	giveBack := func(token string) {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		defer cancel()
+		_ = s.call(cctx, j.via, j.hc, http.MethodPost, j.base+"/v0/team/leave", token, struct{}{}, nil)
+	}
+	// The check, the token file and the swap under x's lock: a leave or a
+	// purge (RetireRole sets Left under it) comes wholly before (the new
+	// token goes back) or wholly after (it takes the new token with it).
+	current := s.ByName(red.Cap.Project) == x
+	x.Mu.Lock()
+	if !current || x.Left || x.R.State != api.RemoteOK || red.Cap.Project != x.R.Project.ID {
+		x.Mu.Unlock()
+		giveBack(red.Token) // left or replaced while the person approved
+		return j.signedIn("GitHub sign-in admitted this machine, but it left " + j.project + " meanwhile"), nil
+	}
+	if err := WriteFileAtomic(s.TokenPath(red.Cap.Project), []byte(red.Token+"\n")); err != nil {
+		x.Mu.Unlock()
+		giveBack(red.Token)
+		return j.signedIn("GitHub sign-in did not bind (the token file: " + err.Error() + "): this machine keeps what the invite gave"), nil
+	}
+	old := x.Token
+	x.Token = red.Token
+	x.Mu.Unlock()
+	giveBack(old)
+	// A first call with the new token: its header moves the cap, the areas
+	// and the copy now (remote_observe), not at the next sync.
+	var p api.Project
+	_ = s.CallRemote(ctx, x, http.MethodGet, "/v0/projects/"+red.Cap.Project, nil, &p)
+	login := "?"
+	if link != nil {
+		login = link.Login
+	}
+	where := ""
+	if red.Cap.Area != "" {
+		where = " in area " + red.Cap.Area
+	}
+	return j.signedIn(fmt.Sprintf("signed in with GitHub @%s: identity %s is linked to it, and its GitHub grant makes this machine %s%s", login, red.Identity, red.Cap.Role, where)), nil
+}
+
+// inviteGitHubKey is the key of an invite's join --github: the code (its
+// hash: the code itself is kept nowhere).
+func inviteGitHubKey(code string) string {
+	sum := sha256.Sum256([]byte(code))
+	return "invite\x00" + hex.EncodeToString(sum[:])
+}
+
+// inviteGitHub is zm join <code> --github once the code is redeemed (red):
+// the join finishes as any invite's does, first, so nothing after it can
+// cost the invite; then, with the remote's token, the home is asked to
+// start a GitHub sign-in for this node (purpose invite, SPEC 17.11), watched
+// as a GitHub join is watched. When the home cannot start one (no OAuth
+// client id, an older home), the join answers as it is and says why.
+func (s *Service) inviteGitHub(ctx context.Context, req api.JoinRequest, key string, red api.RedeemResponse, hc *http.Client, target core.JoinTarget, extra http.Header) (any, error) {
+	res, err := s.finishJoin(ctx, req, red, hc, target.URL, target.Fingerprint, "", target.Via, extra)
+	r, ok := res.(api.JoinResponse)
+	x := s.ByName(red.Cap.Project)
+	if err != nil || !ok || r.Remote == nil || x == nil {
+		return res, err
+	}
+	var st api.GitHubLoginStart
+	if err := s.CallRemote(ctx, x, http.MethodPost, "/v0/login/github/start", api.GitHubLoginRequest{Purpose: "invite"}, &st); err != nil {
+		r.SignIn = "GitHub sign-in did not start (" + err.Error() + "): this machine has what the invite gave"
+		return r, nil
+	}
+	j := &ghJoin{key: key, id: st.ID, secret: st.Secret, hc: hc, base: target.URL, fp: target.Fingerprint, via: target.Via, extra: extra,
+		project: red.Cap.Slug, expires: st.Expires, remote: x, first: r,
+		view: api.JoinGitHub{Login: ids.New(), UserCode: st.UserCode, VerificationURI: st.VerificationURI, Expires: st.Expires,
+			Authority: st.Authority, For: st.For}}
+	if err := s.startGitHub(j, req); err != nil {
+		r.SignIn = "GitHub sign-in did not start (" + err.Error() + "): this machine has what the invite gave"
+		return r, nil
+	}
+	v := j.view
+	r.GitHub = &v
+	r.Notes = append(r.Notes, "joined; now approve the GitHub login to link your GitHub account here (optional: without it this machine keeps what the invite gave)")
+	return r, nil
 }
 
 // lastAway is ", and the authority did not answer the last poll: <err>" when

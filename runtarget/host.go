@@ -215,7 +215,7 @@ func (s *Service) listHost(ctx context.Context, live bool) (any, error) {
 		if live {
 			s.addLive(ctx, &v, t.RunTarget)
 		}
-		v.ImagesBehind = s.imagesBehind(t.RunTarget) // hostimages.go
+		v.ImagesBehind = s.imagesBehind("", t.RunTarget) // hostimages.go
 		out.Targets = append(out.Targets, v)
 	}
 	return out, nil

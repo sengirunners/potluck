@@ -156,6 +156,11 @@ type AdmitInput struct {
 	// id (the owners brick records its link there, so an identity is never
 	// created without it). Its error rolls everything back.
 	Within func(ctx context.Context, tx *sql.Tx, identityID string) error
+	// Keep is a token id Admit leaves live instead of revoking it: an
+	// invite sign-in's own token (zm join --github), which the member gives
+	// back once it holds the new one, so an answer lost on the way never
+	// leaves it with no live token.
+	Keep string
 }
 
 // Admitted is Admit's answer: redemption's, and whether the node is new to
@@ -205,6 +210,19 @@ func (r *Registry) Admit(ctx context.Context, in AdmitInput) (Admitted, error) {
 		Identity: in.Identity, Authority: r.cfg.Machine}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	err := store.Tx(ctx, r.st.Registry(), func(tx *sql.Tx) error {
+		if in.Keep != "" {
+			// The token to keep must still be live, this node's, in this
+			// project: one revoked, left or replaced since (zm leave, a
+			// rejoin, the owner) admits nothing.
+			var live int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM tokens WHERE id = ? AND revoked IS NULL AND (expires IS NULL OR expires > ?)
+				AND node = ? AND project = ?`, in.Keep, store.Millis(now), in.Node, in.Project).Scan(&live); err != nil {
+				return err
+			}
+			if live == 0 {
+				return api.Errorf(api.CodeForbidden, "the token that started this is no longer live")
+			}
+		}
 		var existed int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM identities WHERE name = ?`, in.Identity).Scan(&existed); err != nil {
 			return err
@@ -258,7 +276,7 @@ func (r *Registry) Admit(ctx context.Context, in AdmitInput) (Admitted, error) {
 		out.NewNode = prior == 0
 		out.Cap.Role, out.Cap.Area = string(role), area
 		if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked = ? WHERE revoked IS NULL AND node = ? AND project = ?
-			AND identity = (SELECT id FROM identities WHERE name = ?)`, store.Millis(now), in.Node, in.Project, in.Identity); err != nil {
+			AND identity = (SELECT id FROM identities WHERE name = ?) AND id <> ?`, store.Millis(now), in.Node, in.Project, in.Identity, in.Keep); err != nil {
 			return err
 		}
 		who, tid, secret, err := r.admitTx(ctx, tx, now, admission{node: in.Node, machine: in.Machine, identity: in.Identity,

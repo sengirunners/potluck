@@ -66,3 +66,24 @@ func TestJoinByInviteLink(t *testing.T) {
 		t.Fatalf("invite --json: %+v %v", j, err)
 	}
 }
+
+// join --github with an invite, at a machine that runs no GitHub logins:
+// the sign-in is optional, so the join goes on with what the invite gave
+// and says why it did not sign in. --github without an invite is refused.
+func TestJoinGitHubIsOptional(t *testing.T) {
+	tn := tailnettest.New()
+	a := startMachine(t, tn, "mini", "judy@example.com")
+	b := startMachine(t, tn, "laptop", "ana@example.com")
+	a.ok(t, "create", "friends")
+	l := linkRe.FindStringSubmatch(a.ok(t, "invite", "ana"))
+	if l == nil {
+		t.Fatal("no link")
+	}
+	out := b.ok(t, "join", l[1], "--github")
+	if !strings.Contains(out, "joined pool friends") || !strings.Contains(out, "GitHub: GitHub sign-in did not start") || !strings.Contains(out, "no GitHub OAuth client id") {
+		t.Fatalf("join --github with no GitHub at the home:\n%s", out)
+	}
+	if _, e, code := b.run(t, "join", "friends", "--github"); code != 2 || !strings.Contains(e, "--github goes with an invite") {
+		t.Fatalf("--github by name: exit %d\n%s", code, e)
+	}
+}

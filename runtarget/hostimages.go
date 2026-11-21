@@ -1,12 +1,14 @@
 package runtarget
 
-// A host's box bindings follow its program's image pins (zm-499v): share
-// chooses the pins when a machine lends (hostprobe), and an update brings
-// other ones in the embedded images.pin. At start and every
-// hostImagesEvery, the daemon moves each machine-level box binding whose
-// images Potluck chose (imagepins.Current) to this build's pins: it pulls
-// the new images first, then rebinds once the binding has no live handles
-// and no box is starting on it, so no box is ever dropped. Until then, and
+// A host's box bindings follow its program's image pins (zm-499v, zm-grpc):
+// share chooses the pins when a machine lends (hostprobe), and an update
+// brings other ones in the embedded images.pin. At start and every
+// hostImagesEvery, the daemon moves each box binding of this machine whose
+// images Potluck chose (imagepins.Current) to this build's pins, whether it
+// is machine-level (run_targets.toml) or a project's own (project.toml, what
+// a host with no pool binds): it pulls the new images first, then rebinds
+// once the binding has no live handles and no box is starting on it, so no
+// box is ever dropped. Until then, and
 // when a step fails, the binding lends the pins it has and its view says why
 // (ImagesBehind: potluck host status). Only the oci layer is moved here; a
 // Mac's Tart images are tens of GB and are pulled when its owner runs
@@ -16,6 +18,7 @@ package runtarget
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"reflect"
@@ -42,7 +45,7 @@ const (
 // pins, and the gate between a rebind and the boxes starting on it.
 type hostImages struct {
 	mu  sync.Mutex
-	why map[string]string // binding name -> why it still lends the pins it has
+	why map[string]string // imageKey -> why it still lends the pins it has
 
 	// gate guards starting and entered. An acquire or start counts itself in
 	// (enter) before it reads its binding; a rebind writes the file only
@@ -50,12 +53,22 @@ type hostImages struct {
 	// handles began, so no box boots the old pin unseen. The gate is never
 	// held across a driver call.
 	gate     sync.Mutex
-	starting map[string]int    // binding name -> acquires and starts in flight
-	entered  map[string]uint64 // binding name -> acquires and starts ever counted in
+	starting map[string]int    // imageKey -> acquires and starts in flight
+	entered  map[string]uint64 // imageKey -> acquires and starts ever counted in
 
 	pins   func() []imagepins.DefaultPin                      // this build's (tests replace it)
 	pull   func(ctx context.Context, cli, image string) error // the layer CLI's pull (tests replace it)
 	listed func()                                             // run after the last list of live handles (tests only)
+}
+
+// imageKey names a binding in the refresh's state: a machine-level binding
+// by its name, a project's (its id) by project/name (a binding name holds no
+// "/"), so two projects' bindings and a machine-level one of one name stay apart.
+func imageKey(project, name string) string {
+	if project == "" {
+		return name
+	}
+	return project + "/" + name
 }
 
 func (h *hostImages) say(name, why string) {
@@ -96,14 +109,14 @@ func (h *hostImages) enter(name string) func() {
 	}
 }
 
-// forget drops the counts of names no binding in ts has (an acquire counts
-// itself in before its name is checked) and none is in flight on.
-func (h *hostImages) forget(ts []computeapi.HostRunTarget) {
+// forget drops the counts of keys not in bound (an acquire counts itself in
+// before its name is checked) and none is in flight on.
+func (h *hostImages) forget(bound map[string]bool) {
 	h.gate.Lock()
 	defer h.gate.Unlock()
-	for name := range h.entered {
-		if h.starting[name] == 0 && !slices.ContainsFunc(ts, func(t computeapi.HostRunTarget) bool { return t.Name == name }) {
-			delete(h.entered, name)
+	for key := range h.entered {
+		if h.starting[key] == 0 && !bound[key] {
+			delete(h.entered, key)
 		}
 	}
 }
@@ -138,19 +151,20 @@ func pullImage(ctx context.Context, cli, image string) error {
 
 // imagesBehind is b's ImagesBehind under this build's pins, nil when it lends
 // them or its images are not Potluck's choice.
-func (s *Service) imagesBehind(b computeapi.RunTarget) *computeapi.ImagesBehind {
+// project is the id of the project whose file holds b, "" for a machine-level one.
+func (s *Service) imagesBehind(project string, b computeapi.RunTarget) *computeapi.ImagesBehind {
 	m, ok := s.currentImages(b)
 	if !ok || !m.Behind {
 		return nil
 	}
-	why := s.images.said(b.Name)
+	why := s.images.said(imageKey(project, b.Name))
 	if why == "" {
 		why = cmp.Or(ownerWhy(b, m), "the daemon pulls them and rebinds it shortly")
 	}
 	return &computeapi.ImagesBehind{Lends: b.Images, Current: m.Now, Why: why}
 }
 
-// currentImages is how a box binding of this machine's stands under this
+// currentImages is how a box binding of this machine's, machine-level or a project's, stands under this
 // build's pins; ok is false when its images are not Potluck's choice.
 func (s *Service) currentImages(b computeapi.RunTarget) (imagepins.Move, bool) {
 	if b.Kind != computeapi.RunTargetKindBox || b.Host != "" {
@@ -176,7 +190,34 @@ func ownerWhy(b computeapi.RunTarget, m imagepins.Move) string {
 	return "run " + config.PotluckCommand("host", args...) + " on this machine to lend them (" + why + ")"
 }
 
-// RefreshHostImages moves each machine-level box binding still behind this
+// imageSite is a box binding the refresh looks at, and where it is bound:
+// project is the id of the project whose project.toml holds it, "" for the
+// machine-level file.
+type imageSite struct {
+	project string
+	b       computeapi.RunTarget
+}
+
+// imageSites are this machine's box bindings, machine-level first, then each
+// project's; ok is false when any list could not be read (the counts of a
+// binding not listed are then kept).
+func (s *Service) imageSites() (sites []imageSite, ok bool) {
+	s.host.mu.Lock()
+	ts, err := s.hostBindings()
+	s.host.mu.Unlock()
+	ok = err == nil
+	for _, t := range ts {
+		sites = append(sites, imageSite{"", t.RunTarget})
+	}
+	for _, p := range s.d.Projects.List(s.d.System().Scope) {
+		for _, b := range rt.ProjectTargets(s.d.Projects, p.ID) {
+			sites = append(sites, imageSite{p.ID, b})
+		}
+	}
+	return sites, ok
+}
+
+// RefreshHostImages moves each box binding of this machine still behind this
 // build's pins to them, where it can now, and records why for the rest.
 func (s *Service) RefreshHostImages(ctx context.Context) {
 	// Only once the host file's migration has finished (Start and every host
@@ -185,31 +226,37 @@ func (s *Service) RefreshHostImages(ctx context.Context) {
 	if ctx.Err() != nil || !s.host.done.Load() {
 		return
 	}
-	s.host.mu.Lock()
-	ts, err := s.hostBindings()
-	s.host.mu.Unlock()
-	if err != nil {
-		return
+	sites, ok := s.imageSites()
+	if ok {
+		bound := map[string]bool{}
+		for _, st := range sites {
+			bound[imageKey(st.project, st.b.Name)] = true
+		}
+		s.images.forget(bound)
 	}
-	s.images.forget(ts)
-	for _, t := range ts {
-		b := t.RunTarget
-		m, ok := s.currentImages(b)
+	for _, st := range sites {
+		if ctx.Err() != nil {
+			return
+		}
+		key := imageKey(st.project, st.b.Name)
+		m, ok := s.currentImages(st.b)
 		if !ok || !m.Behind {
-			s.images.say(b.Name, "")
+			s.images.say(key, "")
 			continue
 		}
-		why := s.refreshImages(ctx, b, m)
-		s.images.say(b.Name, why)
+		why := s.refreshImages(ctx, st, m)
+		s.images.say(key, why)
 		if why == "" {
-			s.logInfo("run targets: rebound a host binding to this build's image pins", "binding", b.Name, "images", strings.Join(m.Now, ","))
+			s.logInfo("run targets: rebound a binding to this build's image pins", "binding", st.b.Name, "project", st.project, "images", strings.Join(m.Now, ","))
 		}
 	}
 }
 
-// refreshImages rebinds b to m.Now when it can: "" when it did, else why b
-// still lends the pins it has.
-func (s *Service) refreshImages(ctx context.Context, b computeapi.RunTarget, m imagepins.Move) string {
+// refreshImages rebinds st's binding to m.Now when it can: "" when it did,
+// else why it still lends the pins it has.
+func (s *Service) refreshImages(ctx context.Context, st imageSite, m imagepins.Move) string {
+	b := st.b
+	key := imageKey(st.project, b.Name)
 	if why := ownerWhy(b, m); why != "" {
 		return why
 	}
@@ -228,7 +275,7 @@ func (s *Service) refreshImages(ctx context.Context, b computeapi.RunTarget, m i
 		if slices.Contains(b.Images, im) {
 			continue
 		}
-		s.images.say(b.Name, "pulling "+im)
+		s.images.say(key, "pulling "+im)
 		if err := pull(ctx, cli, im); err != nil {
 			return "the pull failed, so it lends the images it has (tried again in " + hostImagesEvery.String() + "): " + oneLine(err.Error())
 		}
@@ -247,7 +294,7 @@ func (s *Service) refreshImages(ctx context.Context, b computeapi.RunTarget, m i
 	}
 	const starting = "waiting: a box is starting on it"
 	s.images.gate.Lock()
-	seen, idle := s.images.idle(b.Name)
+	seen, idle := s.images.idle(key)
 	s.images.gate.Unlock()
 	if !idle {
 		return starting
@@ -260,9 +307,22 @@ func (s *Service) refreshImages(ctx context.Context, b computeapi.RunTarget, m i
 	}
 	s.images.gate.Lock()
 	defer s.images.gate.Unlock()
-	if n, idle := s.images.idle(b.Name); !idle || n != seen { // one came in while the handles were listed
+	if n, idle := s.images.idle(key); !idle || n != seen { // one came in while the handles were listed
 		return starting
 	}
+	if st.project != "" {
+		return s.rebindProjectImages(ctx, st.project, b, nb)
+	}
+	return s.rebindHostImages(b, nb, d)
+}
+
+// changedMeanwhile is why a rebind leaves a binding whose owner changed it
+// since the refresh read it: that choice stands.
+var changedMeanwhile = "its binding changed meanwhile; looked at again in " + hostImagesEvery.String()
+
+// rebindHostImages writes nb in place of the machine-level binding b, and
+// makes the next heartbeat advertise it. The gate is held.
+func (s *Service) rebindHostImages(b, nb computeapi.RunTarget, d *computeapi.RunTargetDescribe) string {
 	s.host.mu.Lock()
 	defer s.host.mu.Unlock()
 	ts, err := s.hostBindings()
@@ -271,7 +331,7 @@ func (s *Service) refreshImages(ctx context.Context, b computeapi.RunTarget, m i
 	}
 	i := slices.IndexFunc(ts, func(o computeapi.HostRunTarget) bool { return o.Name == b.Name })
 	if i < 0 || !reflect.DeepEqual(ts[i].RunTarget, b) { // its owner changed it since: that choice stands
-		return "its binding changed meanwhile; looked at again in " + hostImagesEvery.String()
+		return changedMeanwhile
 	}
 	h := computeapi.HostRunTarget{RunTarget: nb, Share: ts[i].Share}
 	if err := rt.ValidateHostRunTarget(h); err != nil {
@@ -287,6 +347,35 @@ func (s *Service) refreshImages(ctx context.Context, b computeapi.RunTarget, m i
 	s.host.cache.Store(b.Name, &hostDescribe{d: d, at: time.Now()})
 	if s.link != nil {
 		s.link.KickBeat()
+	}
+	return ""
+}
+
+// rebindProjectImages writes nb in place of b in the project's project.toml,
+// as an owner's bind with replace would, once the binding passes the checks
+// of one. The gate is held.
+func (s *Service) rebindProjectImages(ctx context.Context, project string, b, nb computeapi.RunTarget) string {
+	f, ok := s.d.Projects.File(project)
+	if !ok {
+		return "its project is gone"
+	}
+	if err := rt.ValidateRunTarget(f.Repos.Remotes, nb); err != nil {
+		return "the new binding is not valid, so it lends the images it has: " + oneLine(err.Error())
+	}
+	errStale := errors.New("binding changed")
+	_, err := rt.SetProjectTargets(ctx, s.d.Projects, project, func(old []computeapi.RunTarget) ([]computeapi.RunTarget, error) {
+		i := slices.IndexFunc(old, func(o computeapi.RunTarget) bool { return o.Name == b.Name })
+		if i < 0 || !reflect.DeepEqual(old[i], b) { // its owner changed it since: that choice stands
+			return nil, errStale
+		}
+		old[i] = nb
+		return old, nil
+	})
+	switch {
+	case errors.Is(err, errStale):
+		return changedMeanwhile
+	case err != nil:
+		return "its binding could not be written: " + oneLine(errText(err))
 	}
 	return ""
 }

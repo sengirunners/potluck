@@ -9,6 +9,7 @@ import (
 	"github.com/sengirunners/potluck/kit/authz"
 	"github.com/sengirunners/potluck/kit/core"
 	"github.com/sengirunners/potluck/kit/events"
+	"github.com/sengirunners/potluck/kit/project"
 )
 
 // coreRoutes are the daemon's own endpoints (API.md "Core").
@@ -77,6 +78,10 @@ func (dm *Daemon) coreRoutes(r *core.Router) {
 	}))
 	r.HandleFunc("GET /v0/projects/resolve", core.Authed, "read: only projects the caller sees are candidates", jsonH(func(r *http.Request) (any, error) {
 		return d.Resolve(r.Context()), nil
+	}))
+	r.HandleFunc("DELETE /v0/projects/{project}", core.Local, "local; admin on the project; its tokens end and its folder goes; refused while sandboxes run in it unless ?force=1", jsonH(func(r *http.Request) (any, error) {
+		return d.Projects.Remove(r.Context(), core.SubjectOf(r.Context()), r.PathValue("project"),
+			project.RemoveOptions{Force: r.URL.Query().Get("force") == "1"})
 	}))
 	r.HandleFunc("GET /v0/projects/{project}", core.Authed, "read on the project, else not_found", jsonH(func(r *http.Request) (any, error) {
 		return d.Projects.Get(core.SubjectOf(r.Context()).Scope, r.PathValue("project"))

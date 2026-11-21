@@ -15,7 +15,7 @@ export function platformOf(text) {
 
 /**
  * What to show for `hash` (location.hash) on `origin` (location.origin) from `platform` ("mac", "linux", "other").
- * {kind:"command", command, link, mac} on a computer that can run it; {kind:"link", link} elsewhere, to open the
+ * {kind:"command", command, github, link, mac} on a computer that can run it; {kind:"link", link} elsewhere, to open the
  * link on the right machine; {kind:"incomplete"} when the fragment is missing or not an invite.
  */
 export function joinView(hash, origin, platform) {
@@ -23,7 +23,8 @@ export function joinView(hash, origin, platform) {
   if (!m || !ORIGIN.test(origin)) return { kind: "incomplete" };
   const link = `${origin}/join#${m[1]}`;
   if (platform === "other") return { kind: "link", link };
-  return { kind: "command", command: `${INSTALL} '${link}'`, link, mac: platform === "mac" };
+  // github: the same with GitHub sign-in (optional: the invite works without it).
+  return { kind: "command", command: `${INSTALL} '${link}'`, github: `${INSTALL} '${link}' --github`, link, mac: platform === "mac" };
 }
 
 function glue() {
@@ -36,6 +37,7 @@ function glue() {
     show("phone");
   } else {
     $("cmd").textContent = view.command;
+    $("cmd-github").textContent = view.github;
     $("manual").textContent = `potluck join '${view.link}'`;
     $("mac-hint").hidden = !view.mac;
     show("ok");

@@ -139,7 +139,9 @@ potluck invite carl --host   # a code for a friend who shares a machine (--trust
 `potluck invite ana` prints a link, `https://potluck.sh/join#v1.<code>`, and then the code. Send the link: the page
 shows the friend one line that installs Potluck and joins (`curl -fsSL https://potluck.sh/install.sh | sh -s -- --join
 '<link>'`). The code is in the part after `#`, which a browser never sends to the site. A friend who has Potluck
-already runs `potluck join '<link or code>'`. Then, from any member's machine, the same
+already runs `potluck join '<link or code>'`. Adding `--github` (on either line; the page offers it too) also signs
+the friend in with GitHub at the pool's machine, through GitHub's own device flow, so a program that grants GitHub
+logins there (zm's `zm grant @<login> ...`) reaches them; it is optional, and the invite works without it. Then, from any member's machine, the same
 `potluck sandbox create`, `exec` and `rm` as above. Machines reach each other over Tailscale, or with `--via tunnel`
 over a tunnel you set up (below). Potluck names a machine after its host name plus `-potluck` (`POTLUCK_MACHINE` overrides
 it), so its tailnet node (`potluck-<machine>`) does not take the name of another daemon's node on the same machine.
@@ -215,7 +217,7 @@ goes). `potluck host --help` lists the rest.
 
 [docs/lending.md](docs/lending.md) is the page for someone who lends a Mac and does not code: what setup puts on the
 Mac and why, what the pool's members and its owner can and cannot do, what is not yet proven, and how to pause,
-leave and remove everything.
+leave, remove a pool you created and remove everything.
 
 To remove Potluck from a machine:
 
@@ -230,12 +232,13 @@ potluck uninstall             # does it, after you type yes
 asks for your password), stops the daemon, and removes the daily update job, the host override file, the line
 `install.sh` added to your shell's startup file, the home (`~/.potluck`, unless `--keep-home`) and the programs. It
 names what it leaves for you: Tart and its images (the current macOS image stays until you run `tart delete` on it), a
-Softnet you installed yourself, the Tailscale node and the menu bar app. `potluck leave <pool>` leaves one pool you joined. No command yet removes a pool you created while keeping
-the rest of Potluck.
+Softnet you installed yourself, the Tailscale node and the menu bar app. `potluck leave <pool>` leaves one pool you
+joined, and `potluck disband <pool>` removes one you created (its members are cut off and told) while keeping the rest
+of Potluck.
 
 ### More
 
-`potluck --help` lists the rest: `leave`, `uninstall`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal|stop|start`
+`potluck --help` lists the rest: `leave`, `disband`, `uninstall`, `host stop`, `status`, `sandbox ls|shell|cp|push|extend|signal|stop|start`
 (`sandbox create --persist` keeps a sandbox's disk while it is stopped), `usage`,
 `run`, `agent-task` (a coding agent run once in a fresh sandbox, its commits back as a local ref:
 [docs/agent-tasks.md](docs/agent-tasks.md)), `agent-runner` (a coding agent vendor's self-hosted runners in fresh sandboxes:

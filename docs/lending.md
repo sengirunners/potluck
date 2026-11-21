@@ -1,8 +1,9 @@
 # Lending your Mac
 
 For someone who wants to lend a Mac to a pool and is not a programmer. It says what Potluck puts on your Mac,
-what the other people in the pool can and cannot do with it, and how to pause, leave and remove everything. It
-describes Apple-silicon Macs. For a Linux machine, [hosts.md](hosts.md) has the same steps in more detail.
+what the other people in the pool can and cannot do with it, and how to pause, leave, remove a pool you created and
+remove everything. It describes Apple-silicon Macs. For a Linux machine, [hosts.md](hosts.md) has the same steps in
+more detail.
 
 The facts below were read from the code as it is now; the last section says where each one comes from. Where something
 has not been proven, this page says so (see [What is not proven](#what-is-not-proven)).
@@ -191,9 +192,42 @@ potluck leave friends   # delete this machine's token and ask the pool's machine
 ```
 
 If the pool's machine does not answer, `leave` says so, and the owner can revoke your token there.
-`potluck leave` is for pools you joined. **No command removes a pool you created** and keeps the rest of Potluck:
-it ends when you remove the home folder (`~/.potluck`), which `potluck uninstall` does, and its members lose it.
-That is a gap, not a design.
+`potluck leave` is for pools you joined.
+
+### Remove a pool you created
+
+```sh
+potluck disband friends --dry-run   # what it would do; changes nothing
+potluck disband friends             # does it, after you type yes (--yes does not ask)
+```
+
+`potluck disband` removes one pool this machine runs (one you made with `potluck create`) and keeps the rest of
+Potluck: this machine's identity, its other pools, the pools it joined and its daemon. It prints its plan in
+words first and asks. It does, in this order:
+
+1. stops sharing the sizes this machine shares with the pool (a size shared only with it is removed from this
+   machine's shared sizes; one shared with other pools stays, for them);
+2. cuts off every machine that joined the pool. Each one's token ends, and the next time that machine reaches yours
+   (at its next heartbeat, every 15 seconds or so) it is told "the pool's owner removed pool friends": `potluck remotes` there shows the pool as
+   `purged` with those words, and `potluck leave friends` forgets it;
+3. cancels the invites nobody used yet;
+4. removes the pool and everything it holds on this machine: its settings, grants, invites, the records of its
+   sandboxes and its usage.
+
+A sandbox still running in the pool, or kept stopped with its disk (`--persist`), stops it, and the answer names how
+many: end them first (the member who made one uses `potluck sandbox rm`). The daemon refuses the same way when asked
+directly (`DELETE /v0/projects/<pool>`), so a sandbox started after the plan stops it too. With `--force` (`?force=1`)
+the pool goes anyway and those sandboxes run until their lease ends, out of their members' reach, as with
+`potluck host stop --force`. A pool that
+GitHub Actions jobs run on is refused until its GitHub accounts are unlinked (`potluck runners unlink`) and the
+runners block is out of `config.json`; no command turns the broker off yet.
+
+A machine that lends a size to the pool keeps that share (it is that machine's own setting) until its owner runs
+`potluck host stop` there. If the pool is removed but a step after that fails (a shared size that could not be rewritten, a folder that
+stays), `disband` exits with an error that begins "pool friends was removed, but not everything it held" and lists what
+is left; running it again cannot finish that, because the pool is gone. A pool you only joined is left, not removed: `disband` says so and names `leave`. The pool's
+name is free again afterwards, and a new pool of that name starts empty: nobody from the old one is in it. A GitHub
+name (`@login/name`) is the exception: it stays tied to the removed pool, so no pool takes it again.
 
 ### Remove everything
 
@@ -256,6 +290,7 @@ leads (it takes the programs from the folder of the `potluck` on your PATH when 
 | --- | --- |
 | What install.sh writes | `install.sh`, [install.md](install.md) |
 | What `potluck uninstall` does, and its tests | `cli/uninstall.go`, `cli/uninstall_test.go` |
+| What `potluck disband` does, and its tests | `cli/pool_remove.go`, `kit/project/remove.go`, `cli/pool_remove_test.go` |
 | What Softnet is and why it is root | [softnet.md](softnet.md), `hostprobe/tartmac.go` |
 | Sandbox network, no shared folder | [network.md](network.md), [isolation.md](isolation.md), `vmhost/vm.go` |
 | Conformance's blocking checks | [conformance.md](conformance.md), [isolation.md](isolation.md) |

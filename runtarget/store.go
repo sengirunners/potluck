@@ -237,6 +237,16 @@ func listRows(ctx context.Context, db *sql.DB, target string, liveOnly bool, are
 	return scanRows(rows)
 }
 
+// unendedRows are every binding's rows not yet ended in one project,
+// acquires no driver answered yet included.
+func unendedRows(ctx context.Context, db *sql.DB) ([]row, error) {
+	rows, err := db.QueryContext(ctx, `SELECT `+handleCols+` FROM run_handles WHERE ended='' LIMIT 2000`)
+	if err != nil {
+		return nil, err
+	}
+	return scanRows(rows)
+}
+
 // liveRows are every binding's live handles in one project.
 func liveRows(ctx context.Context, db *sql.DB) ([]row, error) {
 	rows, err := db.QueryContext(ctx, `SELECT `+handleCols+` FROM run_handles WHERE ended='' AND handle IS NOT NULL LIMIT 2000`)

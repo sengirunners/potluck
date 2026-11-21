@@ -67,6 +67,8 @@ type config struct {
 	// the CLI's default), the project made for zm, the owner's profile (root
 	// disk and a fenced NIC) and INCUS_CONF ("" is the CLI's own).
 	IncusBin, IncusRemote, IncusProject, IncusProfile, IncusConf string
+	// vm=cloudhv (cloudhv.go): the ch_* keys.
+	CloudHV cloudhvConfig
 	// admission_url (admission.go): the host's admission controller, asked
 	// for room before every VM; its bearer token file and the lease TTL.
 	AdmissionURL, AdmissionTokenFile string
@@ -362,6 +364,9 @@ func (c config) boxNet(r record) string {
 }
 
 func (c config) vmNetName() string {
+	if c.VM == "cloudhv" {
+		return "fenced link per VM in " + c.CloudHV.Net + " (nftables table potluck_cloudhv, loaded before each boot)"
+	}
 	if c.Softnet {
 		return "softnet"
 	}

@@ -12,7 +12,7 @@ import (
 // GitHubLoginRequest is POST /v0/login/github/start: start a GitHub login that
 // this authority runs (GitHub's device flow with its own client id).
 type GitHubLoginRequest struct {
-	Purpose string `json:"purpose,omitempty"` // "link" (the default), "bind" or "key"
+	Purpose string `json:"purpose,omitempty"` // "link" (the default), "bind", "key" or "invite" (a replica's node-bound token, right after redemption: zm join --github)
 	// A bind (zm names bind): @Owner/Name for Project. A key login: the
 	// project the key answers in (or ?project= on the route).
 	Project string `json:"project,omitempty"`

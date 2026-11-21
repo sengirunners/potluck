@@ -17,7 +17,8 @@ running it with `--push`.
 | `DRIVERS.md` | where the daemon finds drivers, and their sha256 pins (`runtarget/pin.go`) |
 | `docs/protocol.md` | the driver protocol (potluck/1; the old names it still reads: "Names") |
 | `protocol/` | its wire types |
-| `vmhost/` | VM host layer: Tart, Incus, OCI (Kata, gVisor); supervisor, leases, admission |
+| `vmhost/` | VM host layer: Tart, Incus, OCI (Kata, gVisor), cloud-hypervisor; supervisor, leases, admission |
+| `vmhost/cloudhv*.go`, `vmhost/cloudhvguest/`, `cmd/potluck-guest` | the cloud-hypervisor layer (`docs/cloudhv.md`): VMs that nap when idle; its guest agent and their protocol |
 | `boxproc/` | host side of a box's background processes and PTYs |
 | `vmhost/shelfhelper/` | `potluck-deps`, the in-box helper for the package shelf (`docs/shelf.md`), embedded as `shelfhelper.Script` |
 | `conformance/` | the driver conformance suite |

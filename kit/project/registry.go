@@ -79,6 +79,11 @@ type Registry struct {
 	local  api.Identity
 	guard  func(ctx context.Context, name string) error
 	fresh  func(ctx context.Context, tx *sql.Tx, project, machine string) error
+	// removers run in Remove's transaction (OnRemove).
+	removers []RemoveHook
+	// removedHooks run after Remove's transaction committed (OnRemoved).
+	removedHooks []RemovedHook
+	removeMu     sync.Mutex // one Remove at a time
 
 	// machines caches MachineProjects per replica machine name (Visible
 	// asks it for every remote address it redacts); every write to a
@@ -1159,10 +1164,10 @@ func (r *Registry) FromTokenCaller(ctx context.Context, secret string, c Caller)
 	if limited {
 		hash = authz.HashLimited(limit, secret)
 	}
-	var tid, identityID, pid, area, role, boundNode, machine, boxKey, rowLimit, pinNode, pinKey string
+	var tid, identityID, pid, area, role, boundNode, machine, boxKey, rowLimit, pinNode, pinKey, removedPool string
 	var exp, rev, used sql.NullInt64
-	err := r.st.Registry().QueryRowContext(ctx, `SELECT id, identity, project, area, role, expires, revoked, last_used, node, machine, box_key, route_limit, pin_node, pin_key FROM tokens WHERE hash = ?`,
-		hash).Scan(&tid, &identityID, &pid, &area, &role, &exp, &rev, &used, &boundNode, &machine, &boxKey, &rowLimit, &pinNode, &pinKey)
+	err := r.st.Registry().QueryRowContext(ctx, `SELECT id, identity, project, area, role, expires, revoked, last_used, node, machine, box_key, route_limit, pin_node, pin_key, pool_removed FROM tokens WHERE hash = ?`,
+		hash).Scan(&tid, &identityID, &pid, &area, &role, &exp, &rev, &used, &boundNode, &machine, &boxKey, &rowLimit, &pinNode, &pinKey, &removedPool)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, bad
@@ -1173,6 +1178,12 @@ func (r *Registry) FromTokenCaller(ctx context.Context, secret string, c Caller)
 		return nil, bad // the secret's shape and its row disagree
 	}
 	now := time.Now()
+	if rev.Valid && removedPool != "" && (!remote || boundNode == "" || node == boundNode) {
+		// The pool this token joined was removed by its owner: the machine
+		// that held it learns why (teamlink.Observe ends its replica at once).
+		// Only that machine hears it: any other caller meets the bad token.
+		return nil, api.Errorf(api.CodeUnauthenticated, "%s%s", PoolRemovedPrefix, removedPool)
+	}
 	if rev.Valid || (exp.Valid && exp.Int64 <= store.Millis(now)) {
 		return nil, bad
 	}

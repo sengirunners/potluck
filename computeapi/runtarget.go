@@ -233,9 +233,10 @@ type RunTargetView struct {
 	// Stopped are the handles in Live that are stopped (a kept disk, no
 	// VM running), so they hold no cores.
 	Stopped []string `json:"stopped,omitempty"`
-	// ImagesBehind is set on a machine-level box binding that lends other
-	// digests of Potluck's own images than the daemon's build pins (the
-	// owner's list, host=1), until the daemon rebinds it.
+	// ImagesBehind is set on a box binding of this machine, machine-level or
+	// a project's own, that lends other digests of Potluck's own images than
+	// the daemon's build pins (the owner's list, with or without host=1),
+	// until the daemon rebinds it.
 	ImagesBehind *ImagesBehind `json:"images_behind,omitempty"`
 }
 

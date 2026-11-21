@@ -22,6 +22,12 @@ DELETE /v0/invites/x [token-no-whois] 403 {"error":{"code":"forbidden","message"
 DELETE /v0/invites/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 DELETE /v0/invites/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
 DELETE /v0/invites/x [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/projects/x [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/projects/x [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/projects/x [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
+DELETE /v0/projects/x [token-tunnel] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/projects/x [bad-token] 401 {"error":{"code":"unauthenticated","message":"invalid or expired token"}}
+DELETE /v0/projects/x [socket-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 DELETE /v0/team/remotes/x [owner-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 DELETE /v0/team/remotes/x [guest-token] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}
 DELETE /v0/team/remotes/x [token-no-whois] 403 {"error":{"code":"forbidden","message":"this works only for the machine's owner on its own socket"}}

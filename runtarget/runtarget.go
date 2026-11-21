@@ -117,6 +117,10 @@ func New(d *core.Deps) *Service {
 		log = d.Log.Info
 	}
 	s.pins = newPins(d.Config.Home, log)
+	if d.Projects != nil {
+		d.Projects.OnRemove(s.refuseLive)
+		d.Projects.OnRemoved(s.dropShares)
+	}
 	d.Provide(rt.Name, s)
 	d.Provide(rt.DoorName, s)
 	d.Provide(core.SealingService, core.SealingReporter(s))
@@ -194,6 +198,26 @@ func (s *Service) target(r *http.Request, a authz.Action) (core.Target, computea
 	return t, b, db, err
 }
 
+// targetStarting is target for a box acquire: it counts the acquire in for
+// the image refresh before the binding is read, so a rebind (hostimages.go)
+// waits for it. Call the func it returns when the acquire has answered. A
+// start of a stopped box is not counted: the box is a live handle, which
+// holds a rebind off by itself.
+func (s *Service) targetStarting(r *http.Request, a authz.Action) (core.Target, computeapi.RunTarget, *sql.DB, func(), error) {
+	t, err := s.d.WriteTarget(r.Context(), "", a)
+	if err != nil {
+		return t, computeapi.RunTarget{}, nil, func() {}, err
+	}
+	name := r.PathValue("target")
+	leave := s.images.enter(imageKey(t.Project.ID, name))
+	b, db, err := s.bindingNamed(r.Context(), t.Project.ID, name)
+	if err != nil {
+		leave()
+		return t, b, nil, func() {}, err
+	}
+	return t, b, db, leave, nil
+}
+
 // bindingNamed is project's binding called name (its own, or a host's) and
 // the project's database, with no caller check: target's after the
 // caller's, and the authority's own lookups (door.go).
@@ -250,6 +274,9 @@ func (s *Service) list(r *http.Request) (any, error) {
 		}
 		if live {
 			s.addLive(r.Context(), &v, b)
+		}
+		if owner(r.Context()) { // what it lends, and why, are the owner's to see (hostimages.go)
+			v.ImagesBehind = s.imagesBehind(t.Project.ID, b)
 		}
 		out.Targets = append(out.Targets, v)
 	}
@@ -484,26 +511,48 @@ func (s *Service) setup(ctx context.Context, b computeapi.RunTarget, d *computea
 }
 
 func (s *Service) noLive(ctx context.Context, projectID, name string) error {
+	l, err := s.liveIn(ctx, projectID, name)
+	if err != nil {
+		return err
+	}
+	if l.live > 0 {
+		return api.Errorf(api.CodeConflict, "run target %q has %d live handles; release them first", name, l.live)
+	}
+	return nil
+}
+
+// liveTally is the handles of a project not yet ended: how many, and how many
+// of them are stopped (their disk is kept).
+type liveTally struct{ live, stopped int }
+
+// liveIn counts the handles of project not yet ended on binding name ("": on
+// any binding).
+func (s *Service) liveIn(ctx context.Context, projectID, name string) (liveTally, error) {
+	var l liveTally
 	db, err := s.d.Store.Project(s.d.System().Scope, authz.Write, projectID)
 	if err != nil {
-		return err
+		return l, err
 	}
-	rows, err := listRows(ctx, db, name, true, "1=1", nil)
+	var rows []row
+	if name == "" {
+		rows, err = unendedRows(ctx, db)
+	} else {
+		rows, err = listRows(ctx, db, name, true, "1=1", nil)
+	}
 	if err != nil {
-		return err
+		return l, err
 	}
-	live := 0
 	for _, rw := range rows {
 		// An acquire no driver answered for 10 minutes made nothing zm can release.
 		if c, err := time.Parse(time.RFC3339Nano, rw.Created); rw.Handle == "" && err == nil && s.now().Sub(c) > 10*time.Minute {
 			continue
 		}
-		live++
+		l.live++
+		if rw.State == computeapi.StateStopped {
+			l.stopped++
+		}
 	}
-	if live > 0 {
-		return api.Errorf(api.CodeConflict, "run target %q has %d live handles; release them first", name, live)
-	}
-	return nil
+	return l, nil
 }
 
 func (s *Service) unbind(r *http.Request) (any, error) {
@@ -539,6 +588,16 @@ func (s *Service) lock(projectID, name string) func() {
 	mu, _ := s.acquireMu.LoadOrStore(projectID+"/"+name, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	return mu.(*sync.Mutex).Unlock
+}
+
+// tryLock is lock without waiting: ok false when an acquire, bind or unbind
+// of the binding is in progress.
+func (s *Service) tryLock(projectID, name string) (unlock func(), ok bool) {
+	mu, _ := s.acquireMu.LoadOrStore(projectID+"/"+name, &sync.Mutex{})
+	if !mu.(*sync.Mutex).TryLock() {
+		return nil, false
+	}
+	return mu.(*sync.Mutex).Unlock, true
 }
 
 // lifetimeCap is the lower of the binding's and describe's ttl_max_s (0: none).

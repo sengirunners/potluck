@@ -45,11 +45,21 @@ func (s *Service) dropForgotten(ctx context.Context, project string) ([]string, 
 	if err != nil {
 		return dropped, err
 	}
+	handles, err := s.dropLedgerHandles(project)
+	for _, h := range handles {
+		dropped = append(dropped, "handle "+h)
+	}
+	return dropped, err
+}
+
+// dropLedgerHandles removes project's handles from the host's handle ledger
+// and returns them, sorted. Nothing is written when it holds none.
+func (s *Service) dropLedgerHandles(project string) ([]string, error) {
 	s.host.ledgerMu.Lock()
 	defer s.host.ledgerMu.Unlock()
 	led, err := s.ledgerLoad()
 	if err != nil {
-		return dropped, err
+		return nil, err
 	}
 	var handles []string
 	for h, e := range led.Handles {
@@ -59,14 +69,11 @@ func (s *Service) dropForgotten(ctx context.Context, project string) ([]string, 
 		}
 	}
 	if len(handles) == 0 {
-		return dropped, nil
+		return nil, nil
 	}
 	if err := s.ledgerWrite(led); err != nil {
-		return dropped, err
+		return nil, err
 	}
 	sort.Strings(handles)
-	for _, h := range handles {
-		dropped = append(dropped, "handle "+h)
-	}
-	return dropped, nil
+	return handles, nil
 }

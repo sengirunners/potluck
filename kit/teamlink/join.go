@@ -28,6 +28,9 @@ func (s *Service) handleJoin(r *http.Request) (any, error) {
 	if err := api.DecodeJSON(r, &req); err != nil {
 		return nil, err
 	}
+	if req.Login != "" {
+		return s.continueGitHub(ctx, req) // a GitHub login this daemon started: by name, or after an invite
+	}
 	if req.Code == "" && req.Project != "" && project.LooksLikeJoinCode(req.Project) {
 		req.Code, req.Project = req.Project, "" // a malformed code is refused as a code, never a GitHub join
 	}
@@ -43,6 +46,19 @@ func (s *Service) handleJoin(r *http.Request) (any, error) {
 	t, target, err := s.parseCode(req.Code)
 	if err != nil {
 		return nil, err
+	}
+	key := inviteGitHubKey(code)
+	if req.GitHub {
+		// zm join <code> --github again while its sign-in waits (the code
+		// is spent at the home by then): that sign-in, not a second one.
+		if j := s.pendingGitHub(key); j != nil {
+			j.keepCheckouts(req)
+			wait := time.Duration(0)
+			if j.isFinishing() {
+				wait = 2 * time.Minute
+			}
+			return s.watchOn(ctx, j, wait, true)
+		}
 	}
 	machine, early, err := s.joinPrep(ctx, req, t, target)
 	if err != nil || early != nil {
@@ -61,6 +77,9 @@ func (s *Service) handleJoin(r *http.Request) (any, error) {
 	var red api.RedeemResponse
 	if err := s.call(ctx, target.Via, hc, http.MethodPost, target.URL+"/v0/invites/redeem", "", rr, &red); err != nil {
 		return nil, err
+	}
+	if req.GitHub {
+		return s.inviteGitHub(ctx, req, key, red, hc, target, extra) // join_github.go
 	}
 	return s.finishJoin(ctx, req, red, hc, target.URL, target.Fingerprint, "", target.Via, extra)
 }

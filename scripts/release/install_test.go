@@ -147,7 +147,7 @@ func TestInstallScriptChecksSignatures(t *testing.T) {
 	stand := func(tag string) map[string]string {
 		return map[string]string{"potluck": "#!/bin/sh\ncase \"$1\" in\n--version) echo \"potluck version " + version + " " + tag + "\" ;;\n" +
 			"upgrade) [ \"$2\" = --help ] && exit 0; mkdir -p \"$5\" && cp \"$0\" \"$5/potluck\" && echo \"installed potluck " + version + "\" ;;\n" +
-			"join) [ \"$2\" = bad-code ] && { echo 'invalid, used or expired join code' >&2; exit 1; }; echo \"joined with [$2]\" ;;\nesac\n"}
+			"join) [ \"$2\" = bad-code ] && { echo 'invalid, used or expired join code' >&2; exit 1; }; echo \"joined with [$2]${3:+ $3}\" ;;\nesac\n"}
 	}
 	rel := writeRelease(t, filepath.Join(tmp, "rel"), version, commit, time.Now(), stand("good"), key)
 	variant := func(name string, edit func(dir string)) string {
@@ -351,6 +351,13 @@ func TestInstallScriptChecksSignatures(t *testing.T) {
 				}
 				refused(t, from(t, sysPath, rel, "--join"), "--join needs the invite code")
 				refused(t, from(t, sysPath, rel, "--join="), "--join needs the invite code")
+				// --github rides along to potluck join, and only with --join.
+				ghHome := filepath.Join(tmp, "home-gh-"+filepath.Base(sh))
+				r6 := install(t, sh, sysPath, []string{"HOME=" + ghHome, "POTLUCK_INSTALL_DIR=" + filepath.Join(ghHome, "bin")}, "--from", rel, "--github", "--join", "https://x.example#fp:AAAA-BBBB")
+				if r6.err != nil || !strings.Contains(r6.out, "joined with [https://x.example#fp:AAAA-BBBB] --github") {
+					t.Fatalf("--join with --github (%v):\n%s", r6.err, r6.out)
+				}
+				refused(t, from(t, sysPath, rel, "--github"), "--github goes with --join")
 			})
 			t.Run("empty --version", func(t *testing.T) {
 				refused(t, from(t, sysPath, rel, "--version", ""), "--version needs a release")

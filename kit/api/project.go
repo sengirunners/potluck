@@ -183,6 +183,19 @@ type ExportResponse struct {
 	Files []string `json:"files"`
 }
 
+// RemoveProjectResponse is DELETE /v0/projects/{project}: the project is
+// gone from this machine, and every token it held ended.
+type RemoveProjectResponse struct {
+	Project ProjectRef `json:"project"`
+	// Machines are the joined machines (by name, sorted) whose access ended
+	// with it. Each learns the next time it reaches this machine.
+	Machines []string `json:"machines"`
+	// Leftovers say, one line each, what the removal could not finish after
+	// the project was gone (a share still listing it, a folder that stayed).
+	// Empty: nothing is left.
+	Leftovers []string `json:"leftovers"`
+}
+
 // ResolveStep is one rule tried during project resolution.
 type ResolveStep struct {
 	Rule   string `json:"rule"`             // flag, env, cwd-file, cwd-path, cwd-remote, session, default_project

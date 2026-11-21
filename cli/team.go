@@ -165,6 +165,7 @@ type joinFlags struct {
 	paths                        []string
 	wait                         time.Duration
 	accessID, accessSecretFile   string
+	github                       bool
 }
 
 func (f *joinFlags) add(cmd *cobra.Command) {
@@ -177,6 +178,7 @@ func (f *joinFlags) add(cmd *cobra.Command) {
 	fl.DurationVar(&f.wait, "wait", 10*time.Second, "how long to wait for the tailnet node each try")
 	fl.StringVar(&f.accessID, "cf-access-id", "", "a tunnel home behind Cloudflare Access: the service token's client id")
 	fl.StringVar(&f.accessSecretFile, "cf-access-secret-file", "", "a file holding that service token's client secret")
+	fl.BoolVar(&f.github, "github", false, "with an invite: also sign in with GitHub at the project's machine (open the link printed and enter the code), so grants its owner makes to your GitHub login apply to you; optional, and the invite works without it")
 }
 
 // joinRequest is the join arg asks for: an invite code or link, a
@@ -184,7 +186,7 @@ func (f *joinFlags) add(cmd *cobra.Command) {
 // with --from (a GitHub join scoped to one area).
 func (a *app) joinRequest(arg string, f joinFlags) (api.JoinRequest, error) {
 	req := api.JoinRequest{AuthKey: f.authKey, From: f.from, Role: f.role, Machine: f.machine,
-		WaitMS: int(f.wait / time.Millisecond), AccessID: f.accessID}
+		WaitMS: int(f.wait / time.Millisecond), AccessID: f.accessID, GitHub: f.github}
 	arg = strings.TrimSpace(arg)
 	switch proj, area, ok := strings.Cut(arg, "/"); {
 	case ok && !strings.Contains(arg, ":"):
@@ -202,6 +204,9 @@ func (a *app) joinRequest(arg string, f joinFlags) (api.JoinRequest, error) {
 		req.Code = arg
 	default:
 		req.Project = arg
+	}
+	if req.GitHub && req.Code == "" {
+		return req, exitWith{2, fmt.Errorf("join: --github goes with an invite link or code; joining by a project's name already signs in with GitHub")}
 	}
 	if f.accessSecretFile != "" {
 		b, err := os.ReadFile(f.accessSecretFile)
@@ -237,7 +242,10 @@ func (a *app) askForJoin(req api.JoinRequest, r api.JoinResponse) (api.JoinReque
 		if req.Login == "" {
 			a.showSkipped(a.host.Stderr, r.Skipped)
 			who := "tailnet owner " + g.Owner
-			if g.Owner == "" {
+			switch {
+			case g.Owner == "" && req.Code != "":
+				who = "the invite's home"
+			case g.Owner == "":
 				_, fp, _ := strings.Cut(req.From, "#")
 				who = "home key " + fp
 			}

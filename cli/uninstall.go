@@ -136,8 +136,12 @@ func (a *app) uninstall(ctx context.Context, f uninstallFlags) error {
 }
 
 // confirmUninstall reads "yes" from stdin.
-func (a *app) confirmUninstall() error {
-	fmt.Fprint(a.host.Stderr, "Type yes to do this: ")
+func (a *app) confirmUninstall() error { return a.confirmYes("Type yes to do this: ", "removed") }
+
+// confirmYes asks prompt on stderr and reads the answer from stdin: nil for
+// yes, else an error saying nothing was done (a word like "removed").
+func (a *app) confirmYes(prompt, done string) error {
+	fmt.Fprint(a.host.Stderr, prompt)
 	line, err := bufio.NewReader(a.host.Stdin).ReadString('\n')
 	if strings.TrimSpace(line) == "yes" {
 		return nil
@@ -146,7 +150,7 @@ func (a *app) confirmUninstall() error {
 	if err != nil && line == "" {
 		why = "no answer"
 	}
-	return fmt.Errorf("nothing was removed: %s; run it again and type yes, or pass --yes", why)
+	return fmt.Errorf("nothing was %s: %s; run it again and type yes, or pass --yes", done, why)
 }
 
 // uninstallHealthWait is how long a daemon whose socket is there has to answer.

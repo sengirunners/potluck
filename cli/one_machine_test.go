@@ -60,6 +60,12 @@ func onePoolMachine(t *testing.T, images ...string) *machine {
 // runs passes.
 func soloMachine(t *testing.T, bug string) *machine {
 	t.Helper()
+	return soloMachineOn(t, tailnettest.New(), bug)
+}
+
+// soloMachineOn is soloMachine on the tailnet tn, where other machines are.
+func soloMachineOn(t *testing.T, tn *tailnettest.Net, bug string) *machine {
+	t.Helper()
 	oldBeat, oldRunner, oldDetect, oldDriver := teamlink.BeatEvery, shareRunner, detectHost, shareDriver
 	t.Cleanup(func() {
 		teamlink.BeatEvery, shareRunner, detectHost, shareDriver = oldBeat, oldRunner, oldDetect, oldDriver
@@ -74,7 +80,7 @@ func soloMachine(t *testing.T, bug string) *machine {
 	}
 	shareDriver = "ref"
 
-	m := startMachine(t, tailnettest.New(), "solo", "judy@example.com")
+	m := startMachine(t, tn, "solo", "judy@example.com")
 	fix, _ := filepath.EvalSymlinks(t.TempDir())
 	state := filepath.Join(fix, "state")
 	drv, err := refdriver.Install(fix, state, bug)

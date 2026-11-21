@@ -130,7 +130,7 @@ func newApp(h Host) *app {
 // mountable are Potluck's commands but ProgramCommands: what Commands
 // gives a host, and what the potluck program's root holds beside its own.
 func (a *app) mountable() []*cobra.Command {
-	return []*cobra.Command{a.tryCmd(), a.createCmd(), a.inviteCmd(), a.joinCmd(), a.leaveCmd(), a.forgetCmd(), a.remotesCmd(),
+	return []*cobra.Command{a.tryCmd(), a.createCmd(), a.inviteCmd(), a.joinCmd(), a.leaveCmd(), a.disbandCmd(), a.forgetCmd(), a.remotesCmd(),
 		a.doctorCmd(), a.isolationCmd(), a.hostCmd(), a.ciCmd(), a.sandboxCmd(), a.usageCmd(), a.sealingCmd(),
 		a.runCmd(), a.agentTaskCmd(), a.agentRunnerCmd(), a.runnersCmd(), a.secretsCmd(), a.driverCmd(), a.softnetCmd()}
 }

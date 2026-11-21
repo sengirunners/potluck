@@ -158,6 +158,11 @@ func (s *Service) SetDatabaseRecipesForTest(ctx context.Context, project string,
 // the func it returns is called (hostimages.go).
 func (s *Service) StartingOn(binding string) func() { return s.images.enter(binding) }
 
+// StartingOnProject is StartingOn for a binding of project (its id).
+func (s *Service) StartingOnProject(project, binding string) func() {
+	return s.images.enter(imageKey(project, binding))
+}
+
 // SetImagePins replaces the pin table the host image refresh reads.
 func (s *Service) SetImagePins(f func() []imagepins.DefaultPin) { s.images.pins = f }
 
