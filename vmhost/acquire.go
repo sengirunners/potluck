@@ -162,7 +162,7 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 		if err != nil {
 			return refuse("unavailable", "%v", err)
 		}
-		if d.cfg.Root && d.cfg.VM != "oci" && os != tartRootOS { // oci_root.go parseTartRoot
+		if d.cfg.tartRoot() && os != tartRootOS { // oci_root.go parseTartRoot
 			return refuse("bad_request", "root=on is for macOS images on tart: %s is %s, whose root would hold NET_ADMIN and NET_RAW in the VM", image, os)
 		}
 		if guardRun != nil && !boxSecretsServed(d.cfg, os) { // describe lists no github-jit-guard-run
@@ -310,7 +310,7 @@ func (d *drv) rawConfig() map[string]string {
 		c.rootArgs(m)
 	}
 	if c.VM != "oci" {
-		c.rootArgs(m) // tart's root=on (oci_root.go parseTartRoot)
+		c.rootArgs(m) // tart's root=on and cloudhv's root and docker (oci_root.go)
 	}
 	return m
 }

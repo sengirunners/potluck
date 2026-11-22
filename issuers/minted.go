@@ -1090,9 +1090,10 @@ func (g *Minted) revokeBox(ctx context.Context, box Box, why string) error {
 }
 
 // Sweep ends every box holding a credential that live does not answer true
-// for.
+// for, and, until Start has succeeded, every box an earlier run left a kept
+// credential in (earlierBoxes).
 func (g *Minted) Sweep(ctx context.Context, live func(Box) bool) {
-	seen := map[string]Box{}
+	seen := g.earlierBoxes(ctx)
 	g.mu.Lock()
 	for _, h := range g.held {
 		if !h.pending {
@@ -1112,16 +1113,35 @@ func (g *Minted) Sweep(ctx context.Context, live func(Box) bool) {
 // issued is ended too: its issue then revokes what it minted. A box whose
 // issue starts after this read asks ClassOf itself once it holds the name
 // (stillHolds), so a demotion is never missed between the two.
+//
+// Until Start has succeeded it also checks every box an earlier run left a
+// kept credential in (earlierBoxes): its class, and its host's swap, which
+// for a held box is asked at each renewal but for these at nothing else. A
+// swap that cannot be asked now (unavailable) ends nothing.
 func (g *Minted) EndUntrusted(ctx context.Context) {
+	earlier := g.earlierBoxes(ctx)
 	seen := map[string]Box{}
 	g.mu.Lock()
 	for _, h := range g.held {
 		seen[h.box.key()] = h.box
 	}
 	g.mu.Unlock()
-	for _, b := range seen {
+	for k, b := range earlier {
+		if _, ok := seen[k]; !ok {
+			seen[k] = b
+		}
+	}
+	for k, b := range seen {
 		if class, err := g.o.ClassOf(ctx, b); err != nil || class != ClassTrusted {
 			g.End(ctx, b, EndHostDemoted)
+			continue
+		}
+		if _, ok := earlier[k]; !ok {
+			continue
+		}
+		var ae *api.Error
+		if err := g.takesSecrets(ctx, b); err != nil && !(errors.As(err, &ae) && ae.Code == api.CodeUnavailable) {
+			g.End(ctx, b, EndSwapUnsafe)
 		}
 	}
 }
@@ -1179,15 +1199,8 @@ func (g *Minted) Start(ctx context.Context) error {
 // outstanding for Start to settle. Once Start has succeeded every earlier
 // credential is settled or held, and the end revokes it through held.
 func (g *Minted) settleEarlier(ctx context.Context, why string, match func(Entry) bool) {
-	g.mu.Lock()
-	started := g.started
-	g.mu.Unlock()
-	if started || !g.b.keeps() {
-		return
-	}
-	es, err := g.o.Ledger.Outstanding(ctx, g.name)
-	if err != nil {
-		g.o.Log.Error("secrets issuer: reading what an earlier run left for an ending box; the next start settles it", "issuer", g.name, "err", err)
+	es := g.earlier(ctx)
+	if len(es) == 0 {
 		return
 	}
 	mine := map[string]bool{} // this run's own: the end revokes them through held and old
@@ -1202,7 +1215,7 @@ func (g *Minted) settleEarlier(ctx context.Context, why string, match func(Entry
 	}
 	g.mu.Unlock()
 	for _, e := range es {
-		if !e.At.Before(g.born) || mine[e.HashedToken] || !match(e) {
+		if mine[e.HashedToken] || !match(e) {
 			continue
 		}
 		if !g.b.settle(ctx, e) {
@@ -1212,6 +1225,44 @@ func (g *Minted) settleEarlier(ctx context.Context, why string, match func(Entry
 		}
 		g.record(ctx, e, EventRevoked, why) // a refusal is logged by record
 	}
+}
+
+// earlier is, until Start has succeeded and for a kind that keeps
+// (backend.keeps), what an earlier run left outstanding: Start has not yet
+// settled it or taken it back into held, so an end that walks held alone
+// would miss it. Nil once started, for a kind that does not keep, or when
+// the ledger cannot be read (logged; the next start settles it).
+func (g *Minted) earlier(ctx context.Context) []Entry {
+	g.mu.Lock()
+	started := g.started
+	g.mu.Unlock()
+	if started || !g.b.keeps() {
+		return nil
+	}
+	es, err := g.o.Ledger.Outstanding(ctx, g.name)
+	if err != nil {
+		g.o.Log.Error("secrets issuer: reading what an earlier run left, to end it; the next start settles it", "issuer", g.name, "err", err)
+		return nil
+	}
+	var out []Entry
+	for _, e := range es {
+		if e.At.Before(g.born) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// earlierBoxes is, by box key, each box holding a credential of an earlier
+// run (earlier): the boxes EndUntrusted and Sweep check besides those in
+// held; End revokes it through settleEarlier.
+func (g *Minted) earlierBoxes(ctx context.Context) map[string]Box {
+	out := map[string]Box{}
+	for _, e := range g.earlier(ctx) {
+		b := Box{Project: e.Project, Area: e.Area, ID: e.Box, Host: e.Host}
+		out[b.key()] = b
+	}
+	return out
 }
 
 // settleOne settles e, a credential of an earlier run: revoked by the

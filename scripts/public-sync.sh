@@ -6,6 +6,7 @@
 #
 # usage: scripts/public-sync.sh <commit> [--push]
 # Without --push it makes the commit, scans the tree and prints what changed, and pushes nothing.
+# It pushes nothing while a hold is on (a file under public-hold/: a security fix not yet on our machines).
 # Needs git, gitleaks and write access to the public repository (an admin: main is protected).
 set -euo pipefail
 
@@ -16,9 +17,39 @@ EMAIL="ops@sengi.run"
 commit="${1:?usage: scripts/public-sync.sh <commit> [--push]}"
 push="${2:-}"
 command -v gitleaks >/dev/null || { echo "public-sync: gitleaks is not installed" >&2; exit 1; }
+self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+# Paths below are read from the top of the repository, wherever the script was started.
+cd "$(git rev-parse --show-toplevel)"
+# The private main as it is now, not as this clone last saw it: the hold below is looked for there too.
+git fetch --quiet --no-tags origin main || { echo "public-sync: cannot fetch origin main" >&2; exit 1; }
 sha="$(git rev-parse --verify "$commit^{commit}")"
 git rev-parse --verify --quiet origin/main >/dev/null || { echo "public-sync: no origin/main (git fetch origin)" >&2; exit 1; }
 git merge-base --is-ancestor "$sha" origin/main || { echo "public-sync: $sha is not on origin/main" >&2; exit 1; }
+
+# The script that runs is the one in the commit being published. A checkout that is behind that commit would
+# otherwise publish with older rules. (A checkout from before this check was written cannot be stopped here.)
+if [ "$(git rev-parse --verify --quiet "$sha:scripts/public-sync.sh")" != "$(git hash-object "$self")" ]; then
+	echo "public-sync: $self is not the scripts/public-sync.sh of $sha; run it from a checkout of that commit" >&2
+	exit 1
+fi
+
+# A hold: a file under public-hold/ names a security fix that is not yet installed on the machines we run for
+# other people. Publishing shows where the flaw was, and the whole tree goes over, so nothing is pushed while one
+# is there (docs/public-sync.md, "Holds"). It is looked for in the commit being published and on origin/main, so
+# a commit that has the fix and not yet its hold is refused too. Any path with "public-hold" in it counts, in any
+# letter case and with a dash, underscore, dot, space or nothing between the words, so a misnamed hold still
+# holds. A tree that cannot be read counts as held. (-z: git quotes unusual file names otherwise.)
+files="$(git ls-tree -r -z --name-only --full-tree "$sha" | tr '\0' '\n')" || { echo "public-sync: cannot read $sha for holds" >&2; exit 1; }
+main_files="$(git ls-tree -r -z --name-only --full-tree origin/main | tr '\0' '\n')" || { echo "public-sync: cannot read origin/main for holds" >&2; exit 1; }
+held="$(printf '%s\n%s\n' "$files" "$main_files" | { grep -i -E 'public[-_. ]?hold' || [ $? -eq 1 ]; } | sort -u)" ||
+	{ echo "public-sync: cannot search for holds" >&2; exit 1; }
+if [ -n "$held" ]; then
+	printf '%s\n' "$held" | sed 's/^/public-sync: held by /' >&2
+	if [ "$push" = "--push" ]; then
+		echo "public-sync: not pushed: install the fix on our machines, remove its hold on the private main, then sync again" >&2
+		exit 1
+	fi
+fi
 
 git fetch --quiet --no-tags "$PUBLIC" main
 public_main="$(git rev-parse FETCH_HEAD)"
@@ -59,6 +90,8 @@ echo "public-sync: commit $new (tree of $sha) on public main $public_main"
 if [ "$push" = "--push" ]; then
 	git push --quiet --no-verify "$PUBLIC" "$new:refs/heads/main"
 	echo "public-sync: pushed $new to $PUBLIC main"
+elif [ -n "$held" ]; then
+	printf '%s\n' "$held" | sed 's/^/public-sync: not pushed, and --push would refuse: held by /' >&2
 else
 	echo "public-sync: not pushed (pass --push)"
 fi

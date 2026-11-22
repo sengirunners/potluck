@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/config"
 )
 
@@ -204,6 +205,65 @@ func TestPotluckKeptTokenEndsBeforeStart(t *testing.T) {
 			}
 			if p.works(secret) {
 				t.Fatal("the kept token works after its end, before Start succeeded")
+			}
+			if err := next.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if p.works(secret) || len(next.held) != 0 {
+				t.Fatalf("after Start: token works %v, held %d", p.works(secret), len(next.held))
+			}
+		})
+	}
+}
+
+// A kept token is revoked when its host is demoted, its host's swap turns
+// unsafe, or its box is gone while the next run's Start keeps failing: the
+// ends the module runs on a class change and on its sweep reach an earlier
+// run's credentials too, not only what Start has taken back. While nothing
+// has changed they leave it valid.
+func TestPotluckKeptTokenEndsByCheckBeforeStart(t *testing.T) {
+	ctx := context.Background()
+	cases := map[string]func(p *potluckEnv, g *Minted, box Box){
+		"demoted": func(_ *potluckEnv, g *Minted, _ Box) {
+			g.o.ClassOf = func(context.Context, Box) (string, error) { return api.MachinePublic, nil }
+			g.EndUntrusted(ctx)
+		},
+		"swap unsafe": func(_ *potluckEnv, g *Minted, _ Box) {
+			g.o.BoxTakesSecrets = func(context.Context, Box) error {
+				return api.Errorf(api.CodeForbidden, "lender swaps to a plain disk: fix swap there")
+			}
+			g.EndUntrusted(ctx)
+		},
+		"gone": func(p *potluckEnv, g *Minted, box Box) {
+			p.alive[box.key()] = false
+			g.Sweep(ctx, func(b Box) bool { return p.alive[b.key()] })
+		},
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := newPotluckEnv(t)
+			req := p.req(trustedBox)
+			p.alive[req.Box.key()] = true
+			p.mustIssue(req)
+			secret := p.bx.get(req.Box, "POTLUCK_TOKEN")
+			p.iss.Close(ctx)
+			p.opt.Ledger = &assignedFails{Ledger: p.opt.Ledger, fail: true}
+			next := p.load()
+			if err := next.Start(ctx); err == nil {
+				t.Fatal("Start succeeded with the ledger failing")
+			}
+			next.o.BoxTakesSecrets = func(context.Context, Box) error {
+				return api.Errorf(api.CodeUnavailable, "lender advertises no run target now")
+			}
+			next.EndUntrusted(ctx)
+			next.Sweep(ctx, func(b Box) bool { return p.alive[b.key()] })
+			if !p.works(secret) {
+				t.Fatal("the kept token was revoked with its host trusted, its swap not known and its box live")
+			}
+			next.o.BoxTakesSecrets = nil
+			change(p, next, req.Box)
+			if p.works(secret) {
+				t.Fatal("the kept token works after the change, before Start succeeded")
 			}
 			if err := next.Start(ctx); err != nil {
 				t.Fatal(err)

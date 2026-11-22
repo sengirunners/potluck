@@ -225,10 +225,12 @@ func (d *drv) start(handle string, raw json.RawMessage) (any, error) {
 		case r.State != stStopped:
 			return refuse("conflict", "%s is %s: its disk is gone", r.Handle, r.wireState())
 		}
-		if d.cfg.VM == "oci" { // oci_root.go: the container keeps the flags it was made with
+		if d.cfg.VM == "oci" || d.cfg.VM == "cloudhv" { // oci_root.go: a kept box keeps the root and docker it was made with
 			if why := keptRootDiffers(r.Config, d.cfg); why != "" {
 				return refuse("conflict", "%s: %s cannot start as the binding now says (its disk stays kept; %s deletes it)", why, r.Handle, kitconfig.PotluckCommand("sandbox rm"))
 			}
+		}
+		if d.cfg.VM == "oci" {
 			// docker resolves runsc-root at every start, so it is checked again.
 			if o, ok := d.vm.(ociCLI); ok && o.root && o.runtime == ociSudoRuntime {
 				if err := o.checkSudoRuntime(); err != nil {

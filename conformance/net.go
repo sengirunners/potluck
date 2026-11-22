@@ -21,6 +21,7 @@ const (
 	exitUsage       = 64 // a probe older than the net subcommand
 	exitNoTools     = 65 // the guest lacks nc or bash, ip, ping
 	exitUnreliable  = 66 // the guest's nc cannot listen, or cannot tell open from closed
+	exitNoReaddress = 67 // root could not change the box's addresses, routes or neighbours
 )
 
 // MailAddrs expands a --net-mail value: host:port as it is, a bare host on
@@ -418,8 +419,9 @@ func (r *run) netControls(in func(...string) (int, error)) bool {
 
 // peerPortSpan is how many ports from peerPort up the net checks listen on:
 // the peers serve (peerPort), the net group's self (+1), the net-off box's
-// self (+2) and root's self (+3).
-const peerPortSpan = 4
+// self (+2), root's self (+3) and the box root's neighbour check reaches for
+// (+4).
+const peerPortSpan = 5
 
 func (r *run) peerPort() int {
 	if r.opt.NetPeerPort != 0 {
@@ -495,8 +497,94 @@ func (r *run) peers() {
 	}
 }
 
-// peersBox is peers for boxes: a second box listens through an exec held open
-// on its own goroutine while the net group's box (in) scans for it.
+// boxListener is a box held listening on a port: the probe's net serve, an
+// exec held open on its own goroutine until the box ends.
+type boxListener struct {
+	r    *run
+	box  held
+	port string
+	done chan boxServed
+}
+
+type boxServed struct {
+	res execResult
+	err error
+}
+
+// listenIn starts box l listening on port ps and answers once the listener
+// answers inside its own box. An error says why nothing listens there. The
+// caller ends the box with close either way.
+func (r *run) listenIn(l held, ps string) (*boxListener, error) {
+	b := &boxListener{r: r, box: l, port: ps, done: make(chan boxServed, 1)}
+	go func() {
+		res, err := r.exec(l.Handle, probeArgv("net", "serve", ps), "", serveTimeout)
+		b.done <- boxServed{res, err}
+	}()
+	// serve first checks its own listener (for up to serveListen; a listener
+	// of the one-connection forms takes one connection); a check of ours
+	// inside that window can take that connection, and serve exits 66 as if
+	// it could not listen. As peers waits for a run's.
+	r.sleep(serveListen + time.Second)
+	for deadline := time.Now().Add(listenWait); !b.up(); r.sleep(500 * time.Millisecond) {
+		if err := b.ended(); err != nil {
+			return b, err
+		}
+		if !time.Now().Before(deadline) || r.ctx.Err() != nil {
+			return b, fmt.Errorf("nothing listened on port %s in the listening box within %s", ps, listenWait)
+		}
+	}
+	return b, nil
+}
+
+// up: the listener answers inside its own box. An exec still going is no
+// proof: a slow start, or one ended before a scan is done, would pass the
+// scan with nothing listening.
+func (b *boxListener) up() bool {
+	code, err := b.r.boxNet(b.box.Handle, "allow", "127.0.0.1:"+b.port)
+	return err == nil && code == 0
+}
+
+// ended answers why a listener is gone (serve exits 66 if it cannot listen),
+// nil while its exec is still going.
+func (b *boxListener) ended() error {
+	select {
+	case s := <-b.done:
+		b.done <- s
+		switch {
+		case s.err != nil:
+			return fmt.Errorf("the listening box: %v", s.err)
+		case *s.res.Exit == exitNoTools:
+			return fmt.Errorf("the listening box has no nc to listen with")
+		case *s.res.Exit == exitUnreliable:
+			return fmt.Errorf("the listening box could not listen on port %s", b.port)
+		}
+		return fmt.Errorf("the listening box's probe ended with exit %d", *s.res.Exit)
+	default:
+		return nil
+	}
+}
+
+// stopped is why a scan that found nothing proved nothing: the listener was
+// gone before the scan ended.
+func (b *boxListener) stopped() error {
+	if err := b.ended(); err != nil {
+		return err
+	}
+	return fmt.Errorf("the listening box stopped listening on port %s before the scan ended: the scan proved nothing", b.port)
+}
+
+// close ends the listening box (a box's end ends its exec) and waits for the
+// exec to return.
+func (b *boxListener) close() {
+	b.r.endHeld(b.box)
+	select {
+	case <-b.done:
+	case <-time.After(b.r.limit(verbExec) + serveTimeout*time.Second):
+	}
+}
+
+// peersBox is peers for boxes: a second box listens (listenIn) while the net
+// group's box (in) scans for it.
 func (r *run) peersBox(in func(...string) (int, error)) {
 	check := fmt.Sprintf(peersCheck, "boxes")
 	ps := strconv.Itoa(r.peerPort())
@@ -505,67 +593,15 @@ func (r *run) peersBox(in func(...string) (int, error)) {
 		r.add(check, fmt.Errorf("the listening box: %v", err))
 		return
 	}
-	type served struct {
-		res execResult
-		err error
-	}
-	done := make(chan served, 1)
-	go func() {
-		res, err := r.exec(l.Handle, probeArgv("net", "serve", ps), "", serveTimeout)
-		done <- served{res, err}
-	}()
-	defer func() {
-		r.endHeld(l) // a box's end ends its exec
-		select {
-		case <-done:
-		case <-time.After(r.limit(verbExec) + serveTimeout*time.Second):
-		}
-	}()
-	// ended reports a listener that is gone (serve exits 66 if it cannot
-	// listen), adding why.
-	ended := func() bool {
-		select {
-		case s := <-done:
-			done <- s
-			switch {
-			case s.err != nil:
-				r.add(check, fmt.Errorf("the listening box: %v", s.err))
-			case *s.res.Exit == exitNoTools:
-				r.add(check, fmt.Errorf("the listening box has no nc to listen with"))
-			case *s.res.Exit == exitUnreliable:
-				r.add(check, fmt.Errorf("the listening box could not listen on port %s", ps))
-			default:
-				r.add(check, fmt.Errorf("the listening box's probe ended with exit %d", *s.res.Exit))
-			}
-			return true
-		default:
-			return false
-		}
-	}
-	// up: the listener answers inside its own box. An exec still going is no
-	// proof: a slow start, or one ended before the scan is done, would pass
-	// the scan with nothing listening.
-	local := "127.0.0.1:" + ps
-	up := func() bool { code, err := r.boxNet(l.Handle, "allow", local); return err == nil && code == 0 }
-	// serve first checks its own listener (for up to serveListen; a listener
-	// of the one-connection forms takes one connection); a check of ours
-	// inside that window can take that connection, and serve exits 66 as if
-	// it could not listen. As peers waits for a run's.
-	r.sleep(serveListen + time.Second)
-	for deadline := time.Now().Add(listenWait); !up(); r.sleep(500 * time.Millisecond) {
-		if ended() {
-			return
-		}
-		if !time.Now().Before(deadline) || r.ctx.Err() != nil {
-			r.add(check, fmt.Errorf("nothing listened on port %s in the listening box within %s", ps, listenWait))
-			return
-		}
+	b, err := r.listenIn(l, ps)
+	defer b.close()
+	if err != nil {
+		r.add(check, err)
+		return
 	}
 	code, err := in("peers", ps)
-	if err == nil && code == 0 && !up() {
-		if !ended() {
-			r.add(check, fmt.Errorf("the listening box stopped listening on port %s before the scan ended: the scan proved nothing", ps))
-		}
+	if err == nil && code == 0 && !b.up() {
+		r.add(check, b.stopped())
 		return
 	}
 	switch {

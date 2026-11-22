@@ -284,6 +284,7 @@ Capabilities a box driver may list:
 | `volumes-keep` | `release`'s `keep` beside `seal` (Sealed volumes) |
 | `shelf` | every box sees the package shelf, read-only, at `describe.shelf.path` |
 | `root` | the box user has working `sudo` with no password |
+| `root-vm` | the box is a whole VM of its own and its root is the guest's real root (always with `root`; Root and Docker) |
 | `docker` | the box user can `docker run` (always with `root`) |
 | `github-jit` | `acquire` takes `jit_config` |
 | `github-jit-guard` | `acquire` takes `jit_guard` |
@@ -841,6 +842,12 @@ capability, and the write checks skip when the shelf holds no file.
 - A driver listing neither must not give sudo.
 - Root holds the box's own bounding set and no more: it must lack `NET_ADMIN`, `NET_RAW` and `MKNOD`. Conformance's
   `root` group checks this.
+- The one other way: a box that is a whole VM of its own, fenced only from outside the guest, may give the guest's
+  real root, which holds every capability of the guest's kernel. A driver whose Linux boxes are such VMs lists
+  `root-vm` beside `root` (a macOS guest is always one, and needs no word), and must keep the box fenced, and held to its own address, whatever that root does to the guest's packet filter,
+  addresses, routes and neighbours. Conformance's `root` group checks that from root's own shell, checks that
+  two such boxes do not share a kernel, and fails a driver with no forbidden and no allowed address to check it
+  against.
 - A box never runs with more root than describe says, nor advertises a docker it lacks.
 
 ### GitHub runners

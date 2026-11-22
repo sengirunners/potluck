@@ -23,7 +23,8 @@ import (
 // accept rule comes first. From a VM's tap it drops:
 //
 //   - every IPv6 packet;
-//   - a source address that is not the VM's own link's (no spoofing);
+//   - a source address that is not the VM's own, the guest's end of its
+//     link: no spoofing, and no second address beside its own;
 //   - any address of this machine, and broadcast;
 //   - the private, shared, loopback, link-local (cloud metadata), benchmark
 //     and multicast ranges (the list in docs/network.md), which covers the
@@ -139,8 +140,13 @@ var cloudhvForbidden = []string{"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127
 // cloudhvFence is the nftables table, loaded whole in one transaction each
 // time a VM boots, so a fence someone flushed is back before the next guest
 // runs. It names no binding's range: every tap of the layer's is held to the
-// same rules, and a packet's source must be an address routed to the tap it
-// came in on, which is that VM's own link and nothing else.
+// same rules. A packet's source must be an address routed to the tap it
+// came in on, which is that VM's own link and nothing else, and the guest's
+// end of a link: every link is a /30 whose second address is the guest's
+// (cloudhvNetArgs), so the two rules together leave one address. Root in a
+// guest can give its link any address; the link's network and broadcast
+// addresses are routed to the tap too, and replies to them would be the
+// host's to receive, or the link's next VM's.
 func cloudhvFence() string {
 	return `table inet potluck_cloudhv
 delete table inet potluck_cloudhv
@@ -156,6 +162,7 @@ table inet potluck_cloudhv {
 	chain guest_rules {
 		meta nfproto ipv6 drop
 		fib saddr . iif oif missing drop
+		ip saddr & 0.0.0.3 != 0.0.0.2 drop
 		fib daddr type { local, broadcast } drop
 		ip daddr @forbidden drop
 		tcp dport { 25, 465, 587, 2525 } drop
@@ -281,6 +288,13 @@ func cloudhvNetHelper(args []string) int {
 	// Answer ARP on the tap for the tap's own address only: by default a
 	// host answers for every address it has, and a guest could list them.
 	if err := os.WriteFile("/proc/sys/net/ipv4/conf/"+tap+"/arp_ignore", []byte("1\n"), 0o644); err != nil {
+		return fail("%v", err)
+	}
+	// And only to a sender whose address is routed to the tap, which is an
+	// address of the link. A guest's root can send ARP from any address, and
+	// the host keeps a neighbour for each sender it answers: without this one
+	// guest could fill the neighbour table every guest's traffic needs.
+	if err := os.WriteFile("/proc/sys/net/ipv4/conf/"+tap+"/arp_filter", []byte("1\n"), 0o644); err != nil {
 		return fail("%v", err)
 	}
 	for _, a := range [][]string{

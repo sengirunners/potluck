@@ -62,12 +62,15 @@ anything as root through this line.
 
 An image is a raw disk, `<ch_images>/<name>.raw`, that boots under `CLOUDHV.fd` and starts `potluck-guest`
 (`cmd/potluck-guest`) at boot. It needs `sh`, `perl` and `ip`, and `git` for a checkout, and one ordinary account
-named `box` with no sudo: every command runs as that account. The layer talks to the guest only through
-`potluck-guest`, over the VM's vsock. No SSH server and no password or key are involved.
+named `box`, which the image gives no sudo: every command runs as that account. For `root=on` it also needs
+`sudo`, and for `docker=on` a `docker.service` that systemd can start, not enabled, with `box` in the group that
+may use its socket (Root and Docker, below). The layer talks to the guest only through `potluck-guest`, over the
+VM's vsock. No SSH server and no password or key are involved.
 
 `scripts/cloudhv-image.sh` builds one from Ubuntu 24.04's cloud image (checked against Ubuntu's published
-checksum). It boots the image once with no network card to install `potluck-guest`, so nothing is downloaded into
-the image:
+checksum) and Docker's static release (the version and checksum pinned in the script). The script downloads both
+and boots the image once with no network card to install `potluck-guest` and Docker, so nothing is downloaded from
+inside the image:
 
 ```sh
 CGO_ENABLED=0 go build -o potluck-guest ./cmd/potluck-guest
@@ -107,9 +110,46 @@ MiB when unset).
 | `ch_dir` | `<state_dir>/cloudhv` | where each VM's directory is made: its disk, and its saved memory while it naps |
 | `ch_net` | `10.213.0.0/16` | the private range each VM's link is cut from, a /30 each; inside `10.0.0.0/8`. Two bindings on one host need two ranges. Given one range they can pick the same link, and the second VM to start on it is not started |
 | `ch_nap_idle_s` | `0` | nap a VM that has run no command for this many seconds; `0` never naps |
+| `root` | `off` | `on`: the box's user has sudo with no password (capabilities `root` and `root-vm`). Box bindings only |
+| `docker` | `off` | `on`: Docker runs in the box and its user can `docker run` (capability `docker`). Turns `root` on |
 | `ch_console` | `off` | `on` writes the guest's serial console to `console.log` in the VM's directory. Off by default because a guest can fill the host's disk through it |
 
 `network=nat` is refused: the layer has one network, the fenced one.
+
+## Root and Docker (`root=on`, `docker=on`)
+
+So an agent can install packages and run containers. Both are off unless the binding says so.
+
+- With `root=on` the box's user has `sudo` with no password. It is the guest's real root: it holds every
+  capability of the guest's kernel, can load modules, change the guest's addresses and routes, and stop or replace
+  `potluck-guest`.
+- With `docker=on` (which turns `root` on) the image's Docker is started and the box's user can use it. It is
+  ordinary rootful Docker with bridge networking, overlay storage, `docker build` and published ports inside the
+  box. A kept box keeps its images, and a napping box's containers go on at the wake.
+- The image carries no sudo rule and starts no Docker. `potluck-guest` writes the sudo rule
+  (`/etc/sudoers.d/potluck-box`) and starts `docker.service`, waiting until Docker is up, before the first command
+  of a box whose VM was made with them: that command is the boot's own, so a box that is ready has both. It
+  removes any such rule when it starts. A box made without them has neither: its user is in the `docker` group,
+  but there is no Docker socket to use and it cannot start one.
+- A boot fails, saying why, on an image that cannot give them: one without `sudo` or `docker.service`, or one whose
+  `potluck-guest` was built before `root=on`.
+
+Why real root is safe here, when an oci box's root must lack `NET_ADMIN` and `NET_RAW`: an oci box shares a bridge
+and a kernel boundary with its neighbours, and a cloudhv box does not. The box is a VM of its own on a link of its
+own, and everything that fences it is on the host, outside the guest: the tap, the fence table (Network, below)
+and the hypervisor. No root inside the guest can change those. The host takes nothing the guest says as true
+about anything but the box itself.
+
+The driver says so with capability `root-vm` beside `root`, and conformance's `root` group then proves the fence
+from root's own shell instead of reading root's capability bits (`docs/hosts.md`, "Conformance group `root`"):
+root cannot reach a forbidden address, also after it empties the guest's own packet filter and gives its link
+another address and route; cannot reach another box after naming that box a neighbour on its own link; and
+cannot open a connection from any address but the box's own, another box's included. It also checks that two
+boxes do not share a kernel.
+
+A VM is made with the binding's `root` and `docker` and keeps them. A kept box (`persist`) is refused at `start`
+(`conflict`) under a binding whose `root` or `docker` now differ; its disk stays kept until it is released or its
+time ends. A warm box made before such a change is ended, never handed out.
 
 ## The nap
 
@@ -164,7 +204,9 @@ reporting).
 
 Each VM has one tap device on the host: a point-to-point /30 with the host at one end and the guest at the other.
 No bridge joins two VMs. The host routes and masquerades what the fence lets through. On the tap the host answers
-ARP for the tap's own address only, so a guest cannot list the host's other addresses.
+ARP for the tap's own address only, so a guest cannot list the host's other addresses, and only to a sender
+whose address is on that link. A guest's root can send ARP from any address; on a host that leaves `arp_accept`
+and `proxy_arp` off, as Linux does, only the link's own addresses take a place in the host's neighbour table.
 
 A binding hands its links out in turn, so the link a VM just left is the last to be used again, and before a
 link's next VM boots the kernel's connection records for that link's guest address are deleted: replies to what
@@ -174,7 +216,8 @@ The fence is one nftables table, `potluck_cloudhv`, hooked before routing (prior
 accept rule is consulted first. From any of the layer's taps it drops:
 
 - every IPv6 packet (IPv6 is also off on the tap);
-- a packet whose source is not an address routed to the tap it came in on, so a guest cannot use another address;
+- a packet whose source is not the guest's own address (an address routed to the tap it came in on, and the
+  guest's end of that link), so a guest cannot use another address, whatever its root gives its link;
 - any address of the host itself, and broadcast;
 - the ranges in [network.md](network.md): private, shared (tailnets), loopback, link-local (cloud metadata),
   benchmark and multicast. That covers the LAN and every other VM's link;
@@ -189,13 +232,30 @@ host's own resolver is behind the fence.
 
 ## What is proven, and where
 
-On one host (2026-11-21; Ubuntu 24.04, kernel 6.8, cloud-hypervisor v53.0, nftables 1.0.9, Docker installed):
+On one host (2026-11-22; Ubuntu 24.04, kernel 6.8, cloud-hypervisor v53.0, nftables 1.0.9, Docker installed):
 
-- `potluck-conformance --kind box --remote` with `ch_nap_idle_s=2`, so VMs napped and woke during the suite, and
-  with `--net-allow`, four `--net-forbid` addresses (the host's LAN address, its tailnet address, another bridge's
-  address and the LAN's router), `--net-mail` and `--net-peers`: 100 checks passed and none failed (the secrets
-  checks are skipped: a binding that naps serves none), and no tap was left on the host;
-- the same suite with naps off and no net flags: 107 passed and none failed;
+- `potluck-conformance --kind box --remote` four ways, each with no check failed and no tap left on the host:
+
+  | binding | naps | net flags | passed |
+  | --- | --- | --- | --- |
+  | `docker=on` | `ch_nap_idle_s=2`: VMs napped and woke during the suite | yes | 109 |
+  | no root | `ch_nap_idle_s=2` | yes | 100 |
+  | `docker=on` | off | yes | 131 |
+  | no root | off | none | 107 |
+
+  The net flags are `--net-allow`, four `--net-forbid` addresses (the host's LAN address, its tailnet address,
+  another bridge's address and the LAN's router), `--net-mail` and `--net-peers`. A binding that naps serves no
+  secrets, so those checks are skipped in its runs;
+- the `docker=on` run with naps was made eleven times. Ten passed whole. In one, a VM's hypervisor exited while
+  the VM was being restored from a nap: its box was lost, its commands said so, and four checks of the `root`
+  group failed. The cause is not known, and twelve more runs of the `root` group alone did not show it again.
+  A hypervisor that exits during a restore now leaves the end of its log in the run's log;
+- in the `docker=on` runs that passed every check the `root` group makes of a whole-VM Linux box passed, and
+  Docker ran a container; a `docker=on` box was ready about 3 s after its acquire, with Docker already answering;
+- the fence without its source rule fails the `root` group: root sent from its link's first address and the
+  allowed address opened. With the rule it does not;
+- root in a guest sent ARP from 1,200 made-up sender addresses: the host kept one neighbour on the tap, the
+  guest's own. Without `arp_filter` on the tap it kept every one;
 - a guest writing 45 files of 20 MB straight to its disk while it was napped part-way through: every file read
   back whole after the wake;
 - 168 starts cancelled part-way, at varied moments, over two runs: no tap and no VM directory left;
@@ -203,7 +263,7 @@ On one host (2026-11-21; Ubuntu 24.04, kernel 6.8, cloud-hypervisor v53.0, nftab
   port.
 
 Skipped by the suite, and so not proven: secrets on a binding that naps, terminals, volumes, the shelf, warm
-boxes, a checkout, reclaim, box authority, root, and mail over IPv6 (those addresses do not open from the host
+boxes, a checkout, reclaim, box authority, and mail over IPv6 (those addresses do not open from the host
 either, so nothing was shown).
 
 Not tested: arm64, a host without Docker, any other cloud-hypervisor version, and more than a few VMs at once
@@ -211,7 +271,7 @@ through the driver.
 
 ## What it does not do
 
-- No terminal (`spawn` with `pty`), no `root` or `docker` capability, no volumes, no shelf.
+- No terminal (`spawn` with `pty`), no volumes, no shelf.
 - No secrets on a binding that naps (above).
 - A napping box still holds its slot and its lease: napping frees memory, not a place in the binding.
 - A box with a `spawn`ed process still running is not idle, so it never naps.

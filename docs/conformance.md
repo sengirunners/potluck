@@ -80,7 +80,7 @@ behind, no url or secret leaked, verb timing, spend) always run. Groups run in t
 | `reclaim` | all | the owner's reclaim policy ends the resource with no call to the driver; status `reclaimed` | `--reclaim-config` |
 | `refuse` | all | missing `request_id`, `ttl_s` past the cap, shell-string script, unknown box image, bad exec arguments; for db a host not in `create_in` is refused before any connection | db: `--outside-config` with `{port}` |
 | `net` | run, box | from inside: reaches what it should, resolves names, cannot reach forbidden addresses or send mail, peers cannot see each other, a box made with `net off` reaches nothing | `--net-*` flags |
-| `root` | box | with capability `root` or `docker`, sudo works and root lacks `NET_ADMIN`, `NET_RAW`, `MKNOD`; docker runs a container; without them sudo must not work | capabilities `root`, `docker` |
+| `root` | box | with capability `root` or `docker`, sudo works and root lacks `NET_ADMIN`, `NET_RAW`, `MKNOD`; in a whole-VM box (a macOS guest, or capability `root-vm`) root instead cannot reach what the net flags forbid, and in a Linux one cannot reach it after emptying the guest's own filter or from another address, cannot reach another box named a neighbour on its link, cannot open a connection from an address that is not its own, and has a kernel of its own; docker runs a container; without them sudo must not work | capabilities `root`, `root-vm`, `docker`; `--net-forbid`, `--net-mail`, `--net-allow` |
 
 Network flags: `--net-allow host:port` (must open; proves a network), `--net-forbid host:port` (must not open: a
 LAN host, this host's LAN address, a tailnet or metadata address; see below for which addresses it can prove),

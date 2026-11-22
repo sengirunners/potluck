@@ -38,6 +38,29 @@ import (
 type cloudhvCLI struct {
 	c     cloudhvConfig
 	state string // the binding's state directory
+	// root and docker are the binding's root=on and docker=on
+	// (parseCloudhvRoot): what each VM made here is made with.
+	root, docker bool
+}
+
+// parseCloudhvRoot reads root and docker on a cloud-hypervisor binding
+// (config.parseRoot calls it when one of them is on). A box here is a whole
+// VM of its own, and its fence is on the host (cloudhv_net.go), so root=on
+// gives the box's user the guest's own root, with nothing held back: describe
+// lists root and root-vm, and conformance's root group shows from root's own
+// shell that the fence still holds. docker=on, which needs root, also starts
+// the image's Docker when the box boots. The image gives its user no sudo
+// of its own: the guest agent writes the rule in a VM made with root=on, and
+// removes one it finds at boot (cloudhvguest.Run).
+func (c *config) parseCloudhvRoot(m map[string]string, docker bool, bad *[]string) {
+	switch {
+	case m["root"] == "off" && docker:
+		*bad = append(*bad, "docker=on needs root (whoever reaches Docker is root in the box): leave root unset or on")
+	case c.Kind != "box":
+		*bad = append(*bad, "root and docker on cloudhv are a box binding's (capabilities root, root-vm and docker)")
+	default:
+		c.Root, c.Docker = true, docker
+	}
 }
 
 // cloudhvConfig is the layer's binding keys.
@@ -176,6 +199,11 @@ type cloudhvVM struct {
 	Firmware string `json:"firmware"`
 	NapIdleS int    `json:"nap_idle_s,omitempty"`
 	Console  bool   `json:"console,omitempty"`
+	// Root: the guest agent gives the box's user sudo; Docker: it starts the
+	// image's Docker. Both are the binding's when the VM was made, and a
+	// kept VM keeps them (keptRootDiffers).
+	Root   bool `json:"root,omitempty"`
+	Docker bool `json:"docker,omitempty"`
 }
 
 // cloudhvStore writes a VM's record, whole or not at all.
@@ -327,7 +355,7 @@ func (l cloudhvCLI) clone(image, vm string, cpu, memory int, kept bool) error {
 		return err
 	}
 	v := cloudhvVM{Name: vm, Image: img, ImageID: imgID, CPU: cpu, MemoryMB: memory, Net: l.c.Net, Kept: kept,
-		Bin: l.c.Bin, Firmware: l.c.Firmware, NapIdleS: l.c.NapIdleS, Console: l.c.Console}
+		Bin: l.c.Bin, Firmware: l.c.Firmware, NapIdleS: l.c.NapIdleS, Console: l.c.Console, Root: l.root, Docker: l.docker}
 	// Links are handed out in turn, not lowest first, so an address a VM
 	// just gave up is the last to be used again.
 	nextFile := filepath.Join(l.c.Dir, ".next")

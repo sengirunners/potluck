@@ -10,12 +10,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/vmhost/cloudhvguest"
 )
 
@@ -159,6 +161,8 @@ func fakeCloudHV(args []string) int {
 		Squeeze: func() error { return mark("squeezed") },
 		Woke:    func(int64) error { return mark("woke") },
 		Command: func(c *exec.Cmd) { c.Env = append(os.Environ(), "FAKE_MEM="+mem.Mem) },
+		Root:    func() error { return mark("root") },
+		Docker:  func() error { return mark("docker") },
 	}
 	for {
 		c, err := vl.Accept()
@@ -846,6 +850,91 @@ func TestCloudHVConfig(t *testing.T) {
 	}
 }
 
+// root=on and docker=on are a cloudhv box binding's. Describe then lists
+// root, root-vm and docker; the guest of a VM made under the binding is told
+// to give its user root and to start Docker, and the guest of a VM made
+// without them is told neither, whatever the binding says later.
+func TestCloudHVRootAndDocker(t *testing.T) {
+	first := cfg(t)
+	base := func(kv ...string) map[string]string {
+		m := map[string]string{"vm": "cloudhv", "ch_firmware": "/fw/CLOUDHV.fd", "ch_images": "/images"}
+		for k, v := range first {
+			m[k] = v
+		}
+		delete(m, "image")
+		m["kind"], m["size"], m["cpu"], m["memory"] = "box", "c2m4", "2", "4096"
+		m["images"] = "box@sha256:" + strings.Repeat("a", 64)
+		for i := 0; i < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return m
+	}
+	for _, c := range []struct {
+		kv           []string
+		root, docker bool
+		caps         []string
+		bad          string
+	}{
+		{nil, false, false, nil, ""},
+		{[]string{"root", "on"}, true, false, []string{protocol.CapRoot, protocol.CapRootVM}, ""},
+		{[]string{"docker", "on"}, true, true, []string{protocol.CapRoot, protocol.CapRootVM, protocol.CapDocker}, ""},
+		{[]string{"root", "off", "docker", "on"}, false, false, nil, "docker=on needs root"},
+		{[]string{"root", "on", "kind", "run", "image", "img"}, false, false, nil, "box binding"},
+		{[]string{"root", "yes"}, false, false, nil, "root is on or off"},
+	} {
+		got, err := parseConfig(base(c.kv...))
+		if c.bad != "" {
+			if err == nil || !strings.Contains(err.Error(), c.bad) {
+				t.Errorf("%v: %v, want it refused with %q", c.kv, err, c.bad)
+			}
+			continue
+		}
+		if err != nil || got.Root != c.root || got.Docker != c.docker {
+			t.Errorf("%v: root %v, docker %v, %v", c.kv, got.Root, got.Docker, err)
+			continue
+		}
+		// Acquire refuses a Linux image under a Tart binding's root=on; this
+		// layer's images are Linux.
+		if got.tartRoot() {
+			t.Errorf("%v: taken as a Tart binding's root=on, which refuses every Linux image", c.kv)
+		}
+		d, err := call(t, base(c.kv...), "describe", "", nil)
+		if err != nil {
+			t.Errorf("%v: describe: %v", c.kv, err)
+			continue
+		}
+		listed := anyStrings(d["capabilities"])
+		for _, cp := range []string{protocol.CapRoot, protocol.CapRootVM, protocol.CapDocker} {
+			if slices.Contains(listed, cp) != slices.Contains(c.caps, cp) {
+				t.Errorf("%v: describe lists %v, want %s listed: %v", c.kv, listed, cp, slices.Contains(c.caps, cp))
+			}
+		}
+		raw := map[string]string{}
+		got.rootArgs(raw)
+		if why := keptRootDiffers(raw, got); why != "" {
+			t.Errorf("%v: a box made under this binding differs from it: %s", c.kv, why)
+		}
+		if other, _ := parseConfig(base("docker", "on")); !c.docker && keptRootDiffers(raw, other) == "" {
+			t.Errorf("%v: a kept box made without docker would start under docker=on", c.kv)
+		}
+	}
+
+	c := cloudhvFixture(t, 0)
+	c.boot("plain", false)
+	if c.run("plain", "echo", "ran"); c.has("plain", "root") || c.has("plain", "docker") {
+		t.Errorf("a VM made without root: its guest was told root %v, docker %v", c.has("plain", "root"), c.has("plain", "docker"))
+	}
+	c.l.root, c.l.docker = true, true
+	c.boot("rooted", false)
+	if c.run("rooted", "echo", "ran"); !c.has("rooted", "root") || !c.has("rooted", "docker") {
+		t.Errorf("a VM made with root and docker: its guest was told root %v, docker %v", c.has("rooted", "root"), c.has("rooted", "docker"))
+	}
+	// The first VM is what it was made as, though the layer now says root.
+	if c.run("plain", "echo", "ran"); c.has("plain", "root") || c.has("plain", "docker") {
+		t.Errorf("a VM made without root, after the binding changed: its guest was told root %v, docker %v", c.has("plain", "root"), c.has("plain", "docker"))
+	}
+}
+
 // The fence drops everything docs/network.md lists (the same ranges as
 // hostprobe's box network), and the root helper takes
 // nothing but the layer's own taps and addresses.
@@ -853,7 +942,7 @@ func TestCloudHVFenceAndHelperArguments(t *testing.T) {
 	fence := cloudhvFence()
 	for _, want := range []string{"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "168.63.129.16", "169.254.0.0/16", "172.16.0.0/12",
 		"192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4",
-		"meta nfproto ipv6 drop", "fib saddr . iif oif missing drop", "fib daddr type { local, broadcast } drop",
+		"meta nfproto ipv6 drop", "fib saddr . iif oif missing drop", "ip saddr & 0.0.0.3 != 0.0.0.2 drop", "fib daddr type { local, broadcast } drop",
 		"tcp dport { 25, 465, 587, 2525 } drop", "hook prerouting priority raw", `oifname "pch*" drop`} {
 		if !strings.Contains(fence, want) {
 			t.Errorf("the fence lacks %q", want)

@@ -22,9 +22,14 @@ From a clone of the private repository, with `origin` pointing at `potluck-priva
 
 ```sh
 git fetch origin
+git switch --detach origin/main             # run the script that is in the commit you publish
 scripts/public-sync.sh origin/main          # makes the commit, scans and prints it; pushes nothing
 scripts/public-sync.sh origin/main --push   # the same, then pushes it to the public main
 ```
+
+The script fetches the private main itself and refuses to run unless it is the same file as the
+`scripts/public-sync.sh` in the commit being published, so a checkout that is behind cannot publish with older
+rules. An older checkout may carry a script without that check: fetch and switch as above first.
 
 The script refuses a commit that does not contain the private commit the public main already carries: it copies
 the whole tree, so publishing an older commit would undo everything merged since. When two people publish close
@@ -37,6 +42,31 @@ private main first, then sync again.
 The public main is protected (the `go` check is required), so the push needs an admin. The public repository
 refuses new branches and force pushes from anyone, and new tags from anyone but its release workflow, so a clone
 whose `origin` still names the public repository cannot put private history there.
+
+## Holds: a security fix reaches our machines first
+
+A published fix shows where the flaw was. So a fix for anything in `SECURITY.md`'s scope (a guest reaching the
+host, the network or another guest; a secret reaching the wrong place; a VM outliving its lease; a forged handle)
+is installed on every machine we run for other people before it is published.
+
+- The pull request that makes the fix also adds a file under `public-hold/` at the top of the repository, named
+  for the fix, saying in a line or two what must be installed where. One file per fix: a later fix gets its own
+  file, never a line in an existing one, because removing a file releases everything it stood for.
+- `scripts/public-sync.sh --push` refuses while the commit being published, or the private main, carries a hold.
+  Any file under `public-hold/` is a hold, a README too. So is any path with `public-hold` in it under another
+  spelling (`Public_Hold`, `publichold`, a folder elsewhere in the tree), so a misnamed hold still holds.
+  The whole tree goes over in a sync, so one hold stops every release; install the fix soon.
+- Install from the private main: build the programs from that commit and put them on the machines. A public
+  release cannot be the way they get it.
+- When the fix is on those machines, a pull request removes the hold file and says where the fix was installed.
+  The next sync publishes everything. No hold file goes over, because the script never publishes a commit that
+  carries one.
+
+The script cannot tell that a fix needed a hold and did not get one. That is for the fix's author and reviewer.
+It also cannot stop a checkout whose script is from before holds existed.
+
+The hold is for machines we run for other people. People who run Potluck on their own machines get the fix from
+the release, so publish as soon as the hold is off.
 
 ## Outside contributions
 

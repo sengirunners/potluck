@@ -3,14 +3,18 @@
 package cloudhvguest
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"os/user"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,13 +37,19 @@ func (c vsockConn) Close() error {
 
 // Run is potluck-guest: it sets the guest's address from the VM's vsock
 // context id, then answers the host on Port for as long as the guest runs.
-// Commands run as boxUser, an account of the image's with no sudo: the agent
+// Commands run as boxUser, an ordinary account of the image's: the agent
 // itself is root (it sets the network, the clock and the caches), and a
-// command must not be. A guest without that account runs no command at all.
-// dns are the resolvers written to /etc/resolv.conf (none: left alone).
+// command is not. The account has sudo only in a VM whose binding has
+// root=on, which the host says with each exec (Request.Root, giveSudo): the
+// image has no rule of its own, and one left from an earlier boot is removed
+// here. A guest without that account runs no command at all. dns are the
+// resolvers written to /etc/resolv.conf (none: left alone).
 func Run(boxUser string, dns []string, log func(string, ...any)) error {
 	command, err := asUser(boxUser)
 	if err != nil {
+		return err
+	}
+	if err := dropSudo(sudoRule); err != nil {
 		return err
 	}
 	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
@@ -57,7 +67,7 @@ func Run(boxUser string, dns []string, log func(string, ...any)) error {
 			log("network: %v", err)
 		}
 	}()
-	h := Hooks{Squeeze: squeeze, Woke: woke, Command: command}
+	h := Hooks{Squeeze: squeeze, Woke: woke, Command: command, Root: once(func() error { return giveSudo(sudoRule, boxUser) }), Docker: once(startDocker)}
 	for {
 		nfd, peer, err := unix.Accept4(fd, unix.SOCK_CLOEXEC)
 		if err != nil {
@@ -74,6 +84,78 @@ func Run(boxUser string, dns []string, log func(string, ...any)) error {
 		}
 		go Serve(vsockConn{nfd, os.NewFile(uintptr(nfd), "vsock")}, h)
 	}
+}
+
+// once answers a hook that runs f until it has succeeded, one call at a time,
+// and nothing after that.
+func once(f func() error) func() error {
+	var mu sync.Mutex
+	done := false
+	return func() error {
+		mu.Lock()
+		defer mu.Unlock()
+		if done {
+			return nil
+		}
+		err := f()
+		done = err == nil
+		return err
+	}
+}
+
+// sudoRule is the sudoers file that gives the box's user root. Only the
+// agent writes it (giveSudo), so a box has sudo because its host said so in
+// this boot, never because of what is on its disk.
+const sudoRule = "/etc/sudoers.d/potluck-box"
+
+// sudoName is an account name that means only itself in a sudoers file.
+var sudoName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// dropSudo removes the sudo rule at path that an earlier boot's agent wrote,
+// if there is one.
+func dropSudo(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("an earlier boot's sudo rule could not be removed: %w", err)
+	}
+	return nil
+}
+
+// giveSudo writes the sudo rule at path that lets name run anything as root
+// with no password. The rule is written whole under another name and renamed
+// in, since sudo reads the directory at every call, and the temporary name
+// has a dot, which sudo skips.
+func giveSudo(path, name string) error {
+	if !sudoName.MatchString(name) {
+		return fmt.Errorf("the account %q is not a name a sudo rule can carry", name)
+	}
+	if _, err := exec.LookPath("sudo"); err != nil {
+		return fmt.Errorf("this image has no sudo: root=on needs one that has it, as scripts/cloudhv-image.sh builds")
+	}
+	tmp := path + ".new"
+	if err := os.WriteFile(tmp, []byte(name+" ALL=(ALL:ALL) NOPASSWD: ALL\n"), 0o440); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// dockerUnit is the image's Docker, a systemd unit that nothing starts at
+// boot (scripts/cloudhv-image.sh).
+const dockerUnit = "docker.service"
+
+// dockerStartFor bounds one try at starting Docker.
+const dockerStartFor = 60 * time.Second
+
+// startDocker has systemd start dockerUnit and waits until Docker says it is
+// up (the unit is Type=notify), so the command this comes before, and a boot
+// with it, finds Docker answering. It fails in an image without the unit.
+func startDocker() error {
+	ctx, cancel := context.WithTimeout(context.Background(), dockerStartFor)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "systemctl", "start", dockerUnit).CombinedOutput(); err != nil {
+		return fmt.Errorf("this image's Docker (%s) did not start: docker=on needs an image that has it, as scripts/cloudhv-image.sh builds: %v: %s",
+			dockerUnit, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // asUser answers the Hooks.Command that runs a command as name: its ids and

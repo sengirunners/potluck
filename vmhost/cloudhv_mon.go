@@ -362,6 +362,22 @@ func (m *chmon) start(restore *string) error {
 	return nil
 }
 
+// hypervisorSaid is the end of the hypervisor's log, for the run's log when
+// the hypervisor exits: the log itself goes with the VM's directory.
+func hypervisorSaid() string {
+	f, err := os.Open("hypervisor.log")
+	if err != nil {
+		return "(no log)"
+	}
+	defer f.Close()
+	const keep = 600
+	if st, err := f.Stat(); err == nil && st.Size() > keep {
+		_, _ = f.Seek(-keep, io.SeekEnd)
+	}
+	b, _ := io.ReadAll(io.LimitReader(f, keep))
+	return strings.TrimSpace(string(b))
+}
+
 // kill ends the current hypervisor process and waits for it.
 func (m *chmon) kill() {
 	if m.ch == nil || m.ch.Process == nil {
@@ -575,7 +591,10 @@ func (m *chmon) wake() error {
 		case e := <-m.exited:
 			if e == g {
 				m.ch = nil
-				return fmt.Errorf("the hypervisor exited during the restore (hypervisor.log): %v", err)
+				// The answer goes to whoever woke the box; what the
+				// hypervisor said stays in the run's log, on this machine.
+				m.logf("the hypervisor exited during the restore; its log ends: %s", hypervisorSaid())
+				return fmt.Errorf("the hypervisor exited during the restore: %v", err)
 			}
 		default:
 		}
@@ -680,6 +699,10 @@ func cloudhvExec(dir string, argv []string) int {
 	if err := os.Chdir(dir); err != nil {
 		return fail("the VM is gone: %v", err)
 	}
+	v, err := cloudhvLoad(".")
+	if err != nil {
+		return fail("the VM is gone: %v", err)
+	}
 	ctl, err := net.DialTimeout("unix", "ctl.sock", 2*time.Second)
 	if err != nil {
 		return fail("the VM is not running")
@@ -699,7 +722,8 @@ func cloudhvExec(dir string, argv []string) int {
 		return fail("%v", err)
 	}
 	defer g.Close()
-	code, err := cloudhvguest.Do(g, cloudhvguest.Request{Op: cloudhvguest.OpExec, Argv: argv}, os.Stdin, os.Stdout, os.Stderr)
+	// Root and Docker are the VM's record's, which only the host writes.
+	code, err := cloudhvguest.Do(g, cloudhvguest.Request{Op: cloudhvguest.OpExec, Argv: argv, Root: v.Root, Docker: v.Docker}, os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
 		return fail("%v", err)
 	}

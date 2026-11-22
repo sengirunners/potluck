@@ -34,3 +34,25 @@ func TestWarmBoxOfAnOldPinIsNeverHandedOut(t *testing.T) {
 		t.Error("the warm box of the old pin is still live")
 	}
 }
+
+// A rebind that changes the binding's root or docker ends the warm boxes made
+// before it: a box keeps the root it was made with, so one handed out after
+// the rebind would have root where describe lists none, or none where it
+// lists root.
+func TestWarmBoxOfAnotherRootIsNeverHandedOut(t *testing.T) {
+	for _, c := range []struct{ from, to string }{{"on", "off"}, {"off", "on"}} {
+		m, dir := shelfWarmBox(t)
+		if err := os.WriteFile(filepath.Join(dir, "images", m["images"]+".inspect"), []byte("runner\nHOME=/home/runner\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m["oci_runtime"], m["docker"] = ociSudoRuntime, c.from
+		stale := readyWarm(t, m)
+		m["docker"] = c.to
+		if _, vm := acquireBox(t, m, "k"); vm == stale {
+			t.Errorf("the acquire got the warm box made with docker %s after the binding moved to docker %s", c.from, c.to)
+		}
+		if liveVM(m, stale) {
+			t.Errorf("the warm box made with docker %s is still live under docker %s", c.from, c.to)
+		}
+	}
+}

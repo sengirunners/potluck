@@ -310,7 +310,15 @@ func (d *drv) describe() map[string]any {
 			caps = append(caps, "docker") // rootless docker run works in the box
 		}
 	}
-	if d.cfg.Kind == "box" && d.cfg.VM != "oci" && d.cfg.Root {
+	if d.cfg.Kind == "box" && d.cfg.VM == "cloudhv" && d.cfg.Root {
+		// cloudhv.go parseCloudhvRoot: the guest's own root, in a VM of the
+		// box's own whose fence is on the host.
+		caps = append(caps, protocol.CapRoot, protocol.CapRootVM)
+		if d.cfg.Docker {
+			caps = append(caps, protocol.CapDocker) // the image's Docker, up before the box is ready
+		}
+	}
+	if d.cfg.Kind == "box" && d.cfg.tartRoot() {
 		// Tart root=on (oci_root.go parseTartRoot): the image's sudo, kept by
 		// the owner's word, on a macOS guest only.
 		switch {

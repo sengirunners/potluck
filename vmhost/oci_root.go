@@ -74,7 +74,8 @@ func ociHonoursSetuid(rt string) bool {
 	return rt == ociSudoRuntime || ociKataRuntime(rt)
 }
 
-// parseRoot reads root and docker (on, off or unset) for an oci binding.
+// parseRoot reads root and docker (on, off or unset): an oci binding's here,
+// a tart one's in parseTartRoot, a cloudhv one's in parseCloudhvRoot.
 func (c *config) parseRoot(m map[string]string, bad *[]string) {
 	onOff := func(k string) bool {
 		switch m[k] {
@@ -88,6 +89,10 @@ func (c *config) parseRoot(m map[string]string, bad *[]string) {
 	}
 	root, docker := onOff("root"), onOff("docker")
 	if !root && !docker {
+		return
+	}
+	if c.VM == "cloudhv" {
+		c.parseCloudhvRoot(m, docker, bad) // cloudhv.go
 		return
 	}
 	if c.VM != "oci" {
@@ -138,6 +143,10 @@ func (c *config) parseTartRoot(m map[string]string, root, docker bool, bad *[]st
 
 // tartRootOS is the only guest OS a Tart binding lists root for.
 const tartRootOS = "darwin"
+
+// tartRoot reports a Tart binding with root=on, whose root is for
+// tartRootOS images only.
+func (c config) tartRoot() bool { return c.Root && c.VM != "oci" && c.VM != "cloudhv" }
 
 // rootArgs are root's raw config keys (rawConfig).
 func (c config) rootArgs(m map[string]string) {
@@ -209,9 +218,10 @@ func resolveBin(p string) string {
 
 // keptRootDiffers says how a kept box's root and docker (what it was made
 // with: its record's config) differ from the binding's now, "" when they do
-// not. A start reuses the container, flags and all, so such a box would not
-// be what describe says: a start is refused instead (persist.go), and its
-// disk stays kept until release or its time.
+// not. A start reuses the container, flags and all (oci), or the VM and a
+// disk root may have changed (cloudhv), so such a box would not be what
+// describe says: a start is refused instead (persist.go), and its disk stays
+// kept until release or its time.
 func keptRootDiffers(made map[string]string, now config) string {
 	on := func(k string) bool { return made[k] == "on" }
 	root, docker := on("root") || on("docker"), on("docker")

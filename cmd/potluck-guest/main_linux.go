@@ -16,7 +16,7 @@ import (
 
 func main() {
 	dns := flag.String("dns", "1.1.1.1,8.8.8.8", "resolvers written to /etc/resolv.conf, comma-separated (empty: leave it alone)")
-	boxUser := flag.String("user", "box", "the account commands run as: an ordinary one, with no sudo")
+	boxUser := flag.String("user", "box", "the account commands run as: an ordinary one, which has sudo only where the VM's binding has root=on")
 	flag.Parse()
 	var servers []string
 	for _, s := range strings.Split(*dns, ",") {

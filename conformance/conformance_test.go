@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -295,6 +296,94 @@ func TestStrict(t *testing.T) {
 	}
 }
 
+// A box whose driver lists root-vm is a whole VM of its own: the root group
+// skips the bounding-set checks and proves the fence from root's own shell,
+// also after root empties the guest's filter and changes the box's link, and
+// checks the box's kernel is its own. The reference boxes are this machine
+// with a stand-in link and fence (refdriver's guestStandIns), which lets out
+// only what its bug says, so each broken driver fails the check whose probe
+// makes the change that bug is about, and no other.
+func TestRootVMGuest(t *testing.T) {
+	forbid, _, ok := lanListeners(t)
+	if !ok {
+		t.Skip("this machine has no non-loopback, non-link-local IPv4 address on an up interface")
+	}
+	allow, _, _ := lanListeners(t)
+	lan, _, _ := net.SplitHostPort(forbid)
+	const (
+		fence  = "root in a whole-VM box cannot reach what the net checks forbid"
+		readdr = "root in a whole-VM Linux box cannot reach them from another address"
+		neigh  = "root in a whole-VM Linux box cannot reach another box named a neighbour"
+		take   = "root in a whole-VM Linux box cannot use an address that is not its own"
+		kern   = "a root-vm box has a kernel of its own"
+		cannot = "root could not change the box's addresses"
+	)
+	type tc struct {
+		name, bug, link string
+		forbid, allow   []string
+		want            []string
+		pass            bool
+	}
+	pass := func(checks ...string) (out []string) {
+		for _, c := range checks {
+			out = append(out, "PASS  "+c)
+		}
+		return out
+	}
+	cases := []tc{
+		{"fenced", "", lan, []string{forbid}, []string{allow}, append(pass(fence, readdr, neigh, take, kern), "PASS  sudo works in the box",
+			"SKIP  root in the box holds no NET_ADMIN", "SKIP  root in the box holds no NET_RAW", "SKIP  root in the box holds no MKNOD"), true},
+		{"root past the fence", "root-past-fence", lan, []string{forbid}, []string{allow}, []string{"FAIL  " + fence, forbid + " opened from root's shell"}, false},
+		{"the fence is the guest's own filter", "root-fence-in-guest", lan, []string{forbid}, []string{allow},
+			[]string{"FAIL  " + fence, forbid + " opened from root's shell"}, false},
+		{"another address gets past the fence", "root-readdress-past-fence", lan, []string{forbid}, []string{allow},
+			append(pass(fence, neigh, kern), "FAIL  "+readdr, forbid+" opened once root took another address", "FAIL  "+take, "which is not the box's own address"), false},
+		{"a target put on the link gets past the fence", "root-onlink-past-fence", lan, []string{forbid}, []string{allow},
+			append(pass(fence, neigh, take, kern), "FAIL  "+readdr, forbid+" opened once root took another address"), false},
+		{"a neighbour is reached", "root-neighbour-reached", lan, []string{forbid}, []string{allow},
+			append(pass(fence, readdr, take, kern), "FAIL  "+neigh, "root reached another box (198.51.100."), false},
+		{"a box whose address was taken is cut off", "root-cuts-neighbour-off", lan, []string{forbid}, []string{allow},
+			append(pass(fence, readdr, neigh, kern), "FAIL  "+take, "no longer reaches "+allow), false},
+		{"root cannot change the link", "root-vm-cannot-readdress", lan, []string{forbid}, []string{allow},
+			append(pass(fence, kern), "FAIL  "+readdr, "FAIL  "+neigh, "FAIL  "+take, cannot), false},
+		{"two boxes on one kernel", "root-vm-shared-kernel", lan, []string{forbid}, []string{allow},
+			append(pass(fence, readdr, neigh, take), "FAIL  "+kern, "the two are on one kernel"), false},
+		{"root cannot change the kernel", "root-vm-kernel-read-only", lan, []string{forbid}, []string{allow},
+			append(pass(fence, readdr, neigh, take), "FAIL  "+kern, "could not change kernel.printk_ratelimit_burst"), false},
+		{"nothing forbidden", "", lan, nil, []string{allow}, []string{"FAIL  " + fence, "FAIL  " + readdr, "nothing showed root"}, false},
+		{"nothing allowed", "", lan, []string{forbid}, nil, append(pass(fence, readdr, neigh, kern), "FAIL  "+take, "no IPv4 --net-allow address"), false},
+		{"no link", "", "", []string{forbid}, []string{allow}, []string{"PASS  " + fence, "FAIL  " + neigh, "FAIL  " + take, "FAIL  " + kern, "the listening box's link"}, false},
+	}
+	if runtime.GOOS == "linux" { // the box reads this machine's boot id, which only Linux has
+		cases = append(cases, tc{"a box on this machine's kernel", "root-vm-host-kernel", lan, []string{forbid}, []string{allow},
+			[]string{"FAIL  " + kern, "kernel is this machine's own"}, false})
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path, opt := fixture(t, "box", c.bug)
+			opt.Only, opt.NetForbid, opt.NetAllow = []string{"root"}, c.forbid, c.allow
+			opt.Config["guest_vm"], opt.Config["guest_link"] = "on", c.link
+			bin := refdriver.FirewallCI(t, t.TempDir(), forbid, net.JoinHostPort(lan, strconv.Itoa(opt.NetPeerPort+4)))
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			res := Run(context.Background(), path, opt)
+			out := Format(res)
+			for _, w := range c.want {
+				if !strings.Contains(out, w) {
+					t.Errorf("want %q in:\n%s", w, out)
+				}
+			}
+			if c.pass {
+				if Failed(res) > 0 {
+					t.Errorf("failed:\n%s", out)
+				}
+				record(res, passedSet)
+			} else {
+				record(res, failedSet)
+			}
+		})
+	}
+}
+
 // A macOS box with root (Tart's root=on, zm-eakh.12.54.14) has no Linux
 // bounding set: the root group skips those checks and proves instead that
 // root's own shell cannot reach what the net checks forbid. The reference box
@@ -308,7 +397,7 @@ func TestRootMacGuest(t *testing.T) {
 	}
 	bin := refdriver.FirewallCI(t, t.TempDir(), forbid)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	const fence = "root in a macOS box cannot reach what the net checks forbid"
+	const fence = "root in a whole-VM box cannot reach what the net checks forbid"
 	for _, c := range []struct {
 		name, bug string
 		forbid    []string
@@ -680,7 +769,8 @@ var brokenDrivers = []struct {
 	{"box", "", "root", "FAIL  acquire a box for root and docker: image zm/other@sha256:", func(o *Options) {
 		o.Config["images"] = "ref-image,zm/other@sha256:" + strings.Repeat("ab", 32) // every bound image is checked, not the default alone
 	}},
-	{"box", "", "root", "FAIL  root in a macOS box cannot reach what the net checks forbid", func(o *Options) { o.Config["guest_os"] = "darwin" }}, // no --net-forbid: nothing proven, a FAIL (TestRootMacGuest: root past the fence)
+	{"box", "root-vm-without-root", "root", "FAIL  a driver listing root-vm lists root", nil},
+	{"box", "", "root", "FAIL  root in a whole-VM box cannot reach what the net checks forbid", func(o *Options) { o.Config["guest_os"] = "darwin" }}, // no --net-forbid: nothing proven, a FAIL (TestRootMacGuest: root past the fence)
 	{"box", "docker-down", "root", "FAIL  docker run works in the box", nil},
 	{"box", "docker-run-fails", "root", "FAIL  docker run works in the box", nil},
 }

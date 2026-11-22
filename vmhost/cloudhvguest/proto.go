@@ -19,8 +19,11 @@ import (
 )
 
 // Port is the vsock port the agent listens on. Below 1024, so only root in
-// the guest can bind it: if the agent ever stops, the box's user cannot
-// answer the host in its place.
+// the guest can bind it: in a box without root, if the agent ever stops, the
+// box's user cannot answer the host in its place. In a box with root
+// (Request.Root) the user can, so the host takes a guest's answers as the
+// box's own word: a command's output and exit code, and nothing it acts on
+// for anyone else.
 const Port = 1000
 
 // Frame types.
@@ -49,6 +52,14 @@ type Request struct {
 	Op    string   `json:"op"`
 	Argv  []string `json:"argv,omitempty"`
 	Stdin bool     `json:"stdin,omitempty"` // stdin frames follow; else the command reads nothing
+	// Root: the VM's binding has root=on. The agent gives the box's user
+	// sudo the first time an exec says so; the image itself gives it none.
+	// Docker: the binding has docker=on, and the agent starts the image's
+	// Docker likewise, and waits for it. An exec that says either fails in
+	// a guest that cannot do it, and in one whose agent does not know the
+	// word (Result.Root, Result.Docker).
+	Root   bool `json:"root,omitempty"`
+	Docker bool `json:"docker,omitempty"`
 	// UnixNano is the host's clock (OpWoke).
 	UnixNano int64 `json:"unix_nano,omitempty"`
 }
@@ -58,6 +69,10 @@ type Request struct {
 type Result struct {
 	Code int    `json:"code"`
 	Err  string `json:"err,omitempty"`
+	// Root and Docker: the agent gave what the Request asked before it ran
+	// the command. An agent built before those words leaves them out.
+	Root   bool `json:"root,omitempty"`
+	Docker bool `json:"docker,omitempty"`
 }
 
 // WriteFrame writes one frame.
@@ -144,8 +159,17 @@ func Do(conn io.ReadWriter, req Request, stdin io.Reader, stdout, stderr io.Writ
 			if err := json.Unmarshal(p, &res); err != nil {
 				return 0, err
 			}
-			if res.Err != "" && stderr != nil {
-				fmt.Fprintln(stderr, res.Err)
+			if res.Err != "" {
+				if stderr != nil {
+					fmt.Fprintln(stderr, res.Err)
+				}
+				return res.Code, nil
+			}
+			if req.Root && !res.Root || req.Docker && !res.Docker {
+				if stderr != nil {
+					fmt.Fprintln(stderr, "the image's potluck-guest gives no root or docker: it was built from an older source than this driver; rebuild the image")
+				}
+				return 127, nil
 			}
 			return res.Code, nil
 		}

@@ -66,8 +66,8 @@ func (d *drv) takeWarm(key string, ttl int, a warmAcquire) (record, bool) {
 		if !r.Warm || r.State != stReady || r.Target != d.cfg.Target || !alive(r.Supervisor) {
 			continue
 		}
-		if r.Image != d.cfg.Image { // booted before a rebind moved the pin: its digest is off the binding's pins
-			d.endWarm(r, warmOffPin)
+		if why := d.warmOffBinding(r); why != "" { // booted before a rebind: not a box the binding makes now
+			d.endWarm(r, why)
 			continue
 		}
 		if !d.warmShelfMatches(r, want) {
@@ -152,15 +152,28 @@ func (d *drv) fillWarm() {
 // warmOffPin is why a warm box booted on an image its binding no longer lends ended.
 const warmOffPin = "the binding's image changed since it booted"
 
-// endOffPinWarm ends each live warm box of this binding booted on an image
-// other than the binding's default now: a rebind moved the pin, and a box
-// handed out from the old one would boot a digest none of the binding's pins
-// name, and a pool's authority does not check a plain acquire's digest.
-// Lock held.
+// warmOffBinding says why warm box r is not a box the binding makes now, ""
+// when it is. A rebind moved the default image: a box handed out from the old
+// one would boot a digest none of the binding's pins name, and a pool's
+// authority does not check a plain acquire's digest. Or it changed root or
+// docker, which a box keeps from when it was made (keptRootDiffers): handed
+// out, it would have root where describe lists none, or none where it does.
+func (d *drv) warmOffBinding(r record) string {
+	if r.Image != d.cfg.Image {
+		return warmOffPin
+	}
+	return keptRootDiffers(r.Config, d.cfg)
+}
+
+// endOffPinWarm ends each live warm box of this binding that is not a box
+// the binding makes now (warmOffBinding). Lock held.
 func (d *drv) endOffPinWarm() {
 	for _, r := range d.st.all() {
-		if r.Warm && r.live() && r.Target == d.cfg.Target && r.Image != d.cfg.Image {
-			d.endWarm(r, warmOffPin)
+		if !r.Warm || !r.live() || r.Target != d.cfg.Target {
+			continue
+		}
+		if why := d.warmOffBinding(r); why != "" {
+			d.endWarm(r, why)
 		}
 	}
 }

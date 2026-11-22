@@ -20,6 +20,10 @@ type Hooks struct {
 	// Command sets who an exec's command runs as, and its environment and
 	// directory. Nil runs it as the agent itself.
 	Command func(*exec.Cmd)
+	// Root gives the box's user sudo, and Docker starts the guest's Docker,
+	// each if it is not done yet (an exec whose request has Root or Docker).
+	Root   func() error
+	Docker func() error
 }
 
 // Serve answers one connection's request and returns when it is done. An
@@ -48,7 +52,7 @@ func Serve(conn io.ReadWriteCloser, h Hooks) {
 		}
 		exit(conn, hook(f))
 	case OpExec:
-		serveExec(conn, req, h.Command)
+		serveExec(conn, req, h)
 	default:
 		exit(conn, Result{Code: 127, Err: "unknown op " + req.Op})
 	}
@@ -81,17 +85,32 @@ func (l lockedWriter) Write(p []byte) (int, error) {
 	return l.w.Write(p)
 }
 
-func serveExec(conn io.ReadWriter, req Request, prepare func(*exec.Cmd)) {
+func serveExec(conn io.ReadWriter, req Request, h Hooks) {
 	if len(req.Argv) == 0 {
 		exit(conn, Result{Code: 127, Err: "no command"})
 		return
+	}
+	// What the binding gives the box comes before its command, and a guest
+	// that cannot give it says so: the command does not run without.
+	for _, want := range []struct {
+		on   bool
+		name string
+		f    func() error
+	}{{req.Root, "root", h.Root}, {req.Docker, "docker", h.Docker}} {
+		if !want.on {
+			continue
+		}
+		if r := hook(want.f); r.Code != 0 {
+			exit(conn, Result{Code: 127, Err: want.name + ": " + r.Err})
+			return
+		}
 	}
 	var mu sync.Mutex
 	out := lockedWriter{&mu, conn}
 	cmd := exec.Command(req.Argv[0], req.Argv[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if prepare != nil {
-		prepare(cmd)
+	if h.Command != nil {
+		h.Command(cmd)
 	}
 	var stdin io.WriteCloser
 	if req.Stdin {
@@ -225,7 +244,7 @@ func serveExec(conn io.ReadWriter, req Request, prepare func(*exec.Cmd)) {
 			quiet = busy.Load() == 0 && time.Since(time.Unix(0, last)) >= outputGrace
 		}
 	}
-	exit(out, Result{Code: exitCode(werr)})
+	exit(out, Result{Code: exitCode(werr), Root: req.Root, Docker: req.Docker})
 }
 
 // outputGrace is how long an ended command's output may stand still before

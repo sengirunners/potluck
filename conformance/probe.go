@@ -28,7 +28,20 @@ const ProbeScript = `#!/bin/sh
 #   net peers PORT exit 0 if no other machine on this run's IPv4 /24 or IPv6 link-local neighbours that answer
 #                  ping accepts on PORT, 6 if one does
 #   net resolve NAME PORT  exit 0 if NAME resolves (getent hosts), 8 if not; without getent, 0 if NAME:PORT opens, 7 if not
-#   (net exits 65 when the guest lacks the tools: nc or bash, ip, ping)
+#   net link       print the address and hardware address of the link this guest's default route leaves by
+#   net readdress H:P     as root: exit 0 if H:P stays closed from an address beside H and with H named a
+#                         neighbour on this guest's link, 5 if it opens
+#   net neighbour IP MAC PORT  as root: exit 0 if IP:PORT stays closed with IP named a neighbour on this
+#                         guest's link at MAC, 6 if it opens
+#   net take H:P IP       as root: exit 0 if H:P, which opens from this guest's own address (7 if not), stays
+#                         closed from IP (another guest's address, taken and announced) and from the first
+#                         and last address of this guest's subnet; 5, printing them, if it opens from one
+#   net unfilter          as root: empty whatever packet filter this guest runs itself (nft, iptables)
+#   net kernel            print this guest's kernel's boot id
+#   net kset [N]          print kernel.printk_ratelimit_burst, a setting of the whole kernel; as root with N, set it first
+#   (net exits 65 when the guest lacks the tools: nc or bash, ip, ping; link, readdress, neighbour, take,
+#   kernel and kset exit 67 when the guest has no default route, no boot id or no such setting, or ip or the
+#   kernel refused the change)
 #   publish write TEXT  write TEXT to the file $ZM_PUBLISH_FILE names, and exit 0 (9 if it is not set)
 #   publish big         write a JSON object of about 70000 bytes there
 #   publish hold TEXT   write TEXT there, then run until killed
@@ -127,6 +140,105 @@ net)
 		fi
 		if [ -s "$hits" ]; then cat "$hits"; rm -f "$hits"; exit 6; fi
 		rm -f "$hits" ;;
+	link)
+		command -v ip >/dev/null 2>&1 || exit 65
+		dev=$(ip -4 route show default | awk 'NR == 1 { for (i = 1; i < NF; i++) if ($i == "dev") print $(i + 1) }')
+		[ -n "$dev" ] || exit 67
+		a=$(ip -4 -o addr show dev "$dev" scope global | awk 'NR == 1 { sub("/.*", "", $4); print $4 }')
+		m=$(ip -o link show dev "$dev" | sed -n 's/.*link\/ether \([0-9a-f:]*\).*/\1/p')
+		[ -n "$a" ] && [ -n "$m" ] || exit 67
+		echo "$a $m" ;;
+	readdress)
+		# Root with the guest's whole kernel can give its link any address and route. The
+		# forbidden address must stay closed when root sends from an address beside it
+		# (through the gateway, then with the address named a neighbour on the link) and
+		# when it names it a neighbour under the guest's own address.
+		command -v ip >/dev/null 2>&1 || exit 65
+		hostport "$3"
+		set -- $(ip -4 route show default | awk 'NR == 1 { for (i = 1; i < NF; i++) { if ($i == "dev") d = $(i + 1); if ($i == "via") g = $(i + 1) }; print d, g }')
+		dev=$1; gw=$2
+		[ -n "$dev" ] || exit 67
+		last=${h##*.}; n=${h%.*}.$((last % 253 + 1))
+		undo() { ip route del "$h/32" 2>/dev/null; ip addr del "$n/32" dev "$dev" 2>/dev/null; }
+		ip addr replace "$n/32" dev "$dev" || exit 67
+		hit=
+		try() { ip route replace "$h/32" "$@" || { undo; exit 67; }; if tcp "$h" "$p"; then hit=1; fi; }
+		[ -z "$gw" ] || try via "$gw" dev "$dev" src "$n"
+		try dev "$dev" src "$n"
+		try dev "$dev"
+		undo
+		[ -z "$hit" ] || exit 5 ;;
+	neighbour)
+		# Another guest, named a neighbour on this guest's link by its hardware address: on
+		# a link two guests share, that reaches it whatever the router between them drops.
+		command -v ip >/dev/null 2>&1 || exit 65
+		dev=$(ip -4 route show default | awk 'NR == 1 { for (i = 1; i < NF; i++) if ($i == "dev") print $(i + 1) }')
+		[ -n "$dev" ] || exit 67
+		if tcp "$3" "$5"; then exit 6; fi
+		ip route replace "$3/32" dev "$dev" || exit 67
+		ip neigh replace "$3" lladdr "$4" dev "$dev" nud permanent || { ip route del "$3/32" 2>/dev/null; exit 67; }
+		hit=; if tcp "$3" "$5"; then hit=1; fi
+		ip neigh del "$3" dev "$dev" 2>/dev/null; ip route del "$3/32" 2>/dev/null
+		[ -z "$hit" ] || exit 6 ;;
+	take)
+		# Root gives its link an address that is not this guest's own: another guest's, and
+		# the first and last of its own subnet, which are no machine's. What opens from the
+		# guest's own address must not open from them: the answers would be another guest's
+		# to receive, now or once the address is its. arp_notify announces each address
+		# taken, as a guest drawing another's traffic to itself would.
+		command -v ip >/dev/null 2>&1 || exit 65
+		hostport "$3"; peer=$4
+		set -- $(ip -4 route show default | awk 'NR == 1 { for (i = 1; i < NF; i++) { if ($i == "dev") d = $(i + 1); if ($i == "via") g = $(i + 1) }; print d, g }')
+		dev=$1; gw=$2
+		[ -n "$dev" ] || exit 67
+		cidr=$(ip -4 -o addr show dev "$dev" scope global | awk 'NR == 1 { print $4 }')
+		own=${cidr%/*}; len=${cidr#*/}
+		[ -n "$own" ] || exit 67
+		tcp "$h" "$p" || exit 7
+		first=; last=
+		if [ "$len" -lt 31 ]; then
+			set -- $(echo "$own" | tr . ' ')
+			n=$(( ($1 << 24) | ($2 << 16) | ($3 << 8) | $4 )); m=$(( (4294967295 << (32 - len)) & 4294967295 ))
+			f=$(( n & m )); l=$(( f | (4294967295 - m) ))
+			first=$(( f >> 24 & 255 )).$(( f >> 16 & 255 )).$(( f >> 8 & 255 )).$(( f & 255 ))
+			last=$(( l >> 24 & 255 )).$(( l >> 16 & 255 )).$(( l >> 8 & 255 )).$(( l & 255 ))
+		fi
+		echo 1 >"/proc/sys/net/ipv4/conf/$dev/arp_notify" 2>/dev/null
+		hit=
+		for s in "$peer" $first $last; do
+			[ "$s" != "$own" ] || continue
+			# The kernel may refuse a subnet's own first or last address, or to send from it;
+			# another guest's it takes.
+			ip addr replace "$s/32" dev "$dev" 2>/dev/null || { [ "$s" != "$peer" ] || exit 67; continue; }
+			if [ -n "$gw" ]; then ip route replace "$h/32" via "$gw" dev "$dev" src "$s" 2>/dev/null; else ip route replace "$h/32" dev "$dev" src "$s" 2>/dev/null; fi ||
+				{ ip addr del "$s/32" dev "$dev" 2>/dev/null; [ "$s" != "$peer" ] || exit 67; continue; }
+			if tcp "$h" "$p"; then hit="$hit $s"; fi
+			ip route del "$h/32" 2>/dev/null; ip addr del "$s/32" dev "$dev" 2>/dev/null
+		done
+		[ -z "$hit" ] || { echo $hit; exit 5; } ;;
+	unfilter)
+		# A filter the guest runs itself is root's to empty, so it fences nothing.
+		if command -v nft >/dev/null 2>&1; then nft flush ruleset 2>/dev/null; fi
+		for t in iptables ip6tables; do
+			command -v "$t" >/dev/null 2>&1 || continue
+			for c in INPUT OUTPUT FORWARD; do "$t" -P "$c" ACCEPT 2>/dev/null; done
+			for b in filter nat mangle raw; do "$t" -t "$b" -F 2>/dev/null; done
+		done
+		exit 0 ;;
+	kernel)
+		# One id per boot of a kernel: every container on a kernel reads the same one.
+		if command -v sysctl >/dev/null 2>&1 && sysctl -n kernel.random.boot_id 2>/dev/null; then exit 0; fi
+		cat /proc/sys/kernel/random/boot_id 2>/dev/null || exit 67 ;;
+	kset)
+		# A setting the kernel has one of, whatever namespaces a process is in: only root of
+		# the kernel itself can change it, and everything on that kernel then reads the change.
+		if command -v sysctl >/dev/null 2>&1; then
+			[ -z "$3" ] || sysctl -qw "kernel.printk_ratelimit_burst=$3" 2>/dev/null || exit 67
+			sysctl -n kernel.printk_ratelimit_burst 2>/dev/null || exit 67
+		else
+			[ -z "$3" ] || { echo "$3" >/proc/sys/kernel/printk_ratelimit_burst; } 2>/dev/null || exit 67
+			cat /proc/sys/kernel/printk_ratelimit_burst 2>/dev/null || exit 67
+		fi ;;
 	*) exit 64 ;;
 	esac
 	;;

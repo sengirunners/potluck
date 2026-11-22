@@ -935,8 +935,10 @@ So an agent can install packages and run containers: root inside and containers 
 
 Keys and flags:
 
-- They are an oci binding's `root=on` and `docker=on` (docker implies root). A Tart or Incus box is a full VM whose
-  image decides both, and the keys are refused there.
+- They are an oci binding's `root=on` and `docker=on` (docker implies root), which the rest of this section is
+  about. A cloudhv binding has the same two keys with another meaning, the guest's real root and rootful Docker
+  ([cloudhv.md](cloudhv.md), "Root and Docker"). A Tart binding has `root=on` for a macOS image (`--root`, above)
+  and no `docker`. On Incus the image decides both, and the keys are refused.
 - `potluck host --docker` binds them. A re-run without the flag keeps what an earlier run bound for those bindings,
   as admission keys are kept (`--docker=false` turns it off).
 - Sudo is opt-in: a default box keeps every flag it had and has no root.
@@ -1002,6 +1004,24 @@ Conformance group `root`:
 - One listing `root`, for every image the binding lends (config `images`), on boxes acquired with `net` `on` where
   the driver lists `net-off`: `sudo -n id -u` answers `0`, and root's `CapBnd` lacks `NET_ADMIN` (bit 12), `NET_RAW`
   (bit 13) and `MKNOD` (bit 27).
+- In a whole-VM box (a macOS guest, or a driver listing `root-vm`) root owns the guest's kernel, so the bits are not
+  read. Instead the net probe runs under `sudo`: its control must see a port open in the box, and no `--net-forbid`
+  or `--net-mail` address that opens from the host may open from root's shell. With no such address the check
+  fails.
+- In a Linux whole-VM box root first empties the packet filter the guest runs itself (`nft`, `iptables`), so a
+  fence inside the guest fails here, and then changes the network and tries again:
+  - For each forbidden IPv4 address it gives the box's link a second address beside the target, routes the target
+    through the gateway and then straight onto the link, and the target must stay closed.
+  - A second box listens, and root names that box's address a neighbour at its MAC on root's own link: it must
+    not open.
+  - Root takes the second box's address, announces it, and then its own subnet's first and last address (where
+    the guest's kernel lets it use them), and opens a connection from each: an IPv4 `--net-allow` address that
+    opens from the box's own address must not open from any of them, and the second box must still reach it
+    afterwards. With no such address the check fails.
+  - Neither box's kernel has this machine's boot id. Root in one box also changes a setting the kernel has one
+    of (`kernel.printk_ratelimit_burst`) and puts it back: the change must take, and the other box must not see
+    it. A driver whose boxes share a kernel must not list `root-vm`.
+  - A box whose root cannot make those changes fails (it is not what `root-vm` says).
 - With `docker`: a container runs from an image imported from the box's `docker-init`, so no network or registry is
   needed.
 - `potluck host` runs it in its quick groups.

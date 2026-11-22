@@ -61,7 +61,8 @@ type config struct {
 	HostCPULimit, HostMemoryLimit  int
 	OCIDNS                         []string
 	// Root (root=on) gives the box's user working sudo, Docker (docker=on,
-	// implies Root) rootless Docker (oci_root.go).
+	// implies Root) Docker: rootless on oci, the guest's own on cloudhv
+	// (oci_root.go).
 	Root, Docker bool
 	// vm=incus (incus.go): the incus binary, the certificate remote ("" is
 	// the CLI's default), the project made for zm, the owner's profile (root

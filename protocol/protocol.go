@@ -102,6 +102,10 @@ const (
 	// docker (implies CapRoot).
 	CapRoot   = "root"
 	CapDocker = "docker"
+	// CapRootVM (with CapRoot): the box is a whole VM of its own, so root in
+	// it holds every capability of the guest's kernel, and what fences the
+	// box sits outside the guest.
+	CapRootVM = "root-vm"
 	// CapNetOff honours an acquire's net "off".
 	CapNetOff = "net-off"
 	// CapVolumes mounts acquire's named volumes (SPEC 20 "Boxes", Named volumes).

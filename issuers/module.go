@@ -256,8 +256,10 @@ func (m *Module) live(ctx context.Context, box Box) (bool, error) {
 func (m *Module) Routes(*core.Router) {}
 
 // Start runs the issuers in the background: each one's Start (retried each
-// minute until it succeeds; until then Issue for its kind waits), and Tick
-// and Sweep for those that have started.
+// minute until it succeeds; until then Issue for its kind waits), Tick for
+// those that have started, and the class check and Sweep for every one: one
+// whose Start keeps failing still ends what an earlier run left
+// (Minted.earlier).
 func (m *Module) Start(ctx context.Context) error {
 	m.settleLeftOver(ctx)
 	if len(m.iss) == 0 {
@@ -359,11 +361,11 @@ func (m *Module) run(ctx context.Context) {
 		case <-m.wake:
 		case <-t.C:
 		case <-m.classes:
-			for _, iss := range live {
+			for _, iss := range m.iss {
 				iss.EndUntrusted(ctx)
 			}
 		case <-sweep.C:
-			for _, iss := range live {
+			for _, iss := range m.iss {
 				iss.Sweep(ctx, func(b Box) bool {
 					live, err := m.live(ctx, b)
 					return live || err != nil // only the record's "ended" or "never was" ends a box

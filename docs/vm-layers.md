@@ -41,8 +41,9 @@ What the caller guarantees:
 - `Clone` runs once per VM, before `Boot`. `Boot` is called with `isolated` true unless the owner set
   `network=nat`, the unsafe development setting (`vmhost/supervise.go`, `run`).
 - After `Boot`, the supervisor calls `Exec(vm, ..., "true")` every 250 ms until it succeeds or `boot_timeout_s`
-  (default 90, at most 100) passes (`waitReady` in `vmhost/layer.go`). A VM whose `Exec` never succeeds fails the
-  run with "the guest agent did not answer".
+  (default 90, at most 100) passes (`waitReady` in `vmhost/layer.go`); a try still running then is ended. A VM whose
+  `Exec` never succeeds fails the run with "the guest agent did not answer", or, when a try wrote to its stderr,
+  with "the guest ran no command within the boot timeout" and the start of what the last such try wrote.
 - The guest must have `sh`, and `git` for the checkout (`checkout` in `vmhost/supervise.go`). A checkout runs
   `git fetch` in the guest, or, when the host fetches (`fetch=host`, or a local remote), the host streams a git
   bundle in on the stdin of an `Exec`.

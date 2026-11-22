@@ -3,6 +3,7 @@ package cloudhvguest
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -176,6 +177,55 @@ func TestCommandHookSetsTheCommandUp(t *testing.T) {
 	code, err := Do(serve(t, h), Request{Op: OpExec, Argv: []string{"sh", "-c", "echo $WHO; ls"}}, nil, &out, nil)
 	if err != nil || code != 0 || out.String() != "box\nmarker\n" {
 		t.Fatalf("code %d, err %v, stdout %q", code, err, out.String())
+	}
+}
+
+// An exec says what its binding gives the box: root for its user, Docker
+// started. The guest does each before the command, and a guest that cannot
+// fails the command and says why.
+func TestExecGivesRootAndDockerFirst(t *testing.T) {
+	var did []string
+	var dockerErr error
+	h := Hooks{Command: func(*exec.Cmd) { did = append(did, "command") },
+		Root:   func() error { did = append(did, "root"); return nil },
+		Docker: func() error { did = append(did, "docker"); return dockerErr }}
+	for _, req := range []Request{{Op: OpExec, Argv: []string{"true"}}, {Op: OpExec, Argv: []string{"true"}, Root: true, Docker: true}} {
+		if code, err := Do(serve(t, h), req, nil, nil, nil); err != nil || code != 0 {
+			t.Fatalf("%+v: code %d, err %v", req, code, err)
+		}
+	}
+	if got := strings.Join(did, " "); got != "command root docker command" {
+		t.Errorf("the guest did %q", got)
+	}
+	dockerErr, did = errors.New("no docker.service"), nil
+	var errb bytes.Buffer
+	code, err := Do(serve(t, h), Request{Op: OpExec, Argv: []string{"true"}, Docker: true}, nil, nil, &errb)
+	if err != nil || code != 127 || !strings.Contains(errb.String(), "docker: no docker.service") || strings.Join(did, " ") != "docker" {
+		t.Errorf("Docker could not start: code %d, err %v, stderr %q, the guest did %v", code, err, errb.String(), did)
+	}
+	for _, req := range []Request{{Op: OpExec, Argv: []string{"true"}, Root: true}, {Op: OpExec, Argv: []string{"true"}, Docker: true}} {
+		errb.Reset()
+		code, err = Do(serve(t, Hooks{}), req, nil, nil, &errb)
+		if err != nil || code != 127 || !strings.Contains(errb.String(), "not supported") {
+			t.Errorf("%+v in a guest that cannot: code %d, err %v, stderr %q", req, code, err, errb.String())
+		}
+	}
+	// An agent built before root and docker ran the command and says nothing
+	// of either: the host does not take that for a box with root.
+	for _, req := range []Request{{Op: OpExec, Argv: []string{"true"}, Root: true}, {Op: OpExec, Argv: []string{"true"}, Root: true, Docker: true}} {
+		a, b := net.Pipe()
+		go func() {
+			defer b.Close()
+			if _, _, err := ReadFrame(b); err == nil {
+				_ = WriteFrame(b, FrameExit, []byte(`{"code":0}`))
+			}
+		}()
+		errb.Reset()
+		code, err = Do(a, req, nil, nil, &errb)
+		a.Close()
+		if err != nil || code != 127 || !strings.Contains(errb.String(), "rebuild the image") {
+			t.Errorf("%+v answered by an agent that knows no root: code %d, err %v, stderr %q", req, code, err, errb.String())
+		}
 	}
 }
 

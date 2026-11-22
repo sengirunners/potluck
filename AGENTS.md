@@ -6,7 +6,8 @@ Work only in `sengirunners/potluck-private`: branches, pull requests and merges.
 public copy; push to it only through `scripts/public-sync.sh --push`, and never open or merge a pull request there.
 A public release is one copy of a private main commit, made by `scripts/public-sync.sh` when that commit should
 reach people who install Potluck; read `docs/public-sync.md` (when, how, the scan, outside contributions) before
-running it with `--push`.
+running it with `--push`. A pull request that fixes a security flaw also adds a hold file under `public-hold/`
+(`docs/public-sync.md`, "Holds"): nothing is published until the fix is on the machines we run for other people.
 
 ## Map
 

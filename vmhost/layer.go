@@ -1,6 +1,7 @@
 package vmhost
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -74,7 +75,9 @@ var layers = map[string]func(c config) vmLayer{
 	"incus": func(c config) vmLayer {
 		return incusCLI{c.IncusBin, c.IncusRemote, c.IncusProject, c.IncusProfile, c.IncusConf}
 	},
-	"cloudhv": func(c config) vmLayer { return cloudhvCLI{c.CloudHV, c.StateDir} },
+	"cloudhv": func(c config) vmLayer {
+		return cloudhvCLI{c: c.CloudHV, state: c.StateDir, root: c.Root, docker: c.Docker}
+	},
 }
 
 func layerNames() string {
@@ -88,18 +91,46 @@ func layerNames() string {
 
 func newLayer(c config) vmLayer { return layers[c.VM](c) }
 
-// waitReady waits until the guest runs a command, by deadline.
+// readySaid is how much of a boot try's words waitReady keeps.
+const readySaid = 400
+
+// waitReady waits until the guest runs a command, by deadline. Its error
+// carries what the last try that said anything said (a guest that answers
+// and cannot give what its binding says, such as root, says so each time),
+// and says so when a later try was still running at the deadline, where it
+// is ended. What a try says is kept only up to readySaid bytes.
 func waitReady(l vmLayer, vm string, deadline time.Time, exited <-chan struct{}) error {
+	said, running := "", false
 	for time.Now().Before(deadline) {
 		select {
 		case <-exited:
 			return errBootExited // the supervisor says why (diagnoseBoot)
 		default:
 		}
-		if l.Exec(vm, nil, io.Discard, io.Discard, "true").Run() == nil {
-			return nil
+		errb := &capped{max: readySaid}
+		cmd := l.Exec(vm, nil, io.Discard, errb, "true")
+		cmd.WaitDelay = time.Second // a try that ended is not waited on for what still holds its output
+		running = false
+		if cmd.Start() == nil {
+			late := time.AfterFunc(time.Until(deadline), func() { _ = cmd.Process.Kill() })
+			err := cmd.Wait()
+			running = !late.Stop()
+			if err == nil || errors.Is(err, exec.ErrWaitDelay) {
+				return nil
+			}
+		}
+		if s := strings.TrimSpace(errb.buf.String()); s != "" {
+			said, running = s, false
 		}
 		time.Sleep(250 * time.Millisecond)
+	}
+	switch {
+	case said != "" && running:
+		return fmt.Errorf("the guest ran no command within the boot timeout: %s (a later try was still running when the time passed)", said)
+	case said != "":
+		return fmt.Errorf("the guest ran no command within the boot timeout: %s", said)
+	case running:
+		return fmt.Errorf("the guest ran no command within the boot timeout: its last try was still running when the time passed")
 	}
 	return fmt.Errorf("the guest agent did not answer within the boot timeout")
 }

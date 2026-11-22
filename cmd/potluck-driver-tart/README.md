@@ -245,6 +245,9 @@ conformance DNS check fails before anything binds):
 | oci, Kata, `docker=on` | yes, expected (a guest kernel) | rootless bridge mode; runtime acceptance pending (`/dev/net/tun`, user namespaces, netfilter); see `docs/docker-services.md` | as gVisor, on the Kata runtime |
 | tart, macOS | the image's: Cirrus Labs images give `admin` passwordless sudo (measured 2026-11-11 on `macos-tahoe-xcode`); a binding must say `root=on` to lend it | no Docker in a macOS guest | full VM; `root=on` declares it, `docker` refused |
 | tart, Linux guest | the image's | the image's (a full VM kernel: rootful docker works if installed) | full VM; `root`/`docker` keys refused, the image decides |
+| cloudhv, default box | no | no | the image has no sudo rule and starts no Docker |
+| cloudhv, `root=on` | yes, the guest's real root | no | `potluck-guest` writes the sudo rule; the fence is on the host, and capability `root-vm` has conformance prove it from root's shell ([docs/cloudhv.md](../../docs/cloudhv.md)) |
+| cloudhv, `docker=on` | yes, the same | yes, rootful, with bridge networking | as `root=on`, and `potluck-guest` starts the image's Docker |
 
 On tart, `root=on` is a declaration: the driver already needs the image's sudo to close SSH and
 Screen Sharing before a VM serves, so it cannot take sudo away; without `root=on` such a box fails conformance
