@@ -22,6 +22,21 @@
 | `ghapp/` | GitHub App client for a runner broker |
 | `install.sh`, `scripts/release*/`, `internal/upgrade/` | installs and upgrades: the install script, release build, signing and keygen, and `potluck upgrade`'s fetch and verify |
 | `site/` | the landing page |
+| `agentrunners/` | job definitions and adapters for vendor coding-agent runners |
+| `boxport/` | host-side TCP forwarding for box port leases |
+| `depscli/` | CLI flags and project file discovery for dependency layers |
+| `grants/` | policy for who may put specific secret types into boxes |
+| `hostswap/` | host swap checks and reporting for box placement |
+| `issuers/` | secret issuers used to authorize credentials for jobs |
+| `jobrule/` | rules for GitHub Actions jobs that may hold secrets |
+| `macos/` | macOS app source and build resources |
+| `mcp/` | MCP tools for working with boxes through the daemon |
+| `menubar/` | Go bridge between the macOS menu bar and the daemon |
+| `placement/` | filters and ranks candidate box bindings |
+| `portstream/` | adapts authorized port operations to net.Conn |
+| `internal/forkguard/` | selects safe runner labels for fork pull requests |
+| `internal/workflowlint/` | checks workflow configuration for fork-safe CI |
+| `internal/tarsafe/` | validates archive paths and rejects sparse entries |
 
 One Go module, two layers:
 
