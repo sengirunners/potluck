@@ -1,56 +1,45 @@
 package jobrule
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestCheck(t *testing.T) {
-	ok := Job{Repo: "acme/app", HeadRepo: "acme/app", RepoID: 9, HeadRepoID: 9, Workflow: ".github/workflows/lander.yml", Ref: "refs/heads/main",
-		DefaultBranch: "main", Event: "push", RunID: 9}
-	if why := Check(ok); why != "" {
-		t.Fatalf("a main push: %s", why)
+func TestAllowedEvents(t *testing.T) {
+	for _, event := range []string{"push", "schedule", "workflow_dispatch", "repository_dispatch"} {
+		if !Allowed(event) {
+			t.Errorf("expected %q to be allowed", event)
+		}
 	}
-	for name, mod := range map[string]func(*Job){
-		"a fork":                     func(j *Job) { j.HeadRepo = "stranger/app" },
-		"no head repository":         func(j *Job) { j.HeadRepo = "" },
-		"a fork under the same name": func(j *Job) { j.HeadRepoID = 10 },
-		"no repository id":           func(j *Job) { j.RepoID, j.HeadRepoID = 0, 0 },
-		"no head repository id":      func(j *Job) { j.HeadRepoID = 0 },
-		"no repository":              func(j *Job) { j.Repo, j.HeadRepo = "", "" },
-		"no run id":                  func(j *Job) { j.RunID = 0 },
-		"pull_request":               func(j *Job) { j.Event = "pull_request" },
-		"pull_request_target":        func(j *Job) { j.Event = "pull_request_target" },
-		"workflow_run":               func(j *Job) { j.Event = "workflow_run" },
-		"merge_group":                func(j *Job) { j.Event = "merge_group" },
-		"release":                    func(j *Job) { j.Event = "release" },
-		"another branch":             func(j *Job) { j.Ref = "refs/heads/dev" },
-		"a tag named main":           func(j *Job) { j.Ref = "refs/tags/main" },
-		"no default branch":          func(j *Job) { j.DefaultBranch = "" },
-		"a workflow outside":         func(j *Job) { j.Workflow = "ci.yml" },
-		"a workflow escaping":        func(j *Job) { j.Workflow = ".github/workflows/../x.yml" },
-	} {
-		j := ok
-		mod(&j)
-		if Check(j) == "" {
-			t.Errorf("%s: passed", name)
+	for _, event := range []string{"pull_request", "pull_request_target", "workflow_run", "merge_group", "release", "issues", ""} {
+		if Allowed(event) {
+			t.Errorf("expected %q to be refused", event)
 		}
 	}
 }
 
-func TestRuleEvents(t *testing.T) {
-	evs, err := RuleEvents(nil)
-	if err != nil || len(evs) != 2 {
-		t.Fatalf("default: %v %v", evs, err)
+func TestValidRepo(t *testing.T) {
+	for _, repo := range []string{"acme/app", "a.b/c_d-e"} {
+		if !ValidRepo(repo) {
+			t.Errorf("expected %q to be valid", repo)
+		}
 	}
-	j := Job{Event: "workflow_dispatch", Workflow: ".github/workflows/a.yml"}
-	if Serves(evs, nil, j) {
-		t.Error("the default serves workflow_dispatch")
+	for _, repo := range []string{"acme", "acme/", "/app", "a/b/c", "acme/ap p", "a..b/c", "", strings.Repeat("a", 101) + "/app"} {
+		if ValidRepo(repo) {
+			t.Errorf("expected %q to be invalid", repo)
+		}
 	}
-	evs, _ = RuleEvents([]string{"workflow_dispatch"})
-	if !Serves(evs, nil, j) || Serves(evs, []string{".github/workflows/b.yml"}, j) {
-		t.Error("an opted-in dispatch, or the workflow list")
+}
+
+func TestValidWorkflow(t *testing.T) {
+	for _, path := range []string{".github/workflows/ci.yml", ".github/workflows/ci.yaml"} {
+		if !ValidWorkflow(path) {
+			t.Errorf("expected %q to be valid", path)
+		}
 	}
-	for _, bad := range []string{"merge_group", "release", "pull_request", "workflow_run", ""} {
-		if _, err := RuleEvents([]string{bad}); err == nil {
-			t.Errorf("event %q accepted", bad)
+	for _, path := range []string{"ci.yml", ".github/workflows/sub/ci.yml", ".github/workflows/../x.yml", ".github/workflows/ci.txt", ".github/workflows/.yml"} {
+		if ValidWorkflow(path) {
+			t.Errorf("expected %q to be invalid", path)
 		}
 	}
 }
