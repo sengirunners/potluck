@@ -75,18 +75,26 @@ type cloudhvConfig struct {
 	Net string
 	// NapIdleS naps a VM that has run no command for this long (0: never).
 	NapIdleS int
-	// Console keeps the guest's serial console in the VM's directory. Off by
-	// default: a guest can fill the host's disk through it.
+	// NapSlots is how many VMs the binding holds beyond its slots, napping
+	// (cloudhv_awake.go). 0: a napping VM keeps its slot, and Awake is 0.
+	// Above 0, Awake is the binding's slots: how many VMs are awake at once.
+	NapSlots, Awake int
+	// Console keeps the end of what the guest writes to its serial console,
+	// in the VM's directory (cloudhv_log.go).
 	Console bool
+	// Limits are the rates each VM is held to (cloudhv_limits.go).
+	Limits cloudhvLimits
 }
 
 const (
 	cloudhvNetDefault = "10.213.0.0/16"
 	// flagCloudHVVM re-executes the driver as one VM's monitor,
-	// flagCloudHVExec as one command's client, flagCloudHVNet (as root) as
-	// the network helper.
+	// flagCloudHVExec as one command's client, flagCloudHVTTY as the client
+	// of one command on a terminal (cloudhv_tty.go), flagCloudHVNet (as
+	// root) as the network helper.
 	flagCloudHVVM   = "--cloudhv-vm"
 	flagCloudHVExec = "--cloudhv-exec"
+	flagCloudHVTTY  = "--cloudhv-tty"
 	flagCloudHVNet  = "--cloudhv-net"
 	// A VM whose binding names no cpu or memory (MiB) gets these.
 	cloudhvCPU, cloudhvMemory = 2, 4096
@@ -143,9 +151,19 @@ func (cloudhvCLI) ParseConfig(m map[string]string, c *config) (bad []string) {
 		}
 		return n
 	}
+	for _, k := range h.Limits.keys() {
+		*k.n = num(k.key, 0, 0, k.max)
+	}
 	h.NapIdleS = num("ch_nap_idle_s", 0, 0, 30*24*3600)
-	if h.NapIdleS > 0 && m["runner_dir"] != "" {
-		bad = append(bad, "ch_nap_idle_s with runner_dir: a nap saves the box's memory to the host's disk, and a runner's registration is a credential held in it")
+	h.NapSlots = num("ch_nap_slots", 0, 0, 100000)
+	if h.NapSlots > 0 && h.NapIdleS == 0 {
+		bad = append(bad, "ch_nap_slots needs ch_nap_idle_s: its slots are for boxes that nap")
+	}
+	if h.NapSlots > 0 && c.Warm > 0 {
+		bad = append(bad, "ch_nap_slots with warm: a warm box that naps holds no slot to be handed out in")
+	}
+	if h.NapSlots > 0 {
+		h.Awake = c.LinuxSlots
 	}
 	c.CloudHV = h
 	return bad
@@ -155,8 +173,16 @@ func (cloudhvCLI) ParseConfig(m map[string]string, c *config) (bad []string) {
 func (h cloudhvConfig) raw(m map[string]string) {
 	m["ch"], m["ch_firmware"], m["ch_qemu_img"], m["ch_images"], m["ch_dir"], m["ch_net"] = h.Bin, h.Firmware, h.QemuImg, h.Images, h.Dir, h.Net
 	m["ch_nap_idle_s"] = strconv.Itoa(h.NapIdleS)
+	if h.NapSlots > 0 { // a supervisor's layer gives a VM the binding's slots too
+		m["ch_nap_slots"], m["linux_slots"] = strconv.Itoa(h.NapSlots), strconv.Itoa(h.Awake)
+	}
 	if h.Console {
 		m["ch_console"] = "on"
+	}
+	for _, k := range h.Limits.keys() {
+		if *k.n > 0 {
+			m[k.key] = strconv.Itoa(*k.n)
+		}
 	}
 }
 
@@ -198,7 +224,15 @@ type cloudhvVM struct {
 	Bin      string `json:"bin"`
 	Firmware string `json:"firmware"`
 	NapIdleS int    `json:"nap_idle_s,omitempty"`
+	// Awake is the binding's slots when it has nap slots: the VM gives its
+	// slot up while it naps, and wakes only while fewer guests than this hold
+	// one in StateDir, the binding's state directory (cloudhv_awake.go).
+	// 0: it keeps its slot.
+	Awake    int    `json:"awake,omitempty"`
+	StateDir string `json:"state_dir,omitempty"`
 	Console  bool   `json:"console,omitempty"`
+	// Limits are the binding's at the VM's last boot (cloudhv_limits.go).
+	Limits cloudhvLimits `json:"limits,omitzero"`
 	// Root: the guest agent gives the box's user sudo; Docker: it starts the
 	// image's Docker. Both are the binding's when the VM was made, and a
 	// kept VM keeps them (keptRootDiffers).
@@ -244,6 +278,15 @@ func (v cloudhvVM) imageSame() error {
 func (v cloudhvVM) CID() uint32 { return binary.BigEndian.Uint32(net.ParseIP(v.GuestIP).To4()) }
 
 func (l cloudhvCLI) dir(vm string) string { return filepath.Join(l.c.Dir, vm) }
+
+// stateDir is the binding's state directory as a VM's monitor, which runs in
+// the VM's own directory, finds it.
+func (l cloudhvCLI) stateDir() string {
+	if abs, err := filepath.Abs(l.state); err == nil {
+		return abs
+	}
+	return l.state
+}
 
 func cloudhvLoad(dir string) (cloudhvVM, error) {
 	var v cloudhvVM
@@ -355,7 +398,7 @@ func (l cloudhvCLI) clone(image, vm string, cpu, memory int, kept bool) error {
 		return err
 	}
 	v := cloudhvVM{Name: vm, Image: img, ImageID: imgID, CPU: cpu, MemoryMB: memory, Net: l.c.Net, Kept: kept,
-		Bin: l.c.Bin, Firmware: l.c.Firmware, NapIdleS: l.c.NapIdleS, Console: l.c.Console, Root: l.root, Docker: l.docker}
+		Bin: l.c.Bin, Firmware: l.c.Firmware, NapIdleS: l.c.NapIdleS, Awake: l.c.Awake, StateDir: l.stateDir(), Console: l.c.Console, Root: l.root, Docker: l.docker}
 	// Links are handed out in turn, not lowest first, so an address a VM
 	// just gave up is the last to be used again.
 	nextFile := filepath.Join(l.c.Dir, ".next")
@@ -443,10 +486,10 @@ func (l cloudhvCLI) boot(vm, mode string, log io.Writer) (*exec.Cmd, io.WriteClo
 		held.Close()
 		return nil, nil, err
 	}
-	// A VM naps as its binding says now, not as it said when the VM was
-	// made: secrets are served by the binding's setting (secrets.go).
-	if v.NapIdleS != l.c.NapIdleS {
-		v.NapIdleS = l.c.NapIdleS
+	// A VM naps, and is held to the rates, as its binding says now, not
+	// as it said when the VM was made.
+	if v.NapIdleS != l.c.NapIdleS || v.Awake != l.c.Awake || v.StateDir != l.stateDir() || v.Limits != l.c.Limits {
+		v.NapIdleS, v.Awake, v.StateDir, v.Limits = l.c.NapIdleS, l.c.Awake, l.stateDir(), l.c.Limits
 		if err := cloudhvStore(dir, v); err != nil {
 			held.Close()
 			return nil, nil, err
@@ -472,12 +515,19 @@ func (l cloudhvCLI) boot(vm, mode string, log io.Writer) (*exec.Cmd, io.WriteClo
 }
 
 func (l cloudhvCLI) Exec(vm string, stdin io.Reader, stdout, stderr io.Writer, argv ...string) *exec.Cmd {
+	cmd := l.client(flagCloudHVExec, vm, argv)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	return cmd
+}
+
+// client is the driver re-executed as one guest command's client.
+func (l cloudhvCLI) client(flag, vm string, argv []string) *exec.Cmd {
 	self, err := os.Executable()
 	if err != nil {
 		self = "potluck-driver-tart" // Start then fails with the reason
 	}
-	cmd := exec.Command(self, append([]string{flagCloudHVExec, l.dir(vm)}, argv...)...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
+	cmd := exec.Command(self, append([]string{flag, l.dir(vm)}, argv...)...)
+	cmd.Env = append(os.Environ(), cloudhvRefusedEnv+"=") // only WakeRefusal names a mark (cloudhv_awake.go), never the driver's own environment
 	return cmd
 }
 
@@ -559,6 +609,7 @@ func (l cloudhvCLI) Destroy(vm string, runPID int) {
 	// was waiting for it finds no VM and makes no tap.
 	held, _ := cloudhvNetLock(dir, cloudhvNetWait)
 	ours := strings.HasPrefix(dir, l.c.Dir+string(filepath.Separator)) && vm != ""
+	_ = cloudhvMemClear(dir) // a monitor that was killed in a nap or a wake can have left its snapshot there
 	if ours {
 		// The record first: a boot that opens the lock file from here on
 		// finds no VM, whatever else of the directory is still there.
@@ -604,12 +655,13 @@ func (cloudhvCLI) KeepsRoot() bool { return true }
 // cloudhvClearRuntime removes what belongs to one boot of a VM and leaves its
 // disk and record.
 func cloudhvClearRuntime(dir string) {
-	for _, n := range []string{"snap", "snap.tmp", "api.sock", "vsock.sock", "ctl.sock", "state.json", "console.log"} {
+	_ = cloudhvMemClear(dir)
+	for _, n := range append([]string{"snap", "snap.tmp", "api.sock", "vsock.sock", "ctl.sock", "state.json"}, cloudhvLogFiles(cloudhvConsoleLog)...) {
 		_ = os.RemoveAll(filepath.Join(dir, n))
 	}
 	if ents, err := os.ReadDir(dir); err == nil {
-		for _, e := range ents { // the hypervisor's per-port vsock sockets
-			if strings.HasPrefix(e.Name(), "vsock.sock_") {
+		for _, e := range ents { // the hypervisor's per-port vsock sockets, and refused wakes' marks (cloudhv_awake.go)
+			if strings.HasPrefix(e.Name(), "vsock.sock_") || strings.HasPrefix(e.Name(), cloudhvRefusedFile) {
 				_ = os.Remove(filepath.Join(dir, e.Name()))
 			}
 		}

@@ -314,11 +314,15 @@ type Door struct {
 // Runners configures the GitHub runner broker (SPEC 20 "GitHub runner
 // broker"). Secrets are references (kit/secrets), never values.
 type Runners struct {
-	GitHub    RunnersGitHub `json:"github,omitzero"`
-	Pool      RunnersPool   `json:"pool,omitzero"`
-	Label     string        `json:"label,omitempty"`      // default: the pool project's slug
-	PublicURL string        `json:"public_url,omitempty"` // https, forwarding the broker's public routes unsigned (not the zm tunnel)
-	Listen    string        `json:"listen,omitempty"`     // loopback addr serving only those routes, for public_url's proxy
+	GitHub RunnersGitHub `json:"github,omitzero"`
+	Pool   RunnersPool   `json:"pool,omitzero"`
+	Label  string        `json:"label,omitempty"` // default: the pool project's slug
+	// Labels maps an exact runs-on label (matched without regard to case) to
+	// the box it asks for. A job naming a mapped label is the pool's without
+	// naming Label.
+	Labels    map[string]RunnersLabel `json:"labels,omitempty"`
+	PublicURL string                  `json:"public_url,omitempty"` // https, forwarding the broker's public routes unsigned (not the zm tunnel)
+	Listen    string                  `json:"listen,omitempty"`     // loopback addr serving only those routes, for public_url's proxy
 	// AllowForkPRs serves a private repository's runs from forks and of every
 	// event. A public repository's never are. Which repositories are served
 	// at all is the broker's own record (potluck runners allow), not config.
@@ -445,6 +449,15 @@ type RunnersPool struct {
 	Project     string            `json:"project,omitempty"`
 	Sizes       map[string]string `json:"sizes,omitempty"` // optional: size -> the one box binding for it (else placed on any fitting box)
 	DefaultSize string            `json:"default_size,omitempty"`
+}
+
+// RunnersLabel is the box one mapped runs-on label asks for: a size (a
+// pool.sizes alias or a box size), and optionally an OS (linux, macos,
+// windows) and a published named image (such as xcode).
+type RunnersLabel struct {
+	Size  string `json:"size"`
+	OS    string `json:"os,omitempty"`
+	Image string `json:"image,omitempty"`
 }
 
 // Load resolves Home (HomeDir), reads config.json if present

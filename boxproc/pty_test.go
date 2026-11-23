@@ -26,7 +26,7 @@ func TestPTYInputResizeInterrupt(t *testing.T) {
 	go func() {
 		done <- Hold(d, func(stdout, _ io.Writer) (func() int, error) {
 			cmd := exec.Command("sh", "-c", `test -t 0 && test -t 1 || exit 9; stty size; read x; echo "got:$x"; stty size; read y; echo never`)
-			wait, err := StartPTY(d, cmd, PTY{Rows: 24, Cols: 80}, nil, stdout, nil)
+			wait, err := StartPTY(d, cmd, PTY{Rows: 24, Cols: 80}, false, nil, stdout, nil)
 			if err != nil {
 				return nil, err
 			}

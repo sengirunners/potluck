@@ -269,6 +269,18 @@ address, and `POTLUCK_TOKEN` supplies a restricted token. It does not inherit an
 identity variables. Tool discovery works with no daemon; tool calls report the missing daemon.
 All standard output is MCP protocol traffic.
 
+### Claude Code plugin and Agent Skill
+
+[`skills/potluck/SKILL.md`](skills/potluck/SKILL.md) teaches a coding agent to set up Potluck and use its sandboxes.
+In Claude Code, the plugin installs that skill and the MCP server together:
+
+```text
+/plugin marketplace add sengirunners/potluck
+/plugin install potluck@potluck
+```
+
+Other agents that read Agent Skills (Codex, Gemini CLI, Cursor, Copilot) can use the same `SKILL.md`.
+
 ## What works today
 
 | Works today | Not yet |

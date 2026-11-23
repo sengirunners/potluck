@@ -49,6 +49,42 @@ var cloudhvTapName = regexp.MustCompile(`^pch[0-9a-f]{6}$`)
 // address's low 24 bits, so the name and the address cannot be mixed.
 func cloudhvTapOf(guest uint32) string { return fmt.Sprintf("pch%06x", guest&0xffffff) }
 
+// cloudhvTapMAC is the hardware address of the host's end of a link, made
+// from the tap's name: the helper gives it to the tap, and the hypervisor is
+// told it (host_mac). A hypervisor told none takes the address the tap has
+// when the VM starts, and sets it again at every restore if the tap's has
+// changed, which it is not allowed to do. On a host with udev a new tap's
+// address is rewritten a moment after the tap is made, so a VM started in
+// that moment could never be woken. It is locally administered, and never
+// the guest's (52:54:00).
+func cloudhvTapMAC(tap string) string {
+	if !cloudhvTapName.MatchString(tap) {
+		return ""
+	}
+	return "02:70:63:" + tap[3:5] + ":" + tap[5:7] + ":" + tap[7:9]
+}
+
+// cloudhvTapAddr reads the tap's hardware address. Tests replace it.
+var cloudhvTapAddr = func(tap string) (string, error) {
+	b, err := os.ReadFile("/sys/class/net/" + tap + "/address")
+	return strings.TrimSpace(string(b)), err
+}
+
+// cloudhvTapOwn says why the tap does not have its own address, or nil.
+func cloudhvTapOwn(tap string) error {
+	want := cloudhvTapMAC(tap)
+	got, err := cloudhvTapAddr(tap)
+	switch {
+	case want == "":
+		return fmt.Errorf("%q is no tap of this layer", tap)
+	case err != nil:
+		return fmt.Errorf("the hardware address of the tap %s cannot be read: %v", tap, err)
+	case got != want:
+		return fmt.Errorf("the tap %s has the hardware address %s, not its own %s: something on this host changed it, and the hypervisor may not set it back", tap, got, want)
+	}
+	return nil
+}
+
 // cloudhvTapLetGo is how long a down waits for a tap to be let go of.
 const cloudhvTapLetGo = 10 * time.Second
 
@@ -275,6 +311,21 @@ func cloudhvNetHelper(args []string) int {
 		if err := run("ip", "tuntap", "add", "dev", tap, "mode", "tap", "user", strconv.Itoa(uid)); err != nil {
 			return fail("%v", err)
 		}
+		// udev gives a new device an address of its choosing a moment after
+		// the device is made, and leaves alone one a program has set. It is
+		// given its turn first, so the address set below is not set under
+		// it; the address is read back at the end either way.
+		if _, ok := cloudhvTool("udevadm"); ok {
+			settle := toolCmd("udevadm", "settle", "--timeout=5")
+			if settle.Start() == nil {
+				kill := time.AfterFunc(12*time.Second, func() { _ = settle.Process.Kill() })
+				_ = settle.Wait()
+				kill.Stop()
+			}
+		}
+	}
+	if err := run("ip", "link", "set", "dev", tap, "address", cloudhvTapMAC(tap)); err != nil {
+		return fail("%v", err)
 	}
 	// A link's last VM may have left connections in the kernel's table,
 	// which would pass their far end's packets on to this VM.
@@ -322,6 +373,9 @@ func cloudhvNetHelper(args []string) int {
 				}
 			}
 		}
+	}
+	if err := cloudhvTapOwn(tap); err != nil { // read last: after everything else here had its time
+		return fail("%v", err)
 	}
 	return 0
 }

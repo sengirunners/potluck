@@ -8,7 +8,8 @@
 # with npm and corepack, Go 1.27 (GOTOOLCHAIN left at auto, so a go.mod asking for a newer Go fetches it),
 # Python 3 with pip and venv, ripgrep, jq, build-essential, and the Claude Code and Codex CLIs. Every download is pinned by version and, for tarballs, by SHA-256; never a latest. Bump a version and its
 # sums together (Node: https://nodejs.org/dist/v<NODE_VERSION>/SHASUMS256.txt; gh: the release's checksums.txt;
-# Go: https://go.dev/dl/?mode=json&include=all).
+# Go: https://go.dev/dl/?mode=json&include=all). scripts/cloudhv-image.sh reads the versions, the amd64 sums and the
+# two lists from the ARG lines below for the cloud-hypervisor layer's agent image, so that image moves with this one.
 # The workflow always passes BASE; this default is the potluck-box-linux build pinned in imagepins/images.pin.
 ARG BASE=ghcr.io/sengirunners/potluck-box-linux@sha256:b47c4d9f2e92103e6a64ab4c51642a0328ab599c4580d5c560fb93f0c306c6f0
 FROM ${BASE}
@@ -24,13 +25,15 @@ ARG GO_SHA256_AMD64=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab2
 ARG GO_SHA256_ARM64=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
 ARG CLAUDE_CODE_VERSION=2.1.319
 ARG CODEX_VERSION=0.167.0
+# The Ubuntu packages the image adds, and the tools it adds, which its build checks for.
+ARG AGENT_PACKAGES="ca-certificates curl xz-utils build-essential python3 python3-pip python3-venv ripgrep jq"
+ARG AGENT_TOOLS="gh node npm npx corepack go gofmt python3 pip3 rg jq make gcc g++ claude codex"
 USER root
 # Go lives in /usr/local/go; on PATH for every user and for the checks below.
 ENV PATH=/usr/local/go/bin:$PATH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl xz-utils build-essential \
-       python3 python3-pip python3-venv ripgrep jq \
+  && apt-get install -y --no-install-recommends $AGENT_PACKAGES \
   && rm -rf /var/lib/apt/lists/*
 RUN case "$TARGETARCH" in \
       amd64) node_arch=x64 node_sum=$NODE_SHA256_AMD64 gh_sum=$GH_SHA256_AMD64 go_sum=$GO_SHA256_AMD64 ;; \
@@ -54,8 +57,7 @@ RUN case "$TARGETARCH" in \
   && npm cache clean --force \
   && rm -rf /root/.npm /tmp/*
 # What a box needs (as the default's build checks) and what an agent runs: fail the build without any.
-RUN for t in sh bash timeout awk sleep cat kill ps perl git nc ip ping \
-             gh node npm npx corepack go gofmt python3 pip3 rg jq make gcc g++ claude codex; do \
+RUN for t in sh bash timeout awk sleep cat kill ps perl git nc ip ping $AGENT_TOOLS; do \
       command -v "$t" >/dev/null || { echo "agent image lacks $t" >&2; exit 1; }; \
     done \
   && python3 -m venv --help >/dev/null \
@@ -64,4 +66,7 @@ USER runner
 WORKDIR /home/runner
 # The CLIs' updaters would rewrite the pinned install in a box nobody keeps: off.
 ENV DISABLE_AUTOUPDATER=1
-RUN sudo -n true && claude --version && codex --version && node --version && go version && gh --version && python3 --version
+# Tried in a home that is then removed: what the programs write at a first run (gh's device id, Go's counters) is
+# not for every box of the image to share.
+RUN sudo -n true && export HOME=$(mktemp -d) && claude --version && codex --version && node --version && go version \
+  && gh --version && python3 --version && rm -rf "$HOME"

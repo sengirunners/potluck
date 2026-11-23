@@ -282,6 +282,7 @@ func (s *Service) conf() config.Runners {
 	s.cfgMu.RLock()
 	c := s.d.Config.File.Runners
 	c.Pool.Sizes = maps.Clone(c.Pool.Sizes)
+	c.Labels = maps.Clone(c.Labels)
 	c.Accounts = slices.Clone(c.Accounts)
 	s.cfgMu.RUnlock()
 	if c.Label == "" {

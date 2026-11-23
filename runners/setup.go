@@ -67,20 +67,23 @@ type SetupRequest struct {
 // POST's answer with the next step: Next is "create_app" (open URL to make
 // the App) or "install" (open URL to install it and link).
 type Setup struct {
-	Pool        string            `json:"pool,omitempty"`
-	PublicURL   string            `json:"public_url,omitempty"`
-	Listen      string            `json:"listen,omitempty"`
-	Listening   string            `json:"listening,omitempty"` // the address served now ("" none)
-	Label       string            `json:"label"`
-	JobTTLS     int               `json:"job_ttl_s"` // as a job gets it (the default when unset); with Label, what potluck runners set changes
-	Sizes       map[string]string `json:"sizes,omitempty"`
-	DefaultSize string            `json:"default_size,omitempty"`
-	App         *SetupApp         `json:"app,omitempty"`
-	SetupURL    string            `json:"setup_url,omitempty"` // the App's Setup URL on GitHub (an App made before it existed needs it set)
-	Next        string            `json:"next,omitempty"`
-	URL         string            `json:"url,omitempty"`
-	ExpiresAt   string            `json:"expires_at,omitempty"`
-	Check       *Checking         `json:"check,omitempty"` // how jobs arrive, and the checker's last round per installation (once there is an App)
+	Pool      string `json:"pool,omitempty"`
+	PublicURL string `json:"public_url,omitempty"`
+	Listen    string `json:"listen,omitempty"`
+	Listening string `json:"listening,omitempty"` // the address served now ("" none)
+	Label     string `json:"label"`
+	// Labels is the pool's label map (config runners.labels): an exact
+	// runs-on label to the box it asks for.
+	Labels      map[string]config.RunnersLabel `json:"labels,omitempty"`
+	JobTTLS     int                            `json:"job_ttl_s"` // as a job gets it (the default when unset); with Label, what potluck runners set changes
+	Sizes       map[string]string              `json:"sizes,omitempty"`
+	DefaultSize string                         `json:"default_size,omitempty"`
+	App         *SetupApp                      `json:"app,omitempty"`
+	SetupURL    string                         `json:"setup_url,omitempty"` // the App's Setup URL on GitHub (an App made before it existed needs it set)
+	Next        string                         `json:"next,omitempty"`
+	URL         string                         `json:"url,omitempty"`
+	ExpiresAt   string                         `json:"expires_at,omitempty"`
+	Check       *Checking                      `json:"check,omitempty"` // how jobs arrive, and the checker's last round per installation (once there is an App)
 	// Notices are things the pool's owner should know about config.json, in
 	// plain words (a key that no longer does anything).
 	Notices []string `json:"notices,omitempty"`
@@ -250,8 +253,8 @@ func (s *Service) setupStatus(r *http.Request) (any, error) {
 // status describes the setup. Callers hold s.mu.
 func (s *Service) status() Setup {
 	c := s.conf()
-	out := Setup{Pool: c.Pool.Project, PublicURL: c.PublicURL, Listen: c.Listen, Label: c.Label, Sizes: c.Pool.Sizes, DefaultSize: c.Pool.DefaultSize,
-		JobTTLS: s.jobTTL(), Notices: s.notices()}
+	out := Setup{Pool: c.Pool.Project, PublicURL: c.PublicURL, Listen: c.Listen, Label: c.Label, Labels: c.Labels, Sizes: c.Pool.Sizes,
+		DefaultSize: c.Pool.DefaultSize, JobTTLS: s.jobTTL(), Notices: s.notices()}
 	if s.public != nil {
 		out.Listening = s.public.addr
 	}

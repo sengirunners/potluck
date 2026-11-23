@@ -390,6 +390,38 @@ func (s *Service) SettleTry(ctx context.Context, delivery string, attempts, fail
 // its attempts 1..n (runners_bounce_reruns).
 func (s *Service) SeedBounceReruns(ctx context.Context, repo string, run int64, n int) {
 	for a := 1; a <= n; a++ {
-		_, _ = s.db().ExecContext(ctx, `INSERT OR IGNORE INTO runners_bounce_reruns (repo, run, attempt, updated) VALUES (?, ?, ?, ?)`, repo, run, a, s.now().Unix())
+		s.SeedBounceRerun(ctx, repo, run, a, true)
 	}
+}
+
+// SeedBounceRerun records that the broker asked GitHub to re-run attempt of
+// run of repo for bounces alone; asked, that GitHub took it.
+func (s *Service) SeedBounceRerun(ctx context.Context, repo string, run int64, attempt int, asked bool) {
+	_, _ = s.db().ExecContext(ctx, `INSERT OR REPLACE INTO runners_bounce_reruns (repo, run, attempt, updated, asked) VALUES (?, ?, ?, ?, ?)`,
+		repo, run, attempt, s.now().Unix(), asked)
+}
+
+// BounceReruns is run of repo's bounce re-run records: attempt -> asked.
+func (s *Service) BounceReruns(ctx context.Context, repo string, run int64) map[int]bool {
+	out := map[int]bool{}
+	rows, err := s.db().QueryContext(ctx, `SELECT attempt, asked FROM runners_bounce_reruns WHERE repo = ? AND run = ?`, repo, run)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a int
+		var asked bool
+		if rows.Scan(&a, &asked) == nil {
+			out[a] = asked
+		}
+	}
+	return out
+}
+
+// LostWhy is job's runners_lost record: why, and whether it is a bounce
+// ("" when it has none).
+func (s *Service) LostWhy(ctx context.Context, job int64) (why string, bounced bool) {
+	_ = s.db().QueryRowContext(ctx, `SELECT why, bounced FROM runners_lost WHERE job = ?`, job).Scan(&why, &bounced)
+	return why, bounced
 }

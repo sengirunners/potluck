@@ -1,0 +1,62 @@
+{
+  "manifest_version": "0.3",
+  "name": "potluck",
+  "display_name": "Potluck",
+  "version": "0.1.0",
+  "description": "Throwaway VMs and sandboxes for coding agents on Macs and Linux boxes you own.",
+  "long_description": "Potluck pools a team's idle Macs and Linux boxes. Its MCP server gives an agent sandbox tools: create a fresh VM or sandbox, run commands, start background processes, read and write files, extend, stop, restart and delete it. This bundle starts the Potluck you installed (`potluck mcp`); install Potluck and make a pool first: https://potluck.sh",
+  "author": {
+    "name": "Sengi, Inc.",
+    "url": "https://sengi.run"
+  },
+  "homepage": "https://potluck.sh",
+  "documentation": "https://github.com/sengirunners/potluck#mcp-for-agents",
+  "support": "https://github.com/sengirunners/potluck/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sengirunners/potluck"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "sandbox",
+    "vm",
+    "coding-agents",
+    "self-hosted",
+    "tart",
+    "gvisor"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/potluck-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/potluck-mcp",
+      "args": [],
+      "env": {
+        "POTLUCK_MCP_POOL": "${user_config.pool}",
+        "POTLUCK_BIN": "${user_config.potluck_path}"
+      }
+    }
+  },
+  "user_config": {
+    "pool": {
+      "type": "string",
+      "title": "Pool",
+      "description": "The Potluck pool to use. Leave empty when this machine is in one pool.",
+      "required": false,
+      "default": ""
+    },
+    "potluck_path": {
+      "type": "string",
+      "title": "potluck program",
+      "description": "Full path to potluck when it is not on PATH or in ~/.local/bin. Leave empty to find it there.",
+      "required": false,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "linux"
+    ]
+  }
+}

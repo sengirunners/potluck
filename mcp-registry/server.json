@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.sengirunners/potluck",
+  "title": "Potluck",
+  "description": "Throwaway VMs and sandboxes for coding agents on Macs and Linux boxes you own.",
+  "repository": {
+    "url": "https://github.com/sengirunners/potluck",
+    "source": "github"
+  },
+  "websiteUrl": "https://potluck.sh",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/sengirunners/potluck/releases/download/mcp-bundle-v0.1.0/potluck.mcpb",
+      "fileSha256": "FILLED_IN_BY_BUILD",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

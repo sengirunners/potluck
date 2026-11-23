@@ -124,7 +124,8 @@ func parkedAnswer(t *testing.T, what string, err error, state hometerm.State) {
 func TestParkedDaemon(t *testing.T) {
 	succ := hometerm.Peer{Via: "tailnet", URL: "https://zm-next.example.ts.net", Fingerprint: "fp-next"}
 	fenced, _ := hometerm.Initial().Fence(succ, 3)
-	frozen, _ := hometerm.Term{Epoch: 2, State: hometerm.Serving}.Freeze()
+	frozen, _ := hometerm.Term{Epoch: 2, State: hometerm.Serving}.Designate(succ)
+	frozen, _ = frozen.Freeze()
 	standby, _ := hometerm.NewStandby(succ, 1)
 	for _, term := range []hometerm.Term{fenced, frozen, standby} {
 		t.Run(string(term.State), func(t *testing.T) {
@@ -150,6 +151,11 @@ func TestParkedDaemon(t *testing.T) {
 			at, err := c.AuthorityTerm(ctx)
 			if err != nil || at.State != string(term.State) || at.Epoch != term.Epoch || at.Fingerprint != "" {
 				t.Fatalf("term: %+v %v", at, err)
+			}
+			// The fenced home names the one it fenced for, the frozen one the
+			// standby it named; a standby names none (succ is its predecessor).
+			if want := map[bool]*api.HomeKey{true: {Via: succ.Via, Fingerprint: succ.Fingerprint}}[term.State != hometerm.Standby]; !sameKey(at.Successor, want) {
+				t.Fatalf("the %s term names successor %+v, want %+v", term.State, at.Successor, want)
 			}
 			for _, call := range []struct{ method, path string }{
 				{"GET", "/v0/whoami"}, {"GET", "/v0/projects"}, {"POST", "/v0/projects"}, {"GET", "/v0/events"},
@@ -275,6 +281,10 @@ func TestParkedDaemonAnswersItsTermOverTheNetwork(t *testing.T) {
 	if code != http.StatusOK || json.Unmarshal([]byte(body), &at) != nil || at.State != api.HQFenced || at.Epoch != 4 || at.Fingerprint != fp {
 		t.Fatalf("the parked home's term over the tunnel: %d %s", code, body)
 	}
+	// It names the key it fenced for, never that home's address.
+	if !sameKey(at.Successor, &api.HomeKey{Via: core.ViaTunnel, Fingerprint: "fp-next"}) || strings.Contains(body, succ.URL) {
+		t.Fatalf("the fenced home's successor over the tunnel: %s", body)
+	}
 	for _, c := range []struct{ method, path string }{{"GET", "/v0/health"}, {"GET", "/v0/whoami"}, {"POST", "/v0/team/presence"}, {"POST", "/v0/authority/unfreeze"}, {"POST", "/v0/daemon/stop"}} {
 		code, body := call(c.method, c.path, "zm_tok")
 		if code != http.StatusServiceUnavailable || !strings.Contains(body, `"parked"`) || strings.Contains(body, succ.URL) {
@@ -352,10 +362,10 @@ func TestServingDaemonAnswersItsTerm(t *testing.T) {
 		at, err := c.AuthorityTerm(ctx)
 		want := api.AuthorityTerm{State: api.HQServing}
 		if term != nil {
-			want = api.AuthorityTerm{State: api.HQServing, Epoch: 4, Predecessor: &api.HomeKey{Via: "tunnel", Fingerprint: "fp-old"}}
+			want = api.AuthorityTerm{State: api.HQServing, Epoch: 4, Predecessor: &api.HomeKey{Via: "tunnel", Fingerprint: "fp-old"},
+				Successor: &api.HomeKey{Via: "tailnet", Fingerprint: "fp-next"}}
 		}
-		if err != nil || at.State != want.State || at.Epoch != want.Epoch || (at.Predecessor == nil) != (want.Predecessor == nil) ||
-			at.Predecessor != nil && *at.Predecessor != *want.Predecessor {
+		if err != nil || at.State != want.State || at.Epoch != want.Epoch || !sameKey(at.Predecessor, want.Predecessor) || !sameKey(at.Successor, want.Successor) {
 			t.Fatalf("term %+v %v, want %+v", at, err, want)
 		}
 	}
@@ -749,6 +759,23 @@ func TestSelfFenceThroughTheTunnelDoor(t *testing.T) {
 	if got := loadTerm(t, cfgA); got.State != hometerm.Fenced || got.Epoch != 2 || got.Successor == nil || *got.Successor != succ {
 		t.Fatalf("after its successor took over, the term is %+v", got)
 	}
+
+	// Parked from its next start, it names the successor it fenced for by
+	// the key that successor holds, so that home, and only it, can tell
+	// the fence is for it.
+	dmA, err = New(ctx, cfgA, DiscardLog(), wiring.Kit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := serve(t, dmA, cfgA)
+	if at, err := c.AuthorityTerm(ctx); err != nil || at.State != api.HQFenced || !sameKey(at.Successor, &api.HomeKey{Via: core.ViaTunnel, Fingerprint: fpB}) {
+		t.Fatalf("the fenced home's term: %+v %v, want successor %s on the tunnel", at, err, fpB)
+	}
+}
+
+// sameKey is whether a and b name the same key, or both none.
+func sameKey(a, b *api.HomeKey) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
 }
 
 type roundTrip func(*http.Request) (*http.Response, error)

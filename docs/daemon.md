@@ -69,8 +69,11 @@ for a move to another home), `fenced` (a named successor serves at a higher epoc
 only once promoted). A home with no file serves at epoch 0. The file is not on the list of files an off-site
 backup set holds (zm `offsite.HomeFile`, an allow-list), so a home restored on another machine does not take the old machine's
 term. Every daemon answers `GET /v0/authority/term` to anyone, over the tunnel with no token too (a signed request still):
-its state and epoch, the fingerprint of the key the caller reached it by (none on the socket), and the key of the home it
-took over from (`predecessor`). An epoch is at most 2^63-1; a term or an answer above it is refused, and so is a
+its state and epoch, the fingerprint of the key the caller reached it by (none on the socket), the key of the home it
+took over from (`predecessor`), and the key of the home it named to serve after it (`successor`; its key, never its
+address). A fenced home always names the one it fenced for, so a standby that waits for the old home to fence can tell
+whether that fence is its own (`successor` is its key on that transport); a fenced answer without it is from an older
+Potluck and says nothing about whom it fenced for. An epoch is at most 2^63-1; a term or an answer above it is refused, and so is a
 standby term at it (it could never be promoted above it). A home fenced at it is retired: nothing serves after it.
 
 **A home that does not serve gets a parked daemon** (`kit/server/term.go`). The daemon reads the term at start, before
@@ -1361,6 +1364,18 @@ sizes are config.
   fits).
 - `label` (default: the pool project's slug, so a pool `friends` serves `runs-on: friends` or `friends:<size>`, with
   or without `self-hosted`; an explicit label works the same).
+- `labels` (optional): exact `runs-on` labels the pool serves, each to the box it asks for:
+  `{"labels": {"big-box": {"size": "c4m16"}, "mac-box": {"size": "c2m8", "os": "macos", "image": "xcode"}}}`.
+  `size` is required (a `pool.sizes` name, which then picks that binding, or a box size); `os` (linux, macos,
+  windows) and `image` (a published named image) are optional. A label is matched without regard to case, and a job
+  naming one is the pool's without naming `label` (`runs-on: big-box`, with or without `self-hosted`). A job whose
+  labels ask for different boxes (two mapped labels, or a mapped label and `<label>:<size>` or an OS label that
+  disagree) is recorded as not served, saying which labels disagree; so is one naming an entry the broker cannot read
+  (a bad size, OS or image). A key that is the pool's `label`, `<label>:<anything>` or one of GitHub's labels
+  (`self-hosted`, an OS or arch, a named image) keeps its own meaning and does nothing here; the setup's `notices`
+  and the CI doctor's warnings say so. Placement is otherwise unchanged: a mapped label never reaches a host that
+  is not trusted. `GET /v0/runners/pool` and `GET /v0/runners/setup` carry the map as `labels`, and a status
+  screen's `runs-on` line names a mapped label first when one places a job on that box.
 - `public_url`: an https URL that forwards only the broker's public paths (`/v0/runners/hook`,
   `/v0/runners/oauth`, `/v0/runners/app/{new,created,installed}` and `/v0/runners/capacity/<host>`) to the daemon unsigned, for example Tailscale
   Funnel on just those paths or a reverse proxy, never the rest of the API. The tunnel's door takes only
@@ -1424,6 +1439,10 @@ An installation of the App serves a pool area only once linked.
   unlinks and revokes the token. An installation deleted on GitHub unlinks too.
 - CLI: `potluck runners link [<installation-id>] [--area]`, `potluck runners unlink <installation-id>`,
   `potluck runners ls`.
+- A program that embeds the broker and has verified an installation's account itself links it in-process with
+  `Service.LinkVerified` (no route; [mounting.md](mounting.md#linking-an-installation-from-the-program)): no sign-in,
+  no confirmation page and no Members read, the same App, account and token rules, and an installation linked to
+  another area is refused rather than moved.
 
 ### Connected repositories
 
@@ -2111,7 +2130,9 @@ box, and nothing is minted before GitHub says the right job holds it.
   (`GET /repos/{o}/{r}/git/ref/tags/{branch}` answers 404). These two are asked only when a grant would name the run
   on the default branch, so the repository's other jobs never wait on them. A re-run (`run_attempt` above 1)
   gets the ref only while its head commit is still the branch's tip: anyone who can re-run could otherwise run an old
-  commit's workflow file, one since fixed, with a fresh credential. A run that called a reusable workflow from anywhere but its own repository at its own commit gets nothing.
+  commit's workflow file, one since fixed, with a fresh credential. The one exception is an attempt the broker itself
+  started by re-running bounced jobs (see "Bounce" below), when every attempt before it was such a re-run too: it
+  counts as attempt 1. A run that called a reusable workflow from anywhere but its own repository at its own commit gets nothing.
   Two more checks, asked only then, from GitHub with read-only tokens: the default branch counts as reviewed only
   when an active ruleset requires a pull request on it with at least one approval of its last push
   by someone other than its pusher (`require_last_push_approval`; dismissing stale reviews alone lets a pusher
@@ -2125,8 +2146,13 @@ box, and nothing is minted before GitHub says the right job holds it.
   `services.*.image`, an action's `runs.image`) must be named by digest. A tag, a branch, an expression, another
   repository's reusable workflow (its own `uses:` are not read), a Dockerfile action, a file of several YAML
   documents or a file that is not there gets no ref. A re-run (`run_attempt` above 1, the broker's own re-runs of
-  jobs that lost their box included) gets a ref only while its commit is still the branch's tip: once the branch moved
-  on, it runs without its grants' tokens. The broker logs which check a run failed.
+  jobs whose host took their box back included) gets a ref only while its commit is still the branch's tip: once the
+  branch moved on, it runs without its grants' tokens. A bounce re-run is not: the broker records it
+  (`runners_bounce_reruns`) before it asks GitHub, marks it taken once GitHub answers, and drops it when GitHub refuses
+  or the answer is lost. An attempt counts as attempt 1 only when each attempt before it has such a record that
+  GitHub took. A serve that finds a record still waiting for GitHub's answer waits too, for 2 minutes at most; after
+  that the record counts as unanswered. A person's re-run anywhere in the chain, a host-loss re-run, or an unrecorded
+  one breaks it. The attempt is the later of the run's (GitHub's API) and the job delivery's `run_attempt`. The broker logs which check a run failed.
   If a grant names the run (`jobrule`: own repository, default branch, an event the grant lists, its workflow file),
   the box's `jit_guard` gains `run` (`docs/protocol.md`): the hook stops any job of another run, workflow or ref,
   and holds this one until the ready marker (300 s). Nothing is minted. A target whose driver cannot hold a job refuses the
@@ -2152,7 +2178,8 @@ box, and nothing is minted before GitHub says the right job holds it.
   (killed, so none of its steps run, `if: always()` ones included), recorded to be re-run once GitHub fails it and
   its run completed (whichever of GitHub's `in_progress` and `completed` comes first, or the sweep), and the job the
   box was acquired for is served again at once. Bounce re-runs have a cap of their own (5 per run, an `ALERT` log line
-  at the cap) and do not count against the 3 attempts of a run whose jobs lost their box.
+  at the cap) and do not count against the 3 attempts of a run whose jobs lost their box. A bounce re-run keeps the
+  run's grants even after the default branch moved on (see the tip rule above).
 - **Fails closed**: GitHub not answering, a grant gone, an issue refused (two grants giving one name different
   permissions among them), the issuer not started within the 240 s, or the marker not written revokes what the box
   got and writes no marker; the hook stops the job before its first step when the hold ends. The broker records why (`runners_job_secrets`).

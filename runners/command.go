@@ -55,5 +55,5 @@ func (s *Service) notices() []string {
 			"for it, one repository at a time ("+s.cmd("runners allow <owner/repo> --public")+"). Public repositories that were served under the old "+
 			"key are not served until then; delete the key from config.json")
 	}
-	return out
+	return append(out, labelMapNotices(c)...)
 }

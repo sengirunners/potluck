@@ -81,6 +81,26 @@ Every top-level command of `potluck` except `ProgramCommands`: `create`, `invite
 program's daemon and binary, or serve that program's MCP tools, and a host has its own. A hint that names one uses
 the program's name (`supper status`).
 
+## Linking an installation from the program
+
+A program whose daemon embeds the runner broker (`wiring.Compute`) may have its own way to know who runs a GitHub
+account, such as its own GitHub sign-in when the App is installed. It then links that installation to a pool area
+in-process, with no browser step:
+
+```go
+func (s *runners.Service) LinkVerified(ctx context.Context, installation int64, area, by string) (runners.Link, error)
+```
+
+The program's module gets the `*runners.Service` from the modules `wiring.Compute` returns. There is no route for
+this: only code compiled into the daemon can call it, so no network caller and no area admin can skip the link page
+([daemon.md](daemon.md#links)) through it. What that page proves (the person signing in administers the
+installation's account, and said yes to this area) is the program's to have proved; `by` names who did, and is the
+link's `linked_by`. The rest is the page's own: the installation must be this App's (`not_found` otherwise), its
+account must be in `runners.accounts` when that is set (`forbidden`), and the link mints the same broker identity
+token, capped to the pool project and the area, so the area's budget and ledger apply. An installation already linked
+to another area is refused (`conflict`; its admin unlinks it first); one already linked to the same area is answered
+as it is. The App needs no Members read for it.
+
 ## Kit's messages
 
 Messages from kit and the compute packages (an API error's hint, a refusal from the daemon or a driver) name

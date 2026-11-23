@@ -112,19 +112,7 @@ func TestExecOutputIsWholeHoweverSlowTheReader(t *testing.T) {
 
 // A command that does not read its input still ends when the host hangs up.
 func TestHangupKillsACommandThatIgnoresItsInput(t *testing.T) {
-	host := serve(t, Hooks{})
-	b, _ := json.Marshal(Request{Op: OpExec, Argv: []string{"sh", "-c", "echo $$; sleep 60"}, Stdin: true})
-	if err := WriteFrame(host, FrameHello, b); err != nil {
-		t.Fatal(err)
-	}
-	_, p, err := ReadFrame(host)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(p)))
-	if err != nil {
-		t.Fatal(err)
-	}
+	host, pids := started(t, Request{Op: OpExec, Argv: []string{"sh", "-c", "echo $$; sleep 60"}, Stdin: true})
 	chunk := make([]byte, 32<<10)
 	for i := 0; i < 16; i++ { // more than a pipe holds
 		if err := WriteFrame(host, FrameStdin, chunk); err != nil {
@@ -132,18 +120,22 @@ func TestHangupKillsACommandThatIgnoresItsInput(t *testing.T) {
 		}
 	}
 	host.Close()
-	for end := time.Now().Add(5 * time.Second); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
-		if time.Now().After(end) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-			t.Fatalf("process %d outlived the connection", pid)
-		}
-	}
+	endsSoon(t, "the connection", pids...)
 }
 
 // The host hanging up ends the command and everything in its group.
 func TestHangupKillsTheCommand(t *testing.T) {
+	host, pids := started(t, Request{Op: OpExec, Argv: []string{"sh", "-c", "sleep 60 & echo $$ $!; wait"}})
+	host.Close()
+	endsSoon(t, "the connection", pids...)
+}
+
+// started sends req as an agent with no hooks would get it and answers the
+// host's end and the pids the command printed first, on one line.
+func started(t *testing.T, req Request) (net.Conn, []int) {
+	t.Helper()
 	host := serve(t, Hooks{})
-	b, _ := json.Marshal(Request{Op: OpExec, Argv: []string{"sh", "-c", "echo $$; sleep 60"}})
+	b, _ := json.Marshal(req)
 	if err := WriteFrame(host, FrameHello, b); err != nil {
 		t.Fatal(err)
 	}
@@ -151,18 +143,29 @@ func TestHangupKillsTheCommand(t *testing.T) {
 	if err != nil || typ != FrameStdout {
 		t.Fatalf("frame %q, %v", typ, err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(p)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	host.Close()
-	for end := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if syscall.Kill(pid, 0) != nil {
-			return
+	var pids []int
+	for _, f := range strings.Fields(string(p)) {
+		pid, err := strconv.Atoi(f)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if time.Now().After(end) {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-			t.Fatalf("process %d outlived the connection", pid)
+		pids = append(pids, pid)
+	}
+	if len(pids) == 0 {
+		t.Fatalf("the command printed no pid: %q", p)
+	}
+	return host, pids
+}
+
+// endsSoon waits for every one of pids to be gone.
+func endsSoon(t *testing.T, what string, pids ...int) {
+	t.Helper()
+	for _, pid := range pids {
+		for end := time.Now().Add(5 * time.Second); syscall.Kill(pid, 0) == nil; time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(end) {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+				t.Fatalf("process %d outlived %s", pid, what)
+			}
 		}
 	}
 }

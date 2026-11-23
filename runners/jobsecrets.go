@@ -112,6 +112,11 @@ CREATE TABLE runners_bounce_reruns (
 	updated INTEGER NOT NULL,
 	PRIMARY KEY (repo, run, attempt)
 );`},
+	// asked: GitHub took the bounce re-run (rerun). A row is written asking
+	// (0) before GitHub is asked, so the attempt it starts waits for the
+	// answer before its grants are decided (bounceRerunsOnly). Rows from
+	// before were written only once GitHub took the re-run.
+	{Kind: store.KindRegistry, Name: "runners/0015_bounce_reruns_asked", Script: `ALTER TABLE runners_bounce_reruns ADD COLUMN asked INTEGER NOT NULL DEFAULT 1;`},
 }
 
 // Job secrets' states.
@@ -139,8 +144,9 @@ const secretsHeld = "('" + secretsIssuing + "', '" + secretsIssued + "')"
 // a tag named like the branch, or a commit force-pushed away, gets none. A
 // re-run (run_attempt above 1) gets one only while its commit is still the
 // branch's tip: anyone who can re-run could otherwise run an old commit's
-// workflow file, one since fixed, with a fresh credential. A
-// run that called a reusable workflow from anywhere but its own repository
+// workflow file, one since fixed, with a fresh credential. An attempt the
+// broker started by re-running bounced jobs, every attempt before it too,
+// counts as attempt 1 (bounceRerunsOnly). A run that called a reusable workflow from anywhere but its own repository
 // at its own commit gets none either: a grant naming a workflow file
 // trusts only that file's commit. jobrule.Check then refuses whatever is
 // missing or wrong. The ref is asked about only when one of candidates
@@ -178,12 +184,25 @@ func (s *Service) jobOf(ctx context.Context, cl *ghapp.Client, d delivery, candi
 	if run.Attempt < 1 {
 		return j, nil
 	}
-	if run.Attempt > 1 && !tip {
+	// The later of GitHub's two words on the attempt: the run as its API has
+	// it now may lag the job's own delivery (a person's newer re-run read as
+	// the attempt before it).
+	attempt := max(run.Attempt, d.Job.RunAttempt)
+	if attempt > 1 && !tip {
 		// A re-run of an older commit: its workflow file may be one since
-		// fixed. The broker's own re-runs of lost jobs are re-runs too.
-		s.logf("runners: job %d of %s gets no job grant: run %d is attempt %d and its commit is no longer the tip of %s",
-			d.Job.ID, d.Repo.FullName, run.ID, run.Attempt, repo.DefaultBranch)
-		return j, nil
+		// fixed. An attempt the broker itself started by bouncing every
+		// attempt before it is attempt 1 recovered, not a re-run anyone
+		// chose (bounceRerunsOnly); the broker's re-runs of jobs whose host
+		// took their box back are re-runs.
+		ours, err := s.bounceRerunsOnly(ctx, d.Repo.FullName, run.ID, attempt)
+		if err != nil {
+			return j, err
+		}
+		if !ours {
+			s.logf("runners: job %d of %s gets no job grant: run %d is attempt %d and its commit is no longer the tip of %s",
+				d.Job.ID, d.Repo.FullName, run.ID, attempt, repo.DefaultBranch)
+			return j, nil
+		}
 	}
 	tag, err := cl.TagExists(ctx, d.Installation.ID, d.Repo.FullName, repo.DefaultBranch)
 	if err != nil || tag {
@@ -329,7 +348,13 @@ func (s *Service) issueSecrets(ctx context.Context, d delivery, owner int64) {
 	err := s.db().QueryRowContext(ctx, `SELECT id, project, area, run, workflow, ref, state, holder, reguard FROM runners_job_secrets WHERE job = ? ORDER BY id DESC LIMIT 1`, owner).
 		Scan(&r.id, &r.project, &r.area, &r.run, &r.workflow, &r.ref, &r.state, &r.holder, &r.reguard)
 	if errors.Is(err, sql.ErrNoRows) {
-		return // no job grant names it: its box holds nothing
+		// No job grant names owner: its box is unguarded and holds nothing.
+		// A job of another job's making that took it may be a credentialed
+		// one (unguardedTaker).
+		if d.Job.ID != owner {
+			s.unguardedTaker(ctx, d, owner)
+		}
+		return
 	}
 	if err != nil {
 		s.logf("runners: job %d: reading its job grants: %v; its box gets nothing", owner, err)
@@ -636,6 +661,71 @@ func (s *Service) takeOver(ctx context.Context, d delivery, owner int64, r secre
 	}
 }
 
+// unguardedTaker is job d, which took the runner of job owner, whose box has
+// no job grants row (no grant named owner: the box is not guarded to a run,
+// so its hook neither holds a job for a marker nor stops one). If a job
+// grant names d's own run, d must never run here without its secrets (they
+// are issued only into a box guarded to d's run, and an unguarded box has no
+// hold for the marker): the box is released, which ends d's job there, d is
+// recorded for a re-run on a box of its own (a bounce, which keeps its
+// grants), owner is served again, and an ALERT is logged. Unlike a bounce
+// off a guarded box, no hook holds d here: its steps may start, without any
+// secrets, until the release ends it. It is still counted as a bounce
+// (maxBounceReruns, bounceRerunsOnly), because d already passed every grant
+// check a serve makes and only lost its box. The guard is never lowered and
+// nothing is issued here: no job gets another run's tokens. A d that no
+// grant names, or that GitHub does not show on this box, is left as it is.
+// An open guard (fork serving) is no run's guard either: a taker a grant
+// names is stopped there too, the same way. The box is on owner's record, or
+// on d's when followTaker already gave it there (d had no box of its own,
+// and owner is served again).
+func (s *Service) unguardedTaker(ctx context.Context, d delivery, owner int64) {
+	runner := d.Job.RunnerName
+	carrier := owner
+	o, err := s.boxOf(ctx, owner, runner) // its handle recorded: the release below frees the box
+	if err == nil && (o.state != jobServing || o.runner != runner) {
+		if c, cerr := s.job(ctx, d.Job.ID); cerr == nil && c.state == jobServing && c.runner == runner && c.handle != "" {
+			o, carrier = c, d.Job.ID
+		}
+	}
+	if err != nil || o.state != jobServing || o.runner != runner ||
+		o.installation != d.Installation.ID || !strings.EqualFold(o.repo, d.Repo.FullName) {
+		return
+	}
+	if _, why := s.startedHere(ctx, d, carrier, d.Job.RunID); why != "" {
+		return
+	}
+	iss := issuers.From(s.d)
+	if iss == nil {
+		return
+	}
+	l, err := s.link(ctx, d.Installation.ID)
+	if err != nil {
+		return
+	}
+	candidates, err := grants.JobGrants(ctx, s.d, l.project, l.Area, d.Repo.FullName)
+	if err != nil || len(candidates) == 0 {
+		return
+	}
+	cl, err := s.client(ctx)
+	if err != nil {
+		return
+	}
+	job, err := s.jobOf(ctx, cl, d, candidates)
+	if err != nil || len(matching(iss, candidates, job)) == 0 {
+		return
+	}
+	s.logf("runners: ALERT: job %d of %s, which a job grant names, took the runner %s of job %d, whose box is not guarded to any run and cannot hold it for its secrets: its box is being released and it is re-run on a box of its own",
+		d.Job.ID, d.Repo.FullName, runner, owner)
+	s.recordBounce(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt,
+		"it took the runner of job "+itoa(owner)+", whose box is not guarded to any run and cannot hold it for its secrets: its box was released, ending it there before it could be served")
+	if carrier == owner {
+		s.reserveOwner(ctx, owner, d.Job.ID, runner)
+	} else if err := s.finishAs(context.WithoutCancel(ctx), carrier, jobTaken); err != nil {
+		s.logf("runners: ALERT: job %d: releasing its unguarded box: %v; it runs there until its box ends", d.Job.ID, err)
+	}
+}
+
 // bounce records job d, which took the runner of job owner, whose box is
 // guarded to another run and was not taken over for d (takeOver), as a job
 // that lost its box (runners_lost, bounced): the box's hook stops it before
@@ -644,14 +734,13 @@ func (s *Service) takeOver(ctx context.Context, d delivery, owner int64, r secre
 // served on a box of its own. Bounces have a cap of their own (rerun). Owner,
 // whose runner is gone, is served again now.
 func (s *Service) bounce(ctx context.Context, d delivery, owner int64, why string) {
-	s.recordBounce(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt, owner, why)
+	s.recordBounce(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt, guardedBounceWhy(owner, why))
 	s.reserveOwner(ctx, owner, d.Job.ID, d.Job.RunnerName)
 }
 
 // recordBounce is bounce's record (INSERT OR IGNORE: redeliveries, and the
 // completion's own check, record it once).
-func (s *Service) recordBounce(ctx context.Context, installation int64, repo string, job, run int64, attempt int, owner int64, why string) {
-	why = "it took the runner of job " + itoa(owner) + ", whose box holds the job grants of another run, and was not served there (" + why + "): its box's hook stopped it before its first step"
+func (s *Service) recordBounce(ctx context.Context, installation int64, repo string, job, run int64, attempt int, why string) {
 	res, err := s.db().ExecContext(context.WithoutCancel(ctx), `INSERT OR IGNORE INTO runners_lost (job, installation, repo, run, attempt, state, why, updated, bounced)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`, job, installation, repo, run, max(attempt, 1), lostRunning, clip(why), s.now().Unix())
 	if err != nil {
@@ -661,6 +750,12 @@ func (s *Service) recordBounce(ctx context.Context, installation int64, repo str
 	if n, _ := res.RowsAffected(); n == 1 {
 		s.logf("runners: job %d of %s: %s; re-run once GitHub ends it and its run", job, repo, why)
 	}
+}
+
+// guardedBounceWhy is the record of a job stopped on job owner's box, which
+// is guarded to another run (bounce, endedOnGuardedBox).
+func guardedBounceWhy(owner int64, why string) string {
+	return "it took the runner of job " + itoa(owner) + ", whose box holds the job grants of another run, and was not served there (" + why + "): its box's hook stopped it before its first step"
 }
 
 // reserveOwner serves job owner again now: job taker, of another run, took
@@ -709,7 +804,7 @@ func (s *Service) endedOnGuardedBox(ctx context.Context, installation int64, rep
 		owner, ownerRun, owner, job, run, secretsIssuing, secretsIssued, secretsEnded).Scan(&guarded, &ours); err != nil || guarded == 0 || ours > 0 {
 		return
 	}
-	s.recordBounce(ctx, installation, repo, job, run, attempt, owner, "GitHub says it ran on runner "+runner)
+	s.recordBounce(ctx, installation, repo, job, run, attempt, guardedBounceWhy(owner, "GitHub says it ran on runner "+runner))
 	s.reserveOwner(ctx, owner, job, runner)
 }
 

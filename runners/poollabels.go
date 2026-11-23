@@ -2,8 +2,9 @@ package runners
 
 // LabelAsk is what a job's runs-on labels ask of the pool.
 type LabelAsk struct {
-	// Ours: the labels name the pool's label, plain or <label>:<size>. Whether
-	// any box can serve them now is not part of it.
+	// Ours: the labels name the pool's label, plain or <label>:<size>, or a
+	// label of the pool's label map (Setup.Labels). Whether any box can serve
+	// them now is not part of it.
 	Ours bool
 	// Why, when Ours, is why the pool refuses the labels whatever boxes exist
 	// (a label it does not serve, an unnameable size). Empty when it accepts.
@@ -19,11 +20,16 @@ type LabelAsk struct {
 // workflow_job delivery, against the pool's setup (GET /v0/runners/pool):
 // the same rules, so a caller that only needs to know whether a queued job
 // targets the pool, independent of which hosts are up, asks here instead of
-// keeping its own copy. Only Setup's Label and DefaultSize are read.
+// keeping its own copy. Only Setup's Label, DefaultSize and Labels are read.
 func ParseLabels(labels []string, setup Setup) LabelAsk {
-	w, ours, why := parseLabels(labels, setup.Label, setup.DefaultSize)
+	w, ours, why := parseLabels(labels, setup.rule())
 	if !ours {
 		return LabelAsk{}
 	}
 	return LabelAsk{Ours: true, Why: why, Size: w.size, OS: w.os, Image: w.image}
+}
+
+// rule is how setup reads a job's labels, as the broker's own conf does.
+func (setup Setup) rule() labelRule {
+	return labelRule{pool: setup.Label, defaultSize: setup.DefaultSize, mapped: setup.Labels}
 }

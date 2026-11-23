@@ -8,11 +8,10 @@ package vmhost
 // files on the host, never asking the guest; signal is a short guest exec
 // that signals the process group execWrap wrote to the guest's
 // $TMPDIR/.zm-proc-<pid>. Processes end with the box: its VM goes, and the
-// sweep deletes the directory. One file serves Tart, Incus and OCI.
+// sweep deletes the directory. One file serves every layer.
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -81,12 +80,19 @@ func (d *drv) spawn(handle string, raw json.RawMessage) (any, error) {
 	if err := secretsListed(d.cfg, r, len(secrets)); err != nil {
 		return nil, err
 	}
+	var pid string
 	if len(secrets) > 0 { // a guest that takes none answers forbidden now, not a process exiting 125 (secrets.go)
-		if err := d.secretsSafe(r); err != nil {
-			return nil, err
+		// Not asked of a spawn asked again: its answer is the process it
+		// made, whatever its box does now. A process forgotten between
+		// this lookup and the next is started unasked: its guest still
+		// refuses the secrets it may not take (exit 125).
+		_ = d.st.locked(func() error { pid, _ = d.st.procs(r.ID).Find(k.RequestID); return nil })
+		if pid == "" {
+			if err := d.secretsSafe(r); err != nil {
+				return nil, err
+			}
 		}
 	}
-	var pid string
 	err = d.st.locked(func() error {
 		ps := d.st.procs(r.ID)
 		if p, ok := ps.Find(k.RequestID); ok {
@@ -235,6 +241,25 @@ func (d *drv) output(handle string, raw json.RawMessage) (any, error) {
 const signalProg = `f=${TMPDIR:-/tmp}/$1; [ -f "$f" ] || exit 3
 exec perl -e 'open(my $f, "<", $ARGV[1]) or exit 3; my $p = <$f>; defined $p or exit 3; chomp $p; $p =~ /^[0-9]+$/ or exit 3; exit(kill($ARGV[0], -$p) ? 0 : 4)' "$2" "$f"`
 
+// signalWait bounds the guest command that signals a process: a guest that
+// does not answer it keeps neither the driver nor a terminal's holder.
+var signalWait = 10 * time.Second
+
+// signalIn signals process pid's group in vm's guest with sig and answers
+// signalProg's exit code: -1 when it did not run, or not within signalWait.
+func signalIn(l vmLayer, vm, pid, sig string) int {
+	cmd := l.Exec(vm, nil, io.Discard, io.Discard, "sh", "-c", signalProg, "sh", ".zm-proc-"+pid, sig)
+	if cmd.Start() != nil {
+		return -1
+	}
+	late := time.AfterFunc(signalWait, func() { _ = cmd.Process.Kill() })
+	defer late.Stop()
+	if cmd.Wait() == nil {
+		return 0
+	}
+	return cmd.ProcessState.ExitCode()
+}
+
 // signal sends TERM, INT or KILL to a process's group, in the guest.
 func (d *drv) signal(handle string, raw json.RawMessage) (any, error) {
 	a, err := boxproc.ParseSignal(raw)
@@ -253,23 +278,7 @@ func (d *drv) signal(handle string, raw json.RawMessage) (any, error) {
 		if !pd.Running() {
 			return map[string]any{"sent": false}, nil
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cmd := d.vm.Exec(r.VM, nil, io.Discard, io.Discard, "sh", "-c", signalProg, "sh", ".zm-proc-"+a.PID, a.Signal)
-		stop := context.AfterFunc(ctx, func() {
-			if cmd.Process != nil {
-				_ = cmd.Process.Kill()
-			}
-		})
-		err := cmd.Run()
-		stop()
-		cancel()
-		code := 0
-		if err != nil {
-			code = -1
-			if cmd.ProcessState != nil {
-				code = cmd.ProcessState.ExitCode()
-			}
-		}
+		code := signalIn(d.vm, r.VM, a.PID, a.Signal)
 		switch {
 		case code == 0:
 			return map[string]any{"sent": true}, nil

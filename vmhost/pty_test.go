@@ -1,12 +1,88 @@
 package vmhost
 
 import (
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+// envSignalWait shortens, for a holder a test starts, the wait for the
+// guest command that ends a terminal's process at its timeout.
+const envSignalWait = "VMHOST_TEST_SIGNAL_WAIT"
+
+// boxTerm is one process on a terminal in a box, through the driver's
+// verbs: what its terminal showed so far, and its end.
+type boxTerm struct {
+	t      *testing.T
+	m      map[string]string
+	h, pid string
+	seen   strings.Builder
+	next   float64
+	last   map[string]any
+}
+
+// openTerm spawns argv on a terminal of rows by cols; more is spawn's other
+// args, in pairs.
+func openTerm(t *testing.T, m map[string]string, h string, rows, cols int, argv []string, more ...any) *boxTerm {
+	t.Helper()
+	args := map[string]any{"request_id": fmt.Sprintf("t%d", time.Now().UnixNano()), "argv": argv, "pty": map[string]any{"rows": rows, "cols": cols, "term": "vt100"}}
+	for i := 0; i < len(more); i += 2 {
+		args[more[i].(string)] = more[i+1]
+	}
+	sp, err := call(t, m, "spawn", h, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &boxTerm{t: t, m: m, h: h, pid: sp["pid"].(string)}
+}
+
+func (b *boxTerm) read(wait int) {
+	b.t.Helper()
+	o, err := call(b.t, b.m, "output", b.h, map[string]any{"pid": b.pid, "stdout_from": b.next, "wait_s": wait})
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	b.seen.WriteString(o["stdout"].(string))
+	b.next, b.last = o["stdout_next"].(float64), o
+}
+
+// until reads the terminal until it showed want.
+func (b *boxTerm) until(want string) {
+	b.t.Helper()
+	for deadline := time.Now().Add(30 * time.Second); !strings.Contains(b.seen.String(), want); {
+		b.read(1)
+		if !time.Now().Before(deadline) || b.last["running"] == false && !strings.Contains(b.seen.String(), want) {
+			b.t.Fatalf("no %q in %q (%v)", want, b.seen.String(), b.last)
+		}
+	}
+}
+
+// end reads the terminal to its process's exit code.
+func (b *boxTerm) end() float64 {
+	b.t.Helper()
+	for deadline := time.Now().Add(30 * time.Second); b.last == nil || b.last["running"] == true; {
+		if b.read(5); !time.Now().Before(deadline) {
+			b.t.Fatalf("the process never ended: %q (%v)", b.seen.String(), b.last)
+		}
+	}
+	return b.last["exit"].(float64)
+}
+
+func (b *boxTerm) input(kv ...any) map[string]any {
+	b.t.Helper()
+	args := map[string]any{"pid": b.pid}
+	for i := 0; i < len(kv); i += 2 {
+		args[kv[i].(string)] = kv[i+1]
+	}
+	in, err := call(b.t, b.m, "input", b.h, args)
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	return in
+}
 
 // A process on a terminal over the fake layer (zm-eakh.12.5.21): describe
 // lists input and pty, the command sees a terminal of the size asked in
@@ -19,50 +95,24 @@ func TestBoxTerminal(t *testing.T) {
 		t.Fatalf("describe: verbs %v, capabilities %v", d["verbs"], d["capabilities"])
 	}
 	script := `test -t 0 && test -t 1 || exit 9; stty size; echo "term=$TERM home=$(pwd)"; read x; echo "got:$x"; stty size; read y; echo never`
-	sp, err := call(t, m, "spawn", h, map[string]any{"request_id": "t1", "argv": []string{"sh", "-c", script},
-		"pty": map[string]any{"rows": 24, "cols": 80, "term": "vt100"}})
-	if err != nil {
-		t.Fatal(err)
+	b := openTerm(t, m, h, 24, 80, []string{"sh", "-c", script})
+	pid := b.pid
+	b.until("24 80")
+	b.until("term=vt100 home=")
+	if strings.Contains(b.seen.String(), "\n") && !strings.Contains(b.seen.String(), "\r\n") {
+		t.Errorf("a terminal's output has no CR LF: %q", b.seen.String())
 	}
-	pid := sp["pid"].(string)
-	var seen strings.Builder
-	next := 0.0
-	until := func(want string) {
-		t.Helper()
-		for deadline := time.Now().Add(15 * time.Second); !strings.Contains(seen.String(), want); {
-			o, err := call(t, m, "output", h, map[string]any{"pid": pid, "stdout_from": next, "wait_s": 1})
-			if err != nil {
-				t.Fatal(err)
-			}
-			seen.WriteString(o["stdout"].(string))
-			next = o["stdout_next"].(float64)
-			if !time.Now().Before(deadline) || o["running"] == false && !strings.Contains(seen.String(), want) {
-				t.Fatalf("no %q in %q (%v)", want, seen.String(), o)
-			}
-		}
+	if in := b.input("rows", 30, "cols", 100, "data", "hello\n"); in["written"] != 6.0 || in["running"] != true {
+		t.Fatalf("input: %v", in)
 	}
-	until("24 80")
-	until("term=vt100 home=")
-	if strings.Contains(seen.String(), "\n") && !strings.Contains(seen.String(), "\r\n") {
-		t.Errorf("a terminal's output has no CR LF: %q", seen.String())
+	b.until("got:hello")
+	b.until("30 100")
+	b.input("data", "\x03")
+	if code := b.end(); code != 130 {
+		t.Fatalf("after Ctrl-C: exit %v, want 130; the terminal showed %q", code, b.seen.String())
 	}
-	if in, err := call(t, m, "input", h, map[string]any{"pid": pid, "rows": 30, "cols": 100, "data": "hello\n"}); err != nil || in["written"] != 6.0 || in["running"] != true {
-		t.Fatalf("input: %v %v", in, err)
-	}
-	until("got:hello")
-	until("30 100")
-	if _, err := call(t, m, "input", h, map[string]any{"pid": pid, "data": "\x03"}); err != nil {
-		t.Fatal(err)
-	}
-	o, err := call(t, m, "output", h, map[string]any{"pid": pid, "stdout_from": next, "wait_s": 10})
-	for err == nil && o["running"] == true {
-		o, err = call(t, m, "output", h, map[string]any{"pid": pid, "stdout_from": o["stdout_next"], "wait_s": 10})
-	}
-	if err != nil || o["exit"] != 130.0 {
-		t.Fatalf("after Ctrl-C: %v %v, want exit 130", o, err)
-	}
-	if in, err := call(t, m, "input", h, map[string]any{"pid": pid, "data": "x"}); err != nil || in["running"] != false {
-		t.Errorf("input after the end: %v %v", in, err)
+	if in := b.input("data", "x"); in["running"] != false {
+		t.Errorf("input after the end: %v", in)
 	}
 	for name, args := range map[string]map[string]any{
 		"pty with secrets": {"request_id": "t2", "argv": []string{"sh"}, "pty": map[string]any{"rows": 24, "cols": 80}, "secrets": map[string]string{"A": "b"}},

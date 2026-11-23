@@ -3,6 +3,7 @@ package vmhost
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,15 +34,48 @@ import (
 // the fake is asked to shut down: a fake that was killed leaves none.
 
 const (
-	envFakeCloudHV   = "VMHOST_TEST_FAKE_CLOUDHV"
-	envCloudHVNetLog = "VMHOST_TEST_CLOUDHV_NETLOG"
+	envFakeCloudHV = "VMHOST_TEST_FAKE_CLOUDHV"
+	// envCloudHVAwakeWait: how long a monitor a test starts waits for a
+	// slot at a wake, where the test's 200 ms is too short to tell by.
+	envCloudHVAwakeWait = "VMHOST_TEST_CLOUDHV_AWAKE_WAIT"
+	envCloudHVNetLog    = "VMHOST_TEST_CLOUDHV_NETLOG"
+	// envCloudHVMem: the directory that stands in for the host's memory
+	// (cloudhvMemRoot). Unset or missing, the host has none.
+	envCloudHVMem = "VMHOST_TEST_CLOUDHV_MEM"
+	// envCloudHVNapRest shortens a monitor's rest after its failed naps.
+	envCloudHVNapRest = "VMHOST_TEST_CLOUDHV_NAP_REST"
+	// envCloudHVNoCore: "fails", a monitor cannot set its core limit;
+	// "set", it is taken as set (the test's own hard limit is 0, so no
+	// process it starts can have 1).
+	envCloudHVNoCore = "VMHOST_TEST_CLOUDHV_NO_CORE"
 )
 
 // cloudhvTestStubs replaces the root helper's two calls for this process
 // (the test, or a monitor it started): up succeeds, down is written down.
 func cloudhvTestStubs() {
 	cloudhvSettle = 20 * time.Millisecond
+	cloudhvAwakeWait = 200 * time.Millisecond
+	if d, err := time.ParseDuration(os.Getenv(envCloudHVAwakeWait)); err == nil {
+		cloudhvAwakeWait = d
+	}
+	if d, err := time.ParseDuration(os.Getenv(envCloudHVNapRest)); err == nil {
+		cloudhvNapRest = d
+	}
+	switch os.Getenv(envCloudHVNoCore) {
+	case "fails":
+		cloudhvNoCore = func() error { return errors.New("the test's host allows no core limit of 1 byte") }
+	case "set":
+		cloudhvNoCore = func() error { return nil }
+	}
 	cloudhvNetUp = func(cloudhvVM, *os.File) error { return nil }
+	cloudhvTapAddr = fakeTapAddr
+	cloudhvMemRoot = func() (string, error) {
+		d := os.Getenv(envCloudHVMem)
+		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
+			return "", errors.New("the test's host has no memory filesystem")
+		}
+		return d, nil
+	}
 	cloudhvNetDown = func(v cloudhvVM) {
 		if p := os.Getenv(envCloudHVNetLog); p != "" {
 			if f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
@@ -51,11 +86,42 @@ func cloudhvTestStubs() {
 	}
 }
 
+// fakeTapAddr is the hardware address of the tests' tap, which is no device:
+// its own (cloudhvTapMAC), or what the file "tap-address" in the VM's
+// directory says, for a test in which something changed it. A monitor and
+// its hypervisor both run in the VM's directory.
+func fakeTapAddr(tap string) (string, error) {
+	if b, err := os.ReadFile("tap-address"); err == nil {
+		return strings.TrimSpace(string(b)), nil
+	}
+	return cloudhvTapMAC(tap), nil
+}
+
+// fakeRan is the file the tests' hypervisor leaves in a VM's directory when
+// it is run: what it was last told, an argument to a line.
+const fakeRan = "hypervisor-ran"
+
 // fakeCloudHV is the tests' hypervisor process. It runs in the VM's directory.
+// As the real one does, it takes for the tap's address the one it is told
+// (host_mac), or told none the one the tap has just then, which on a real
+// host is not always the one the tap has later: the fake takes one no tap
+// has. It exits when the tap does not have the address it was told, and at
+// a restore when the tap does not have the one it took, since it may not
+// set it. It exits when it is told to write a log or a console file itself.
 func fakeCloudHV(args []string) int {
-	var api, vsock, restore string
+	_ = os.WriteFile(fakeRan, []byte(strings.Join(args, "\n")+"\n"), 0o600)
+	var api, vsock, restore, tap, hostMAC string
 	for i := 0; i+1 < len(args); i++ {
 		switch args[i] {
+		case "--net":
+			for _, kv := range strings.Split(args[i+1], ",") {
+				if v, ok := strings.CutPrefix(kv, "tap="); ok {
+					tap = v
+				}
+				if v, ok := strings.CutPrefix(kv, "host_mac="); ok {
+					hostMAC = v
+				}
+			}
 		case "--api-socket":
 			api = strings.TrimPrefix(args[i+1], "path=")
 		case "--vsock":
@@ -66,11 +132,21 @@ func fakeCloudHV(args []string) int {
 			}
 		case "--restore":
 			restore = strings.TrimPrefix(args[i+1], "source_url=file://")
+		case "--serial", "--console", "--log-file":
+			// A file the hypervisor writes itself has no limit.
+			if args[i] == "--log-file" || strings.Contains(args[i+1], "file=") {
+				fmt.Fprintln(os.Stderr, "the tests' hypervisor is told to write a file itself:", args[i], args[i+1])
+				return 1
+			}
 		}
 	}
-	type memory struct{ Vsock, Mem string }
+	type memory struct{ Vsock, Mem, Tap, HostMAC string }
 	var mu sync.Mutex
-	mem, paused := memory{vsock, fmt.Sprintf("mem-%d-%d", os.Getpid(), time.Now().UnixNano())}, false
+	told := hostMAC != ""
+	if !told {
+		hostMAC = "06:00:00:00:00:01"
+	}
+	mem, paused := memory{vsock, fmt.Sprintf("mem-%d-%d", os.Getpid(), time.Now().UnixNano()), tap, hostMAC}, false
 	if restore != "" { // a restored VM starts paused, with what the snapshot held
 		b, err := os.ReadFile(filepath.Join(restore, "fake.json"))
 		if err != nil || json.Unmarshal(b, &mem) != nil {
@@ -78,6 +154,10 @@ func fakeCloudHV(args []string) int {
 			return 1
 		}
 		paused = true
+	}
+	if has, _ := fakeTapAddr(mem.Tap); has != mem.HostMAC && (told || restore != "") {
+		fmt.Fprintln(os.Stderr, "fake hypervisor: TapSetMac(IoctlError(35108, Os { code: 1, kind: PermissionDenied }))")
+		return 1
 	}
 	al, err := net.Listen("unix", api)
 	if err != nil {
@@ -100,14 +180,26 @@ func fakeCloudHV(args []string) int {
 		}
 	}
 	// Files in the VM's directory are the test's switches and the fake's
-	// record: "paused" is there while the VM is paused, "snapshots" has a
-	// line per snapshot asked for, "fail-snapshot" makes each one fail and
-	// "dirty-shutdown" makes the hypervisor exit badly when shut down.
+	// record: "paused" is there while the VM is paused, "pauses" has a line
+	// per pause and "snapshots" one per snapshot asked for, "fail-snapshot" makes each one fail
+	// with the memory already written, "odd-snapshot" leaves a link beside
+	// the memory, "dirty-shutdown" makes the hypervisor exit badly when shut down, and
+	// a restore does not finish while "slow-restore" is there, nor a
+	// shutdown while "slow-shutdown" is.
 	mux.HandleFunc("PUT /api/v1/vm.pause", func(w http.ResponseWriter, r *http.Request) {
 		_ = os.WriteFile("paused", nil, 0o600)
+		if f, err := os.OpenFile("pauses", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			fmt.Fprintln(f, "paused")
+			f.Close()
+		}
 		set(true)(w, r)
 	})
 	mux.HandleFunc("PUT /api/v1/vm.resume", func(w http.ResponseWriter, r *http.Request) {
+		for end := time.Now().Add(10 * time.Second); restore != "" && time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
+			if _, err := os.Stat("slow-restore"); err != nil {
+				break
+			}
+		}
 		_ = os.Remove("paused")
 		set(false)(w, r)
 	})
@@ -124,10 +216,6 @@ func fakeCloudHV(args []string) int {
 			fmt.Fprintln(f, "asked")
 			f.Close()
 		}
-		if _, err := os.Stat("fail-snapshot"); err == nil {
-			http.Error(w, "the test asked for a failed snapshot", http.StatusInternalServerError)
-			return
-		}
 		if !p || dir == body.Dest {
 			http.Error(w, "a snapshot is of a paused VM, to a file:// directory", http.StatusInternalServerError)
 			return
@@ -136,6 +224,13 @@ func fakeCloudHV(args []string) int {
 		if err := os.WriteFile(filepath.Join(dir, "fake.json"), b, 0o600); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if _, err := os.Stat("fail-snapshot"); err == nil {
+			http.Error(w, "the test asked for a failed snapshot", http.StatusInternalServerError)
+			return
+		}
+		if _, err := os.Stat("odd-snapshot"); err == nil {
+			_ = os.Symlink("fake.json", filepath.Join(dir, "link"))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -146,7 +241,15 @@ func fakeCloudHV(args []string) int {
 		if _, err := os.Stat("dirty-shutdown"); err == nil {
 			code = 1
 		}
-		time.AfterFunc(10*time.Millisecond, func() { os.Exit(code) })
+		go func() {
+			for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
+				if _, err := os.Stat("slow-shutdown"); err != nil {
+					break
+				}
+			}
+			time.Sleep(10 * time.Millisecond)
+			os.Exit(code)
+		}()
 	})
 	go func() { _ = http.Serve(al, mux) }()
 	mark := func(name string) error {
@@ -158,7 +261,17 @@ func fakeCloudHV(args []string) int {
 		return f.Close()
 	}
 	hooks := cloudhvguest.Hooks{
-		Squeeze: func() error { return mark("squeezed") },
+		Squeeze: func() error {
+			// A test's switch: a squeeze that follows another closely fails,
+			// which is the one just before a pause and no other.
+			if b, err := os.ReadFile("squeezed"); err == nil && isFile("sync-fails") {
+				f := strings.Fields(string(b))
+				if last, _ := strconv.ParseInt(f[len(f)-1], 10, 64); time.Since(time.Unix(0, last)) < 800*time.Millisecond {
+					return fmt.Errorf("the fake guest's files are not written out")
+				}
+			}
+			return mark("squeezed")
+		},
 		Woke:    func(int64) error { return mark("woke") },
 		Command: func(c *exec.Cmd) { c.Env = append(os.Environ(), "FAKE_MEM="+mem.Mem) },
 		Root:    func() error { return mark("root") },
@@ -229,6 +342,13 @@ func cloudhvFixture(t *testing.T, nap int) chTest {
 	netlog := filepath.Join(dir, "netlog")
 	t.Setenv(envFakeCloudHV, "1")
 	t.Setenv(envCloudHVNetLog, netlog)
+	if err := os.Mkdir(filepath.Join(dir, "mem"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envCloudHVMem, filepath.Join(dir, "mem"))
+	if !coreLimitCanBeOne() {
+		t.Setenv(envCloudHVNoCore, "set")
+	}
 	return chTest{t, cloudhvCLI{c: cloudhvConfig{Bin: self, Firmware: filepath.Join(dir, "fw"), QemuImg: qemu,
 		Images: filepath.Join(dir, "images"), Dir: filepath.Join(dir, "vms"), Net: "10.254.254.0/28", NapIdleS: nap}, state: dir}, netlog}
 }
@@ -338,6 +458,13 @@ func (c chTest) has(vm, name string) bool {
 
 func chGone(pid int) bool { return pid <= 1 || syscall.Kill(pid, 0) != nil }
 
+// coreLimitCanBeOne says whether a process this test starts can set its core
+// limit to 1 byte: not when the test's own hard limit is 0.
+func coreLimitCanBeOne() bool {
+	var l syscall.Rlimit
+	return syscall.Getrlimit(syscall.RLIMIT_CORE, &l) != nil || l.Max >= 1
+}
+
 // An idle VM naps: its memory is on disk and no hypervisor process is left.
 // The next command wakes it, and runs in the same guest.
 func TestCloudHVNapsWhenIdleAndWakesForACommand(t *testing.T) {
@@ -349,12 +476,25 @@ func TestCloudHVNapsWhenIdleAndWakesForACommand(t *testing.T) {
 	if mem == "" || hv <= 1 {
 		t.Fatalf("mem %q, hypervisor pid %d", mem, hv)
 	}
+	ran := time.Now().UnixNano()
 	release()
 	c.until("the idle VM naps", func() bool { return c.state("vm1").State == "napping" })
+	// Its guest wrote its files out twice: when it was squeezed, and again
+	// just before the pause, since a stop may not be able to wake it.
+	b, _ := os.ReadFile(filepath.Join(c.l.dir("vm1"), "squeezed"))
+	syncs := 0
+	for _, at := range strings.Fields(string(b)) {
+		if n, _ := strconv.ParseInt(at, 10, 64); n > ran {
+			syncs++
+		}
+	}
+	if syncs != 2 {
+		t.Errorf("the guest was asked to write its files out %d times between its last command and its nap, want 2", syncs)
+	}
 	if st := c.state("vm1"); st.Naps != 1 || st.HypervisorPID != 0 || !chGone(hv) {
 		t.Errorf("napping: %+v, hypervisor %d gone %v: a napping VM has no hypervisor process", st, hv, chGone(hv))
 	}
-	if !c.has("vm1", "snap/fake.json") || !c.has("vm1", "squeezed") {
+	if !c.has("vm1", "snap/sealed") || !c.has("vm1", "squeezed") {
 		t.Error("napping with no snapshot, or with a guest that was never asked to give memory back")
 	}
 	if !c.has("vm1", "flushed") {
@@ -411,7 +551,7 @@ func TestCloudHVLostSnapshotEndsTheVM(t *testing.T) {
 	c := cloudhvFixture(t, 1)
 	c.boot("vm1", false)
 	c.until("the idle VM naps", func() bool { return c.state("vm1").State == "napping" })
-	if err := os.Remove(filepath.Join(c.l.dir("vm1"), "snap", "fake.json")); err != nil {
+	if err := os.Remove(filepath.Join(c.l.dir("vm1"), "snap", cloudhvSealFile)); err != nil {
 		t.Fatal(err)
 	}
 	var errb bytes.Buffer
@@ -456,6 +596,24 @@ func TestCloudHVEndsWithItsSupervisorOrHypervisor(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.until("vm2 ends when its hypervisor dies", func() bool { return !c.has("vm2", "") })
+
+	// Also when another process still holds the hypervisor's output open.
+	if !hypervisorStreams() {
+		return
+	}
+	c.boot("vm3", false)
+	holder, err := strconv.Atoi(c.run("vm3", "sh", "-c", "setsid sleep 300 > /proc/$PPID/fd/2 2>&1 < /dev/null & echo $!"))
+	if err != nil || syscall.Kill(holder, 0) != nil {
+		t.Fatalf("no process holds the hypervisor's output: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(holder, syscall.SIGKILL) })
+	if err := syscall.Kill(c.state("vm3").HypervisorPID, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	c.until("vm3 ends when its hypervisor dies with its output still held", func() bool { return !c.has("vm3", "") })
+	if syscall.Kill(holder, 0) != nil {
+		t.Error("the process that held the hypervisor's output had gone: nothing was shown")
+	}
 }
 
 // A kept VM's stop leaves its disk and nothing running; its next boot is a
@@ -492,6 +650,70 @@ func TestCloudHVKeptDiskSurvivesAStop(t *testing.T) {
 	}
 }
 
+// The address of the host's end of a link is made from the tap's name: it is
+// one an owner may set, it is no group address, it is not the guest's, and
+// two taps do not share one.
+func TestCloudHVTapAddress(t *testing.T) {
+	a, b := cloudhvTapMAC(cloudhvTapOf(0x0afefe02)), cloudhvTapMAC(cloudhvTapOf(0x0afefe06))
+	if a != "02:70:63:fe:fe:02" || b != "02:70:63:fe:fe:06" {
+		t.Fatalf("addresses %q and %q", a, b)
+	}
+	for _, m := range []string{a, b} {
+		hw, err := net.ParseMAC(m)
+		if err != nil || hw[0]&3 != 2 {
+			t.Errorf("%s: %v: want a locally administered address of one device", m, err)
+		}
+		if strings.HasPrefix(m, "52:54:00") {
+			t.Errorf("%s could be a guest's", m)
+		}
+	}
+	for _, tap := range []string{"", "pch", "eth0", "pchzzzzzz", "pch0000001"} {
+		if m := cloudhvTapMAC(tap); m != "" {
+			t.Errorf("%q, no tap of the layer, has the address %q", tap, m)
+		}
+	}
+}
+
+// A VM is not started on a tap that does not have its own address, and the
+// monitor says so: the hypervisor is never run.
+func TestCloudHVAVMWhoseTapHasAnotherAddressIsNotStarted(t *testing.T) {
+	c := cloudhvFixture(t, 0)
+	if err := c.l.CloneKept("img", "vm1", 2, 512); err != nil { // kept: its directory is still there to look in
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.l.dir("vm1"), "tap-address"), []byte("ee:00:00:00:00:01\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var log bytes.Buffer
+	cmd, held, err := c.l.BootKept("vm1", true, &log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	held.Close()
+	defer c.l.Destroy("vm1", 0)
+	if said := log.String(); !strings.Contains(said, "has the hardware address ee:00:00:00:00:01, not its own 02:70:63:") {
+		t.Fatalf("the monitor said %q", said)
+	}
+	if !c.has("vm1", "vm.json") || c.has("vm1", fakeRan) {
+		t.Fatalf("the VM's directory is there: %v; the hypervisor was run: %v", c.has("vm1", "vm.json"), c.has("vm1", fakeRan))
+	}
+}
+
+// A napping VM whose tap's address was changed is not woken, and its command
+// is told why.
+func TestCloudHVANappingVMWhoseTapAddressChangedIsNotWoken(t *testing.T) {
+	c := cloudhvFixture(t, 1)
+	c.boot("vm1", false)
+	c.until("vm1 naps", func() bool { return c.state("vm1").State == "napping" })
+	if err := os.WriteFile(filepath.Join(c.l.dir("vm1"), "tap-address"), []byte("ee:00:00:00:00:01\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, said := c.ask("vm1"); code == 0 || out != "" || !strings.Contains(said, "has the hardware address ee:00:00:00:00:01") {
+		t.Fatalf("a command for it: exit %d, printed %q, said %q", code, out, said)
+	}
+}
+
 // Without its fence a VM does not start.
 func TestCloudHVBootNeedsTheFence(t *testing.T) {
 	c := cloudhvFixture(t, 0)
@@ -510,11 +732,19 @@ func TestCloudHVBootNeedsTheFence(t *testing.T) {
 	}
 }
 
-// A snapshot that fails leaves the VM running, as it was, and after three
-// failures in a row the monitor stops trying.
+// A snapshot that fails, or one that cannot be sealed, leaves the VM
+// running, as it was, with nothing of its memory saved: not on disk, and not
+// what the hypervisor had written into the host's memory by then. After
+// three failures in a row the monitor stops trying.
 func TestCloudHVFailedSnapshotLeavesTheVMAwake(t *testing.T) {
+	for _, how := range []string{"fail-snapshot", "odd-snapshot"} {
+		t.Run(how, func(t *testing.T) { cloudhvFailedNap(t, how) })
+	}
+}
+
+func cloudhvFailedNap(t *testing.T, how string) {
 	c := cloudhvFixture(t, 1)
-	c.made("vm1", "fail-snapshot")
+	c.made("vm1", how)
 	c.boot("vm1", false)
 	asked := func() int {
 		b, _ := os.ReadFile(filepath.Join(c.l.dir("vm1"), "snapshots"))
@@ -531,8 +761,43 @@ func TestCloudHVFailedSnapshotLeavesTheVMAwake(t *testing.T) {
 	if c.has("vm1", "paused") {
 		t.Error("the VM was left paused after a failed nap")
 	}
-	if got := c.run("vm1", "sh", "-c", "echo $FAKE_MEM"); got == "" {
-		t.Error("no command runs after the failed naps")
+	got := c.run("vm1", "sh", "-c", "echo $FAKE_MEM")
+	if got == "" {
+		t.Fatal("no command runs after the failed naps")
+	}
+	if where := holds(t, c.l.state, got); len(where) != 0 || c.has("vm1", "snap") || c.has("vm1", "snap.tmp") {
+		t.Errorf("after the failed naps the guest's memory is in the clear in %v; snap %v, snap.tmp %v", where, c.has("vm1", "snap"), c.has("vm1", "snap.tmp"))
+	}
+	if memDir, err := cloudhvMemDir(c.l.dir("vm1")); err != nil {
+		t.Error(err)
+	} else if _, err := os.Stat(memDir); err == nil {
+		t.Error("what the failed snapshot wrote is still in the host's memory")
+	}
+}
+
+// After three failed naps the monitor leaves the VM be for a while, not for
+// good: once what failed is over and the rest is too, the VM naps.
+func TestCloudHVNapsAreTriedAgainAfterARest(t *testing.T) {
+	t.Setenv(envCloudHVNapRest, "3s")
+	c := cloudhvFixture(t, 1)
+	c.made("vm1", "fail-snapshot")
+	c.boot("vm1", false)
+	mem := c.run("vm1", "sh", "-c", "echo $FAKE_MEM")
+	asked := func() int {
+		b, _ := os.ReadFile(filepath.Join(c.l.dir("vm1"), "snapshots"))
+		return strings.Count(string(b), "asked")
+	}
+	c.until("the monitor has tried three naps", func() bool { return asked() >= cloudhvNapRetries })
+	if err := os.Remove(filepath.Join(c.l.dir("vm1"), "fail-snapshot")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second) // without the rest a fourth try comes in about a second, and naps
+	if st := c.state("vm1"); asked() != cloudhvNapRetries || st.State != "awake" {
+		t.Fatalf("within the rest: %d snapshots asked for, %+v", asked(), st)
+	}
+	c.until("the VM naps once the rest is over", func() bool { return c.state("vm1").State == "napping" })
+	if got := c.run("vm1", "sh", "-c", "echo $FAKE_MEM"); got != mem {
+		t.Fatalf("after the wake the guest's memory is %q, was %q", got, mem)
 	}
 }
 
@@ -615,62 +880,132 @@ func TestCloudHVHelperHoldsTheNetworkLock(t *testing.T) {
 	}
 }
 
-// A VM naps as its binding says at each boot. One still running under an
-// older setting takes no secrets though the binding now serves them.
+// A VM naps as its binding says at each boot, and its monitor says in the
+// VM's state that it seals what a nap saves. A VM that naps and whose state
+// does not say so, as one whose monitor is of a driver that saved naps in
+// the clear, takes no secrets until it is started again. The VM's record
+// cannot say it for the monitor.
 func TestCloudHVAVMNapsAsItsBindingSaysNow(t *testing.T) {
 	c := cloudhvFixture(t, 0)
 	if err := c.l.CloneKept("img", "vm1", 2, 512); err != nil {
 		t.Fatal(err)
+	}
+	// A VM that does not nap saves no memory, whatever its monitor says:
+	// one made without naps, with the state file a driver that never
+	// sealed a nap wrote.
+	if err := c.l.CloneKept("img", "vm2", 2, 512); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(c.l.dir("vm2"), "state.json"), []byte(`{"state":"awake"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	noNaps := config{VM: "cloudhv", Kind: "box", CloudHV: cloudhvConfig{Dir: c.l.c.Dir}}
+	r2 := record{Handle: "box:a/r2", OS: "linux", VM: "vm2"}
+	if v, err := cloudhvLoad(c.l.dir("vm2")); err != nil || v.NapIdleS != 0 {
+		t.Fatalf("a VM made without naps: %+v, %v", v, err)
+	}
+	if err := secretsListed(noNaps, r2, 1); err != nil {
+		t.Errorf("a secret for a VM that does not nap: %v", err)
+	}
+	if err := napsAnyway(noNaps, r2); err != nil {
+		t.Errorf("the secrets verb's check for a VM that does not nap: %v", err)
 	}
 	c.l.c.NapIdleS = 60
 	cmd, _ := c.start("vm1", c.l.BootKept)
 	if v, err := cloudhvLoad(c.l.dir("vm1")); err != nil || v.NapIdleS != 60 {
 		t.Fatalf("after a boot under ch_nap_idle_s=60: %+v, %v", v, err)
 	}
-	now := config{VM: "cloudhv", Kind: "box", CloudHV: cloudhvConfig{Dir: c.l.c.Dir}} // the binding's key set back to 0
-	r := record{Handle: "box:a/r1", OS: "linux", VM: "vm1"}
-	if !boxSecretsServed(now, "linux") {
-		t.Fatal("the binding serves no secrets with naps off")
+	c.until("the monitor is at rest", func() bool { st := c.state("vm1"); return st.State == "awake" && st.Active == 0 })
+	if !c.state("vm1").NapSealed {
+		t.Fatalf("the monitor does not say it seals naps: %+v", c.state("vm1"))
 	}
-	if err := secretsListed(now, r, 1); code(err) != "forbidden" {
-		t.Errorf("a secret for a VM that still naps: %v, want forbidden", err)
+	now := config{VM: "cloudhv", Kind: "box", CloudHV: cloudhvConfig{Dir: c.l.c.Dir, NapIdleS: 60}}
+	r := record{Handle: "box:a/r1", OS: "linux", VM: "vm1", State: stReady}
+	if err := secretsListed(now, r, 1); err != nil {
+		t.Errorf("a secret for a VM whose naps are sealed: %v", err)
+	}
+	if why := (&drv{cfg: now}).warmOffBinding(r); why != "" {
+		t.Errorf("a warm box whose naps are sealed is not handed out: %s", why)
+	}
+	refused := func(what string) {
+		t.Helper()
+		// Warm, such a box is never handed out: it could not be started
+		// again, and would take no secrets for as long as it lived.
+		if why := (&drv{cfg: now}).warmOffBinding(r); why == "" {
+			t.Errorf("a warm box that is %s would be handed out", what)
+		}
+		if err := secretsListed(now, r, 1); code(err) != "forbidden" {
+			t.Errorf("an exec's secret for %s: %v, want forbidden", what, err)
+		}
+		if err := napsAnyway(now, r); code(err) != "forbidden" {
+			t.Errorf("the secrets verb's check for %s: %v, want forbidden", what, err)
+		}
+	}
+	state, rec := filepath.Join(c.l.dir("vm1"), "state.json"), filepath.Join(c.l.dir("vm1"), "vm.json")
+	st := c.state("vm1")
+	st.NapSealed = false // as the monitor of a driver that saved naps in the clear writes it
+	b, _ := json.Marshal(st)
+	if err := os.WriteFile(state, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refused("a VM whose monitor does not say it seals naps")
+	// A record that says so, as a driver that seals left it before such a
+	// monitor was started, does not stand in for the monitor.
+	var raw map[string]any
+	b, _ = os.ReadFile(rec)
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["nap_sealed"] = true
+	b, _ = json.Marshal(raw)
+	if err := os.WriteFile(rec, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refused("a VM whose record alone says its naps are sealed")
+	if err := os.Remove(state); err != nil {
+		t.Fatal(err)
+	}
+	refused("a VM whose state cannot be read")
+	// A warm box still starting has no monitor to say so yet: it is not
+	// ended for it.
+	starting := r
+	starting.State = stStarting
+	if why := (&drv{cfg: now}).warmOffBinding(starting); why != "" {
+		t.Errorf("a warm box still starting, its state not yet written, is ended: %s", why)
+	}
+	// A box with no VM of this layer has no nap to ask about.
+	if err := secretsListed(noNaps, record{Handle: "box:a/r3", OS: "linux", VM: "none"}, 1); err != nil {
+		t.Errorf("a secret for a VM with no record: %v", err)
 	}
 	c.l.PowerOff("vm1", cmd.Process.Pid)
-	c.l.c.NapIdleS = 0
 	c.start("vm1", c.l.BootKept)
 	if err := secretsListed(now, r, 1); err != nil {
-		t.Errorf("a secret once the VM was started again with naps off: %v", err)
+		t.Errorf("a secret once the VM was started again: %v", err)
 	}
 }
 
-// What decides that a binding which naps its boxes takes no secrets: the
-// functions describe, exec, spawn and the secrets verb all ask. A nap saves a
-// box's memory to the host's disk.
-func TestCloudHVNappingBindingTakesNoSecrets(t *testing.T) {
-	for nap, want := range map[int]bool{0: true, 60: false} {
+// A binding that naps its boxes serves secrets as one that does not: a nap's
+// saved memory reaches the disk sealed. And it may have a runner_dir.
+func TestCloudHVANappingBindingServesSecrets(t *testing.T) {
+	for _, nap := range []int{0, 60} {
 		c := config{VM: "cloudhv", Kind: "box", CloudHV: cloudhvConfig{NapIdleS: nap}}
-		if got := boxSecretsServed(c, "linux"); got != want {
-			t.Errorf("ch_nap_idle_s=%d: secrets served %v, want %v", nap, got, want)
+		if !boxSecretsServed("linux") {
+			t.Errorf("ch_nap_idle_s=%d: no secrets served", nap)
 		}
-		err := secretsListed(c, record{Handle: "box:a/r1", OS: "linux"}, 1)
-		if (err == nil) != want || (err != nil && code(err) != "bad_request") {
-			t.Errorf("ch_nap_idle_s=%d: an exec with a secret: %v", nap, err)
-		}
-		if err := secretsListed(c, record{Handle: "box:a/r1", OS: "linux"}, 0); err != nil {
-			t.Errorf("ch_nap_idle_s=%d: an exec with no secret: %v", nap, err)
+		for _, n := range []int{0, 1} {
+			if err := secretsListed(c, record{Handle: "box:a/r1", OS: "linux"}, n); err != nil {
+				t.Errorf("ch_nap_idle_s=%d: an exec with %d secrets: %v", nap, n, err)
+			}
 		}
 	}
-	if boxSecretsServed(config{VM: "tart", Kind: "box", CloudHV: cloudhvConfig{NapIdleS: 60}}, "linux") != true {
-		t.Error("another layer was refused secrets for a cloudhv key")
-	}
-	// A runner's registration is a credential in the box's memory too.
 	m := map[string]string{"vm": "cloudhv", "ch_firmware": "/fw/CLOUDHV.fd", "ch_images": "/images", "ch_nap_idle_s": "60", "runner_dir": "/opt/runner"}
 	for k, v := range cfg(t) {
 		m[k] = v
 	}
-	m["kind"] = "box"
-	if _, err := parseConfig(m); err == nil || !strings.Contains(err.Error(), "runner_dir") {
-		t.Errorf("ch_nap_idle_s with runner_dir: %v, want it refused", err)
+	m["kind"], m["size"], m["cpu"], m["memory"] = "box", "small", "1", "512"
+	m["images"] = "fake/linux@sha256:" + strings.Repeat("ab", 32)
+	if _, err := parseConfig(m); err != nil {
+		t.Errorf("ch_nap_idle_s with runner_dir: %v", err)
 	}
 }
 
@@ -817,7 +1152,7 @@ func TestCloudHVConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	if h := c.CloudHV; h.Bin != "cloud-hypervisor" || h.QemuImg != "qemu-img" || h.Net != cloudhvNetDefault || h.NapIdleS != 0 ||
-		h.Dir != filepath.Join(c.StateDir, "cloudhv") || h.Console {
+		h.Dir != filepath.Join(c.StateDir, "cloudhv") || h.Console || h.Limits != (cloudhvLimits{}) {
 		t.Errorf("defaults: %+v", h)
 	}
 	if c.isolation() != "ephemeral" {
@@ -833,12 +1168,61 @@ func TestCloudHVConfig(t *testing.T) {
 		}
 	}
 	for k, v := range map[string]string{"ch_firmware": "", "ch_images": "relative/dir", "ch_dir": "relative", "ch_net": "192.168.0.0/24",
-		"ch_nap_idle_s": "soon", "ch_console": "yes", "network": "nat"} {
+		"ch_nap_idle_s": "soon", "ch_console": "yes", "network": "nat", "ch_nap_slots": "3",
+		"ch_disk_mb_s": "fast", "ch_disk_ops_s": "-1", "ch_net_mbit_s": "1.5"} {
 		m := base()
 		m[k] = v
 		if _, err := parseConfig(m); err == nil {
 			t.Errorf("%s=%q was accepted", k, v)
 		}
+	}
+	for k, v := range map[string]string{"ch_disk_mb_s": "100001", "ch_disk_ops_s": "10000001", "ch_net_mbit_s": "100001"} {
+		m := base()
+		m[k] = v
+		if _, err := parseConfig(m); err == nil {
+			t.Errorf("%s=%s, a rate past the most it can be, was accepted", k, v)
+		}
+	}
+	// The rates, up to the most each can be, and the supervisor reads the
+	// same back.
+	m := base()
+	m["ch_disk_mb_s"], m["ch_disk_ops_s"], m["ch_net_mbit_s"] = "100000", "10000000", "100000"
+	c, err = parseConfig(m)
+	if want := (cloudhvLimits{DiskMBs: 100000, DiskOps: 10000000, NetMbit: 100000}); err != nil || c.CloudHV.Limits != want {
+		t.Fatalf("the largest rates: %+v, %v, want %+v", c.CloudHV.Limits, err, want)
+	}
+	m["ch_disk_mb_s"], m["ch_disk_ops_s"], m["ch_net_mbit_s"] = "20", "2000", "10"
+	c, err = parseConfig(m)
+	if want := (cloudhvLimits{DiskMBs: 20, DiskOps: 2000, NetMbit: 10}); err != nil || c.CloudHV.Limits != want {
+		t.Fatalf("the three rates: %+v, %v, want %+v", c.CloudHV.Limits, err, want)
+	}
+	m = base()
+	c.CloudHV.raw(m)
+	if c2, err := parseConfig(m); err != nil || c2.CloudHV != c.CloudHV {
+		t.Errorf("the rates read back: %+v, %v, want %+v", c2.CloudHV, err, c.CloudHV)
+	}
+	// Nap slots: the binding's slots are then how many VMs are awake at once,
+	// and the supervisor reads the same back.
+	m = base()
+	m["ch_nap_idle_s"], m["ch_nap_slots"], m["linux_slots"] = "60", "5", "7"
+	c, err = parseConfig(m)
+	if err != nil || c.CloudHV.NapSlots != 5 || c.CloudHV.Awake != 7 {
+		t.Fatalf("ch_nap_slots=5 with linux_slots=7: %+v, %v", c.CloudHV, err)
+	}
+	m = base()
+	c.CloudHV.raw(m)
+	if c2, err := parseConfig(m); err != nil || c2.CloudHV != c.CloudHV {
+		t.Errorf("nap slots read back: %+v, %v, want %+v", c2.CloudHV, err, c.CloudHV)
+	}
+	// A warm box that naps would hold no slot to be handed out in.
+	m = base()
+	m["ch_nap_idle_s"], m["ch_nap_slots"], m["warm"] = "60", "5", "1"
+	if _, err := parseConfig(m); err == nil || !strings.Contains(err.Error(), "ch_nap_slots with warm") {
+		t.Errorf("ch_nap_slots with warm: %v, want it refused", err)
+	}
+	delete(m, "ch_nap_slots")
+	if _, err := parseConfig(m); err != nil && strings.Contains(err.Error(), "ch_nap_slots") {
+		t.Errorf("warm without ch_nap_slots: %v", err)
 	}
 	for _, n := range []string{"10.0.0.0/31", "10.1.2.0/33", "11.0.0.0/16", "fd00::/64", "ten"} {
 		if _, _, err := cloudhvRange(n); err == nil {

@@ -158,9 +158,18 @@ const warmOffPin = "the binding's image changed since it booted"
 // authority does not check a plain acquire's digest. Or it changed root or
 // docker, which a box keeps from when it was made (keptRootDiffers): handed
 // out, it would have root where describe lists none, or none where it does.
+// Or it naps as a driver that did not seal naps started it (napsAnyway):
+// handed out, it would take no secrets where describe lists them. Or its
+// VM is held to other rates than the binding's (cloudhvRatesDiffer).
 func (d *drv) warmOffBinding(r record) string {
 	if r.Image != d.cfg.Image {
 		return warmOffPin
+	}
+	if why := cloudhvRatesDiffer(r.Config, d.cfg); why != "" {
+		return why
+	}
+	if r.State == stReady && napsAnyway(d.cfg, r) != nil { // a box still starting has no monitor to say so yet
+		return "it naps, and its monitor does not seal the memory a nap saves"
 	}
 	return keptRootDiffers(r.Config, d.cfg)
 }

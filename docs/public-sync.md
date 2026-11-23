@@ -82,6 +82,9 @@ then differ from the private tree and the next sync would undo the change.
 - Private vulnerability reporting on (`SECURITY.md`).
 - Branch protection on main: the `go` check required.
 - Environment `potluck-release`, deploying from main only, holding the secret `POTLUCK_RELEASE_KEY`.
+- Tag rulesets: "tags only from the release workflow" refuses creating, moving or deleting any tag but
+  `refs/tags/potluck-main-*` and `refs/tags/mcp-bundle-v*` (the MCP bundle's releases, `mcp-registry/README.md`);
+  "only project-identity commits" holds those tags to the project identity's commits.
 - Runners: `ci.yml`'s `go` job and `release.yml` run on a push to main on `vars.CI_ROUTE_LABEL` /
   `vars.RELEASE_RUNNER` or the Sengi label `sengi-standard-*`. Whichever runners serve them must accept this
   repository, or the required `go` check stays queued and no release is made. A self-hosted runner group serves it

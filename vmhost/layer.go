@@ -44,6 +44,23 @@ type vmLayer interface {
 	Destroy(vm string, runPID int)
 }
 
+// napper is a layer whose idle VMs nap and then hold none of the binding's
+// slots (cloudhv, cloudhv_awake.go). NapSlots is how many VMs the binding
+// holds beyond its slots, napping. Slot says what a record's VM holds, given
+// the binding the record was made under: up, it has a hypervisor process or
+// is being given one; gaveUp, it naps without one, and takes a slot back
+// before it wakes. Neither: the VM has no hypervisor process and gave no
+// slot up (it naps with its slot, its monitor is gone and it was not napping,
+// or it is no VM of this layer), and the record's state decides. WakeRefusal asks cmd, an Exec for vm not yet
+// started, to say out of band that nothing ran because the VM naps and was
+// not woken; once the command has ended, refused answers whether it said so
+// and, from what it wrote to stderr, why.
+type napper interface {
+	NapSlots() int
+	Slot(vm string, config map[string]string) (up, gaveUp bool)
+	WakeRefusal(vm string, cmd *exec.Cmd) (refused func(stderr string) (why string, ok bool))
+}
+
 // loginCloser is a layer whose images may keep a network login open (Tart:
 // tartCLI.CloseLogin). Its argv runs in each guest once the agent answers,
 // before a checkout, a job or the box's ready; when it fails the VM ends.

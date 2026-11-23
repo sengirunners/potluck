@@ -23,6 +23,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -150,20 +151,17 @@ func frameBoxSecrets(a protocol.BoxSecretsArgs) []byte {
 // boxSecretsServed says whether a box of this binding takes the secrets
 // verb: one whose image is a Linux guest's (a macOS guest has no memory
 // filesystem the driver can prove: it refuses, and describe does not list
-// the capability), on a binding that never writes a guest's memory to the
-// host's disk.
-func boxSecretsServed(c config, os string) bool { return noSecrets(c, os) == "" }
+// the capability).
+func boxSecretsServed(os string) bool { return noSecrets(os) == "" }
 
 // noSecrets is why a box of this binding takes no secrets; empty: it does.
-// Secrets are files in the guest's memory, and a binding that naps its VMs
-// (cloudhv.go) saves that memory to a file on the host, so it serves none:
-// the protocol's "never on a disk" covers the host's disk too.
-func noSecrets(c config, os string) string {
+// Secrets are files in the guest's memory. A binding that naps its VMs
+// (cloudhv.go) saves that memory, and the protocol's "never on a disk"
+// covers the host's disk too: a nap's saved memory reaches the disk sealed
+// only (cloudhv_seal.go), so such a binding serves secrets as any other.
+func noSecrets(os string) string {
 	if os != "linux" {
 		return "is a " + os + " guest, which has no memory filesystem for secrets"
-	}
-	if c.VM == "cloudhv" && c.CloudHV.NapIdleS > 0 {
-		return "is on a binding that naps its boxes (ch_nap_idle_s), and a nap saves the box's memory to the host's disk"
 	}
 	return ""
 }
@@ -172,7 +170,7 @@ func noSecrets(c config, os string) string {
 // whose binding lists no secrets capability (noSecrets): bad_request, as
 // the protocol says for secrets without the capability, before anything runs.
 func secretsListed(c config, r record, n int) error {
-	if why := noSecrets(c, r.OS); n > 0 && why != "" {
+	if why := noSecrets(r.OS); n > 0 && why != "" {
 		return refuse("bad_request", "%s %s: this binding lists no secrets capability", r.Handle, why)
 	}
 	if n > 0 {
@@ -181,15 +179,22 @@ func secretsListed(c config, r record, n int) error {
 	return nil
 }
 
-// napsAnyway refuses secrets for a box whose VM naps though the binding no
-// longer does: a VM keeps the nap setting it last booted with, so a box
-// started before ch_nap_idle_s was set to 0 still saves its memory to disk.
+// napsAnyway refuses secrets for a box whose VM naps without sealing the
+// memory it saves. A VM is napped by the monitor it was started with, and
+// only that monitor knows how: it says so in the VM's state file, which each
+// start begins anew. A VM that naps and whose monitor does not say it seals
+// (one started by a driver that saved naps in the clear) takes no secrets.
 func napsAnyway(c config, r record) error {
 	if c.VM != "cloudhv" {
 		return nil
 	}
-	if v, err := cloudhvLoad(filepath.Join(c.CloudHV.Dir, r.VM)); err == nil && v.NapIdleS > 0 {
-		return refuse("forbidden", "%s was started when its binding napped its boxes, and still naps (its memory is saved to the host's disk): it takes no secrets until it is started again", r.Handle)
+	dir := filepath.Join(c.CloudHV.Dir, r.VM)
+	if v, err := cloudhvLoad(dir); err != nil || v.NapIdleS <= 0 {
+		return nil
+	}
+	var st cloudhvState
+	if b, err := os.ReadFile(filepath.Join(dir, "state.json")); err != nil || json.Unmarshal(b, &st) != nil || !st.NapSealed {
+		return refuse("forbidden", "%s naps, and its monitor does not say that it seals the memory a nap saves (it was started by a driver that saved it to the host's disk in the clear): it takes no secrets until it is started again", r.Handle)
 	}
 	return nil
 }
@@ -204,7 +209,7 @@ func (d *drv) boxSecrets(handle string, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if why := noSecrets(d.cfg, r.OS); why != "" { // describe lists no box-secrets: the protocol's bad_request
+	if why := noSecrets(r.OS); why != "" { // describe lists no box-secrets: the protocol's bad_request
 		return nil, refuse("bad_request", "%s %s: this binding lists no box-secrets capability", r.Handle, why)
 	}
 	if err := napsAnyway(d.cfg, r); err != nil {
@@ -214,6 +219,7 @@ func (d *drv) boxSecrets(handle string, raw json.RawMessage) (any, error) {
 	var res protocol.BoxSecretsResult
 	err = flocked(filepath.Join(d.st.dir, "logs", r.ID+".secrets.lock"), func() error { // one call at a time per box: the 64 KiB check holds
 		cmd := d.vm.Exec(r.VM, bytes.NewReader(frameBoxSecrets(a)), &out, &errb, "perl", "-e", secretsProg, guestMem, guestMounts, guestSwaps)
+		wakeRefused := d.wakeRefusal(r, cmd)
 		ctx, cancel := context.WithTimeout(context.Background(), secretsLimit)
 		defer cancel()
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -224,6 +230,9 @@ func (d *drv) boxSecrets(handle string, raw json.RawMessage) (any, error) {
 		stop := context.AfterFunc(ctx, func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
 		defer stop()
 		_ = cmd.Wait()
+		if why, ok := wakeRefused(errb.String()); ok { // the box naps on: nothing ran in it
+			return napsOn(r, why)
+		}
 		// The guest's stderr is never quoted: an answer carries only these words.
 		switch code := cmd.ProcessState.ExitCode(); {
 		case ctx.Err() != nil:
@@ -283,6 +292,7 @@ exit 0;
 func (d *drv) secretsSafe(r record) error {
 	var out, errb capped
 	cmd := d.vm.Exec(r.VM, nil, &out, &errb, "perl", "-e", memCheckProg, guestMem, guestMounts, guestSwaps)
+	wakeRefused := d.wakeRefusal(r, cmd)
 	ctx, cancel := context.WithTimeout(context.Background(), secretsLimit)
 	defer cancel()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -293,6 +303,9 @@ func (d *drv) secretsSafe(r record) error {
 	stop := context.AfterFunc(ctx, func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
 	defer stop()
 	_ = cmd.Wait()
+	if why, ok := wakeRefused(errb.String()); ok { // the box naps on: nothing ran in it
+		return napsOn(r, why)
+	}
 	switch code := cmd.ProcessState.ExitCode(); {
 	case ctx.Err() != nil:
 		return refuse("unavailable", "secrets in %s: the guest did not answer in %s", r.Handle, secretsLimit)

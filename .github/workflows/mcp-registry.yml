@@ -1,0 +1,92 @@
+# Potluck in the Official MCP Registry (registry.modelcontextprotocol.io), by hand: run it from main after changing
+# mcp-registry/ (docs: mcp-registry/README.md). It builds potluck.mcpb, a small bundle whose launcher starts the
+# potluck already installed on the user's machine, attaches it to its own release (mcp-bundle-v<version>, a
+# prerelease never marked latest and never pruned, so install.sh, potluck upgrade and release.yml's pruning ignore
+# it; the public repository's tag ruleset must let this tag through: docs/public-sync.md), and publishes
+# mcp-registry/server.json with the bundle's SHA-256 under io.github.sengirunners/potluck, signing in with this
+# job's GitHub OIDC token (no secret). A version already released or published is left as it is; to change the
+# bundle or the entry, raise the version in both manifest.json and server.json.
+name: mcp-registry
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mcp-registry
+  cancel-in-progress: false
+jobs:
+  publish:
+    name: publish the MCP bundle and registry entry
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.repository == 'sengirunners/potluck'
+    permissions:
+      contents: write
+      id-token: write
+    timeout-minutes: 15
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.16
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: build the bundle
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mcp-registry/build.sh dist
+          v=$(jq -r .version mcp-registry/bundle/manifest.json)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=mcp-bundle-v$v" >> "$GITHUB_OUTPUT"
+      # The registry entry names the release's file by its hash, so a released bundle never changes: an existing
+      # release must hold the same bytes, or the version was not raised.
+      - name: release the bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.build.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release download "$TAG" --pattern potluck.mcpb --dir "$RUNNER_TEMP/released"
+            if ! cmp -s "$RUNNER_TEMP/released/potluck.mcpb" dist/potluck.mcpb; then
+              echo "::error::$TAG holds a different potluck.mcpb: raise the version in mcp-registry/bundle/manifest.json and mcp-registry/server.json"
+              exit 1
+            fi
+            echo "$TAG is released already with these bytes"
+          else
+            gh release create "$TAG" dist/potluck.mcpb --target "$GITHUB_SHA" --latest=false --prerelease \
+              --title "Potluck MCP bundle ${TAG#mcp-bundle-v}" \
+              --notes "MCP bundle for the Official MCP Registry. It starts the potluck installed on your machine (potluck mcp); install Potluck first: README."
+          fi
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: get mcp-publisher, checked with cosign
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=mcp-publisher_linux_amd64.tar.gz
+          base=https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "$base/$archive"
+          curl -fsSL -o "$RUNNER_TEMP/$archive.sigstore.json" "$base/$archive.sigstore.json"
+          cosign verify-blob --bundle "$RUNNER_TEMP/$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/$MCP_PUBLISHER_VERSION" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$RUNNER_TEMP/$archive"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" mcp-publisher
+      - name: publish to the registry
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          "$RUNNER_TEMP/mcp-publisher" validate server.json
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.sengirunners%2Fpotluck/versions/$VERSION")
+          if [[ "$code" == 200 ]]; then
+            echo "version $VERSION is in the registry already"; exit 0
+          fi
+          "$RUNNER_TEMP/mcp-publisher" login github-oidc
+          "$RUNNER_TEMP/mcp-publisher" publish server.json
+          curl -fsS "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.sengirunners%2Fpotluck/versions/$VERSION" >/dev/null
+          echo "published io.github.sengirunners/potluck $VERSION"

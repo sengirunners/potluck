@@ -47,7 +47,10 @@ func Main(argv []string) int {
 		return cloudhvMonitor(argv[1], argv[2])
 	}
 	if len(argv) >= 3 && argv[0] == flagCloudHVExec { // one command in a cloud-hypervisor guest
-		return cloudhvExec(argv[1], argv[2:])
+		return cloudhvExec(argv[1], argv[2:], cloudhvPipes)
+	}
+	if len(argv) >= 3 && argv[0] == flagCloudHVTTY { // the same, on a terminal
+		return cloudhvExec(argv[1], argv[2:], cloudhvOnTerminal)
 	}
 	if len(argv) > 0 && argv[0] == flagCloudHVNet { // cloudhv_net.go: the root helper
 		return cloudhvNetHelper(argv[1:])
@@ -108,9 +111,11 @@ func (d *drv) free(os string) (int, error) {
 // room counts the open slots for guests of os, and, when there are none,
 // why in words a refusal gives. Live records of this state directory hold
 // slots from clone to delete; for macOS, any other running macOS VM on the
-// host counts too (Apple's cap is per host). The binding's own host limits
-// and the lender's dials (lend.go) bound the cores and memory those records
-// hold together. Lock held.
+// host counts too (Apple's cap is per host). A VM that naps holds no slot
+// where the layer keeps nap slots for it (napper, layer.go): then the slots
+// bound the VMs awake, and slots and nap slots together every live one. The
+// binding's own host limits and the lender's dials (lend.go) bound the cores
+// and memory the live records hold together, napping or not. Lock held.
 func (d *drv) room(os string) (int, string, error) {
 	budget, err := d.requestedHostBudget()
 	if err != nil {
@@ -122,36 +127,38 @@ func (d *drv) room(os string) (int, string, error) {
 	}
 	cpuLimit, memLimit := lowest(d.cfg.HostCPULimit, lend.Cores), lowest(d.cfg.HostMemoryLimit, lend.MemoryMB)
 	usedCPU, usedMemory := 0, 0
-	used, ours := 0, map[string]bool{}
-	for _, r := range d.st.all() {
-		counts := r.live()
-		if !counts && r.HostBudget != nil {
-			name := hostParentName(d.st.dir, r.VM, r.Starts)
-			counts = !(&ownedHostParent{path: filepath.Join(hostCgroupRoot, "potluck.slice", name)}).empty()
-		}
-		if counts && (cpuLimit > 0 || memLimit > 0) {
-			b := r.HostBudget
-			if b == nil {
-				if ociKataRuntime(r.Config["oci_runtime"]) || r.Config["oci_host_profile"] != "" {
-					return 0, "", fmt.Errorf("a live bounded OCI run has no immutable host allocation")
-				}
-				cpu, _ := strconv.Atoi(r.Config["cpu"])
-				mem, _ := strconv.Atoi(r.Config["memory"])
-				b = &hostBudget{cpu, mem}
-			}
-			// A binding's own host limits need both; a dial only what it bounds.
-			bounded := d.cfg.HostCPULimit > 0 || d.cfg.HostMemoryLimit > 0
-			if (bounded || cpuLimit > 0) && b.CPU <= 0 || (bounded || memLimit > 0) && b.MemoryMiB <= 0 {
-				return 0, "", fmt.Errorf("a live run has no verified host allocation")
-			}
-			usedCPU += b.CPU
-			usedMemory += b.MemoryMiB
-		}
-		if counts && r.OS == os {
-			used++
-			ours[r.VM] = true
+	np, _ := d.vm.(napper)
+	if np != nil && np.NapSlots() <= 0 {
+		np = nil
+	}
+	rs := d.st.all()
+	if np != nil { // the count a napping box wakes by: here as there, a record that cannot be read refuses
+		if rs, err = d.st.readAll(); err != nil {
+			return 0, "", err
 		}
 	}
+	for _, r := range rs {
+		if !d.st.holdsSlot(r) || cpuLimit <= 0 && memLimit <= 0 {
+			continue
+		}
+		b := r.HostBudget
+		if b == nil {
+			if ociKataRuntime(r.Config["oci_runtime"]) || r.Config["oci_host_profile"] != "" {
+				return 0, "", fmt.Errorf("a live bounded OCI run has no immutable host allocation")
+			}
+			cpu, _ := strconv.Atoi(r.Config["cpu"])
+			mem, _ := strconv.Atoi(r.Config["memory"])
+			b = &hostBudget{cpu, mem}
+		}
+		// A binding's own host limits need both; a dial only what it bounds.
+		bounded := d.cfg.HostCPULimit > 0 || d.cfg.HostMemoryLimit > 0
+		if (bounded || cpuLimit > 0) && b.CPU <= 0 || (bounded || memLimit > 0) && b.MemoryMiB <= 0 {
+			return 0, "", fmt.Errorf("a live run has no verified host allocation")
+		}
+		usedCPU += b.CPU
+		usedMemory += b.MemoryMiB
+	}
+	used, awake, ours := d.st.slotUse(rs, np, os)
 	if os == "darwin" {
 		vs, err := d.vm.List()
 		if err != nil {
@@ -169,6 +176,12 @@ func (d *drv) room(os string) (int, string, error) {
 	why := ""
 	if free == 0 {
 		why = fmt.Sprintf("%s (%d in use)", protocol.NoFreeSlot(os), d.cfg.slots(os))
+	}
+	if np != nil {
+		free, why = max(0, min(d.cfg.slots(os)-awake, d.cfg.slots(os)+np.NapSlots()-used)), ""
+		if free == 0 {
+			why = fmt.Sprintf("%s (%d awake of %d at once, %d boxes of %d in all)", protocol.NoFreeSlot(os), awake, d.cfg.slots(os), used, d.cfg.slots(os)+np.NapSlots())
+		}
 	}
 	// Each limit in turn: the lender's dial names itself when it is the one
 	// that leaves no room.
@@ -201,6 +214,44 @@ func (d *drv) room(os string) (int, string, error) {
 		}
 	}
 	return free, why, nil
+}
+
+// holdsSlot says whether a record's guest still holds one of its host's
+// slots: the record is live, or its bounded host parent still has processes.
+func (s store) holdsSlot(r record) bool {
+	if r.live() || r.HostBudget == nil {
+		return r.live()
+	}
+	name := hostParentName(s.dir, r.VM, r.Starts)
+	return !(&ownedHostParent{path: filepath.Join(hostCgroupRoot, "potluck.slice", name)}).empty()
+}
+
+// slotUse counts the guests of os among rs, a state directory's records.
+// live: those that hold a slot or a nap slot (holdsSlot). awake: those that
+// hold a slot. Without np the two are the same. With it (a layer with nap
+// slots) a guest that gave its slot up for a nap is not awake, and one whose
+// hypervisor still runs after its record ended is. A guest still starting
+// holds its slot through a nap: the steps of its start are not to be refused.
+// vms names the live ones. Lock held.
+func (s store) slotUse(rs []record, np napper, os string) (live, awake int, vms map[string]bool) {
+	vms = map[string]bool{}
+	for _, r := range rs {
+		if r.OS != os {
+			continue
+		}
+		holds, up, gaveUp := s.holdsSlot(r), false, false
+		if np != nil {
+			up, gaveUp = np.Slot(r.VM, r.Config)
+		}
+		if holds {
+			live++
+			vms[r.VM] = true
+		}
+		if up || holds && (!gaveUp || r.State == stStarting) {
+			awake++
+		}
+	}
+	return live, awake, vms
 }
 
 // lowest is the stricter of two limits, where 0 is none.
@@ -239,7 +290,7 @@ func (d *drv) describe() map[string]any {
 		if d.persists() {
 			verbs = append(verbs, "stop", "start") // persist.go
 		}
-		if boxSecretsServed(d.cfg, os) {
+		if boxSecretsServed(os) {
 			verbs = append(verbs, "secrets") // secrets.go
 		}
 	}
@@ -280,7 +331,7 @@ func (d *drv) describe() map[string]any {
 	if d.cfg.Kind == "box" && d.cfg.JITRunnerDir != "" {
 		// jit_guard: the runner stops a job the broker would not serve
 		caps = append(caps, "github-jit", "github-jit-guard", protocol.CapJITGuardPrivate)
-		if boxSecretsServed(d.cfg, os) {
+		if boxSecretsServed(os) {
 			// jit_guard.run: the hook holds the job for the door's ready
 			// marker, a box secret, so only where box secrets are served.
 			caps = append(caps, protocol.CapJITGuardRun)
@@ -292,7 +343,7 @@ func (d *drv) describe() map[string]any {
 	if d.cfg.Kind == "box" {
 		caps = append(caps, "base64")             // exec's encoding (exec.go): every box serves it
 		caps = append(caps, protocol.CapHostLend) // room and the disk floor read the dials at every acquire (lend.go)
-		if boxSecretsServed(d.cfg, os) {
+		if boxSecretsServed(os) {
 			// exec's secrets and the secrets verb (exec.go, secrets.go): only
 			// where the guest has a memory filesystem to put them in.
 			caps = append(caps, "secrets", "box-secrets")
@@ -554,7 +605,9 @@ func (d *drv) renew(handle string, raw json.RawMessage) (any, error) {
 }
 
 // sweep ends what a dead supervisor left, deletes this state directory's VMs
-// no live record holds, and forgets old records. Lock held.
+// no live record holds, forgets old records, and sets aside a file an
+// unclean shutdown left in a record's place (setAsideTorn), for as long as
+// an ended record is kept. Lock held.
 func (d *drv) sweep() error {
 	// Fresh metadata requests also sweep before their first acquire. Establish
 	// the same verified local producer first; never mutate a selected context
@@ -570,7 +623,7 @@ func (d *drv) sweep() error {
 	}
 	held := map[string]bool{}
 	busy := map[string]bool{} // a VM whose supervisor runs: it may be making the box's cow copies still
-	for _, r := range d.st.all() {
+	for _, r := range d.st.scan(d.st.setAsideTorn) {
 		if alive(r.Supervisor) {
 			busy[r.VM] = true
 		}
@@ -614,6 +667,7 @@ func (d *drv) sweep() error {
 			d.st.endProcs(r.ID) // processes end with the box
 		}
 	}
+	d.st.sweepTorn()
 	d.sweepVolumes()     // volume.go
 	d.st.sweepProgress() // progress.go
 	vs, err := d.vm.List()

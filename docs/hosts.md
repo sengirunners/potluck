@@ -809,13 +809,13 @@ Network details for each layer are in `docs/network.md`. Adding a layer is in `d
 
 ### Background processes and terminals
 
-- One file serves Tart, Incus and OCI: a detached holder per process runs it through the layer's exec channel and
+- One file serves every layer: a detached holder per process runs it through the layer's exec channel and
   writes its output and exit to host files under the state directory (`boxproc`, shared with the reference driver).
   `output` reads those files without asking the guest, and `signal` is a short guest exec on the group id the guest
   wrapper wrote.
 - For a terminal the holder runs the command through the layer's terminal exec (`tart exec -i -t`, `docker exec -i
-  -t`, `incus exec --force-interactive`) on a host pseudo-terminal it owns, whose size the layer carries into the
-  guest.
+  -t`, `incus exec --force-interactive`, the cloud-hypervisor layer's own client) on a host pseudo-terminal it
+  owns, whose size the layer carries into the guest.
 - `input` hands the holder frames of at most 512 bytes (PIPE_BUF, so each is whole) through a FIFO in the process's
   directory.
 - A waiting `output` on a terminal looks for new bytes every 10 ms, any other every 50 ms.

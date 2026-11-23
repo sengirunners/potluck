@@ -100,16 +100,22 @@ type fakeGitHub struct {
 	// Re-runs (requeue_test.go): the runner a job runs on and how it ended, a
 	// run's status (default in_progress) and attempt (default 1), the re-runs
 	// asked ("job <id>", "run <id>"), and the repositories whose installation
-	// was not granted Actions: write.
-	runnerOf   map[int64]string
-	conclusion map[int64]string
-	jobRun     map[int64]int64
-	runStatus  map[int64]string
-	runEnd     map[int64]string // a completed run's conclusion (default failure)
-	attempt    map[int64]int
-	reruns     []string
-	noWrite    map[string]bool
-	noContents bool
+	// was not granted Actions: write. rerunRefused: GitHub refuses every
+	// re-run as already running (an attempt a person started just before),
+	// counting them in rerunAsks.
+	runnerOf     map[int64]string
+	conclusion   map[int64]string
+	jobRun       map[int64]int64
+	runStatus    map[int64]string
+	runEnd       map[int64]string // a completed run's conclusion (default failure)
+	attempt      map[int64]int
+	reruns       []string
+	staleRuns    int // run reads that still show the attempt before a re-run (GitHub lagging)
+	rerunExtra   int // attempts a re-run adds beyond its own (a person's re-run racing it)
+	rerunRefused bool
+	rerunAsks    int
+	noWrite      map[string]bool
+	noContents   bool
 	// Repositories (repos_test.go): those that are public (default: acme/site
 	// alone), each one's approval rule for outside contributors' runs
 	// (default all_external_contributors; "error" answers 403), and the
@@ -327,8 +333,13 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 				fmt.Fprint(w, raw)
 				return
 			}
+			shown := max(g.attempt[id], 1)
+			if shown > 1 && g.staleRuns > 0 {
+				g.staleRuns--
+				shown--
+			}
 			fmt.Fprintf(w, `{"id":%d,"event":%q,"status":%q,"conclusion":%q,"run_attempt":%d,"head_repository":%s,"repository":{"full_name":%q}}`,
-				id, ev, cmp.Or(g.runStatus[id], "in_progress"), concl, max(g.attempt[id], 1), headJSON, repo)
+				id, ev, cmp.Or(g.runStatus[id], "in_progress"), concl, shown, headJSON, repo)
 		case r.Method == "GET" && jobRe.MatchString(p):
 			var id int64
 			fmt.Sscan(jobRe.FindStringSubmatch(p)[1], &id)
@@ -349,13 +360,14 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 			if m[1] == "jobs" {
 				run = g.jobRun[id]
 			}
-			if g.runStatus[run] != "completed" {
+			g.rerunAsks++
+			if g.runStatus[run] != "completed" || g.rerunRefused {
 				w.WriteHeader(403)
 				fmt.Fprint(w, `{"message":"This workflow is already running"}`)
 				return
 			}
 			g.reruns = append(g.reruns, strings.TrimSuffix(m[1], "s")+" "+m[2])
-			g.runStatus[run], g.attempt[run] = "queued", max(g.attempt[run], 1)+1
+			g.runStatus[run], g.attempt[run] = "queued", max(g.attempt[run], 1)+1+g.rerunExtra
 			w.WriteHeader(201)
 			fmt.Fprint(w, `{}`)
 		case r.Method == "POST" && mintRe.MatchString(p):
@@ -505,6 +517,7 @@ type fixture struct {
 	cfg     *config.Config
 	tap     string                 // the box driver, as the run-target service runs it
 	before  func(*runners.Service) // applied to the broker before each start
+	wire    server.Wiring          // the daemon's modules
 	stop    func()                 // stops the running daemon
 	dm      *server.Daemon
 	svc     *runners.Service
@@ -578,6 +591,12 @@ func newPoolFixture(t *testing.T, conf func(*config.Runners), boxes ...computeap
 // just before it starts. The checker's loop ticks once an hour unless before
 // says otherwise: tests call Check.
 func newPoolFixtureStarting(t *testing.T, conf func(*config.Runners), before func(*runners.Service), boxes ...computeapi.RunTarget) *fixture {
+	return newPoolFixtureWired(t, conf, before, wiring.Compute, boxes...)
+}
+
+// newPoolFixtureWired is newPoolFixtureStarting with the daemon wired by
+// wire: a program built on Potluck (wiring.Compute plus modules of its own).
+func newPoolFixtureWired(t *testing.T, conf func(*config.Runners), before func(*runners.Service), wire server.Wiring, boxes ...computeapi.RunTarget) *fixture {
 	home, err := os.MkdirTemp("", "zm")
 	if err != nil {
 		t.Fatal(err)
@@ -635,7 +654,7 @@ tee -a %[1]q | exec %[2]q
 `, seen, ref, gate)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{gh: gh, home: home, seen: seen, gate: gate, state: state, cfg: cfg, tap: tap, before: before}
+	f := &fixture{gh: gh, home: home, seen: seen, gate: gate, state: state, cfg: cfg, tap: tap, before: before, wire: wire}
 	t.Cleanup(func() {
 		if f.stop != nil {
 			f.stop()
@@ -666,7 +685,7 @@ tee -a %[1]q | exec %[2]q
 // started (startBroker).
 func (f *fixture) startDaemon(t *testing.T) {
 	t.Helper()
-	dm, err := server.New(context.Background(), f.cfg, nil, wiring.Compute)
+	dm, err := server.New(context.Background(), f.cfg, nil, f.wire)
 	if err != nil {
 		t.Fatal(err)
 	}

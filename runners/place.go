@@ -18,6 +18,7 @@ import (
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/imagepins"
 	"github.com/sengirunners/potluck/kit/authz"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/placement"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget/rt"
@@ -36,61 +37,194 @@ var (
 type want struct{ size, os, image string }
 
 // labels reads a job's labels. ours: it names the pool's label (plain or
-// <label>:<size>); then w is the box it wants, or why says why the pool
-// cannot serve it. self-hosted and GitHub's OS and arch labels may come with
-// it, along with a published named-image label such as xcode. A job naming
-// no size gets default_size, else any size
+// <label>:<size>) or a label of runners.labels; then w is the box it wants,
+// or why says why the pool cannot serve it. self-hosted and GitHub's OS and
+// arch labels may come with it, along with a published named-image label
+// such as xcode. A job naming no size gets default_size, else any size
 // (the smallest box that fits); one naming no OS gets linux.
 func (s *Service) labels(labels []string) (w want, ours bool, why string) {
 	c := s.conf()
-	return parseLabels(labels, c.Label, c.Pool.DefaultSize)
+	return parseLabels(labels, labelRule{pool: c.Label, defaultSize: c.Pool.DefaultSize, mapped: c.Labels})
 }
 
-func parseLabels(labels []string, poolLabel, defaultSize string) (w want, ours bool, why string) {
-	label := strings.ToLower(poolLabel)
-	if label == "" {
+// labelRule is what of the pool's setup reads a job's labels.
+type labelRule struct {
+	pool, defaultSize string
+	mapped            map[string]config.RunnersLabel
+}
+
+// reserved: a mapped label never takes one of these; they keep their own
+// meaning (the pool's label, GitHub's labels, a published named image).
+func (r labelRule) reserved(ll string) bool {
+	label := strings.ToLower(r.pool)
+	return label != "" && (ll == label || strings.HasPrefix(ll, label+":")) ||
+		ll == "self-hosted" || slices.Contains(osLabels, ll) || slices.Contains(archLabels, ll) || imagepins.NamedImage(ll)
+}
+
+// mappedFor is every runners.labels entry whose label is ll without regard
+// to case (two keys can fold together), sorted by key.
+func (r labelRule) mappedFor(ll string) (keys []string, out []config.RunnersLabel) {
+	for k := range r.mapped {
+		if strings.ToLower(k) == ll {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		out = append(out, r.mapped[k])
+	}
+	return keys, out
+}
+
+// mappedProblem is why a runners.labels entry cannot be served, or "".
+func mappedProblem(m config.RunnersLabel) string {
+	switch {
+	case !sizeRe.MatchString(strings.ToLower(m.Size)):
+		return fmt.Sprintf("size %q is not a size name", m.Size)
+	case m.OS != "" && !slices.Contains(osLabels, strings.ToLower(m.OS)):
+		return fmt.Sprintf("os %q is not one of %s", m.OS, strings.Join(osLabels, ", "))
+	case m.Image != "" && !imagepins.NamedImage(strings.ToLower(m.Image)):
+		return fmt.Sprintf("image %q is not a published named image", m.Image)
+	}
+	return ""
+}
+
+// namesOS reports whether labels name an OS themselves: an OS label, or a
+// mapped label whose entry has one.
+func (r labelRule) namesOS(labels []string) bool {
+	for _, l := range labels {
+		ll := strings.ToLower(l)
+		if slices.Contains(osLabels, ll) {
+			return true
+		}
+		if r.reserved(ll) {
+			continue
+		}
+		if _, ms := r.mappedFor(ll); slices.ContainsFunc(ms, func(m config.RunnersLabel) bool { return m.OS != "" }) {
+			return true
+		}
+	}
+	return false
+}
+
+// labelMapNotices are what the pool's owner should know about
+// runners.labels, in plain words: keys the broker never reads as mapped
+// (they keep their own meaning, or no runs-on label can match them) and
+// entries it cannot serve (a job naming one is refused), including keys
+// that differ only in case and disagree.
+func labelMapNotices(c config.Runners) []string {
+	pool := c.Label
+	if pool == "" {
+		pool = c.Pool.Project
+	}
+	r := labelRule{pool: pool}
+	var out []string
+	for k, m := range c.Labels {
+		switch {
+		case k == "" || strings.TrimSpace(k) != k:
+			out = append(out, fmt.Sprintf("runners.labels %q in config.json does nothing: a runs-on label is never empty and has no spaces at its ends; fix the key", k))
+		case r.reserved(strings.ToLower(k)):
+			out = append(out, fmt.Sprintf("runners.labels %q in config.json does nothing: it is the pool's own label or one of GitHub's, which keep their meaning; delete it or rename it", k))
+		default:
+			if p := mappedProblem(m); p != "" {
+				out = append(out, fmt.Sprintf("runners.labels %q in config.json cannot be served (%s): a job naming it is refused; fix the entry", k, p))
+			}
+		}
+	}
+	// Keys that fold together: only those noticed nowhere above, compared as
+	// parseLabels reads them (lowercased).
+	folded := map[string][]string{}
+	for k, m := range c.Labels {
+		if k != "" && strings.TrimSpace(k) == k && !r.reserved(strings.ToLower(k)) && mappedProblem(m) == "" {
+			folded[strings.ToLower(k)] = append(folded[strings.ToLower(k)], k)
+		}
+	}
+	lower := func(m config.RunnersLabel) config.RunnersLabel {
+		return config.RunnersLabel{Size: strings.ToLower(m.Size), OS: strings.ToLower(m.OS), Image: strings.ToLower(m.Image)}
+	}
+	for _, keys := range folded {
+		slices.Sort(keys)
+		for _, k := range keys[1:] {
+			if lower(c.Labels[k]) != lower(c.Labels[keys[0]]) {
+				out = append(out, fmt.Sprintf("runners.labels %q in config.json cannot be served: labels match without regard to case, and %q and %q ask for different boxes; keep one", keys[0], keys[0], k))
+				break
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func parseLabels(labels []string, r labelRule) (w want, ours bool, why string) {
+	label := strings.ToLower(r.pool)
+	if label == "" && len(r.mapped) == 0 {
 		return want{}, false, ""
 	}
-	var other []string
+	var other, clash, bad []string
+	// from is which label set each of w's fields, and whether it was mapped:
+	// a mapped label that disagrees with another label is a clash.
+	type source struct {
+		label  string
+		mapped bool
+	}
+	from := map[string]source{}
+	set := func(field string, dst *string, v string, src source) {
+		switch {
+		case v == "":
+		case *dst == "":
+			*dst, from[field] = v, src
+		case *dst != v && (src.mapped || from[field].mapped):
+			clash = append(clash, fmt.Sprintf("%s asks %s %s, %s asks %s %s", from[field].label, field, *dst, src.label, field, v))
+		case *dst != v:
+			other = append(other, src.label)
+		}
+	}
 	for _, l := range labels {
 		ll := strings.ToLower(l)
 		switch {
-		case ll == label:
+		case label != "" && ll == label:
 			ours = true
-		case strings.HasPrefix(ll, label+":"):
+		case label != "" && strings.HasPrefix(ll, label+":"):
 			ours = true
-			if sz := ll[len(label)+1:]; w.size != "" && w.size != sz {
-				other = append(other, l)
-			} else {
-				w.size = sz
-			}
+			set("size", &w.size, ll[len(label)+1:], source{label: l})
 		case imagepins.NamedImage(ll):
-			if w.image != "" && w.image != ll {
-				other = append(other, l)
-			} else {
-				w.image = ll
-			}
+			set("image", &w.image, ll, source{label: l})
 		case ll == "self-hosted", slices.Contains(archLabels, ll): // arch: no box states one; the runner's own labels decide
 		case slices.Contains(osLabels, ll):
-			if w.os != "" && w.os != ll {
-				other = append(other, l)
-			} else {
-				w.os = ll
-			}
+			set("os", &w.os, ll, source{label: l})
 		default:
-			other = append(other, l)
+			keys, ms := r.mappedFor(ll)
+			if len(ms) == 0 {
+				other = append(other, l)
+				continue
+			}
+			ours = true
+			for i, m := range ms {
+				if p := mappedProblem(m); p != "" {
+					bad = append(bad, fmt.Sprintf("%s: %s", keys[i], p))
+					continue
+				}
+				src := source{label: keys[i], mapped: true}
+				set("size", &w.size, strings.ToLower(m.Size), src)
+				set("os", &w.os, strings.ToLower(m.OS), src)
+				set("image", &w.image, strings.ToLower(m.Image), src)
+			}
 		}
 	}
 	switch {
 	case !ours:
 		return want{}, false, ""
+	case len(bad) > 0:
+		return w, true, "runners.labels in config.json cannot be served: " + strings.Join(bad, "; ")
+	case len(clash) > 0:
+		return w, true, "its labels ask for different boxes: " + strings.Join(clash, "; ")
 	case len(other) > 0:
 		return w, true, "it asks for labels the pool does not serve: " + strings.Join(other, ", ")
 	case w.size != "" && !sizeRe.MatchString(w.size):
 		return w, true, fmt.Sprintf("no size %q in the pool", w.size)
 	}
 	if w.size == "" {
-		w.size = defaultSize
+		w.size = r.defaultSize
 	}
 	if w.os == "" {
 		w.os = "linux" // as GitHub's own runs-on: a job names macos or windows to get one

@@ -190,8 +190,9 @@ func (s *Service) doctorJob(ctx context.Context, repo, path string, data []byte,
 	}
 
 	// Check 9: a job naming no OS runs on linux, as on GitHub's runners
-	// (labels); that fails only when no machine could take it.
-	if why == "" && !slices.ContainsFunc(labels, func(l string) bool { return slices.Contains(osLabels, strings.ToLower(l)) }) {
+	// (labels); that fails only when no machine could take it. A mapped
+	// label that names an OS names it.
+	if c := s.conf(); why == "" && !(labelRule{pool: c.Label, mapped: c.Labels}).namesOS(labels) {
 		status := "warn"
 		if !placed {
 			status = "fail"

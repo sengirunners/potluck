@@ -165,7 +165,7 @@ func (d *drv) acquire(raw json.RawMessage) (any, error) {
 		if d.cfg.tartRoot() && os != tartRootOS { // oci_root.go parseTartRoot
 			return refuse("bad_request", "root=on is for macOS images on tart: %s is %s, whose root would hold NET_ADMIN and NET_RAW in the VM", image, os)
 		}
-		if guardRun != nil && !boxSecretsServed(d.cfg, os) { // describe lists no github-jit-guard-run
+		if guardRun != nil && !boxSecretsServed(os) { // describe lists no github-jit-guard-run
 			return refuse("bad_request", "a %s box cannot hold a job for its secrets: it serves no box secrets (no %s capability)", os, protocol.CapJITGuardRun)
 		}
 		wa := warmAcquire{image: image, jit: a.JITConfig != nil, persist: a.Persist, volumes: len(a.Volumes) > 0, net: a.Net, ref: a.Ref, cmt: a.Commit}

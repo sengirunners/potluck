@@ -1,6 +1,7 @@
 package runners
 
 import (
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -18,7 +19,8 @@ import (
 // (the Zm-Project header), not the machine's host=1 inventory: trust is
 // relative to the pool project.
 //
-// Explicit size aliases select one binding, just as in placement, while all
+// A mapped label that places a job on v is answered first; then explicit
+// size aliases, which select one binding, just as in placement, while all
 // fitness checks still apply. This tests the configured fallback runtime
 // plus startup allowance; a workflow may require a different budget.
 // This is a snapshot: recent refusals and competition from other boxes are
@@ -46,6 +48,21 @@ func RunsOn(v computeapi.RunTargetView, setup Setup) ([]string, bool, string) {
 		}
 	}
 	slices.Sort(aliases)
+	// A mapped label (Setup.Labels) is the owner's chosen name for a box:
+	// answer one that places a job here first, in key order. Its reasons do
+	// not replace the pool label's below, which name what the box lacks.
+	keys := slices.Sorted(maps.Keys(setup.Labels))
+	for _, key := range keys {
+		if setup.rule().reserved(strings.ToLower(key)) {
+			continue // keeps its own meaning: answered below, as the pool's label
+		}
+		labels := []string{key}
+		if w, ours, parseWhy := parseLabels(labels, setup.rule()); ours && parseWhy == "" {
+			if names, _ := bindingFits([]computeapi.RunTargetView{v}, setup.Sizes, w, nil, nil, setup.JobTTLS+startupAllowance); slices.Contains(names, v.Name) {
+				return labels, true, ""
+			}
+		}
+	}
 	var why string
 	// A plain pool label can place automatically even when the driver's
 	// named size is overridden to another binding and no default is set.
@@ -55,7 +72,7 @@ func RunsOn(v computeapi.RunTargetView, setup Setup) ([]string, bool, string) {
 			label += ":" + candidate
 		}
 		labels := []string{label, os}
-		w, ours, parseWhy := parseLabels(labels, setup.Label, setup.DefaultSize)
+		w, ours, parseWhy := parseLabels(labels, setup.rule())
 		if !ours || parseWhy != "" {
 			// Invalid driver sizes must still report automatic placement's reason.
 			_, why = fits([]computeapi.RunTargetView{v}, want{os: os}, nil, nil, setup.JobTTLS+startupAllowance)
@@ -86,7 +103,7 @@ func (s *Service) poolStatus(r *http.Request) (any, error) {
 		return nil, err
 	}
 	c := s.conf()
-	return Setup{Pool: c.Pool.Project, Label: c.Label, JobTTLS: s.jobTTL(), Sizes: c.Pool.Sizes, DefaultSize: c.Pool.DefaultSize}, nil
+	return Setup{Pool: c.Pool.Project, Label: c.Label, Labels: c.Labels, JobTTLS: s.jobTTL(), Sizes: c.Pool.Sizes, DefaultSize: c.Pool.DefaultSize}, nil
 }
 
 // readablePool hides broker configuration and lookup errors from callers

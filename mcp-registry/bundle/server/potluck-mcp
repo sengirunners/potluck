@@ -1,0 +1,26 @@
+#!/bin/sh
+# Starts the Potluck installed on this machine as an MCP server on standard input and output. The bundle carries
+# no potluck of its own, so the server always matches the daemon it talks to. Nothing but MCP traffic may reach
+# standard output: messages go to standard error.
+set -eu
+# A client that does not fill a user setting in may pass it on as "${user_config...}" or "undefined": unset.
+unset_if_placeholder() {
+	case "$1" in '${'*'}' | undefined | null) echo "" ;; *) echo "$1" ;; esac
+}
+bin=$(unset_if_placeholder "${POTLUCK_BIN:-}")
+pool=$(unset_if_placeholder "${POTLUCK_MCP_POOL:-}")
+if [ -z "$bin" ]; then
+	if command -v potluck >/dev/null 2>&1; then
+		bin=$(command -v potluck)
+	elif [ -x "$HOME/.local/bin/potluck" ]; then
+		bin=$HOME/.local/bin/potluck
+	else
+		echo "potluck is not installed. Install it: curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh" >&2
+		echo "Then make a pool and share a machine with it (potluck try). Docs: https://potluck.sh" >&2
+		exit 1
+	fi
+fi
+if [ -n "$pool" ]; then
+	exec "$bin" --pool "$pool" mcp
+fi
+exec "$bin" mcp

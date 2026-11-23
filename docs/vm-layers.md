@@ -91,6 +91,7 @@ it is missing:
 | `layerConfig` | the layer reads and checks its own `vm=<name>` config keys | `vmhost/layer.go` |
 | `loginCloser` | argv run in each guest before anything else, to close a login the image keeps open | `vmhost/layer.go` |
 | `ttyLayer` | terminals (`input` verb) | `vmhost/pty.go` |
+| `rawTTYLayer` | a `ttyLayer` whose exec only carries bytes to a terminal in the guest: the host terminal is raw before it starts | `vmhost/pty.go` |
 | `keeper` | kept disks (`persist`, `stop` and `start`) | `vmhost/persist.go` |
 | `volumer` | named volumes | `vmhost/volume.go` |
 | `diskDir` | the directory the persist free-space floor measures | `vmhost/persist.go` |

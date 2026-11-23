@@ -56,7 +56,7 @@ const askTimeout = 10 * time.Second
 
 // termRoutes are the term's routes on a serving daemon.
 func (dm *Daemon) termRoutes(r *core.Router) {
-	r.HandleFunc("GET "+termPath, core.Public, "none: this home's state and epoch, the key the caller reached it by, and the home it took over from", dm.term)
+	r.HandleFunc("GET "+termPath, core.Public, "none: this home's state and epoch, the key the caller reached it by, the home it took over from, and the home it named to serve after it", dm.term)
 	r.HandleFunc("POST "+freezePath, core.Local, "local; refused during another caller's swap and while managed sessions would end; the daemon stops after, and parks from its next start", dm.freeze)
 }
 
@@ -194,6 +194,9 @@ func (dm *Daemon) termAnswer(ctx context.Context, t hometerm.Term) api.Authority
 	}
 	if p := t.Predecessor; p != nil {
 		a.Predecessor = &api.HomeKey{Via: p.Via, Fingerprint: p.Fingerprint}
+	}
+	if s := t.Successor; s != nil { // its key only: the address is for this machine's owner (parkedErr)
+		a.Successor = &api.HomeKey{Via: s.Via, Fingerprint: s.Fingerprint}
 	}
 	return a
 }

@@ -2,8 +2,9 @@ package vmhost
 
 // A box's terminals (SPEC 20 "Boxes", terminals; zm-eakh.12.5.21): a
 // process spawned with pty runs through the layer's own terminal exec
-// (docker exec -it, incus exec --force-interactive, tart exec -i -t) whose
-// host side is a pseudo-terminal the holder owns (boxproc); the layer
+// (docker exec -it, incus exec --force-interactive, tart exec -i -t, the
+// cloud-hypervisor layer's own client, cloudhv_tty.go) whose host side is
+// a pseudo-terminal the holder owns (boxproc); the layer
 // carries its size into the guest, so a resize on the host side reaches the
 // guest. input writes to it and resizes it. No ssh key, port or credential:
 // it is the exec channel, as exec's is.
@@ -25,6 +26,15 @@ import (
 // terminal the caller attaches as stdin, stdout and stderr (left unset).
 type ttyLayer interface {
 	ExecTTY(vm string, argv ...string) *exec.Cmd
+}
+
+// rawTTYLayer is a ttyLayer whose terminal exec does nothing to the host
+// terminal but carry its bytes and its size: the holder makes that terminal
+// raw before the exec starts, so the guest's terminal is the only one that
+// echoes, edits a line or reads a Ctrl-C, in what is typed first too.
+type rawTTYLayer interface {
+	ttyLayer
+	rawTTY()
 }
 
 func (t tartCLI) ExecTTY(vm string, argv ...string) *exec.Cmd {
@@ -88,7 +98,8 @@ func holdPTY(pd boxproc.Dir, r record, cfg config, spec boxproc.Spec, pid string
 			return nil, fmt.Errorf("the %s layer gives no terminal", cfg.VM)
 		}
 		cmd := tl.ExecTTY(r.VM, ttyWrapped(r, spec.Cwd, ".zm-proc-"+pid, spec.PTY.Term, spec.Argv)...)
-		wait, err := boxproc.StartPTY(pd, cmd, *spec.PTY, spec.Stdin, stdout, nil)
+		_, raw := l.(rawTTYLayer)
+		wait, err := boxproc.StartPTY(pd, cmd, *spec.PTY, raw, spec.Stdin, stdout, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +110,7 @@ func holdPTY(pd boxproc.Dir, r record, cfg config, spec boxproc.Spec, pid string
 				t := time.AfterFunc(time.Duration(limit)*time.Second, func() {
 					late.Store(true)
 					// The guest command first (the layer's exec may leave it running), then the exec.
-					_ = l.Exec(r.VM, nil, io.Discard, io.Discard, "sh", "-c", signalProg, "sh", ".zm-proc-"+pid, "KILL").Run()
+					signalIn(l, r.VM, pid, "KILL")
 					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 				})
 				defer t.Stop()

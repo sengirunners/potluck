@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/sengirunners/potluck/boxproc"
+	"github.com/sengirunners/potluck/protocol"
 )
 
 // SPEC 20's exec limits.
@@ -260,6 +262,7 @@ func (d *drv) exec(handle string, raw json.RawMessage) (any, error) {
 	}
 	var out, errb capped
 	cmd := d.vm.Exec(r.VM, stdin, &out, &errb, wrapped(r, a.cwd, timeout, len(secrets) > 0, "", a.argv)...)
+	wakeRefused := d.wakeRefusal(r, cmd)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second+execHostMargin)
 	defer cancel()
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -283,6 +286,14 @@ func (d *drv) exec(handle string, raw json.RawMessage) (any, error) {
 		if err := guestRefusal(r, errb.String()); err != nil {
 			return nil, err
 		}
+	}
+	// Nothing ran: the box naps, and was not woken (no slot for it, or its
+	// host could not count its slots). A box whose supervisor died holds its
+	// slot until a sweep, which exec skips (dispatch.go): the refusal sweeps,
+	// for the caller's next try.
+	if why, ok := wakeRefused(errb.String()); ok {
+		_ = d.st.locked(d.sweep)
+		return nil, napsOn(r, why)
 	}
 	now, lerr := d.st.load(r.ID)
 	// A command the VM layer could not finish (125 and up: its CLI's own
@@ -365,4 +376,20 @@ func frameSecrets(m map[string]string) []byte {
 		b.WriteString(m[k])
 	}
 	return b.Bytes()
+}
+
+// wakeRefusal asks cmd, a command for r's box not yet started, to say out of
+// band that nothing ran because the box naps and was not woken (napper's
+// WakeRefusal). On a layer whose boxes do not nap the answer is never.
+func (d *drv) wakeRefusal(r record, cmd *exec.Cmd) (refused func(stderr string) (why string, ok bool)) {
+	if np, ok := d.vm.(napper); ok {
+		return np.WakeRefusal(r.VM, cmd)
+	}
+	return func(string) (string, bool) { return "", false }
+}
+
+// napsOn is the answer to a command that did not run because r's box naps
+// and was not woken, for the reason why.
+func napsOn(r record, why string) error {
+	return refuse("unavailable", "%s: %s naps and was not woken (%s): nothing ran; ask again", protocol.NoFreeSlot(r.OS), r.Handle, why)
 }

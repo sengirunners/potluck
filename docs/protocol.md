@@ -207,14 +207,14 @@ Every verb answers `not_implemented` when the driver does not serve it. Every ve
 | `progress` | `bad_request`: no `request_id`. `not_found`: a `request_id` this binding never received (an acquire refused before it began may answer this too). |
 | `cancel` | `bad_request`: no `request_id`. Never `not_found`: see [Acquire progress and cancel](#acquire-progress-and-cancel). |
 | `renew` | `bad_request`: past the lifetime cap. `conflict`: a stopped box. |
-| `exec` | `bad_request`: `argv` not a non-empty array; `timeout_s` past 600; `secrets` or `encoding` without the capability; a bad secret name or size. `conflict`: the box is not `ready`, or is past `expires_at`. |
-| `spawn` | as `exec`; also `conflict` with 32 processes running, `bad_request` for `pty` without capability `pty` or `pty` with `secrets` |
+| `exec` | `bad_request`: `argv` not a non-empty array; `timeout_s` past 600; `secrets` or `encoding` without the capability; a bad secret name or size. `conflict`: the box is not `ready`, or is past `expires_at`. `unavailable`: the box naps and was not woken, because its host has no slot to wake it in now, could not count its slots, or had no room in memory for what the nap saved (a layer that naps its boxes, `docs/cloudhv.md`): nothing ran, the box is as it was, and the caller may ask again. |
+| `spawn` | as `exec`, but for its `unavailable`: a `spawn` without `secrets` for a napping box that was not woken answers its `pid`, and the process ends with exit 255 and the reason in its output; with `secrets` it answers `unavailable` as `exec` does, and no process is made. Also `conflict` with 32 processes running, `bad_request` for `pty` without capability `pty` or `pty` with `secrets` |
 | `output` | `not_found`: unknown `pid`. `bad_request`: an offset past what was written. |
 | `signal` | `not_found`: unknown `pid` |
 | `input` | `not_found`: unknown `pid`. `bad_request`: a process without a terminal. |
 | `stop` | `bad_request`: a box acquired without `persist` |
 | `start` | `unavailable`: no free slot, the reclaim policy says no, too little free disk. `conflict`: the binding's `root` or `docker` changed since the box was made. |
-| `secrets` | `bad_request`: neither `secrets` nor `unset`; a bad name; a name in both; more than 64 KiB in the call, or held by the box after it; more than 256 names unset. `conflict`: the box is not `ready`, or is past `expires_at`. `forbidden`: the guest has no memory filesystem, swaps to a disk, or something not a private directory of the box's user is at the directory's path. |
+| `secrets` | `bad_request`: neither `secrets` nor `unset`; a bad name; a name in both; more than 64 KiB in the call, or held by the box after it; more than 256 names unset. `conflict`: the box is not `ready`, or is past `expires_at`. `forbidden`: the guest has no memory filesystem, swaps to a disk, something not a private directory of the box's user is at the directory's path, or the box naps and its memory is not saved encrypted (`docs/cloudhv.md`). `unavailable`: the box naps and was not woken, as for `exec`: nothing was set, and the caller may ask again. |
 
 ### describe
 

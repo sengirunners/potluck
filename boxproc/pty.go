@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"golang.org/x/term"
 )
 
 // SPEC 20's limits on terminals.
@@ -195,10 +196,13 @@ func Input(d Dir, a InputArgs, data []byte) (map[string]any, error) {
 
 // StartPTY starts cmd on a new terminal of p's size (a new session, the
 // terminal its controlling one unless attrs says otherwise), its output to
-// out, input from the process's FIFO and stdin written first. wait answers
-// once the process ended and its output was read (up to drainAfter more:
-// something it left may hold the terminal).
-func StartPTY(d Dir, cmd *exec.Cmd, p PTY, stdin []byte, out io.Writer, attrs *syscall.SysProcAttr) (wait func() error, err error) {
+// out, input from the process's FIFO and stdin written first. With raw the
+// terminal is raw before cmd starts: for a cmd that only carries the bytes
+// to a terminal of its own somewhere else, so that this one echoes nothing,
+// edits no line and reads no Ctrl-C, not even in what is typed first. wait
+// answers once the process ended and its output was read (up to drainAfter
+// more: something it left may hold the terminal).
+func StartPTY(d Dir, cmd *exec.Cmd, p PTY, raw bool, stdin []byte, out io.Writer, attrs *syscall.SysProcAttr) (wait func() error, err error) {
 	_ = os.Remove(fifoPath(d))
 	if err := syscall.Mkfifo(fifoPath(d), 0o600); err != nil {
 		return nil, err
@@ -210,8 +214,7 @@ func StartPTY(d Dir, cmd *exec.Cmd, p PTY, stdin []byte, out io.Writer, attrs *s
 	if attrs == nil {
 		attrs = &syscall.SysProcAttr{Setsid: true, Setctty: true}
 	}
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
-	master, err := pty.StartWithAttrs(cmd, &pty.Winsize{Rows: uint16(p.Rows), Cols: uint16(p.Cols)}, attrs)
+	master, err := startOn(cmd, p, raw, attrs)
 	if err != nil {
 		in.Close()
 		_ = os.Remove(fifoPath(d))
@@ -236,6 +239,29 @@ func StartPTY(d Dir, cmd *exec.Cmd, p PTY, stdin []byte, out io.Writer, attrs *s
 		in.Close()
 		return err
 	}, nil
+}
+
+// startOn starts cmd on a new terminal and answers the terminal's host side.
+func startOn(cmd *exec.Cmd, p PTY, raw bool, attrs *syscall.SysProcAttr) (*os.File, error) {
+	master, tty, err := pty.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer tty.Close()
+	err = pty.Setsize(master, &pty.Winsize{Rows: uint16(p.Rows), Cols: uint16(p.Cols)})
+	if err == nil && raw {
+		_, err = term.MakeRaw(int(tty.Fd()))
+	}
+	if err == nil {
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+		cmd.SysProcAttr = attrs
+		err = cmd.Start()
+	}
+	if err != nil {
+		master.Close()
+		return nil, err
+	}
+	return master, nil
 }
 
 // serveInput applies the FIFO's frames to the terminal until in closes.

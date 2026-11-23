@@ -5,76 +5,8 @@ import (
 	"time"
 )
 
-// Round C of SPEC 17 (17.6): a team replica's copy, its sync and its outbox.
-
-// Snapshot line kinds (GET /v0/sync/snapshot, NDJSON).
-const (
-	SnapEnd   = "end"   // the last line: Cursor and Now
-	SnapError = "error" // the stream failed (Data: ErrorResponse); no end follows
-)
-
-// SnapshotLine is one line of GET /v0/sync/snapshot. A stream without its
-// end line is incomplete and must be discarded.
-type SnapshotLine struct {
-	Kind   string          `json:"kind"`
-	Data   json.RawMessage `json:"data,omitempty"`
-	Cursor string          `json:"cursor,omitempty"`
-	Now    *time.Time      `json:"now,omitempty"`
-	// Generation (end line) is the home's restore generation, "" when it
-	// was never restored. A replica keeps it with the copy and sends it
-	// back as GET /v0/sync's gen= (SPEC 17.6 "Resync").
-	Generation string `json:"generation,omitempty"`
-}
-
-// QueuedWrite is one write from a replica's outbox. The authority runs it as
-// Method Path with Body, Zm-As As and Zm-Write-Id ID, in the order given,
-// and records its answer under (identity, ID), so a replay answers the
-// recorded result instead of running it again.
-type QueuedWrite struct {
-	ID     string          `json:"id"` // a ULID the replica minted
-	Method string          `json:"method"`
-	Path   string          `json:"path"` // /v0/work..., /v0/leases..., /v0/mail...
-	Body   json.RawMessage `json:"body,omitempty"`
-	As     string          `json:"as,omitempty"`
-	// Item is the work item or lease key the write touches (its base and
-	// what it left behind are read for it).
-	Item string `json:"item,omitempty"`
-	// Base, on a field write (status), is a change id for Item the replica
-	// had seen: the write is refused (conflict) when the field changed at
-	// the authority after it.
-	Base string `json:"base,omitempty"`
-}
-
-// WritesRequest is POST /v0/team/writes.
-type WritesRequest struct {
-	Project string        `json:"project"`
-	Writes  []QueuedWrite `json:"writes"`
-}
-
-// WriteResult is one write's answer: the HTTP status and body the route
-// gave (an ErrorResponse when not 2xx). Seen is the newest change id about
-// Item once it ran (the replica's copy has caught up with the write when its
-// row reaches it). Replayed: the recorded answer of an earlier run.
-type WriteResult struct {
-	ID       string          `json:"id"`
-	Status   int             `json:"status"`
-	Body     json.RawMessage `json:"body"`
-	Seen     string          `json:"seen,omitempty"`
-	Replayed bool            `json:"replayed,omitempty"`
-	// StatusSeen is the id of the status_changed event the write minted (a
-	// status write, or a claim that moved the item to claimed): a later
-	// queued status write of the item may take it as its base. Other writes'
-	// events never raise a base (they would hide another writer's status
-	// change the replica never saw).
-	StatusSeen string `json:"status_seen,omitempty"`
-}
-
-// WritesResponse answers the writes that ran, in order. Stopped says why the
-// rest did not (the authority could not run one now: retry from it, in order).
-type WritesResponse struct {
-	Results []WriteResult `json:"results"`
-	Stopped string        `json:"stopped,omitempty"`
-}
+// Round C of SPEC 17 (17.6): a team replica's copy and its outbox, as a
+// member's daemon and its clients see them.
 
 // Outbox entry states on a replica.
 const (
@@ -138,20 +70,4 @@ type WriteCancelResponse struct {
 const (
 	WriteCancelled = "cancelled"
 	WriteRan       = "ran"
-)
-
-// NoQueueData is the data of a 503 for a no-queue write (Zm-No-Queue) that
-// got no answer. Outcome: "not_sent" (the authority was unreachable, nothing
-// went out), "cancelled" (it went out, got no answer, and the authority
-// confirmed it never ran) or "unknown" (no answer and no confirmation: it may
-// have applied; zm project team cancel <write> settles it).
-type NoQueueData struct {
-	Write   string `json:"write,omitempty"`
-	Outcome string `json:"outcome"`
-}
-
-const (
-	OutcomeNotSent   = "not_sent"
-	OutcomeCancelled = "cancelled"
-	OutcomeUnknown   = "unknown"
 )

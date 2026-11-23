@@ -130,6 +130,13 @@ func (r record) cutAt() time.Time {
 
 // guestSync flushes the guest's writes to its disk before a power-off.
 func guestSync(l vmLayer, vm string) {
+	// A box that gave its slot up for a nap is not woken for it: its guest
+	// synced before it napped, and no command has run in it since.
+	if np, ok := l.(napper); ok {
+		if _, gaveUp := np.Slot(vm, nil); gaveUp {
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), syncFor)
 	defer cancel()
 	cmd := l.Exec(vm, nil, io.Discard, io.Discard, "sync")

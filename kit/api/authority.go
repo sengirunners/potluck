@@ -250,7 +250,7 @@ type StandbyCopy struct {
 
 // AuthorityTerm is GET /v0/authority/term, answered by every daemon, parked
 // or not, to anyone: its state and epoch, the key the caller reached it by,
-// and the home it took over from.
+// the home it took over from, and the home it named to serve after it.
 type AuthorityTerm struct {
 	State string `json:"state"` // HQServing, HQFrozen, HQFenced or HQStandby
 	Epoch uint64 `json:"epoch"`
@@ -263,8 +263,16 @@ type AuthorityTerm struct {
 	// this one its successor fences itself only when it is named here
 	// (kit/server), so a successor that serves someone else's data at a
 	// higher epoch fences nothing.
-	Predecessor *HomeKey     `json:"predecessor,omitempty"`
-	Standby     *StandbyCopy `json:"standby,omitempty"` // on a standby only
+	Predecessor *HomeKey `json:"predecessor,omitempty"`
+	// Successor is the key of the home this one named to serve after it;
+	// left out when it names none (a standby never does). A fenced home
+	// always names the one it fenced for, so a standby that waits for the
+	// old home to fence (a forced takeover) can tell whether the fence is
+	// its own; a fenced answer without it is an older Potluck's and says
+	// nothing about whom it fenced for. A serving or frozen home names the
+	// standby it would move to.
+	Successor *HomeKey     `json:"successor,omitempty"`
+	Standby   *StandbyCopy `json:"standby,omitempty"` // on a standby only
 }
 
 // HomeKey is a home's key as another home pinned it: the transport and the

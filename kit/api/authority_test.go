@@ -138,6 +138,9 @@ func TestAuthorityTermWire(t *testing.T) {
 	marshalIs(t, AuthorityTerm{State: HQFrozen, Epoch: 2}, `{"state":"frozen","epoch":2}`)
 	marshalIs(t, AuthorityTerm{State: HQServing, Epoch: 3, Predecessor: &HomeKey{Via: "tunnel", Fingerprint: "old"}},
 		`{"state":"serving","epoch":3,"predecessor":{"via":"tunnel","fingerprint":"old"}}`)
+	// A fenced home names the key it fenced for; the term carries no address.
+	marshalIs(t, AuthorityTerm{State: HQFenced, Epoch: 5, Predecessor: &HomeKey{Via: "tunnel", Fingerprint: "old"}, Successor: &HomeKey{Via: "tailnet", Fingerprint: "next"}},
+		`{"state":"fenced","epoch":5,"predecessor":{"via":"tunnel","fingerprint":"old"},"successor":{"via":"tailnet","fingerprint":"next"}}`)
 }
 
 func TestCandidatesWire(t *testing.T) {

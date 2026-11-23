@@ -233,7 +233,11 @@ func (s *Service) confirm(w http.ResponseWriter, r *http.Request) {
 	}
 	l, err := s.doLink(ctx, p)
 	if err != nil {
-		page(w, http.StatusConflict, "Not linked", err.Error())
+		msg := err.Error()
+		if ae := (*api.Error)(nil); errors.As(err, &ae) {
+			msg = ae.Message // a person's page: the words, not the API's code
+		}
+		page(w, http.StatusConflict, "Not linked", msg)
 		return
 	}
 	page(w, http.StatusOK, "Linked", fmt.Sprintf("GitHub %s %s now runs its pool jobs in %s's pool, area %q. You can close this tab.",
@@ -276,7 +280,25 @@ func (s *Service) userToken(ctx context.Context, code string) (string, error) {
 	return out.Token, nil
 }
 
-// doLink records the link and mints zm-runners' token for the area.
+// linkable reads installation as the App and answers it if it may be
+// linked: this App's (not_found otherwise), of an account runners.accounts
+// allows (forbidden otherwise).
+func (s *Service) linkable(ctx context.Context, cl *ghapp.Client, installation int64) (ghapp.Installation, error) {
+	in, err := cl.Installation(ctx, installation)
+	if ghapp.NotFound(err) {
+		return in, api.Errorf(api.CodeNotFound, "installation %d is not one of this App's", installation)
+	}
+	if err != nil {
+		return in, err
+	}
+	if why := s.accountRefused(in.Account); why != "" {
+		return in, api.Errorf(api.CodeForbidden, "%s", why)
+	}
+	return in, nil
+}
+
+// doLink records the link and mints zm-runners' token for the area: the
+// link page's confirm and an embedding program's LinkVerified.
 func (s *Service) doLink(ctx context.Context, p pending) (link, error) {
 	pool, err := s.pool()
 	if err != nil {
@@ -286,12 +308,9 @@ func (s *Service) doLink(ctx context.Context, p pending) (link, error) {
 	if err != nil {
 		return link{}, err
 	}
-	in, err := cl.Installation(ctx, p.installation)
+	in, err := s.linkable(ctx, cl, p.installation)
 	if err != nil {
 		return link{}, err
-	}
-	if why := s.accountRefused(in.Account); why != "" {
-		return link{}, errors.New(why)
 	}
 	s.linkMu.Lock() // one link change at a time: the check, grant, insert and revoke below
 	defer s.linkMu.Unlock()
@@ -300,7 +319,7 @@ func (s *Service) doLink(ctx context.Context, p pending) (link, error) {
 		return link{}, oerr
 	}
 	if oerr == nil && old.Area != p.area && (!p.mayReplace || old.Area != p.replaces) {
-		return link{}, fmt.Errorf("installation %d was linked to another area meanwhile; ask again", p.installation)
+		return link{}, api.Errorf(api.CodeConflict, "installation %d was linked to another area meanwhile; ask again", p.installation)
 	}
 	sys := s.d.System()
 	if _, err := s.d.Projects.Grant(ctx, sys, api.GrantRequest{Identity: Identity, Role: api.RoleMember, Project: pool.ID, Area: p.area}); err != nil {
@@ -313,10 +332,11 @@ func (s *Service) doLink(ctx context.Context, p pending) (link, error) {
 	}
 	// Only the token's id is kept: the broker acts as its subject
 	// (core.Deps.SubscriptionSubject), so its secret is never needed or stored.
-	l := link{Link: Link{Installation: p.installation, Account: in.Account, AccountType: in.AccountType, Area: p.area, LinkedBy: p.by},
-		project: pool.ID, tokenID: tok.Token.ID}
+	created := s.now().Unix()
+	l := link{Link: Link{Installation: p.installation, Account: in.Account, AccountType: in.AccountType, Area: p.area, LinkedBy: p.by,
+		Created: time.Unix(created, 0).UTC().Format(time.RFC3339)}, project: pool.ID, tokenID: tok.Token.ID}
 	if _, err := s.db().ExecContext(ctx, `INSERT OR REPLACE INTO runners_links (installation, account, account_type, project, area, linked_by, token_id, created)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, l.Installation, l.Account, l.AccountType, l.project, l.Area, l.LinkedBy, l.tokenID, s.now().Unix()); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, l.Installation, l.Account, l.AccountType, l.project, l.Area, l.LinkedBy, l.tokenID, created); err != nil {
 		_, _ = s.d.Projects.RevokeToken(ctx, tok.Token.ID)
 		return link{}, err
 	}

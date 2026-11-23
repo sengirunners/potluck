@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeCloudHV(os.Args[1:])) // cloudhv_test.go: the tests' hypervisor
 	}
 	cloudhvTestStubs() // no test, and no monitor a test starts, runs the root helper
-	if len(os.Args) >= 4 && (os.Args[1] == flagCloudHVVM || os.Args[1] == flagCloudHVExec) {
+	if len(os.Args) >= 4 && (os.Args[1] == flagCloudHVVM || os.Args[1] == flagCloudHVExec || os.Args[1] == flagCloudHVTTY) {
 		os.Exit(Main(os.Args[1:]))
 	}
 	// Test sockets are served by this test process, never a real dockerd.
@@ -44,6 +44,9 @@ func TestMain(m *testing.M) {
 	if hostOverridePath = os.Getenv(envHostOverride); hostOverridePath == "" {
 		hostOverridePath = filepath.Join(os.TempDir(), fmt.Sprintf("vmhost-test-%d", os.Getpid()), "host-override.json") // none: auto
 		os.Setenv(envHostOverride, hostOverridePath)
+	}
+	if d, err := time.ParseDuration(os.Getenv(envSignalWait)); err == nil { // a holder a test starts (pty_test.go)
+		signalWait = d
 	}
 	if len(os.Args) == 4 && (os.Args[1] == flagSupervise || os.Args[1] == flagHold || os.Args[1] == flagMeasure) {
 		os.Exit(Main(os.Args[1:]))
@@ -215,6 +218,29 @@ func (l dirLayer) Boot(vm string, _ bool, log io.Writer) (*exec.Cmd, io.WriteClo
 
 func isFile(p string) bool { _, err := os.Stat(p); return err == nil }
 
+// fakeNapSlots, a file beside the fake VMs, holds the fake layer's nap slots
+// (napper). A fake VM naps while its directory has a file "napping", and
+// with a file "wake-refused" too its Exec runs nothing and says what
+// cloudhv's refused wake says.
+const fakeNapSlots = "fake-nap-slots"
+
+func (l dirLayer) NapSlots() int {
+	b, _ := os.ReadFile(filepath.Join(filepath.Dir(l.root), fakeNapSlots))
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return n
+}
+
+func (l dirLayer) Slot(vm string, _ map[string]string) (up, gaveUp bool) {
+	return false, isFile(filepath.Join(l.dir(vm), "napping"))
+}
+
+func (l dirLayer) WakeRefusal(vm string, _ *exec.Cmd) func(string) (string, bool) {
+	return func(stderr string) (string, bool) {
+		_, napping := l.Slot(vm, nil)
+		return napsOnWhy(stderr), napping && isFile(filepath.Join(l.dir(vm), "wake-refused"))
+	}
+}
+
 func (l dirLayer) running(vm string) bool {
 	b, err := os.ReadFile(filepath.Join(l.dir(vm), "boot"))
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
@@ -224,6 +250,7 @@ func (l dirLayer) running(vm string) bool {
 func (l dirLayer) Exec(vm string, stdin io.Reader, stdout, stderr io.Writer, argv ...string) *exec.Cmd {
 	guest := filepath.Join(l.dir(vm), "guest")
 	a := []string{"-c", `d=$1; shift; [ -f "$d/boot" ] && kill -0 "$(cat "$d/boot")" 2>/dev/null || exit 255
+[ ! -f "$d/wake-refused" ] || { echo "` + cloudhvNapsOn + `" >&2; exit 255; }
 echo $$ >>"$d/pids" || exit 255; exec "$@"`, "sh", l.dir(vm)}
 	for _, s := range argv { // the fake guest's own checkout, memory filesystem, mount and swap tables
 		s = strings.ReplaceAll(s, guestDir, guest)

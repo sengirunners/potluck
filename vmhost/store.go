@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -166,16 +167,103 @@ func (s store) remove(r record) {
 	s.endProcs(r.ID)
 }
 
-func (s store) all() []record {
+func (s store) all() []record { return s.scan(nil) }
+
+// scan is all, and calls bad (when not nil) with each file that is no record.
+func (s store) scan(bad func(path string)) []record {
 	ps, _ := filepath.Glob(filepath.Join(s.dir, "runs", "*.json"))
 	var out []record
 	for _, p := range ps {
 		var r record
-		if b, err := os.ReadFile(p); err == nil && json.Unmarshal(b, &r) == nil {
+		b, err := os.ReadFile(p)
+		switch {
+		case err == nil && json.Unmarshal(b, &r) == nil:
 			out = append(out, r)
+		case err == nil && bad != nil:
+			bad(p)
 		}
 	}
 	return out
+}
+
+// setAsideTorn renames a file that is no record to <name>.torn when it was
+// written before this host last started: an unclean shutdown can leave a
+// record just saved empty, and the VM it named ended with the host. A count
+// that must read every record (readAll) refuses for as long as such a file
+// is there. One written since the host started is left: it may name a VM
+// that runs. A file set aside is kept keepFor from then (sweepTorn). Lock
+// held.
+func (s store) setAsideTorn(path string) {
+	boot := hostBootTime()
+	if fi, err := os.Stat(path); err == nil && !boot.IsZero() && fi.ModTime().Before(boot) {
+		if os.Rename(path, path+".torn") == nil {
+			now := time.Now()
+			_ = os.Chtimes(path+".torn", now, now)
+		}
+	}
+}
+
+// sweepTorn removes the files setAsideTorn set aside keepFor ago. Lock held.
+func (s store) sweepTorn() {
+	ps, _ := filepath.Glob(filepath.Join(s.dir, "runs", "*.torn"))
+	for _, p := range ps {
+		if fi, err := os.Stat(p); err == nil && time.Since(fi.ModTime()) > keepFor {
+			_ = os.Remove(p)
+		}
+	}
+}
+
+// hostBootTime is when this host last started (zero where it cannot be told:
+// no /proc/stat).
+func hostBootTime() time.Time {
+	b, _ := os.ReadFile("/proc/stat")
+	for _, line := range strings.Split(string(b), "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "btime" {
+			if n, err := strconv.ParseInt(f[1], 10, 64); err == nil {
+				return time.Unix(n, 0)
+			}
+		}
+	}
+	return time.Time{}
+}
+
+// readAll is all for a count that must not miss a record: one that cannot be
+// read is an error.
+func (s store) readAll() ([]record, error) {
+	ents, err := os.ReadDir(filepath.Join(s.dir, "runs"))
+	if err != nil {
+		return nil, fmt.Errorf("the records cannot be listed: %w", noPath(err))
+	}
+	var out []record
+	for _, e := range ents {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		var r record
+		b, err := os.ReadFile(filepath.Join(s.dir, "runs", e.Name()))
+		if err == nil {
+			err = json.Unmarshal(b, &r)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("record %s: %w", e.Name(), noPath(err))
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// noPath is err without the path a file call put in it. What a count's
+// failure says reaches a box's caller, who is not told this host's paths.
+func noPath(err error) error {
+	var pe *fs.PathError
+	var le *os.LinkError
+	switch {
+	case errors.As(err, &le):
+		return fmt.Errorf("%s: %w", le.Op, le.Err)
+	case errors.As(err, &pe):
+		return fmt.Errorf("%s: %w", pe.Op, pe.Err)
+	}
+	return err
 }
 
 // locked runs f holding the state directory's lock: every change to a record
@@ -209,6 +297,28 @@ func flocked(path string, f func() error) error {
 	}
 	defer syscall.Flock(int(l.Fd()), syscall.LOCK_UN)
 	return f()
+}
+
+// tryLocked is locked for a caller that must not wait for the lock, and
+// makes nothing: held false says another holds the lock now, and f did not
+// run.
+func (s store) tryLocked(f func() error) (held bool, err error) {
+	if _, err := os.Stat(s.dir); err != nil {
+		return false, fmt.Errorf("state directory: %w", noPath(err))
+	}
+	l, err := os.OpenFile(filepath.Join(s.dir, "lock"), os.O_RDWR, 0)
+	if err != nil {
+		return false, fmt.Errorf("state directory's lock: %w", noPath(err))
+	}
+	defer l.Close()
+	if err := syscall.Flock(int(l.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer syscall.Flock(int(l.Fd()), syscall.LOCK_UN)
+	return true, f()
 }
 
 // update changes one record under the lock.

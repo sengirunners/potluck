@@ -29,4 +29,11 @@ func TestAgentImageDockerfile(t *testing.T) {
 	if strings.Contains(d, "@latest") {
 		t.Errorf("the agent Dockerfile installs a @latest")
 	}
+	// The two lists the cloud-hypervisor layer's agent image is built from too (scripts/cloudhv-image.sh reads the
+	// ARG lines; cloudhvimage_test.go) are what this image installs and checks for, not a copy of them.
+	for _, use := range []string{`apt-get install [^\n]*\$AGENT_PACKAGES\b`, `for t in [^\n]*\$AGENT_TOOLS; do`} {
+		if !regexp.MustCompile(use).MatchString(d) {
+			t.Errorf("the agent Dockerfile has no %s: its list is no longer the one on its ARG line", use)
+		}
+	}
 }

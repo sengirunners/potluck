@@ -58,7 +58,7 @@ func holdPTY(d *drv, r record, pd boxproc.Dir, spec boxproc.Spec) int {
 		cmd.Dir = boxDir(r, spec.Cwd)
 		tmp := d.boxTmp(r) // volumes.go
 		cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + r.Dir, "TMPDIR=" + tmp, "LANG=C", "TERM=" + spec.PTY.Term}, d.boxSecretsEnv(r)...)
-		wait, err := boxproc.StartPTY(pd, cmd, *spec.PTY, spec.Stdin, stdout, nil)
+		wait, err := boxproc.StartPTY(pd, cmd, *spec.PTY, false, spec.Stdin, stdout, nil)
 		if err != nil {
 			return nil, err
 		}
