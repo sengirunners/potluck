@@ -60,6 +60,8 @@ jobs:
         run: go mod tidy && git diff --exit-code go.mod go.sum
       - run: go build ./...
       - run: go vet ./...
+      - name: go test -json wrapper regression
+        run: scripts/ci/go-test-json_test.sh
       # A throwaway HOME and ZM_HOME, as zm's own suite runs: no test can touch real dotfiles and pass silently.
       # The whole suite runs on every PR and on main; internal/layers checks the layer rule and that nothing
       # here depends on zm.
@@ -87,12 +89,24 @@ jobs:
           # conformance's lines come as they are written, each starting "conformance: ", so a timeout or a cancel
           # still shows them.
           # Under pipefail the pipeline's status is go test's, and waiting on it waits for sed's last line too.
-          go test -timeout 30m -parallel 16 ./conformance/ 2>&1 | sed -u 's/^/conformance: /' &
+          # Each run also writes go test -json (every test's pass, fail or skip) for the improvement loop's merge step,
+          # uploaded below as go-test-json; the log stays go test's own (scripts/ci/go-test-json.sh).
+          scripts/ci/go-test-json.sh "$GITHUB_WORKSPACE/go-test-conformance.json" -timeout 30m -parallel 16 ./conformance/ 2>&1 | sed -u 's/^/conformance: /' &
           conf=$!
           code=0
-          go test -timeout 30m $slow $rest || code=$?
+          scripts/ci/go-test-json.sh "$GITHUB_WORKSPACE/go-test.json" -timeout 30m $slow $rest || code=$?
           wait "$conf" || code=$?
           exit "$code"
+      - if: ${{ always() }}
+        continue-on-error: true # a report for a person and the loop to read; a full storage quota must not red the run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-test-json
+          path: |
+            go-test.json
+            go-test-conformance.json
+          if-no-files-found: ignore
+          retention-days: 30
   # Conformance as a report: potluck-conformance against potluck-driver-local (scripts/ci/conformance-report.sh), its
   # results written as JSON with the skipped checks' names (--json-out) and uploaded as the conformance-results
   # artifact. Report only: no required check names it, no job needs it, and the conformance step does not fail the

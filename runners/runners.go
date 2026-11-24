@@ -213,6 +213,7 @@ type Service struct {
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 	wake      [2]chan struct{} // per lane
+	ending    map[int64]bool   // jobs an EndJob is ending now, under flight (embed.go)
 	flight    sync.Mutex
 	taking    [2]map[string]bool  // per lane: deliveries a worker is applying
 	jobsOn    map[int64]bool      // jobs a serve-lane worker is applying a delivery of
@@ -247,7 +248,7 @@ type publicListener struct {
 }
 
 // Migrations are the broker's tables in registry.db (New adds them).
-var Migrations = slices.Concat(baseMigrations, repoMigrations, checkMigrations, doctorMigrations, jobSecretMigrations, preselectMigrations)
+var Migrations = slices.Concat(baseMigrations, repoMigrations, checkMigrations, doctorMigrations, jobSecretMigrations, preselectMigrations, embedMigrations)
 
 // New makes the broker; it serves nothing until config.json has runners.
 func New(d *core.Deps) *Service {

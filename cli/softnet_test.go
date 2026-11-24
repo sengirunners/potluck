@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,16 +25,17 @@ import (
 // run options Potluck needs) and a pinned test build whose executable is
 // a script printing its version and accepting the rules.
 type softnetMac struct {
-	t       *testing.T
-	macOS   string
-	build   softnet.Build
-	file    string // the build's file, as a download would give it
-	store   softnet.Store
-	sudo    [][]string // each admin step's command line
-	ran     []string   // every command the fake Mac ran
-	noTart  bool
-	asRoot  bool
-	refuses bool // the build refuses Potluck's rules
+	t         *testing.T
+	macOS     string
+	build     softnet.Build
+	file      string // the build's file, as a download would give it
+	store     softnet.Store
+	sudo      [][]string // each admin step's command line
+	ran       []string   // every command the fake Mac ran
+	noTart    bool
+	asRoot    bool
+	refuses   bool   // the build refuses Potluck's rules
+	downloads string // where softnet install --no-sudo keeps its download
 }
 
 func newSoftnetMac(t *testing.T, macOS string) *softnetMac {
@@ -65,6 +69,10 @@ func newSoftnetMac(t *testing.T, macOS string) *softnetMac {
 		m.sudo = append(m.sudo, append([]string{exe}, args...))
 		return nil
 	}
+	m.downloads = filepath.Join(t.TempDir(), "Caches", "potluck", "softnet")
+	oldDownloads := softnetDownloadDir
+	softnetDownloadDir = func() (string, error) { return m.downloads, nil }
+	t.Cleanup(func() { softnetDownloadDir = oldDownloads })
 	return m
 }
 
@@ -198,7 +206,7 @@ func TestSoftnetAdminStepInstallsUpgradesAndRollsBack(t *testing.T) {
 	// Potluck's boxes now run the managed copy, not Homebrew's first on PATH.
 	out, code = softnetRun(t, "softnet", "status")
 	if code != 0 || !strings.Contains(out, "Potluck's boxes run: Softnet 0.23.0-test.1-abc at "+m.store.Current()) ||
-		!strings.Contains(out, "the softnet first on PATH (/opt/homebrew/bin/softnet) is not the one they run") {
+		!strings.Contains(out, "the other softnet (/opt/homebrew/bin/softnet) is not the one they run") {
 		t.Fatalf("status after install: exit %d: %s", code, out)
 	}
 	if out, code := softnetRun(t, "softnet", "install", "--candidate"); code != 0 || !strings.Contains(out, "nothing to do") || len(m.sudo) != 0 {
@@ -335,5 +343,231 @@ func TestSoftnetRollbackRefusesABuildForAnotherMacOS(t *testing.T) {
 	}
 	if out, code := softnetRun(t, "softnet", "rollback", "--admin-step"); code == 0 || !strings.Contains(out, "not built for this Mac (macOS 15.6") {
 		t.Fatalf("rollback to a macOS 14 build: exit %d: %s", code, out)
+	}
+}
+
+// softnetRunJSON runs potluck with --json and returns stdout (the answer)
+// apart from the rest.
+func softnetRunJSON(t *testing.T, args ...string) (answer []byte, words string, code int) {
+	t.Helper()
+	var out, errs bytes.Buffer
+	code = Run(context.Background(), append([]string{"--json"}, args...), strings.NewReader(""), &out, &errs)
+	return out.Bytes(), errs.String(), code
+}
+
+// adminStepOf reads {"admin_step": ...} from a --json answer.
+func adminStepOf(t *testing.T, answer []byte) adminStep {
+	t.Helper()
+	var a struct {
+		AdminStep *adminStep `json:"admin_step"`
+	}
+	if err := json.Unmarshal(answer, &a); err != nil || a.AdminStep == nil {
+		t.Fatalf("no admin_step in %s (%v)", answer, err)
+	}
+	return *a.AdminStep
+}
+
+// rootHalf runs a step's argv as the fake Mac's root would: this program's
+// words after argv[0], as root.
+func (m *softnetMac) rootHalf(t *testing.T, s adminStep) string {
+	t.Helper()
+	exe, _ := os.Executable()
+	exe, _ = filepath.EvalSymlinks(exe)
+	if len(s.Argv) < 2 || s.Argv[0] != exe || !filepath.IsAbs(s.Argv[0]) {
+		t.Fatalf("argv %q does not start with this program %s", s.Argv, exe)
+	}
+	m.asRoot = true
+	defer func() { m.asRoot = false }()
+	out, code := softnetRun(t, s.Argv[1:]...)
+	if code != 0 {
+		t.Fatalf("root half %q: exit %d: %s", s.Argv, code, out)
+	}
+	return out
+}
+
+// --no-sudo checks and downloads as the person, keeps the download for the
+// root half, answers the root step as data and runs no sudo; the answer's
+// argv is what the root half accepts; then install says nothing to do and
+// drops the kept download.
+func TestSoftnetInstallNoSudoAnswersTheAdminStep(t *testing.T) {
+	m := newSoftnetMac(t, "15.6")
+	body, _ := os.ReadFile(m.file)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write(body) }))
+	t.Cleanup(srv.Close)
+	m.build.URL = srv.URL + "/softnet"
+	softnet.Builds = []softnet.Build{m.build}
+
+	answer, words, code := softnetRunJSON(t, "softnet", "install", "--candidate", "--no-sudo")
+	if code != 0 || len(m.sudo) != 0 {
+		t.Fatalf("exit %d, sudo %v: %s %s", code, m.sudo, answer, words)
+	}
+	step := adminStepOf(t, answer)
+	kept := filepath.Join(m.downloads, softnet.AssetName(m.build.ID, m.build.Arch))
+	if want := []string{"softnet", "install", "--admin-step", "--from", kept, "--candidate"}; !slices.Equal(step.Argv[1:], want) {
+		t.Fatalf("argv %q, want %q after the program", step.Argv, want)
+	}
+	if !strings.Contains(step.Why, "owned by root and setuid") || !strings.Contains(words, "downloading Softnet") {
+		t.Fatalf("why %q, words %s", step.Why, words)
+	}
+	if fi, err := os.Stat(filepath.Dir(kept)); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("download directory: %v %v", fi, err)
+	}
+	if out := m.rootHalf(t, step); !strings.Contains(out, "Softnet 0.23.0-test.1 is in use at "+m.store.Current()) {
+		t.Fatalf("root half: %s", out)
+	}
+	answer, words, code = softnetRunJSON(t, "softnet", "install", "--candidate", "--no-sudo")
+	if code != 0 || strings.TrimSpace(string(answer)) != "{}" || !strings.Contains(words, "nothing to do") || len(m.sudo) != 0 {
+		t.Fatalf("second run: exit %d: %s %s", code, answer, words)
+	}
+	if _, err := os.Lstat(kept); !os.IsNotExist(err) {
+		t.Fatalf("the kept download is still there: %v", err)
+	}
+}
+
+// Without --json, --no-sudo says the root command, quoted for a shell.
+func TestSoftnetInstallNoSudoSaysTheRootCommand(t *testing.T) {
+	m := newSoftnetMac(t, "15.6")
+	from := filepath.Join(t.TempDir(), "my softnet")
+	b, _ := os.ReadFile(m.file)
+	os.WriteFile(from, b, 0o755)
+	out, code := softnetRun(t, "softnet", "install", "--candidate", "--no-sudo", "--from", from)
+	if code != 0 || len(m.sudo) != 0 || !strings.Contains(out, "Run this as root") || !strings.Contains(out, "--from '"+from+"'") {
+		t.Fatalf("exit %d, sudo %v: %s", code, m.sudo, out)
+	}
+	if out, code := softnetRun(t, "softnet", "install", "--admin-step", "--no-sudo", "--from", from); code == 0 || !strings.Contains(out, "--no-sudo is for the run as yourself") {
+		t.Fatalf("--admin-step --no-sudo: exit %d: %s", code, out)
+	}
+}
+
+// softnet uninstall and rollback hand their root step back the same way.
+func TestSoftnetUninstallAndRollbackNoSudo(t *testing.T) {
+	m := newSoftnetMac(t, "15.6")
+	content := "#!/bin/sh\necho older\n"
+	sum := sha256.Sum256([]byte(content))
+	older := m.build
+	older.ID, older.Version, older.SHA256, older.Bytes = "0.23.0-test.0", "softnet 0.23.0-test.0-abc", hex.EncodeToString(sum[:]), int64(len(content))
+	olderFile := filepath.Join(t.TempDir(), "softnet")
+	os.WriteFile(olderFile, []byte(content), 0o755)
+	m.asRoot = true
+	for _, c := range []struct {
+		file   string
+		builds []softnet.Build
+	}{{olderFile, []softnet.Build{older}}, {m.file, []softnet.Build{m.build, older}}} {
+		softnet.Builds = c.builds
+		if out, code := softnetRun(t, "softnet", "install", "--admin-step", "--candidate", "--from", c.file); code != 0 {
+			t.Fatalf("install %s: exit %d: %s", c.file, code, out)
+		}
+	}
+	m.asRoot = false
+
+	answer, words, code := softnetRunJSON(t, "softnet", "rollback", "--no-sudo")
+	if code != 0 {
+		t.Fatalf("rollback: exit %d: %s", code, words)
+	}
+	m.rootHalf(t, adminStepOf(t, answer))
+	if cur := m.store.Status().Current; cur == nil || cur.ID != older.ID {
+		t.Fatalf("after rollback: %+v", cur)
+	}
+
+	answer, words, code = softnetRunJSON(t, "softnet", "uninstall", "--no-sudo")
+	if code != 0 {
+		t.Fatalf("uninstall: exit %d: %s", code, words)
+	}
+	step := adminStepOf(t, answer)
+	if !slices.Equal(step.Argv[1:], []string{"softnet", "uninstall", "--admin-step"}) {
+		t.Fatalf("argv %q", step.Argv)
+	}
+	m.rootHalf(t, step)
+	if out, code := softnetRun(t, "softnet", "uninstall", "--no-sudo"); code != 0 || !strings.Contains(out, "nothing to do") {
+		t.Fatalf("second uninstall: exit %d: %s", code, out)
+	}
+	if len(m.sudo) != 0 {
+		t.Fatalf("sudo ran: %v", m.sudo)
+	}
+}
+
+// upstreamArchive makes m's build an upstream release for macOS 26 and
+// newer, published as a gzipped tar served by a test server, and returns
+// the archive.
+func (m *softnetMac) upstreamArchive(t *testing.T, serve func([]byte) []byte) []byte {
+	t.Helper()
+	exe, _ := os.ReadFile(m.file)
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	tw.WriteHeader(&tar.Header{Name: "LICENSE", Mode: 0o644, Size: int64(len(softnet.License)), Typeflag: tar.TypeReg})
+	tw.Write([]byte(softnet.License))
+	tw.WriteHeader(&tar.Header{Name: "softnet", Mode: 0o755, Size: int64(len(exe)), Typeflag: tar.TypeReg})
+	tw.Write(exe)
+	tw.Close()
+	zw.Close()
+	data := buf.Bytes()
+	sum := sha256.Sum256(data)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write(serve(data)) }))
+	t.Cleanup(srv.Close)
+	m.build.MinMacOS, m.build.MaxMacOS, m.build.UpstreamRelease = 26, softnet.AnyNewer, true
+	m.build.URL = srv.URL + "/softnet.tar.gz"
+	m.build.Archive = &softnet.Archive{SHA256: hex.EncodeToString(sum[:]), Bytes: int64(len(data)), Member: "softnet"}
+	softnet.Builds = []softnet.Build{m.build}
+	return data
+}
+
+// On macOS 26 the pinned upstream release installs like Potluck's own
+// builds: no --candidate, the archive downloaded, checked and unpacked as
+// the person, one root step that the root half accepts, then nothing to do.
+func TestSoftnetInstallOnMacOS26UnpacksThePinnedUpstreamRelease(t *testing.T) {
+	m := newSoftnetMac(t, "26.1")
+	m.upstreamArchive(t, func(d []byte) []byte { return d })
+	answer, words, code := softnetRunJSON(t, "softnet", "install", "--no-sudo")
+	if code != 0 || len(m.sudo) != 0 || strings.Contains(words, "candidate") {
+		t.Fatalf("exit %d, sudo %v: %s %s", code, m.sudo, answer, words)
+	}
+	step := adminStepOf(t, answer)
+	kept := filepath.Join(m.downloads, softnet.AssetName(m.build.ID, m.build.Arch))
+	if want := []string{"softnet", "install", "--admin-step", "--from", kept}; !slices.Equal(step.Argv[1:], want) {
+		t.Fatalf("argv %q, want %q after the program", step.Argv, want)
+	}
+	if es, _ := os.ReadDir(m.downloads); len(es) != 1 {
+		t.Fatalf("the download directory holds %d files, want the executable alone", len(es))
+	}
+	if out := m.rootHalf(t, step); !strings.Contains(out, "Softnet 0.23.0-test.1 is in use at "+m.store.Current()) {
+		t.Fatalf("root half: %s", out)
+	}
+	answer, words, code = softnetRunJSON(t, "softnet", "install", "--no-sudo")
+	if code != 0 || strings.TrimSpace(string(answer)) != "{}" || !strings.Contains(words, "nothing to do") {
+		t.Fatalf("second run: exit %d: %s %s", code, answer, words)
+	}
+	if out, code := softnetRun(t, "softnet", "status"); code != 0 || !strings.Contains(out, "Potluck's boxes run: Softnet 0.23.0-test.1-abc at "+m.store.Current()) {
+		t.Fatalf("status: exit %d: %s", code, out)
+	}
+}
+
+// An archive that is not the pinned one is refused before it is unpacked,
+// with no root step and nothing kept.
+func TestSoftnetInstallOnMacOS26RefusesAnotherArchive(t *testing.T) {
+	m := newSoftnetMac(t, "26.1")
+	m.upstreamArchive(t, func(d []byte) []byte {
+		d = bytes.Clone(d)
+		d[len(d)-10] ^= 1
+		return d
+	})
+	out, code := softnetRun(t, "softnet", "install")
+	if code == 0 || len(m.sudo) != 0 || !strings.Contains(out, "is not Softnet 0.23.0-test.1's archive") {
+		t.Fatalf("exit %d, sudo %v: %s", code, m.sudo, out)
+	}
+	if _, err := os.Lstat(m.store.Dir); !os.IsNotExist(err) {
+		t.Fatalf("the store was made: %v", err)
+	}
+}
+
+// A macOS 26 Mac that set up upstream Softnet itself, owned by root and
+// setuid, keeps using it: the pinned release is offered, never required.
+func TestSoftnetStatusOnMacOS26AcceptsASoftnetSetUpAsRoot(t *testing.T) {
+	m := newSoftnetMac(t, "26.1")
+	m.upstreamArchive(t, func(d []byte) []byte { return d })
+	out, code := softnetRun(t, "softnet", "status")
+	if code != 0 || !strings.Contains(out, "Potluck's boxes run: Softnet 0.23.0-test.1-abc at /opt/homebrew/bin/softnet") ||
+		strings.Contains(out, "problem:") || !strings.Contains(out, "with `potluck softnet install`") {
+		t.Fatalf("exit %d: %s", code, out)
 	}
 }

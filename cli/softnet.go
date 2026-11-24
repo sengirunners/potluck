@@ -22,15 +22,30 @@ import (
 // Test hooks for potluck softnet: the store, this Mac, the admin step's
 // command and the download.
 var (
-	softnetStore                    = softnet.System
-	softnetGOOS                     = runtime.GOOS
-	softnetRunner  hostprobe.Runner = hostprobe.ExecRunner{}
-	softnetFacts   hostprobe.Facts  = hostprobe.SystemFacts{}
-	softnetEUID                     = os.Geteuid
-	softnetSudo                     = runSudo
-	softnetHTTP                     = &http.Client{Timeout: 5 * time.Minute}
-	softnetTempDir                  = os.TempDir
+	softnetStore                        = softnet.System
+	softnetGOOS                         = runtime.GOOS
+	softnetRunner      hostprobe.Runner = hostprobe.ExecRunner{}
+	softnetFacts       hostprobe.Facts  = hostprobe.SystemFacts{}
+	softnetEUID                         = os.Geteuid
+	softnetSudo                         = runSudo
+	softnetHTTP                         = &http.Client{Timeout: 5 * time.Minute}
+	softnetTempDir                      = os.TempDir
+	softnetDownloadDir                  = userSoftnetDownloads
 )
+
+// userSoftnetDownloads is where softnet install --no-sudo keeps the build it
+// downloaded and checked, for the root half to read after the command
+// ends: the user's cache directory (on a Mac ~/Library/Caches/potluck/softnet).
+// Not the home: a home made only for this would not be one uninstall
+// accepts. The root half hashes its own copy, so a file changed here after
+// the check is refused.
+func userSoftnetDownloads() (string, error) {
+	d, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "potluck", "softnet"), nil
+}
 
 // softnetCmd is potluck softnet: Potluck's managed Softnet on a Mac whose
 // macOS no upstream Softnet release that enforces Potluck's rules runs on
@@ -40,10 +55,12 @@ func (a *app) softnetCmd() *cobra.Command {
 		Use:   "softnet",
 		Short: "Tart's network helper on a Mac (docs/softnet.md): status, install, rollback, uninstall",
 		Long: `Softnet is the helper Tart starts, as root, for each sandbox's isolated network.
-On macOS ` + fmt.Sprint(softnet.UpstreamMinMacOS) + ` or newer, use the latest upstream Softnet release. On an older macOS that
-Potluck has its own build for, ` + a.cmd("softnet install") + ` installs it, root owned and setuid, in
-` + softnet.Dir + `, keeping the build it replaces for ` + a.cmd("softnet rollback") + `.
-Potluck's sandboxes then use that copy, whatever other softnet is on PATH.`,
+` + a.cmd("softnet install") + ` installs the build Potluck pins for this Mac's macOS, root owned and
+setuid, in ` + softnet.Dir + `, keeping the build it replaces for ` + a.cmd("softnet rollback") + `:
+on macOS ` + fmt.Sprint(softnet.UpstreamMinMacOS) + ` or newer an upstream Softnet release, on an older macOS
+Potluck's own build when it has one. Potluck's sandboxes then use that copy, whatever other
+softnet is on PATH. Without it, they use the softnet on PATH, which must be owned by root
+and setuid.`,
 	}
 	cmd.AddCommand(a.softnetStatusCmd(), a.softnetInstallCmd(), a.softnetRollbackCmd(), a.softnetUninstallCmd())
 	return cmd
@@ -112,66 +129,96 @@ func (a *app) softnetAdvice(r hostprobe.Report) string {
 
 func (a *app) softnetInstallCmd() *cobra.Command {
 	var from string
-	var candidate, adminStep bool
+	var candidate, adminStep, noSudo bool
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install or update Potluck's Softnet build for this Mac's macOS (asks for an admin password once)",
-		Long: `Installs the Softnet build this potluck pins for this Mac's macOS version:
-from --from, or downloaded from its release. The file must have the build's
-pinned SHA-256, which is checked before and again as root. It needs your
+		Short: "Install or update the Softnet build Potluck pins for this Mac's macOS (asks for an admin password once)",
+		Long: `Installs the Softnet build this potluck pins for this Mac's macOS version
+(on macOS ` + fmt.Sprint(softnet.UpstreamMinMacOS) + ` or newer, an upstream release): from --from (the
+executable), or downloaded from its release. A downloaded archive must have
+its pinned SHA-256 and size before it is unpacked. The executable must have
+the build's pinned SHA-256 and size, checked before and again as root. It needs your
 admin password once (sudo): the build is placed owned by root and setuid in
 ` + softnet.Dir + `, because Tart starts it as root to set up each sandbox's
 network. The build in use before becomes the previous one, for rollback.
 Nothing else changes: another softnet on PATH (Homebrew's, say) stays as it
 is, and Potluck's sandboxes use the managed copy. Running it again with the
-build already in use changes nothing.`,
+build already in use changes nothing.
+
+--no-sudo does the checks and the download (kept in your cache directory),
+then prints the root command in place of running sudo (with --json, as
+{"admin_step": {"why": ..., "argv": [...]}}), for a program such as the Mac
+app to run as root itself. Run install again afterwards to check the result.`,
 		Example: "  " + a.cmd("softnet install") + "\n  " + a.cmd("softnet install --from ./softnet-<build>-darwin-arm64"),
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.softnetInstall(cmd.Context(), from, candidate, adminStep)
+			if err := noSudoNotAsRoot(adminStep, noSudo); err != nil {
+				return err
+			}
+			return a.adminStepCmd(a.cmd("softnet install")+" again to check it", func() error {
+				return a.softnetInstall(cmd.Context(), from, candidate, adminStep, noSudo)
+			})
 		},
 	}
 	cmd.Flags().StringVar(&from, "from", "", "install from this file instead of downloading it (it must be the pinned build)")
 	cmd.Flags().BoolVar(&candidate, "candidate", false, "install a build not yet validated on a real Mac of this macOS version (to help validate it)")
 	cmd.Flags().BoolVar(&adminStep, "admin-step", false, "the root part of install, which install runs with sudo")
 	_ = cmd.Flags().MarkHidden("admin-step")
+	cmd.Flags().BoolVar(&noSudo, "no-sudo", false, "do not run sudo: print the root command (with --json, as admin_step) for you or an app to run as root")
 	return cmd
 }
 
 func (a *app) softnetRollbackCmd() *cobra.Command {
-	var adminStep bool
+	var adminStep, noSudo bool
 	cmd := &cobra.Command{
 		Use:   "rollback",
 		Short: "Put the managed Softnet in use before the last install back in use (asks for an admin password once)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.softnetRollback(cmd.Context(), adminStep)
+			if err := noSudoNotAsRoot(adminStep, noSudo); err != nil {
+				return err
+			}
+			return a.adminStepCmd(a.cmd("softnet status")+" to check it, and "+a.cmd("host")+" again if this Mac lends, so its sizes use that Softnet", func() error { return a.softnetRollback(cmd.Context(), adminStep, noSudo) })
 		},
 	}
 	cmd.Flags().BoolVar(&adminStep, "admin-step", false, "the root part of rollback, which rollback runs with sudo")
 	_ = cmd.Flags().MarkHidden("admin-step")
+	cmd.Flags().BoolVar(&noSudo, "no-sudo", false, "do not run sudo: print the root command (with --json, as admin_step) for you or an app to run as root")
 	return cmd
 }
 
 func (a *app) softnetUninstallCmd() *cobra.Command {
-	var adminStep bool
+	var adminStep, noSudo bool
 	cmd := &cobra.Command{
 		Use:   "uninstall",
 		Short: "Remove the managed Softnet (asks for an admin password once); sandboxes then use the softnet on PATH",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return a.softnetUninstall(cmd.Context(), adminStep)
+			if err := noSudoNotAsRoot(adminStep, noSudo); err != nil {
+				return err
+			}
+			return a.adminStepCmd(a.cmd("host")+" again if this Mac lends: until then its isolated boxes do not start, and "+a.cmd("host")+" picks the Softnet they use now", func() error { return a.softnetUninstall(cmd.Context(), adminStep, noSudo) })
 		},
 	}
 	cmd.Flags().BoolVar(&adminStep, "admin-step", false, "the root part of uninstall, which uninstall runs with sudo")
 	_ = cmd.Flags().MarkHidden("admin-step")
+	cmd.Flags().BoolVar(&noSudo, "no-sudo", false, "do not run sudo: print the root command (with --json, as admin_step) for you or an app to run as root")
 	return cmd
+}
+
+// noSudoNotAsRoot refuses --no-sudo on a root half: it is the person's run
+// that hands the root step back, never the root step itself.
+func noSudoNotAsRoot(adminStep, noSudo bool) error {
+	if adminStep && noSudo {
+		return errors.New("--no-sudo is for the run as yourself; --admin-step is the root step it prints")
+	}
+	return nil
 }
 
 // softnetUninstall disarms and removes every managed build. It reads no
 // macOS version: a Mac upgraded past the managed build's macOS removes it
 // the same way.
-func (a *app) softnetUninstall(ctx context.Context, adminStep bool) error {
+func (a *app) softnetUninstall(ctx context.Context, adminStep, noSudo bool) error {
 	if softnetGOOS != "darwin" {
 		return errors.New("Softnet is Tart's network helper on a Mac; this is " + softnetGOOS)
 	}
@@ -186,7 +233,7 @@ func (a *app) softnetUninstall(ctx context.Context, adminStep bool) error {
 		fmt.Fprintf(a.host.Stdout, "removed the managed Softnet in %s\n", store.Dir)
 		return nil
 	}
-	removed, err := a.removeManagedSoftnet(ctx, store)
+	removed, err := a.removeManagedSoftnet(ctx, store, noSudo)
 	if err != nil || !removed {
 		return err
 	}
@@ -204,8 +251,9 @@ func (a *app) softnetUninstall(ctx context.Context, adminStep bool) error {
 
 // removeManagedSoftnet runs the admin step that removes every managed build
 // in store (it asks for the admin password) and checks the directory is gone.
-// removed is false when there was none to remove.
-func (a *app) removeManagedSoftnet(ctx context.Context, store softnet.Store) (removed bool, err error) {
+// removed is false when there was none to remove. With noSudo the error is
+// the *adminStepLeft that names the step.
+func (a *app) removeManagedSoftnet(ctx context.Context, store softnet.Store, noSudo bool) (removed bool, err error) {
 	if _, err := os.Lstat(store.Dir); errors.Is(err, os.ErrNotExist) {
 		fmt.Fprintf(a.host.Stdout, "no managed Softnet is installed in %s; nothing to do\n", store.Dir)
 		return false, nil
@@ -213,7 +261,7 @@ func (a *app) removeManagedSoftnet(ctx context.Context, store softnet.Store) (re
 	if softnetEUID() == 0 {
 		return false, errors.New("run " + a.cmd("softnet uninstall") + " as yourself, not as root: it asks for the admin password itself")
 	}
-	if err := a.softnetAdmin(ctx, []string{"uninstall", "--admin-step"}, "disarms and removes every managed Softnet build in "+store.Dir); err != nil {
+	if err := a.softnetAdmin(ctx, []string{"uninstall", "--admin-step"}, "disarms and removes every managed Softnet build in "+store.Dir, noSudo); err != nil {
 		return false, err
 	}
 	if _, err := os.Lstat(store.Dir); !errors.Is(err, os.ErrNotExist) {
@@ -262,7 +310,7 @@ func (a *app) managedLeft() string {
 	return ""
 }
 
-func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminStep bool) error {
+func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminStep, noSudo bool) error {
 	b, r, l, err := a.softnetBuild(ctx, candidate, adminStep)
 	if err != nil {
 		return err
@@ -297,28 +345,23 @@ func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminS
 	}
 	if cur := softnetStore().Status().Current; cur != nil && cur.ID == b.ID && cur.Pinned && from == "" {
 		fmt.Fprintf(w, "Softnet %s is in use already at %s; nothing to do\n", b.ID, softnetStore().Current())
+		forgetKeptDownload(b)
 		return a.softnetAfter(ctx, r)
 	}
-	if !b.Validated {
+	if b.Candidate() {
 		fmt.Fprintf(w, "note: Softnet %s is a candidate, not yet validated on a real macOS %d Mac. Potluck's own checks (%s) still run before this Mac lends.\n", b.ID, hostprobe.MacOSMajor(r.MacOS), a.cmd("host"))
 	}
 	file := from
 	if file == "" {
-		dir, err := os.MkdirTemp(softnetTempDir(), "potluck-softnet-")
-		if err != nil {
+		var err error
+		var done func()
+		if file, done, err = a.downloadSoftnet(ctx, b, noSudo); err != nil {
 			return err
 		}
-		defer os.RemoveAll(dir)
-		file = filepath.Join(dir, softnet.AssetName(b.ID, b.Arch))
-		fmt.Fprintf(w, "downloading Softnet %s from %s\n", b.ID, b.URL)
-		if err := softnetDownload(ctx, b, file); err != nil {
-			return err
-		}
+		defer done()
 	}
-	if sum, n, err := softnet.FileSHA256(file); err != nil {
-		return fmt.Errorf("cannot read %s: %w", file, err)
-	} else if sum != b.SHA256 || n != b.Bytes {
-		return fmt.Errorf("%s is not Softnet %s: it has %d bytes and SHA-256 %s; the pinned build has %d bytes and SHA-256 %s. Nothing was installed", file, b.ID, n, sum, b.Bytes, b.SHA256)
+	if err := isBuild(file, b); err != nil {
+		return err
 	}
 	abs, err := filepath.Abs(file)
 	if err != nil {
@@ -328,7 +371,7 @@ func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminS
 	if candidate {
 		args = append(args, "--candidate")
 	}
-	if err := a.softnetAdmin(ctx, args, "installs Softnet "+b.ID+" owned by root and setuid in "+softnet.Dir); err != nil {
+	if err := a.softnetAdmin(ctx, args, "installs Softnet "+b.ID+" owned by root and setuid in "+softnet.Dir, noSudo); err != nil {
 		return err
 	}
 	if err := inUse(b.ID); err != nil {
@@ -337,7 +380,73 @@ func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminS
 	return a.softnetAfter(ctx, r)
 }
 
-func (a *app) softnetRollback(ctx context.Context, adminStep bool) error {
+// isBuild checks the file at path is build b: its pinned size and SHA-256.
+func isBuild(path string, b softnet.Build) error {
+	sum, n, err := softnet.FileSHA256(path)
+	switch {
+	case err != nil:
+		return fmt.Errorf("cannot read %s: %w", path, err)
+	case sum != b.SHA256 || n != b.Bytes:
+		return fmt.Errorf("%s is not Softnet %s: it has %d bytes and SHA-256 %s; the pinned build has %d bytes and SHA-256 %s. Nothing was installed", path, b.ID, n, sum, b.Bytes, b.SHA256)
+	}
+	return nil
+}
+
+// downloadSoftnet fetches build b and returns its file (the caller checks
+// it). With sudo the root half runs while this command waits, so the file
+// is in a temp directory that done removes; under --no-sudo
+// the root half runs after this command, so the file is kept in
+// softnetDownloadDir (one already there that is b is used again), and the
+// next install that finds b in use removes it.
+func (a *app) downloadSoftnet(ctx context.Context, b softnet.Build, keep bool) (file string, done func(), err error) {
+	done = func() {}
+	var dir string
+	if keep {
+		if dir, err = softnetDownloadDir(); err != nil {
+			return "", nil, fmt.Errorf("cannot find a directory to keep the Softnet download in: %w", err)
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", nil, err
+		}
+	} else {
+		if dir, err = os.MkdirTemp(softnetTempDir(), "potluck-softnet-"); err != nil {
+			return "", nil, err
+		}
+		done = func() { os.RemoveAll(dir) }
+	}
+	file = filepath.Join(dir, softnet.AssetName(b.ID, b.Arch))
+	if keep {
+		if isBuild(file, b) == nil {
+			return file, done, nil
+		}
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", nil, err
+		}
+	}
+	fmt.Fprintf(a.host.Stdout, "downloading Softnet %s from %s\n", b.ID, b.URL)
+	if err := softnetDownload(ctx, b, file); err != nil {
+		done()
+		if keep {
+			os.Remove(file)
+		}
+		return "", nil, err
+	}
+	return file, done, nil
+}
+
+// forgetKeptDownload removes the copy of b a --no-sudo install kept, once
+// b is in use (and the directory, when that leaves it empty).
+func forgetKeptDownload(b softnet.Build) {
+	d, err := softnetDownloadDir()
+	if err != nil {
+		return
+	}
+	_ = os.Remove(filepath.Join(d, softnet.AssetName(b.ID, b.Arch)))
+	_ = os.Remove(d)
+	_ = os.Remove(filepath.Dir(d))
+}
+
+func (a *app) softnetRollback(ctx context.Context, adminStep, noSudo bool) error {
 	if softnetGOOS != "darwin" {
 		return errors.New("Softnet is Tart's network helper on a Mac; this is " + softnetGOOS)
 	}
@@ -369,7 +478,7 @@ func (a *app) softnetRollback(ctx context.Context, adminStep bool) error {
 	if softnetEUID() == 0 {
 		return errors.New("run " + a.cmd("softnet rollback") + " as yourself, not as root: it asks for the admin password itself")
 	}
-	if err := a.softnetAdmin(ctx, []string{"rollback", "--admin-step"}, "puts Softnet "+st.Previous.ID+" back in use in "+softnet.Dir); err != nil {
+	if err := a.softnetAdmin(ctx, []string{"rollback", "--admin-step"}, "puts Softnet "+st.Previous.ID+" back in use in "+softnet.Dir, noSudo); err != nil {
 		return err
 	}
 	if err := inUse(st.Previous.ID); err != nil {
@@ -380,8 +489,9 @@ func (a *app) softnetRollback(ctx context.Context, adminStep bool) error {
 }
 
 // softnetAdmin runs this program's softnet command words args as root
-// through sudo, after saying what the admin step does.
-func (a *app) softnetAdmin(ctx context.Context, args []string, does string) error {
+// through sudo, after saying what the admin step does. With noSudo it runs
+// nothing and returns an *adminStepLeft naming the step.
+func (a *app) softnetAdmin(ctx context.Context, args []string, does string, noSudo bool) error {
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
@@ -390,7 +500,11 @@ func (a *app) softnetAdmin(ctx context.Context, args []string, does string) erro
 		return fmt.Errorf("cannot find this program to run its admin step: %w", err)
 	}
 	words := append(strings.Fields(a.cmd("softnet"))[1:], args...)
-	fmt.Fprintf(a.host.Stdout, "the admin step %s, because Tart starts Softnet as root for each box's network. sudo asks for your Mac password once.\n", does)
+	why := "The admin step " + does + ", because Tart starts Softnet as root for each box's network."
+	if noSudo {
+		return &adminStepLeft{adminStep{Why: why, Argv: append([]string{exe}, words...)}}
+	}
+	fmt.Fprintf(a.host.Stdout, "%s sudo asks for your Mac password once.\n", why)
 	if err := softnetSudo(ctx, exe, words, a.host.Stdout, a.host.Stderr); err != nil {
 		return fmt.Errorf("the admin step did not finish (%v); the Softnet in use is unchanged", err)
 	}
@@ -468,9 +582,26 @@ func (a *app) softnetAfter(ctx context.Context, r hostprobe.Report) error {
 	return nil
 }
 
-// softnetDownload fetches b's published file into path (at most its
-// pinned size; the caller checks its SHA-256).
+// softnetDownload fetches b's executable into path (at most its pinned
+// size; the caller checks its SHA-256). A build published in an archive
+// (b.Archive) is downloaded beside path, checked against the archive's pin
+// and unpacked (softnet.Build.Unpack), and the archive removed.
 func softnetDownload(ctx context.Context, b softnet.Build, path string) error {
+	if b.Archive == nil {
+		return softnetFetch(ctx, b, path, b.Bytes)
+	}
+	archive := path + ".tar.gz"
+	os.Remove(archive)
+	defer os.Remove(archive)
+	if err := softnetFetch(ctx, b, archive, b.Archive.Bytes); err != nil {
+		return err
+	}
+	return b.Unpack(archive, path)
+}
+
+// softnetFetch fetches b.URL into path, a new file, at most limit bytes
+// and one more (so a longer file fails its size check).
+func softnetFetch(ctx context.Context, b softnet.Build, path string, limit int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.URL, nil)
 	if err != nil {
 		return err
@@ -482,7 +613,7 @@ func softnetDownload(ctx context.Context, b softnet.Build, path string) error {
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return fmt.Errorf("Softnet %s is not published at %s yet: install it from a copy of the file with --from <file>", b.ID, b.URL)
+		return fmt.Errorf("Softnet %s is not published at %s yet: install it from a copy of the executable with --from <file>", b.ID, b.URL)
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("cannot download Softnet %s: %s answered %s", b.ID, b.URL, resp.Status)
 	}
@@ -490,7 +621,7 @@ func softnetDownload(ctx context.Context, b softnet.Build, path string) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(f, io.LimitReader(resp.Body, b.Bytes+1))
+	_, err = io.Copy(f, io.LimitReader(resp.Body, limit+1))
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

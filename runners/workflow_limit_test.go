@@ -15,6 +15,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/config"
+	"github.com/sengirunners/potluck/runners"
 )
 
 func TestWorkflowLimitThroughBroker(t *testing.T) {
@@ -615,8 +616,14 @@ func TestOtherJobsEarlierTimeoutDoesNotClaimThisJobTimedOut(t *testing.T) {
 // minted for the short one takes the long one. Its box lives for the long
 // job's limit (renewed past the short one's, stopped only at the long one's),
 // and the short job, still queued on GitHub, gets a new box.
+//
+// A reference-driver binding has room for any number of boxes, so the long
+// job waits only while no binding is listed. Its waiting serve is retried
+// only when the test makes it due (Nudge): a retry on its own clock, once
+// time moves on, could give it a box of its own before its start is applied.
 func TestTakenRunnerBoxLivesForTheTakenJobsLimit(t *testing.T) {
-	f := newPoolFixture(t, func(r *config.Runners) { r.Pool.Sizes = map[string]string{} },
+	f := newPoolFixtureStarting(t, func(r *config.Runners) { r.Pool.Sizes = map[string]string{} },
+		func(s *runners.Service) { s.Retry, s.WaitMax = time.Hour, time.Hour },
 		box("a", "sa", "linux", "1"), box("b", "sa", "linux", "1"))
 	if w := f.link(t, inst, "good"); w.Code != http.StatusOK {
 		t.Fatalf("link: %d %s", w.Code, w.Body)
@@ -643,12 +650,16 @@ func TestTakenRunnerBoxLivesForTheTakenJobsLimit(t *testing.T) {
 	})
 	live := func() int { return f.liveOn(t, "a") + f.liveOn(t, "b") }
 	other := map[string]string{"a": "b", "b": "a"}[f.jobs(t)[short].Target]
-	f.svc.HideTargets(other)
+	f.svc.HideTargets("a", "b")
 	f.deliver(t, "workflow_job", jobEvent("queued", long, 9932, "acme/app", true, "pool:sa"))
 	// Waiting is decided after asking the targets for room, through the driver: a box step.
-	eventuallyBox(t, "long job waits", func() bool { j := f.jobs(t)[long]; return j.State == "waiting" && j.LimitS == 1200 })
+	eventuallyBox(t, "long job waits", func() bool {
+		j := f.jobs(t)[long]
+		return j.State == "waiting" && j.LimitS == 1200 && strings.Contains(j.Why, "no box in the pool serves jobs yet")
+	})
 
 	// GitHub gives the short job's runner the long job.
+	f.svc.HideTargets(other)
 	elapsed.Store(60)
 	f.gh.mu.Lock()
 	f.gh.jobStarts[long] = base.Add(60 * time.Second).Format(time.RFC3339)
@@ -656,15 +667,19 @@ func TestTakenRunnerBoxLivesForTheTakenJobsLimit(t *testing.T) {
 	startOn(t, f, long, 9932, "potluck-99301", "pool:sa")
 	eventuallyBox(t, "long job carries the box", func() bool {
 		j := f.jobs(t)[long]
-		return j.State == "serving" && j.Deadline == base.Unix()+60+1200 && f.svc.Undone(ctx) == 0
+		return j.State == "serving" && j.Deadline == base.Unix()+60+1200
 	})
+	// Its own waiting serve, due now, finds it running and ends.
+	f.svc.Nudge(ctx)
+	eventuallyBox(t, "every delivery applied", func() bool { return f.svc.Undone(ctx) == 0 })
 	if got := f.renews(t); len(got) == 0 || got[len(got)-1] != 1200 {
 		t.Fatalf("box not renewed to the taken job's limit: %v", got)
 	}
 
 	// The short job, still queued, gets a new box.
 	f.svc.HideTargets()
-	elapsed.Store(61) // its serve waited for room: due again
+	elapsed.Store(61)
+	f.svc.Nudge(ctx) // a serve that waited for room is due again
 	f.svc.Watch(ctx)
 	eventuallyBox(t, "short job served again", func() bool {
 		j := f.jobs(t)[short]

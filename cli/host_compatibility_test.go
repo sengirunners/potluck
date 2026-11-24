@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,5 +96,33 @@ func TestHostBlockedByAFlagDropsIt(t *testing.T) {
 	}
 	if want := "run again without --docker=true (the layer this machine shares on does not take --docker): potluck host trial --linux-slots 2 --no-sudo=true"; st.Setup.Next != want {
 		t.Fatalf("next %q, want %q", st.Setup.Next, want)
+	}
+}
+
+// The old spelling (host share -P <pool>) records the command that runs a
+// setup again as host's: the pool its argument, not --pool beside it, and
+// again_args say the same command as again.
+func TestHostShareOldSpellingAgainArgs(t *testing.T) {
+	m := soloMachine(t, "")
+	detectHost = func(context.Context, string) hostprobe.Report {
+		return hostprobe.Report{OS: "darwin", MacOS: "26.0", Arch: "arm64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 500, Swap: hostswap.Encrypted,
+			Layers: []hostprobe.Layer{{Name: "tart", Available: true, Supported: true, CLI: "tart"}}}
+	}
+	shareRunner = runnerFunc(func(context.Context, string, ...string) (hostprobe.Result, error) {
+		t.Error("a refused flag ran a download or conformance command")
+		return hostprobe.Result{}, nil
+	})
+	m.ok(t, "create", "trial")
+	if _, _, code := m.run(t, "host", "share", "-P", "trial", "--docker", "--linux-slots", "2", "--no-sudo"); code == 0 {
+		t.Fatal("--docker on tart went through")
+	}
+	r, err := hostsetup.Read(m.home)
+	if want := []string{"host", "trial", "--linux-slots=2", "--no-sudo=true"}; err != nil || r == nil || !slices.Equal(r.AgainArgs, want) || r.NeedsInvite ||
+		r.Again != "potluck host trial --linux-slots 2 --no-sudo=true" {
+		t.Fatalf("setup record: %+v %v", r, err)
+	}
+	// Run as given, it is host's own command again: blocked no more by --docker.
+	if _, errs, _ := m.run(t, r.AgainArgs...); strings.Contains(errs, "--docker") || strings.Contains(errs, "unknown") || strings.Contains(errs, "accepts") {
+		t.Fatalf("again_args did not run as host:\n%s", errs)
 	}
 }

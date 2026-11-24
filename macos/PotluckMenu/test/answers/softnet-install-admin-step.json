@@ -1,0 +1,12 @@
+{
+  "admin_step": {
+    "why": "The admin step installs Softnet 0.9 root-owned in /Library/Application Support/Potluck/softnet, because Tart starts Softnet as root for each box's network.",
+    "argv": [
+      "/Users/bailey/.local/bin/potluck",
+      "softnet",
+      "install",
+      "--admin-step",
+      "/Users/bailey/.potluck/softnet/softnet-0.9"
+    ]
+  }
+}

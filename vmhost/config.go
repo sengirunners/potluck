@@ -117,8 +117,8 @@ func parseConfig(m map[string]string) (config, error) {
 	if c.VM == "" {
 		c.VM = "tart"
 	}
-	if c.Tart == "" {
-		c.Tart = "tart"
+	if c.Tart == "" && c.VM == "tart" {
+		c.Tart = ResolveTart()
 	}
 	sd, err := StateDir(m)
 	if err != nil {

@@ -351,99 +351,1550 @@ read them yourself. This is not legal advice.
 
 ---
 
-Source: https://potluck.sh/blog/volunteer-computing-projects
+Source: https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc
 
-# Volunteer computing projects in November 2026: BOINC, GPU projects and self-hosted pools
+# Actions Runner Controller (ARC): Self-Hosted GitHub Actions Runners on Kubernetes in 2026
 
-Published 2026-11-20. https://potluck.sh/blog/volunteer-computing-projects
+Published 2026-11-24. https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc
 
-**Short answer:** Most volunteer computing projects in November 2026 still run on BOINC, the open-source platform from the University of California, Berkeley. The BOINC article on Wikipedia, citing BOINCstats, counts 25,314 active participants on 130,853 computers averaging 15.220 PetaFLOPS a day as of 13 August 2026, and 26 projects on BOINC's official list as of 7 February 2026. Long-running BOINC projects include Einstein@Home, Rosetta@home, World Community Grid, PrimeGrid, LHC@home, climateprediction.net, MilkyWay@home, Asteroids@home and GPUGRID. Outside BOINC, Folding@home, GIMPS and distributed.net run their own clients, and peer-to-peer tools such as Petals, Hivemind and AI Horde pool volunteer GPUs for AI models. If you want to pool your own team's idle Macs and Linux boxes for builds and coding agents instead of donating them to science, that is a different job. Potluck, a free, open-source and early project made by Sengi, does that.
+**Short answer**: Actions Runner Controller (ARC) is the Kubernetes operator from the actions/actions-runner-controller repository that runs and autoscales self-hosted GitHub Actions runners as ephemeral pods. The GitHub Docs page "Actions Runner Controller" says ARC ships as 2 Helm charts and 1 controller container image. You run 2 `helm install` commands: one for the gha-runner-scale-set-controller chart, and one gha-runner-scale-set chart per runner scale set. Then you set `runs-on` to the installation name, which the same page limits to 45 characters. Per that page, a failed runner pod is retried up to 5 times, and GitHub unassigns a job that no runner accepts within 24 hours. ARC needs a Kubernetes cluster and runs Linux container pods. If your spare capacity is Macs and Linux boxes rather than a cluster, Potluck, an early open-source project, runs jobs in a fresh VM or sandbox on machines you already own.
 
-Volunteer and project counts change month to month. The Wikipedia "List of volunteer computing projects" and BOINC's own "Choosing BOINC projects" page carry the current figures.
+The rest of this page is a setup reference. Each fact names the GitHub Docs page or repository it comes from. The last part shows where Potluck fits.
 
-## The options compared
+## What Actions Runner Controller (ARC) is
 
-| Option | What your machine works on | Who uses the result | GPU work | How you take part |
-|---|---|---|---|---|
-| BOINC projects | Science tasks: astrophysics, biology, maths, climate, physics | The research group that runs each project | In some projects (see below) | Install the BOINC client, attach to projects or use an account manager |
-| Folding@home | Protein folding simulations | Folding@home research labs | CPU and GPU | Its own client |
-| GIMPS | Tests of Mersenne prime candidates | The GIMPS project | CPU, plus separate GPU programs | Its own client |
-| distributed.net | Cipher and Golomb ruler searches | distributed.net | CPU and GPU clients | Its own client |
-| Petals and Hivemind | Parts of large language models | Anyone using the swarm | GPU | Run a Petals server or Hivemind peer |
-| AI Horde | Image and text generation | Users of the horde, with kudos as a reward | GPU | Run a worker |
-| Golem Network | Tasks bought on a marketplace | Paying requestors | Depends on the task | Run a provider node |
-| Potluck | GitHub Actions jobs and coding-agent sandboxes | Your team or friends you invite | Not covered so far; you share a fraction of cores and RAM | Join or host in a private pool |
+The repository description calls actions-runner-controller a "Kubernetes controller for GitHub Actions self-hosted runners". The GitHub Docs concept page describes it as an operator that orchestrates and scales those runners.
 
-Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without Sengi or a Sengi account.
+- **Runner scale sets are the supported mode.** The repository README says the older autoscaling modes are legacy and maintained by the community only.
+- **Charts are OCI only.** The concept page says the charts are published as OCI packages on GitHub Packages. There are no tarballs and no Helm repository on GitHub Pages.
+- **ARC adds custom resources.** The concept page lists the API groups `actions.github.com/v1alpha1` (scale sets) and `actions.summerwind.net/v1alpha1` (legacy). The controller chart installs them.
 
-## BOINC volunteer computing projects in 2026
+## ARC compared with other runner options
 
-BOINC is middleware: a server that hands out work units and a client that runs them when your computer is idle. The client runs on Windows, macOS, Linux, Android, FreeBSD and Raspberry Pi OS, and the code is under the LGPL. A credit system checks returned results before it grants credit, which is how projects catch faulty hardware and cheating.
+Potluck is made by Sengi, which sells hosted GitHub Actions runners. Potluck is a separate, free project.
 
-The well-known active projects, by focus:
+| Option | Where jobs run | What you operate | macOS jobs |
+|---|---|---|---|
+| ARC runner scale sets | Pods in your Kubernetes cluster | The cluster, 2 Helm releases, GitHub auth, logs | No, Linux container pods |
+| One self-hosted runner | A machine you own | The runner app, cleanup between jobs | Yes, on a Mac |
+| Hosted runners (GitHub-hosted, Cirrus Runners, Blacksmith, Sengi) | The vendor's machines | Nothing; the vendor bills you | Where the vendor offers it |
+| Potluck | A fresh VM or sandbox on Macs and Linux boxes you own | A `potluck` daemon per machine, Tailscale or your own tunnel | Yes, with Tart on Apple silicon |
 
-- **Einstein@Home**: searches radio and gravitational-wave data for pulsars.
-- **Rosetta@home**: protein structure prediction for disease research.
-- **World Community Grid**: humanitarian research on disease, clean water and clean energy, now run by the Krembil Research Institute.
-- **PrimeGrid, SRBase, NumberFields@home, yoyo@home**: prime searches, Sierpinski and Riesel problems, number theory and factoring.
-- **LHC@home**: physics simulations for CERN.
-- **climateprediction.net**: climate model runs from Oxford.
-- **MilkyWay@home**: a model of our galaxy from Sloan Digital Sky Survey data.
-- **Asteroids@home**: asteroid shapes and spins from photometry.
-- **SiDock@home and TN-Grid**: drug design and gene networks.
+ARC is GitHub-supported and autoscales with workflow demand. A single runner is the simplest option, but it has no autoscaling and does not give each job a clean environment. Hosted runners need no hardware. Potluck is early: its Actions path has been run by hand, not yet daily.
 
-Recent additions to the Wikipedia list include Kessler@home, which simulates orbital debris growth; Beacon@Home, which runs light citizen-science tasks such as mapping background radiation with volunteer Geiger counters; and Eternity II, which searches for better arrangements of the edge-matching puzzle. BitBOINC and The Puzzle also appear; both include Bitcoin challenge-key searches, so read a project's About page before you attach and decide whether that is work you want to give cycles to. BOINC Central is a shared pool hosted at Berkeley so researchers can submit jobs without running their own server.
+## Prerequisites for ARC on Kubernetes
 
-Some names have ended. SETI@home stopped in 2020, and the list marks Universe@Home, Amicable Numbers and DreamLab as completed.
+The GitHub Docs tutorial "Get started with Actions Runner Controller" lists:
 
-If you do not want to pick projects yourself, an account manager does it. Science United assigns vetted projects by research area such as medicine or physics; BAM! and GridRepublic manage several accounts across several computers.
+- A Kubernetes cluster. It suggests a managed service such as AKS, or minikube or kind for a local trial.
+- Helm 3.
+- A way to collect and keep logs from the controller, listeners and ephemeral runners before production. The tutorial recommends this but does not require it.
 
-## GPU volunteer computing projects
+## Step 1: install the gha-runner-scale-set-controller chart
 
-BOINC added NVIDIA CUDA support first, then AMD, then OpenCL on Windows, Linux and macOS; Intel GPU work exists but is sparse, per the BOINC article on Wikipedia, which also says GPU applications run 2 to 10 times faster than the earlier CPU-only versions. Projects that use GPUs:
+This step installs the operator and the CRDs. The commands come from the quickstart:
 
-- **GPUGRID**: full-atom protein simulations, NVIDIA GPUs only.
-- **Einstein@Home, PrimeGrid, World Community Grid**: GPU and CPU applications.
-- **MilkyWay@home**: built NVIDIA CUDA applications early on.
-- **Folding@home**: its own client, CPU and GPU.
+```bash
+NAMESPACE="arc-systems"
+helm install arc \
+  --namespace "${NAMESPACE}" \
+  --create-namespace \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+```
 
-GPU work availability comes and goes. Before you buy or dedicate a card, check the project's Applications page for your GPU vendor and operating system.
+Once you move past a trial, pin a chart version with `--version`. The namespace must be able to reach the Kubernetes API server.
 
-For AI workloads, the GPU pools are peer to peer. Petals serves large language models across volunteer GPUs. AI Horde is a crowdsourced GPU cluster for image and text generation, run by a non-profit. Exo is different: it joins your own devices into one cluster at home rather than lending to strangers.
+## Step 2: authenticate ARC to the GitHub API
 
-## Open-source and peer-to-peer alternatives to BOINC
+The docs page "Authenticating ARC to the GitHub API" covers authentication.
 
-BOINC is the most complete option if you are a researcher: it has a server you can host, a credit system, account managers and a large volunteer base. The cost is that you package your application as BOINC work units and run a project server, which takes real effort.
+- For repository or organization runners, GitHub recommends a GitHub App.
+- Enterprise-level scale sets require a personal access token (classic).
+- The quickstart uses a classic token with the `repo` and `admin:org` scopes to keep the trial short.
 
-Other open-source approaches:
+The quickstart warns against passing secrets in plain text on the command line. Create a Kubernetes secret instead:
 
-- **Hivemind**: a PyTorch library for training models over the internet without central coordination. Good for ML research; it assumes ML work.
-- **Pando and Wasimoff**: browser-based volunteer computing, where tasks run in web workers. No install for volunteers; limited to what runs in a browser.
-- **Flower**: federated learning across devices that keep their own data. It is related to volunteer computing but solves a privacy problem, not a capacity one.
-- **Golem Network**: a permissionless marketplace for compute. It pays providers, which brings a different trust and payment model than donation.
+```bash
+kubectl create namespace arc-runners
+kubectl create secret generic arc-github-secret \
+  --namespace arc-runners \
+  --from-literal=github_token='<PAT>'
+```
 
-## When you want a self-hosted pool instead
+## Step 3: deploy a runner scale set
 
-Searches like "self-hosted distributed computing pool join volunteer compute" often come from developers who are not after science credit. They have a Mac mini under a desk and a Linux box in a closet, both idle most of the day, and a CI queue or a coding agent that wants somewhere to run. Volunteer computing sends cycles to a project you do not run. A private pool keeps the cycles inside a group you choose.
+The installation name becomes your `runs-on` value. The quickstart recommends keeping runner pods in a different namespace from the controller.
 
-That is what Potluck does. It runs GitHub Actions jobs and coding agents on machines your team already owns, each in a fresh VM or sandbox. Details from the project facts:
+```bash
+INSTALLATION_NAME="arc-runner-set"
+NAMESPACE="arc-runners"
+GITHUB_CONFIG_URL="<URL of your repository, organization or enterprise>"
+helm install "${INSTALLATION_NAME}" \
+  --namespace "${NAMESPACE}" \
+  --set githubConfigUrl="${GITHUB_CONFIG_URL}" \
+  --set githubConfigSecret=arc-github-secret \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+```
 
-- **What a host needs**: Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux. `potluck host` checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes.
-- **How much you share**: `--share` sets the fraction of cores and RAM, default 0.5.
-- **Getting the machine back**: a Mac sandbox ends when its owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.
-- **GitHub Actions status**: a real Actions job has been run through the runner broker, by hand, on a Mac (Tart) and on a Linux box on another machine (OCI with gVisor). It is not yet running daily in our own CI. See [GitHub Actions runner](/github-actions-runner) and [a self-hosted GitHub Actions runner on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac).
-- **Agents**: `potluck --pool friends mcp` is an MCP server that gives an agent sandbox tools; see [agent sandbox](/agent-sandbox) and [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp). `potluck agent-runner` runs a coding-agent vendor's self-hosted runners in fresh sandboxes.
-- **Isolation**: `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer the default is no network at all.
-- **Trust**: the machine that runs a VM can read everything in it, secrets included, and the machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust. There are no promises; use it at your own risk.
-- **Macs**: Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice. More in [Tart](/tart).
+The concept page's resource table says that when `githubConfigSecret` is a string, ARC uses that existing secret instead of creating one.
 
-Potluck is not a hosted cloud, not a sandbox runtime of its own (it drives Tart, Kata, gVisor and Incus) and not a cluster scheduler. For the longer walkthrough, read [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+Resource names are the installation name plus a fixed suffix, so keep the name short. For example, the listener Role reserves 26 characters for its suffix.
+
+To route jobs by other names, set `runnerScaleSetName` or `runnerScaleSetLabels` in `values.yaml`.
+
+## Step 4: verify the install and run a workflow
+
+```bash
+helm list -A
+kubectl get pods -n arc-systems
+```
+
+You should see both releases deployed, plus a controller pod and a listener pod in `Running`. Then add a workflow:
+
+```yaml
+name: Actions Runner Controller Demo
+on:
+  workflow_dispatch:
+jobs:
+  Explore-GitHub-Actions:
+    runs-on: arc-runner-set
+    steps:
+      - run: echo "This job uses runner scale set runners"
+```
+
+Trigger it by hand and watch a runner pod come and go with `kubectl get pods -n arc-runners -w`. If a pod stays pending, see the GitHub Docs page "Troubleshooting Actions Runner Controller errors".
+
+## How ARC scales runners
+
+The architecture section of the concept page describes this flow:
+
+1. The controller fetches the runner group and creates the scale set in the GitHub Actions service.
+2. A listener pod holds an HTTPS long poll and waits for a Job Available message.
+3. When a job's `runs-on` matches, the listener patches the EphemeralRunnerSet replica count.
+4. The EphemeralRunner controller gets a just-in-time token and creates runner pods. It retries a failed pod up to 5 times.
+5. When the job finishes, the runner is deleted.
+
+Each job gets a new pod.
+
+## Custom runner images
+
+The concept page lists what GitHub's minimal runner image contains: runner binaries, container hooks, and Docker for Docker-in-Docker mode.
+
+To add tools, use setup actions such as actions/setup-node, or build your own image. A custom image must:
+
+- place the runner under `/home/runner/` and start it with `/home/runner/run.sh`;
+- in Kubernetes mode, put the container hooks under `/home/runner/k8s`.
+
+## Where Potluck fits
+
+ARC assumes a Kubernetes cluster and Linux pods. Many teams that ask about running jobs on spare Macs have no cluster. They have a Mac mini on a shelf and a Linux box under a desk.
+
+Potluck is free, Apache-2.0 software that runs GitHub Actions jobs and coding agents on those machines, each in a fresh VM or sandbox.
+
+- **Runtimes:** Tart on Apple silicon, or Docker or Podman with Kata or gVisor on Linux.
+- **Not a cluster scheduler:** if you already run Kubernetes, ARC is the better fit for Linux jobs.
+- **Status:** a real Actions job has been run through the runner broker by hand, on a Mac (Tart) and on a Linux box on another machine (OCI with gVisor). It does not run daily in our own CI yet.
+- **Coding agents:** `potluck agent-runner` runs a coding-agent vendor's self-hosted runners in fresh sandboxes.
+- **Owners come first:** a Mac sandbox ends when its owner touches the keyboard or pointer. On Linux, hand-back works only as a time window today.
+- **macOS limit:** Apple's licence allows 2 macOS VMs on a Mac you own, and Potluck caps macOS guests at 2 per Mac.
+
+More: [GitHub Actions runners on your own machines](/github-actions-runner), [a self-hosted runner on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac), [pooling spare Macs and Linux boxes](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
 
 ## How to start with Potluck
 
-Install on macOS or Linux with the install script, install.sh, from the main branch of the sengirunners/potluck repository on GitHub: fetch it with curl and pipe it to sh. No Go is needed. Then start the daemon:
+Install and start the daemon on macOS or Linux (no Go needed):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+Set up a pool:
+
+1. On the pool machine, run `potluck create friends`. The first time, it prints a Tailscale login URL.
+2. Run `potluck invite ana` to make a code for a friend who runs sandboxes.
+3. Run `potluck invite carl --host` to make a code for a friend who shares a machine.
+4. Friends run `potluck join '<code>'` or `potluck host '<code>'`.
+
+Before you share a machine:
+
+- `potluck doctor` shows what the machine can share.
+- `potluck host --dry-run` prints the plan.
+- `--share` sets the fraction of cores and RAM shared (default 0.5).
+- `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet.
+
+Try a sandbox with `potluck sandbox create`, `potluck sandbox exec <id> -- uname -a` and `potluck sandbox rm <id>`. To stop sharing, run `potluck host stop`.
+
+Trust works like this. The machine that runs a VM can read everything in it, including secrets. The pool machine can read commands and output passing through it. Join only a pool whose owner you trust, and use Potluck at your own risk.
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. Contributors can find good first issues at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### What is Actions Runner Controller (ARC)?
+
+ARC is a Kubernetes operator that runs and autoscales self-hosted GitHub Actions runners as ephemeral pods. It lives in the actions/actions-runner-controller repository, and its documentation is on GitHub Docs.
+
+### Is ARC supported by GitHub?
+
+The runner scale set mode is supported by GitHub. The README says the legacy autoscaling modes are maintained by the community only.
+
+### Should ARC use a GitHub App or a personal access token?
+
+GitHub Docs recommends a GitHub App for repository and organization runners. Enterprise-level scale sets require a personal access token (classic).
+
+### Can ARC run macOS jobs?
+
+No. ARC runners are Linux container pods. For macOS jobs you need a Mac, a hosted macOS runner, or a Tart VM through Potluck on Apple silicon.
+
+### Does Potluck replace ARC?
+
+No. Potluck is not a cluster scheduler. It puts idle Macs and Linux boxes to work in fresh VMs or sandboxes.
+
+### Do I need a Sengi account to use Potluck?
+
+No. Potluck runs without Sengi and without a Sengi account.
+
+---
+
+Source: https://potluck.sh/blog/best-self-hosted-ci-runners
+
+# Open Source Self-Hosted CI Runner Tools for CI Jobs and Coding Agents on Your Own Machines (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/best-self-hosted-ci-runners
+
+**Short answer**: in November 2026 there are eight open-source tools worth a look for running CI jobs, and in one case coding agents, on hardware you already own. They are the GitHub Actions runner with actions-runner-controller, GitLab Runner, the Buildkite Agent, Jenkins with agent clouds, Woodpecker CI, Tekton, Concourse and Potluck. The first seven are CI systems or CI agents that run jobs on Linux servers or a Kubernetes cluster you operate. Potluck is different: it pools a team's idle Macs and Linux boxes, runs GitHub Actions jobs and coding-agent sandboxes there, and gives every job a fresh VM or sandbox. Potluck is free, Apache-2.0 licensed and early. Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners; Potluck is a separate free project and runs without Sengi or a Sengi account.
+
+The tools differ less in what they can build than in what separates one job from the next. Pick on that first, then on what you already run.
+
+## The options side by side
+
+| Tool | What it runs | What separates jobs | Where it fits | Where it costs more work |
+|---|---|---|---|---|
+| GitHub Actions runner + actions-runner-controller | GitHub Actions jobs | A pod per job on Kubernetes, shared node kernel unless you add Kata or gVisor | GitHub teams already running Kubernetes | You need a cluster; GitHub's own docs warn against self-hosted runners on public repos |
+| GitLab Runner | GitLab CI jobs | Depends on the executor: shell (none), docker (container), kubernetes (pod), instance executors (VM) | GitLab teams who choose the executor on purpose | The executor line is easy to set once and forget |
+| Buildkite Agent | Buildkite pipelines | A host process by default; containers through plugins or hooks | Teams that want hosted coordination with all compute on their side | Coordination is a Buildkite service; isolation is yours to build |
+| Jenkins with agent clouds | Jenkins pipelines | A pod, container or instance per build, by cloud plugin | Existing Jenkins installs with plugins nothing else has | Controller and plugin upkeep; agent images go stale |
+| Woodpecker CI | Container pipelines | A container per step | Small setups, homelabs, Gitea or Forgejo | Smaller ecosystem; privileged steps for image builds |
+| Tekton | Kubernetes-native pipelines | A pod per run | Platform teams building CI as an internal product | Verbose; most teams add a layer on top |
+| Concourse | Resource-and-job pipelines | A container per step with declared inputs and outputs | Teams that want reproducible builds enforced by the tool | An unfamiliar model and its own ecosystem |
+| Potluck | GitHub Actions jobs and coding-agent sandboxes | A fresh Tart VM on Apple silicon, or a Kata or gVisor sandbox on Linux | Teams with spare Macs and Linux boxes, including macOS work | Early; Linux hand-back is only a time window today |
+
+## The CI runners, one by one
+
+### GitHub Actions runner with actions-runner-controller
+
+If your code is on GitHub and you run Kubernetes, this is the default. The runner is GitHub's own agent, and actions-runner-controller scales it as ephemeral runners that take one job and go away. You get a reset filesystem per job and autoscaling on queue depth. The boundary is a pod, so concurrent jobs on a node share a kernel. GitHub's documentation warns against self-hosted runners on public repositories, because a fork pull request can run code on your runner. If you build forks, put a VM-backed runtime under the pods or run those jobs elsewhere.
+
+### GitLab Runner
+
+GitLab Runner is one binary with several executors, and the executor is your isolation model. The shell executor runs jobs on the host in a reused build directory. The docker executor gives a fresh container per job. The kubernetes executor gives a pod per job. Instance executors give a VM per job at the cost of provisioning time. All are reasonable for the right repo; the risk is picking one from a setup prompt and never revisiting it, or adding privileged mode or a mounted Docker socket to make image builds work.
+
+### Buildkite Agent
+
+Buildkite splits the work: pipelines, scheduling and the UI are a hosted service, and the open-source agent runs on your machines. Source, secrets and artifacts stay on your side. This suits fleets spread across data centres and clouds. By default the agent runs jobs as host processes, so containers or VMs are something you set up through plugins or hooks.
+
+### Jenkins with agent clouds
+
+Jenkins still has a huge installed base. With a Kubernetes, Docker or cloud plugin it creates an agent per build and tears it down after. The work is in keeping agent images fresh, patching plugins and keeping builds off the controller, which holds credentials for everything it builds.
+
+### Woodpecker CI
+
+Woodpecker, a community fork of Drone, is a small server plus agents where every pipeline step is a container. Setup is short and one person can hold the whole thing in their head. It fits trusted code on small fleets, often next to a self-hosted Gitea or Forgejo.
+
+### Tekton
+
+Tekton models CI as Kubernetes resources: Tasks, Pipelines, PipelineRuns. You get the cluster's RBAC, GitOps and monitoring for free. A simple build takes more YAML than in other tools, so teams usually put a generator or dashboard in front.
+
+### Concourse
+
+Concourse runs every step in a container with declared inputs and outputs and no ambient state. Builds come out reproducible by design. Migrating an existing pipeline means modelling it properly, which takes time.
+
+## What about coding agents?
+
+The seven CI tools above run pipelines. A coding agent needs something else: a place to run commands, install packages and run tests that is not your laptop, created on demand and thrown away after. You can build that yourself with containers plus Kata or gVisor, or with VMs, and wire it to the agent. That works and is a fair amount of glue.
+
+Potluck covers two agent cases on machines you own. `potluck agent-runner` runs a coding-agent vendor's self-hosted runners in fresh sandboxes. `potluck --pool friends mcp` is an MCP server that exposes sandbox tools to an agent, so the agent can create a sandbox, run commands in it and remove it. More on that in [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp) and [run coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines), or the [agent sandbox page](/agent-sandbox).
+
+## Where Potluck fits, and where it does not
+
+Potluck is not a hosted cloud, not a sandbox runtime of its own and not a scheduler for clusters. It drives Tart, Kata, gVisor and Incus. What it adds is the pool: one machine runs it, friends join or share machines, and machines reach each other over Tailscale or a tunnel you configure.
+
+What works today, from the Potluck facts:
+
+- A real GitHub Actions job has been run through the runner broker, by hand, on a Mac with Tart and on a Linux box on another machine with OCI and gVisor. It is not yet running daily in Potluck's own CI. See the [GitHub Actions runner page](/github-actions-runner).
+- Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux.
+- `potluck host` checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes.
+- On the OCI layer the default is no network at all, and `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet.
+- A Mac sandbox ends when its owner touches the keyboard or pointer. On Linux, hand-back works only as a time window today.
+
+If you already run Kubernetes and actions-runner-controller or GitLab Runner covers your needs, keep it. Potluck is for the case where the spare capacity is a few desks of Macs and Linux boxes, not a cluster.
+
+## macOS jobs on a Mac you own
+
+The GitHub, GitLab and Buildkite agents all have macOS builds, but on a bare Mac they run jobs on the host, so one job can leave state for the next. A VM per job fixes that. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a macOS guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice. Details in [self-hosted GitHub Actions runner on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac) and the [Tart page](/tart).
+
+## Trust, before you pool anything
+
+The machine that runs a VM can read everything in it, including secrets. The machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust. Potluck comes with no promises; use it at your own risk. The same reasoning applies to every tool above: whoever controls the host controls the job.
+
+## How to choose
+
+1. On GitHub with Kubernetes: actions-runner-controller.
+2. On GitLab: GitLab Runner, with the docker or kubernetes executor chosen on purpose.
+3. Already on Jenkins: keep it and move to agent clouds.
+4. Small and self-hosted: Woodpecker. Building CI as a platform: Tekton. Reproducible by construction: Concourse. Hosted coordination with your compute: Buildkite.
+5. Idle Macs and Linux boxes, macOS jobs, or coding agents that need throwaway sandboxes: try Potluck, knowing it is early.
+6. Building fork pull requests or running agent-written code: put a VM or a Kata or gVisor sandbox under each job, whichever tool you pick.
+
+## How to start with Potluck
+
+Install on macOS or Linux, no Go needed:
 
 ```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that will run the pool:
+
+```
+potluck create friends
+potluck invite ana
+potluck invite carl --host
+```
+
+The first `potluck create` prints a Tailscale login URL. Ana runs `potluck join '<code>'` to use sandboxes. Carl checks his box with `potluck doctor` and `potluck host --dry-run`, then runs `potluck host '<code>'` to share it. `--share` (default 0.5) sets the fraction of cores and RAM shared, and `potluck host stop` stops sharing.
+
+Try a sandbox:
+
+```
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+A longer walkthrough is in [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions with what you ran and what happened. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### What open source tools run coding agents and CI jobs on machines I already own?
+
+For CI jobs: the GitHub Actions runner with actions-runner-controller, GitLab Runner, the Buildkite Agent, Jenkins, Woodpecker, Tekton and Concourse. Potluck runs both GitHub Actions jobs and coding-agent sandboxes on idle Macs and Linux boxes, through `potluck agent-runner` and an MCP server.
+
+### Is Potluck free, and who makes it?
+
+Potluck is free and open source under Apache-2.0. It is made by Sengi, Inc., which sells hosted GitHub Actions runners, but Potluck runs without Sengi and without a Sengi account.
+
+### Is it safe to run self-hosted runners on a public repository?
+
+GitHub's own documentation warns against it, because a fork pull request can run code on your runner. If you must, give each job its own VM or a Kata or gVisor sandbox with no secrets and no network access it does not need.
+
+### Can Potluck run macOS CI jobs?
+
+Yes, on an Apple silicon Mac with Tart, at most two macOS guests per Mac under Apple's licence. A real Actions job has been run this way by hand; it is not yet in daily use in Potluck's own CI.
+
+### Does Potluck replace actions-runner-controller or GitLab Runner?
+
+No. Those run jobs on servers or clusters you operate; Potluck pools desk machines and spare boxes. If your cluster setup works, keep it.
+
+### What does a Linux box need to share work through Potluck?
+
+Docker or Podman with Kata or gVisor. Run `potluck doctor` to see what the machine can share before you host.
+
+### What happens when a machine's owner wants it back?
+
+On a Mac, a sandbox ends when the owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused; on Linux, hand-back works only as a time window today.
+
+---
+
+Source: https://potluck.sh/blog/claude-code-permissions-sandboxing-explained
+
+# Claude Code permissions and sandbox settings explained (2026)
+
+Published 2026-11-24. https://potluck.sh/blog/claude-code-permissions-sandboxing-explained
+
+**Short answer**: Claude Code has two separate controls. Permission rules (allow, ask, deny) and permission modes decide whether a tool call runs and whether you are asked first, and they apply to every tool: Read, Edit, Bash, WebFetch, MCP. The Bash sandbox is a boundary the operating system enforces (Seatbelt on macOS, bubblewrap on Linux and WSL2) around shell commands only. It is off by default. When on, commands can write only to the working directory, a per-user temp directory and directories you added; they can read most of the machine, including `~/.ssh`, unless you deny it; and their network traffic goes through a local proxy whose allowed domains list starts empty. Claude's file tools, MCP servers and hooks run outside the sandbox. For one boundary around everything the agent does, run it in a container, a VM, or a sandbox on another machine. This follows Anthropic's Claude Code documentation as of November 2026.
+
+## The layers at a glance
+
+| Layer | What it controls | Enforced by | Covers |
+|---|---|---|---|
+| Permission rules | Which tool calls run, prompt, or are blocked | Claude Code, before the tool runs | All tools |
+| Permission modes | Whether you get a prompt | Claude Code (auto mode adds a classifier) | All tools |
+| Bash sandbox | What a running shell command can read, write and reach | The OS kernel | Bash, PowerShell and Monitor commands and their child processes |
+| Whole-process boundary | Everything the agent process does | A container, VM or remote sandbox | The agent, its file tools, MCP servers and hooks |
+
+The University of Vermont IT knowledge base names the most common mistake: assuming the sandbox restricts everything Claude reads. It does not. A sandbox `denyRead` entry does not stop the Read tool, and `allowedDomains` does not limit WebFetch. Block a secret in both places, or the other path still reaches it.
+
+## Permission rules: allow, ask, deny
+
+Rules live in `permissions` in a settings file and use patterns such as `Read(...)`, `Edit(...)`, `Bash(git push *)` and `WebFetch(domain:example.com)`. Per the UVM article, they are evaluated deny first, then ask, then allow, and a deny set in managed settings cannot be re-allowed by a user. Watch the path syntax: in Read and Edit rules, `//path` is absolute and `/path` is relative to the project, while sandbox filesystem settings use ordinary paths such as `/tmp/build` and `~/.kube`.
+
+## Permission modes
+
+Modes decide who approves a call. Manual mode prompts; acceptEdits approves file edits; auto mode hands the decision to a classifier model; dontAsk refuses anything not already allowed; plan mode gates commands while you plan; bypassPermissions (the `--dangerously-skip-permissions` flag) skips prompts. `/sandbox` is not a mode. The sandbox's own auto-allow setting approves Bash commands because the sandbox contains them, which is different from auto mode's classifier. You can combine the two.
+
+## What the Bash sandbox restricts by default
+
+| Access | Default when enabled | Change it with |
+|---|---|---|
+| Writes | Working directory, per-user temp directory, added directories; protected paths such as `.claude` settings, `.mcp.json` and `.bashrc` stay write-denied | `filesystem.allowWrite`, `filesystem.denyWrite` |
+| Reads | Most of the machine, including credential files | `filesystem.denyRead`, `filesystem.allowRead`, `credentials` |
+| Network | No direct route out; a proxy checks each host against an allowlist that starts empty | `network.allowedDomains`, `network.deniedDomains`, `network.strictAllowlist` |
+| Environment | Inherited from Claude Code, secrets included | `credentials.envVars`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` |
+
+Turn it on with `/sandbox` in a session and pick auto-allow or regular permissions, or set `sandbox.enabled` to true in `~/.claude/settings.json`. On Linux and WSL2, install `bubblewrap` and `socat` first. To check it works, ask Claude (not the `!` prompt, which runs unsandboxed) to run `touch ~/sandbox-probe`; it should fail.
+
+A starting point for user settings that blocks SSH and AWS keys, strips a token, allows two registries and stops unsandboxed retries:
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "failIfUnavailable": true,
+    "network": { "allowedDomains": ["github.com", "*.npmjs.org"] },
+    "credentials": {
+      "files": [
+        { "path": "~/.ssh", "mode": "deny" },
+        { "path": "~/.aws/credentials", "mode": "deny" }
+      ],
+      "envVars": [ { "name": "GITHUB_TOKEN", "mode": "deny" } ]
+    }
+  }
+}
+```
+
+There is no built-in credential deny list; only what you name is protected.
+
+## The escape hatches
+
+- **Unsandboxed retry**: after a failure Claude can retry with `dangerouslyDisableSandbox`. Setting `allowUnsandboxedCommands` to false (strict sandbox mode) removes it.
+- **excludedCommands**: matching commands run with your full access. Docker does not work inside the sandbox, so `docker compose *` here is common; keep patterns narrow.
+- **Weakening switches**: `allowAppleEvents` on macOS, `allowNestedUserNamespaces` and `enableWeakerNestedSandbox` on Linux each trade isolation for compatibility.
+
+## Settings for a team
+
+Administrators deliver keys through managed settings. `enabled`, `failIfUnavailable` and `allowUnsandboxedCommands: false` together make the sandbox admin-required, and Claude Code then ignores repository settings that loosen it, such as a repo's `excludedCommands` or `allowedDomains`. `allowManagedDomainsOnly` and `allowManagedReadPathsOnly` lock network and read lists to managed values. Native Windows has no sandbox, so with `failIfUnavailable` set Claude Code exits there; move those users to WSL2 or a container.
+
+## Limits Anthropic lists
+
+The documentation says the sandbox reduces risk but is not a complete isolation boundary. The proxy decides on hostname and does not inspect TLS by default, so a broad entry like `github.com` can be an exfiltration path and domain fronting is possible. Allowing a Unix socket such as `/var/run/docker.sock` effectively hands over the host. Broad write rules to `$PATH` directories or shell startup files can lead to code running elsewhere.
+
+## When to put the whole agent in a box
+
+If MCP servers, hooks and file tools need a boundary too, the documentation points to running the Claude Code process itself in a container, VM or the sandbox runtime. Your options:
+
+| Option | Covers file tools and MCP | Runs on | What it costs you |
+|---|---|---|---|
+| Claude Code Bash sandbox | No | Your machine | Little setup; shell commands only |
+| Dev container | Yes | Your machine | Image upkeep; shares your laptop's CPU and RAM |
+| Local VM | Yes | Your machine | Strong boundary; heavy on a laptop |
+| Hosted sandbox service | Yes, for what you send it | Rented machines | Easy to scale; usage bills and your code leaves your hardware |
+| Potluck sandbox | Commands sent to it | A spare Mac or Linux box your team owns | Early software; you run the pool |
+
+Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without a Sengi account.
+
+Potluck is not a replacement for Claude Code's settings. It is not a sandbox runtime of its own; it drives Tart on Apple silicon Macs and Kata, gVisor or Incus on Linux, and puts each sandbox on a machine that is not your laptop. On the OCI layer the default is no network at all. Trust still applies: the machine that runs a VM can read everything in it, including secrets, and the machine that runs a pool can read commands and output passing through it.
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+Create a pool with `potluck create friends` (the first time it prints a Tailscale login URL). `potluck invite carl --host` makes a code for someone sharing a machine, who runs `potluck host '<code>'`; `potluck doctor` and `potluck host --dry-run` show what will be shared first. Then:
+
+```sh
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+`potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. To hand an agent sandbox tools, run `potluck --pool friends mcp`; see [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp) and [agent sandboxes](/agent-sandbox).
+
+## What makes Potluck different
+
+- When the Bash sandbox is not enough, it uses the Macs and Linux boxes your team already owns instead of rented machines.
+- Each command an agent sends lands in a fresh VM or sandbox, and the same pool can also run GitHub Actions jobs (run by hand so far, not yet daily in Potluck's own CI).
+- Agents get sandbox tools over MCP with `potluck --pool friends mcp`.
+- A lent Mac goes back to its owner the moment they touch the keyboard or pointer; on Linux, hand-back works only as a time window today.
+- It is free and open source (Apache-2.0) and runs without a Sengi account.
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions, and if you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### Is the Claude Code sandbox on by default?
+
+No. Turn it on with `/sandbox` in a session or set `sandbox.enabled` to true in a settings file.
+
+### Does the sandbox stop Claude from reading my .env file?
+
+Only for shell commands. The Read tool follows permission rules, so add a Read deny rule as well as a sandbox `denyRead` or `credentials` entry.
+
+### Does the sandbox work on Windows?
+
+Not natively; commands run unsandboxed there. Run Claude Code inside WSL2 to get it.
+
+### What is dangerouslyDisableSandbox?
+
+It is the parameter Claude uses to retry a failed command outside the sandbox. Set `allowUnsandboxedCommands` to false to make Claude Code ignore it.
+
+### Is the sandbox a full security boundary?
+
+Anthropic's documentation says no: the proxy filters by hostname without inspecting TLS, and broad allowlists or sockets can undo it. For a harder line, isolate the whole agent process.
+
+### Does Potluck replace Claude Code's sandbox?
+
+No. It gives agents fresh VMs or sandboxes on machines your team owns, over MCP or the `potluck sandbox` commands. Keep your permission rules either way.
+
+### Is Potluck free?
+
+Yes. It is open source under Apache-2.0, and you can read the code at https://github.com/sengirunners/potluck.
+
+---
+
+Source: https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared
+
+# Coding Agent Sandboxing Guide: Containers vs gVisor vs microVMs (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared
+
+**Short answer**: a plain container (Docker or Podman with the default runc runtime) shares the host kernel, so it is a packaging boundary, not a sandbox for code an agent writes. gVisor puts a user-space kernel between the agent and the host, and a microVM or full VM (Firecracker, Kata, Tart) gives the agent its own kernel, which is the strongest of the three. Then pick where the boundary runs: hosted platforms such as E2B, Modal and Daytona rent it to you, while self-hosting puts gVisor or a VM on hardware you already pay for. Potluck, a free, open-source (Apache-2.0) and early project, takes the self-hosted route. It runs each agent task in a fresh Tart VM on an Apple silicon Mac, or in a Kata or gVisor sandbox on Linux, on a team's idle machines. Per the Potluck docs, it caps macOS guests at two per Mac under Apple's licence.
+
+## The isolation options at a glance
+
+| Boundary | Kernel the agent talks to | What it stops | What it costs you |
+|---|---|---|---|
+| Process sandbox (Seatbelt, Bubblewrap, Landlock, seccomp) | The host kernel, with rules | File and syscall access outside allowed paths | Rules are easy to get wrong; agents have been seen probing for gaps |
+| Container (Docker or Podman, runc) | The host kernel, shared | Casual mistakes, dependency mess | A kernel bug or a bad mount reaches the host |
+| gVisor | A user-space kernel that re-implements syscalls | Direct calls into the host kernel | Some software hits syscalls gVisor does not emulate the same way |
+| microVM (Firecracker, Kata Containers) | Its own guest kernel on hardware virtualization | Kernel exploits reaching the host | Needs KVM; you manage images and networking yourself |
+| Full VM (Tart on a Mac, Incus on Linux) | Its own full OS | Same as a microVM, and you get macOS | Slower to start, more memory per guest |
+
+The order runs weakest to strongest. Every step up costs some start time and memory, and buys a smaller surface the agent can attack.
+
+## Why a coding agent needs more than a container
+
+A coding agent writes a command and runs it before you read it. It installs packages, runs test suites, starts servers and deletes files. Most of the time that is fine. The cases that hurt are the ordinary ones: a cleanup step with a bad path, an install script piped from an unknown host, a test that forks until the machine stalls, or a dependency that reads environment variables and sends them somewhere.
+
+A container handles the dependency mess well. It does not handle a hostile or broken process well, because every syscall still lands in the host kernel. That is why the hosted sandbox vendors and the cloud providers all reach for gVisor or a VM when the code is untrusted. Treat agent-written code as untrusted even when the agent is yours.
+
+Three things matter as much as the kernel boundary:
+
+- **Network.** Default to no egress. Most real damage needs a way out, so a box that cannot reach the internet, your LAN or your tailnet is far safer than one that can.
+- **Secrets.** A sandbox does not scrub the API keys you pass in. Give the agent only the tokens the task needs.
+- **Lifetime.** A fresh sandbox per task means a bad run cannot leave something behind for the next one.
+
+## Containers vs gVisor vs microVMs: how to choose
+
+Ask how much you trust the code and what it needs to run.
+
+- **Your own scripts that passed review:** a container is enough.
+- **Agent-written code on Linux, mostly language tooling:** gVisor is a good default. It runs ordinary OCI images and fits into Docker or Podman as a runtime. Test your toolchain first, since a few programs behave differently under it.
+- **Agent-written code that installs arbitrary packages or binaries, or anything you would call hostile:** use a VM boundary, Kata on Linux or a microVM platform.
+- **Anything that needs macOS or Xcode:** a full macOS VM, which on Apple silicon means a tool like Tart. No container or gVisor option runs macOS.
+
+## Hosted platforms vs your own machines
+
+Once you know the boundary, decide who runs it. Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners; Potluck itself is a separate free project, so weigh this table with that in mind.
+
+| Option | Isolation | Where it runs | Good at | Costs more or needs more work |
+|---|---|---|---|---|
+| E2B | Firecracker microVMs | Hosted; open source, self-hostable | Clean SDKs, fast start for short tasks | Usage billing adds up for long sessions |
+| Modal | gVisor | Hosted only | GPUs and Python workloads | No self-hosting; images defined in its SDK |
+| Daytona | Docker by default, Kata optional | Hosted or self-hosted | Persistent dev environments | You must opt into Kata for a VM boundary |
+| Google Agent Sandbox | gVisor or Kata on Kubernetes | Your cluster | Warm pools, no new vendor | You run the Kubernetes cluster |
+| DIY Firecracker or gVisor | Your choice | Your servers | Full control | You build images, networking, scheduling |
+| Potluck | Tart VMs on Mac; Kata or gVisor on Linux | Macs and Linux boxes you already own | Fresh sandbox per task on idle hardware, macOS guests | Early; machines are shared desktops, not a fleet |
+
+Hosted platforms win when you need many sandboxes at once, GPUs or no hardware to look after. Self-hosting wins when you already own the machines, need macOS, or do not want agent code and repo contents on someone else's servers. Potluck sits in the self-hosted column but does not ask you to build a fleet: it drives Tart, Kata, gVisor and Incus on the computers your team already has.
+
+## What Potluck checks before a machine takes work
+
+`potluck host` checks the machine, pulls the image, runs a quick conformance check per sandbox size and joins the pool only when a size passes. `potluck doctor` shows what a machine can share, and `potluck host --dry-run` prints the plan without changing anything. The `--share` flag sets the fraction of cores and RAM shared; the Potluck docs give the default as 0.5.
+
+For network isolation, `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer (Docker or Podman with Kata or gVisor) the default is no network at all.
+
+Be clear about the trust model. The machine that runs a VM can read everything in it, including secrets, and the machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust. There are no promises; use it at your own risk.
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+Create a pool on the machine that will run it. The first time, it prints a Tailscale login URL:
+
+```
+potluck create friends
+potluck invite ana
+potluck invite carl --host
+```
+
+Ana runs `potluck join '<code>'` to use sandboxes. Carl runs `potluck host '<code>'` to share a machine, and `potluck host stop` when he wants it back. Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux.
+
+Run a sandbox by hand:
+
+```
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+To hand sandboxes to an agent, run `potluck --pool friends mcp`, which is an MCP server exposing sandbox tools. More on that in [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp) and [run coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines). If your coding-agent vendor offers self-hosted runners, `potluck agent-runner` runs them in fresh sandboxes. See also the [agent sandbox](/agent-sandbox) page.
+
+## What makes Potluck different
+
+- **It uses the Macs and Linux boxes your team already owns** instead of rented machines, so a gVisor, Kata or Tart boundary for agent code runs on hardware you have already paid for.
+- **A Mac goes back to its owner the moment they touch the keyboard or pointer.** The sandbox ends, running VMs end and new work is refused, so lending a desktop does not mean losing it. On Linux, hand-back works only as a time window today.
+- **One pool serves coding-agent sandboxes and GitHub Actions jobs,** each in a fresh VM or sandbox. A real Actions job has run through the runner broker by hand on a Mac (Tart) and on a Linux box (OCI with gVisor), though not yet daily in our own CI. See [GitHub Actions runner](/github-actions-runner).
+- **Agents get sandbox tools over MCP,** and teammates and invited friends can lend machines to the same pool.
+- **It is free and open source (Apache-2.0) and runs without a Sengi account.** It is not a hosted cloud, not a sandbox runtime of its own and not a cluster scheduler.
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it on real agent work and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### Is Docker safe enough for a coding agent?
+
+Not on its own with the default runc runtime, because the container shares the host kernel. Add gVisor or Kata as the runtime, or use a VM, and turn off network access unless the task needs it.
+
+### What is the difference between gVisor and a microVM?
+
+gVisor intercepts the agent's syscalls with a user-space kernel, so the agent never calls the host kernel directly. A microVM such as Firecracker or Kata gives the agent its own guest kernel on hardware virtualization, which is a stronger boundary but needs KVM and more setup.
+
+### Can I sandbox a coding agent on macOS?
+
+Yes, with a macOS or Linux VM on an Apple silicon Mac using Tart, which is what Potluck drives. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac; see [Tart](/tart).
+
+### Does a sandbox protect my API keys?
+
+No. Anything you pass into the sandbox is readable by the code inside it, and with Potluck the machine running the VM can read it too, so pass only the keys the task needs.
+
+### Can I lend Mac time to people outside my team?
+
+Lending a macOS guest to your team or invited friends is fine under Apple's licence; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.
+
+### How much does Potluck cost?
+
+Potluck is free and open source under Apache-2.0. You supply the machines and their power.
+
+### Is Potluck ready to replace a hosted sandbox platform?
+
+Not for every team. It is early, it runs on shared desktops rather than a fleet, and Linux hand-back is only a time window today, so try it on non-critical agent work first.
+
+---
+
+Source: https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes
+
+# E2B Alternatives in November 2026: Self-Hosted Sandboxes for Coding Agents
+
+Published 2026-11-24. https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes
+
+**Short answer**: Yes, you can self-host coding agent sandboxes instead of using E2B's cloud. As of November 2026 the main self-hosted routes are:
+
+- E2B's own open-source runtime, either the single-machine Embed package or the full infra on a cluster
+- OpenSandbox
+- Microsandbox
+- Docker Sandboxes, for an agent on one laptop
+- Building directly on Firecracker or gVisor
+- Potluck, which pools the Macs and Linux boxes your team already owns
+
+Potluck is free and open source (Apache-2.0). It gives each agent a fresh VM or sandbox through Tart on Apple silicon or Kata and gVisor on Linux. It is early. Among the options in this post, it is the only one that lends idle machines across a team and offers macOS sandboxes, capped at two per Mac to match Apple's licence.
+
+Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without a Sengi account.
+
+## Self-hosted E2B alternatives compared
+
+| Option | Where it runs | Isolation | More than one machine | macOS sandboxes | Who operates it |
+|---|---|---|---|---|---|
+| E2B cloud (baseline) | E2B's cloud | Firecracker microVM | Yes, managed | No, Linux only | E2B |
+| E2B Embed | One Linux machine with KVM | Firecracker microVM | No, single machine | No | You |
+| E2B infra | Your cloud account | Firecracker microVM | Yes, via Terraform and Nomad | No | You |
+| OpenSandbox | Your servers | Docker, Kubernetes or Firecracker | Yes, via Kubernetes | No | You |
+| Microsandbox | A library on your machine | microVM | Scaling past one machine is your job | No, Linux guests | You |
+| Docker Sandboxes (local) | Your laptop | microVM with its own Docker Engine | No | No, Linux guests | You |
+| Firecracker or gVisor, DIY | Your hosts | What you build | What you build | No | You |
+| Potluck | Macs and Linux boxes your team owns, pooled | Tart VMs on Mac; Kata or gVisor on Linux | Yes, a pool over Tailscale or your own tunnel | Yes, up to two per Mac | You and your teammates |
+
+## What E2B does, and why teams self-host
+
+E2B runs Linux sandboxes for AI agents on Firecracker microVMs in its own cloud. It has Python and JavaScript SDKs and per-second billing. It does stateful work well: sandboxes can pause with memory intact and be forked. If you want zero operations and a mature SDK, it is a strong default.
+
+The searches that lead here ask for something else: sandboxes on hardware you control. The usual reasons are:
+
+- Code, files and secrets should stay on your own machines.
+- Teams want to stop paying per second for CPU they already own.
+- Plan session limits get in the way of long agent runs.
+- E2B sandboxes are Linux only, and some agents need macOS.
+
+E2B's own self-host story has three levels:
+
+- Embed packages the open-source runtime for a single machine.
+- The full infra runs across machines with Packer, Terraform and Nomad.
+- Running E2B inside your own cloud account is an enterprise option that E2B operates.
+
+Daytona, often listed as an alternative, moved core development to a private codebase earlier this year. Its public repository says it is no longer maintained, so it is a weak choice if self-hosting is the point.
+
+## The options, one by one
+
+### E2B Embed and E2B infra
+
+Use these if your code already talks to the E2B SDK and you want the same API on your hardware. Embed is the quick path, but it is one node. The cluster path is a real infrastructure project that you patch and scale yourself. If you want to keep E2B-style code and run it elsewhere, see [use the E2B SDK on your own machines](/blog/use-the-e2b-sdk-on-your-own-machines).
+
+### OpenSandbox
+
+OpenSandbox is an Apache-2.0 project from Alibaba. It runs agent sandboxes on Docker, Kubernetes or Firecracker, has SDKs in several languages, and supports MCP. It fits a platform team that already runs Kubernetes and wants a sandbox service of its own. You operate it as a platform, not a tool.
+
+### Microsandbox
+
+Microsandbox is an Apache-2.0 library that boots microVMs on your own machine, with no server or daemon. It runs on Linux with KVM or on an Apple silicon Mac, and it runs OCI images, which means Linux guests. Its maintainers still warn users to expect breaking changes. Spreading work across more than one machine is left to you.
+
+### Docker Sandboxes
+
+Docker Sandboxes run a coding agent such as Claude Code or Codex in a microVM with its own Docker Engine, on your laptop, with no charge for local use. This is a good answer for one developer and one machine. It does not pool machines across a team.
+
+### Firecracker or gVisor directly
+
+Building on Firecracker or gVisor gives you full control and no vendor. The cost is engineering time. You build networking, image handling, lifecycle management and an API before an agent can use it.
+
+### Potluck
+
+Potluck takes a different approach from the rest of this list. It does not ask you to stand up sandbox servers. Instead it puts the idle Macs and Linux boxes your team already has into a pool. Each coding agent or GitHub Actions job gets a fresh VM or sandbox on one of them.
+
+Potluck is not a sandbox runtime of its own. It drives Tart, Kata, gVisor and Incus. It is also not a hosted cloud or a cluster scheduler.
+
+An agent can use the pool in two ways:
+
+- From the command line, to create a sandbox, run commands in it and remove it.
+- Through an MCP server that exposes sandbox tools.
+
+What Potluck does not give you matters if you came from E2B:
+
+- It hands out fresh sandboxes that you create and remove. It is not a drop-in for E2B's pause-with-memory or fork.
+- It is early.
+- On Linux, handing a machine back to its owner works only as a time window today. On a Mac it happens when the owner returns.
+
+More detail is on the [agent sandbox page](/agent-sandbox) and in [run coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines).
+
+## How to choose
+
+- **You use the E2B SDK and have one spare Linux server:** E2B Embed.
+- **You run Kubernetes and want a sandbox platform:** OpenSandbox.
+- **One developer, one laptop:** Docker Sandboxes or Microsandbox.
+- **Unusual isolation needs and engineering time to spend:** Firecracker or gVisor directly.
+- **Your team has Macs and Linux boxes that sit idle, and agents need Linux or macOS:** Potluck.
+- **You want no operations at all, or you rely on memory-preserving pause and fork:** stay on E2B's cloud.
+
+## What self-hosting costs you: trust and operations
+
+Every self-hosted option moves responsibility to you. With Potluck that responsibility is spread across the people in the pool, so be clear about who can see what:
+
+- The machine that runs a VM can read everything in it, including secrets.
+- The machine that runs a pool can read the commands and output that pass through it.
+- Join only a pool whose owner you trust. Potluck is used at your own risk, with no promises.
+
+You can check isolation yourself. `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer the default is no network at all.
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that runs the pool, create it. The first time, it prints a Tailscale login URL. Then make an invite code for a friend who will share a machine:
+
+```
+potluck create friends
+potluck invite carl --host
+```
+
+On a spare Mac or Linux box, check what it can share, preview the plan, then join with the code:
+
+```
+potluck doctor
+potluck host --dry-run
+potluck host '<code>'
+```
+
+Here is what `potluck host` does:
+
+- It checks the machine, pulls the image and runs a quick conformance check per size.
+- It joins the pool only when a size passes.
+- By default it shares half the machine's cores and RAM (`--share` defaults to 0.5).
+- `potluck host stop` stops sharing.
+
+Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux.
+
+Run a sandbox:
+
+```
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+Give an agent sandbox tools over MCP with `potluck --pool friends mcp`. See [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp) for a walkthrough.
+
+## What makes Potluck different
+
+- **It uses the Macs and Linux boxes your team already owns instead of rented machines.** For a team leaving per-second sandbox bills, the compute is hardware already on desks.
+- **A Mac goes back to its owner the moment they touch the keyboard or pointer.** The sandbox ends, so lending a laptop does not cost its owner their workday.
+- **One pool serves both coding-agent sandboxes and GitHub Actions jobs, each in a fresh VM or sandbox.** A real Actions job has been run through the runner broker by hand, on a Mac and on a Linux box, though not yet daily in our own CI. See [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+- **Teammates and invited friends can lend machines to the same pool, and agents get sandbox tools over MCP.** No single server has to carry the load.
+- **It is free and open source (Apache-2.0) and runs without a Sengi account.**
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### Is there a self-hosted alternative to E2B for coding agent sandboxes?
+
+Yes. E2B Embed, E2B's infra, OpenSandbox, Microsandbox, Docker Sandboxes and Potluck all run sandboxes on hardware you control. Potluck is the one built around pooling a team's existing Macs and Linux boxes.
+
+### Can I self-host E2B itself?
+
+Yes. Embed runs E2B's open-source runtime on one Linux machine, and the full infra runs across machines with Terraform and Nomad. Running it in your own cloud account as a setup E2B operates is an enterprise option.
+
+### Can a coding agent get a macOS sandbox without a hosted service?
+
+With Potluck, yes, on an Apple silicon Mac running Tart. Apple's licence allows up to two macOS VMs on a Mac you own, so Potluck caps macOS guests at two per Mac. Lending them to your team or invited friends is fine; selling Mac time to the public is not, and this is not legal advice.
+
+### How does an agent use a Potluck sandbox?
+
+Run `potluck --pool friends mcp` to expose sandbox tools to an MCP-capable agent. You can also script `potluck sandbox create`, then `potluck sandbox exec <id> -- uname -a` and `potluck sandbox rm <id>` directly.
+
+### Is it safe to run agent code on a teammate's machine?
+
+Each job runs in a fresh VM or sandbox, and `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. The host machine can still read everything inside the VM, including secrets, so pool only with people you trust.
+
+### What does Potluck cost?
+
+Nothing. It is free, open-source software under Apache-2.0 and runs without a Sengi account.
+
+### Does Potluck replace E2B's pause and fork?
+
+No. Potluck hands out fresh sandboxes that you create and remove. If memory-preserving pause or fork is central to your agent, E2B's cloud covers that.
+
+---
+
+Source: https://potluck.sh/blog/github-actions-self-hosted-runner-macos-install-official
+
+# GitHub Actions Self-Hosted Runner on macOS and Linux: Install, config.sh, Ephemeral and JIT Runners (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/github-actions-self-hosted-runner-macos-install-official
+
+**Short answer**: To install a GitHub Actions self-hosted runner on macOS 11.0 or later, or on Linux such as Ubuntu 20.04 or later, open Settings, then Actions, then Runners, then New self-hosted runner, run the download commands shown, then `./config.sh --url REPO_URL --token TOKEN` and `./run.sh`. The registration token expires after one hour (GitHub Docs, "Adding self-hosted runners"). For a single-use runner, add `--ephemeral` to `config.sh` or create a just-in-time (JIT) runner through the REST API; GitHub de-registers it after one job, and your own automation wipes the machine. A matched runner has 60 seconds to pick up a job, and a job with no runner fails after 24 hours (GitHub Docs, "Self-hosted runners reference"). On a Mac, clean-per-job means a macOS VM per job, and Apple's licence allows up to two macOS VMs per Mac you own. Potluck, an early open-source project, runs that VM-per-job step on machines you already own.
+
+Each fact below names the GitHub Docs page it comes from, as read in November 2026.
+
+## Requirements for a self-hosted runner machine
+
+The GitHub Docs page "Self-hosted runners reference" lists:
+
+- **macOS**: macOS 11.0 (Big Sur) or later.
+- **Linux**: among others, Ubuntu 20.04 or later, Debian 10 or later, Red Hat Enterprise Linux 8 or later, Fedora 29 or later.
+- **Architectures**: x64 on Linux, macOS and Windows; ARM64 is listed for the same systems and marked as public preview on that page.
+- **Network**: outbound HTTPS on port 443 to the GitHub domains the page lists, and at least 70 kilobits per second upload and download.
+- **Docker container actions and service containers**: these need a Linux runner with Docker installed. They do not run on a macOS runner.
+
+The runner application itself needs few resources, so size the machine for your builds.
+
+One warning from "Adding self-hosted runners": GitHub recommends self-hosted runners only for private repositories, because a pull request from a fork of a public repository can run code on your machine.
+
+## Install a self-hosted runner on macOS
+
+These steps follow "Adding self-hosted runners".
+
+1. Open the repository, then Settings, then Actions, then Runners, then New self-hosted runner. For an organization, open the organization Settings and choose New runner, then New self-hosted runner. Only an organization owner can add an organization runner.
+2. Select macOS and your architecture. On an Apple silicon Mac mini, that is ARM64.
+3. Run the download and extract commands exactly as the page shows them. They carry the current runner version, so copy them from that page.
+4. Register the runner with the URL and token from the same page:
+
+```
+./config.sh --url REPO_URL --token TOKEN
+```
+
+5. Start it:
+
+```
+./run.sh
+```
+
+When connected, the terminal prints "Connected to GitHub" and "Listening for Jobs", and the runner appears under Runners. On macOS and Linux you install it as a background service after adding it; GitHub covers that on "Configuring the self-hosted runner application as a service".
+
+Target the runner by its labels:
+
+```
+jobs:
+  build:
+    runs-on: [self-hosted, macOS, ARM64]
+```
+
+## Install a self-hosted runner on Linux with config.sh and a registration token
+
+The Linux steps are the same: choose Linux on the New self-hosted runner page, run its download commands, then `./config.sh --url REPO_URL --token TOKEN` and `./run.sh`. Because the token expires after one hour, a script that registers runners later has to fetch a fresh token through the REST API. "Self-hosted runners reference" lists the credentials that can do that: an access token with `repo` scope for private repositories, `public_repo` for public ones, `admin:org` for organizations, or a GitHub App with the administration or organization_self_hosted_runners permission.
+
+If workflows use Docker container actions or service containers, install Docker on the Linux runner.
+
+## Ephemeral self-hosted runners: the single-use lifecycle
+
+The GitHub Docs concept page "Self-hosted runners" notes that self-hosted runners do not need a clean instance for every job. That also means nothing cleans up for you. An ephemeral runner is registered once and takes one job:
+
+```
+./config.sh --url ORG_URL --token TOKEN --ephemeral
+```
+
+Per "Self-hosted runners reference", the lifecycle is:
+
+1. Register with `--ephemeral`.
+2. GitHub assigns one job to that runner.
+3. After the job, the GitHub Actions service de-registers the runner.
+4. Your automation wipes the machine, or discards the VM or container, and registers a new runner with a new token.
+
+GitHub recommends ephemeral runners for autoscaling and advises against autoscaling persistent runners, because in some cases a job can be sent to a persistent runner while it is shutting down. A clean environment per job also limits what one job leaves behind for the next. The same page asks you to forward ephemeral runner logs to external storage, since the machine and its logs are gone after the job.
+
+## Just-in-time (JIT) runners through the REST API
+
+Instead of `config.sh --ephemeral`, you can create ephemeral, just-in-time runners with the REST API, described on "REST API endpoints for self-hosted runners". The generate-jitconfig endpoint returns an encoded configuration that you pass to the runner at start with `./run.sh --jitconfig`. A JIT runner is single-use and skips the separate token and config step, which suits a script that boots a VM and starts one runner inside it.
+
+## Routing, queueing and runner updates
+
+From "Self-hosted runners reference":
+
+- GitHub sends a job to an online, idle runner that matches its `runs-on` labels and groups. If that runner does not pick it up within 60 seconds, the job is re-queued.
+- If no matching runner is online, the job waits, and fails after 24 hours in the queue.
+- Runners update themselves by default, so every fresh VM or container image starts by updating. Register with `--disableupdate` and update the image on your own schedule.
+- With updates off, update within 63 days of a new runner version, or GitHub stops assigning jobs to that runner.
+
+## Ways to get a clean environment per job
+
+The autoscaling routes below come from "Self-hosted runners reference", plus Potluck. All pair with ephemeral or JIT runners.
+
+| Option | What it does well | What it needs from you |
+|---|---|---|
+| Persistent runner (`config.sh`, `run.sh`) | Simplest install, warm caches | Manual cleanup; jobs share one disk |
+| `--ephemeral` with your own scripts | One job per registration | Wipe and re-register logic, token fetching, log forwarding |
+| JIT runner via REST API | Single-use, no separate token step | Code that calls the API and boots a fresh machine |
+| Actions Runner Controller (ARC) | GitHub's reference implementation, full lifecycle | A Kubernetes cluster and people to run it |
+| Runner Scale Set Client (actions/scaleset) | Go module for VMs, containers and macOS | You write the provisioning |
+| workflow_job webhook | Scaling built exactly as you want | Your own service; depends on timely webhook delivery |
+| Potluck runner broker | Fresh Tart VM on a Mac, or gVisor or Kata sandbox on Linux, on machines you own | Early; run by hand so far, not yet daily in its makers' CI |
+
+Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without a Sengi account.
+
+## Self-hosted macOS runners with an ephemeral VM per job
+
+ARC targets Kubernetes, which does not run macOS. On a Mac, the clean-per-job pattern is: boot a macOS VM from an image, start one ephemeral or JIT runner inside it, delete the VM after the job. Tart is a common way to run those VMs on Apple silicon. Apple's licence allows up to two macOS VMs on a Mac you own, so plan for two concurrent macOS jobs per Mac. Lending those VMs to your team is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice. See our [Tart page](/tart) and [self-hosted GitHub Actions runner on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac).
+
+## Where Potluck fits
+
+Potluck is free, open-source (Apache-2.0) software that runs GitHub Actions jobs and coding agents on machines a team already owns, each in a fresh VM or sandbox. It drives Tart on an Apple silicon Mac and Docker or Podman with Kata or gVisor on Linux. It is not a sandbox runtime of its own, not a hosted cloud and not a cluster scheduler.
+
+What works today: a real Actions job has been run through Potluck's runner broker, by hand, on a Mac with Tart and on a Linux box on another machine with gVisor. It is not yet in daily use in its makers' own CI. Potluck caps macOS guests at two per Mac. A Mac sandbox ends when its owner touches the keyboard or pointer; on Linux, hand-back to a returning owner works only as a time window today.
+
+The machine that runs a VM can read everything in it, including repository secrets, and the machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust, and use it at your own risk. More on the [GitHub Actions runner page](/github-actions-runner) and in [pool spare Macs and Linux boxes](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that runs the pool (the first `create` prints a Tailscale login URL):
+
+```
+potluck create friends
+potluck invite carl --host
+```
+
+On the Mac mini or Linux box that will share:
+
+```
+potluck doctor
+potluck host --dry-run
+potluck host '<code>'
+```
+
+`potluck host` checks the machine, pulls the image, runs a conformance check per size and joins only when a size passes. `--share` (default 0.5) sets the fraction of cores and RAM shared, and `potluck host stop` stops sharing. `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet.
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. To contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### How long is a self-hosted runner registration token valid?
+
+One hour, according to the GitHub Docs page "Adding self-hosted runners". Automation that registers runners later should fetch a fresh token through the REST API.
+
+### What is the difference between --ephemeral and a JIT runner?
+
+Both take one job and are then removed. `--ephemeral` is a `config.sh` flag used with a registration token; a JIT runner gets an encoded config from the REST API and starts with `./run.sh --jitconfig`.
+
+### Can a macOS self-hosted runner run Docker container actions?
+
+No. "Self-hosted runners reference" says Docker container actions and service containers need a Linux machine with Docker installed.
+
+### What happens if no self-hosted runner is online?
+
+The job stays queued and fails after 24 hours, per "Self-hosted runners reference".
+
+### How many macOS VMs can I run per Mac for ephemeral runners?
+
+Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. This is not legal advice.
+
+### Is Potluck ready to replace my CI runners?
+
+Not yet. A real Actions job has run through its runner broker by hand on a Mac and on Linux, but it is not in daily use in its makers' CI, and it is early software.
+
+### Do I need a Sengi account to use Potluck?
+
+No. Potluck is made by Sengi, which sells hosted runners, but it runs without Sengi and without a Sengi account.
+
+---
+
+Source: https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms
+
+# Give Coding Agents Their Own Mac: macOS VMs on a Mac mini (2026)
+
+Published 2026-11-24. https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms
+
+**Short answer**: one Apple silicon Mac mini can give coding agents two macOS VMs at a time, because Apple's licence allows up to two macOS VMs on a Mac you own. Potluck caps macOS guests at two per Mac for the same reason. The usual way to do it is Tart: clone a fresh macOS VM for each task, run the agent in it headless, and delete the VM when the task ends. UTM suits people who want the VM in a window, and Lima is built around Linux guests. Potluck, an early, free and open-source (Apache-2.0) project, drives Tart on your Macs and Kata or gVisor on Linux, so an agent gets a fresh sandbox per task through a command line or an MCP server without you writing the VM lifecycle yourself.
+
+## The options compared
+
+Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without Sengi or a Sengi account.
+
+| Option | What it runs on a Mac | Best at | Disposable per task | How an agent gets in | Work you do |
+|---|---|---|---|---|---|
+| Tart | macOS and Linux VMs on Apple silicon | Headless, scripted macOS guests from registry images | Yes, if you clone and delete per task | Your own scripts around its exec command | Write and maintain the lifecycle scripts |
+| UTM | macOS, Linux and Windows guests, with a GUI | Interactive use, trying an OS in a window | Possible, mostly by hand | You shell into the guest | More manual steps for automation |
+| Lima | Linux VMs, often used for containers | Linux dev environments on a Mac | Yes, for Linux guests | Shell or container tools | Not the tool for a macOS guest |
+| Hosted Macs (cloud or hosted runners) | Machines you rent | No hardware to look after | Depends on the provider | Provider's API or runner | You pay for rented time |
+| Potluck | Tart guests on Macs, Kata or gVisor sandboxes on Linux | Fresh sandboxes for agents and Actions jobs on machines you own | Yes, each run in a fresh VM or sandbox | `potluck sandbox` commands or the MCP server | Install, create a pool, host a machine |
+
+## Why an agent needs its own Mac
+
+A coding agent that builds a Mac app, clicks through its UI or installs tools wants the whole machine. On your desktop it competes with you for the keyboard, the pointer and the front window, and it can reach your files, your keychain and your shell history. A macOS VM fixes both: the agent gets a desktop of its own, and when the task ends you throw the VM away so the next task starts clean.
+
+A developer blog post from November 2026, about running a Mac card game's UI tests in a VM, describes the pattern well: Xcode and the source stay on the host, the host builds a Debug app, the app is copied into a headless macOS guest, and the agent drives it there and reads back a screenshot and the accessibility tree. The host Mac stays usable the whole time.
+
+## The two-VM limit on a Mac mini
+
+The number that shapes every plan is two. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac to match. A Mac mini therefore gives you at most two agent Macs at once. For more parallel macOS agents you need more Macs, and Linux sandboxes on other boxes can take the work that does not need macOS.
+
+The licence also limits who uses those guests. Lending a macOS guest to your team or to invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.
+
+## Doing it by hand with Tart
+
+Tart, from Cirrus Labs, is the most direct route. You install it with Homebrew, use `tart clone` to pull a macOS image from a container registry into a named VM, start it headless with `tart run`, and send commands into the guest with `tart exec`. Use the prebuilt images that include Tart's guest agent, since exec needs it; the vanilla images lack it. The images are large, so check free disk space first, and pick the macOS version your app needs as its minimum.
+
+To make the VM disposable, clone a fresh copy from the base image for each task and delete it afterwards. That loop is what you end up scripting: create, wait for the desktop, copy the build in, run, collect output, delete. It works well, and you own every line of it. For more on Tart, see our [Tart page](/tart).
+
+## UTM and Lima: where they fit
+
+UTM is a good app for running macOS, Linux and Windows guests in a window on Apple silicon. It is the friendlier choice when a person sits in front of the VM. For an agent that needs a fresh guest every few minutes, you do more by hand than with Tart.
+
+Lima is a solid way to run Linux VMs on a Mac, often as the base for containers. If your agent only needs a Linux shell, a Lima VM on the Mac mini is a fine sandbox. For a macOS guest, people reach for Tart or UTM instead.
+
+## Making the VM safe, and what safe means
+
+A fresh VM per task stops one task from leaving files or processes behind for the next. Beyond that:
+
+- **Network.** Decide what the guest can reach. With Potluck, `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. On Potluck's OCI layer on Linux, the default is no network at all.
+- **Secrets.** The machine that runs a VM can read everything in it, including any secret you pass in. Give an agent only the tokens the task needs.
+- **The person at the Mac.** On a desk Mac, Potluck ends a Mac sandbox when its owner touches the keyboard or pointer. A Mac mini in a cupboard has nobody touching it, so it stays available.
+
+## Start with Potluck
+
+Potluck is early. On macOS or Linux, with no Go needed:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that runs the pool (the first time, it prints a Tailscale login URL), create the pool and make a code for a machine to share:
+
+```
+potluck create friends
+potluck invite carl --host
+```
+
+On the Mac mini you want to share, which needs Tart on Apple silicon, check it, look at the plan, then host:
+
+```
+potluck doctor
+potluck host --dry-run
+potluck host '<code>'
+```
+
+`potluck host` checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes. `--share` (default 0.5) sets the fraction of cores and RAM shared. `potluck host stop` stops sharing.
+
+Then create a sandbox, run a command in it and remove it:
+
+```
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+To give an agent sandbox tools directly, run `potluck --pool friends mcp`, an MCP server the agent connects to. There is more in [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp) and [run coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines). If you use a coding-agent vendor's self-hosted runners, `potluck agent-runner` runs them in fresh sandboxes.
+
+## What makes Potluck different
+
+- **It uses the Mac mini you already own.** Your agent's VMs run on Macs and Linux boxes the team already has, instead of rented machines.
+- **A desk Mac goes back to its owner the moment they touch the keyboard or pointer.** You can lend a work Mac to agents when it is idle without losing it when you sit down. On Linux, hand-back is only a time window today.
+- **One pool, a fresh VM or sandbox per run, for agents and CI.** The same machines serve coding-agent sandboxes and GitHub Actions jobs. A real Actions job has been run through the runner broker by hand on a Mac and on a Linux box; it is not yet daily in our own CI.
+- **Agents get sandbox tools over MCP,** and teammates or invited friends can lend their own machines to the same pool.
+- **Free and open source (Apache-2.0), no Sengi account needed.** It drives Tart, Kata, gVisor and Incus rather than replacing them, and it is not a hosted cloud or a cluster scheduler.
+
+## Try it early
+
+Potluck is early, and its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues. The code is at https://github.com/sengirunners/potluck. For a wider view, read [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## Questions people ask
+
+### How many macOS VMs can a coding agent use on one Mac mini?
+
+Two at once. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac.
+
+### Is Tart or UTM better for an AI agent sandbox?
+
+Tart, for most agent setups, because it is built for headless, scripted guests and has a guest agent for running commands. UTM is better when a person wants to use the VM in a window.
+
+### Can I use Lima to give an agent a macOS VM?
+
+Lima is built around Linux guests. Use it when a Linux shell is enough, and use Tart or UTM when the agent needs macOS.
+
+### Are secrets safe inside the agent's VM?
+
+Not from the machine running it: that machine can read everything in the VM, including secrets, and a pool's machine can read commands and output passing through it. Pass in only what the task needs and join only pools whose owner you trust.
+
+### Can the agent's VM reach my home or office network?
+
+It depends on your setup. With Potluck, `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet.
+
+### Can I rent out my Mac mini's macOS VMs?
+
+No. Lending a macOS guest to your team or invited friends is fine, but selling Mac time to the public is not allowed under Apple's licence. This is not legal advice.
+
+### Do I need a Sengi account to use Potluck?
+
+No. Potluck is free, open source under Apache-2.0, and runs without Sengi or a Sengi account.
+
+---
+
+Source: https://potluck.sh/blog/local-open-source-alternatives-cloud-ai-coding-sandboxes
+
+# Local Alternatives to Cloud AI Coding Sandboxes (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/local-open-source-alternatives-cloud-ai-coding-sandboxes
+
+**Short answer**: the local alternatives to cloud AI coding sandboxes such as E2B and Daytona are open-source tools that run the same kind of isolated box on hardware you control. The main ones are E2B's own open-source runtime, microsandbox, Hotcell, agent-sandbox for Kubernetes and agentbox, plus the runtimes underneath them: Firecracker, gVisor, Kata Containers, nsjail and bubblewrap. The software is free to use. You pay in hardware and in the hours it takes to run it. Potluck takes a different route: free, Apache-2.0 software that pools the Macs and Linux boxes a team already owns and gives each agent a fresh VM or sandbox on one of them, with GitHub Actions jobs served from the same pool. Potluck is early, and it is made by Sengi, a company that sells hosted GitHub Actions runners.
+
+## Local alternatives at a glance
+
+| Option | What it is | Isolation | Runs on | Where it needs more work |
+|---|---|---|---|---|
+| E2B open-source runtime | The runtime behind E2B's managed service | Firecracker microVMs | Cloud accounts you operate | You run the same distributed system E2B runs |
+| microsandbox | Embeddable library, no long-running daemon | libkrun microVMs | Apple silicon Macs, Linux with KVM, Windows | You wire it into your own agent code |
+| Hotcell | Sandbox layer with a key-swapping gateway on the host | Docker, Firecracker, Apple Virtualization | One Mac, Linux box or VM | Sized to one machine; non-HTTP credentials still have to be injected |
+| agent-sandbox | Kubernetes resource and controller | gVisor or Kata via RuntimeClass | Any Kubernetes cluster | You need to run a cluster |
+| agentbox | Container wrapper for one developer's agent | Docker plus an egress proxy and firewall | Your own machine | Container boundary, one developer |
+| Firecracker, gVisor, Kata, nsjail, bubblewrap | Building blocks | microVM, user-space kernel, VM-backed containers, Linux namespaces | Linux | You build lifecycle, networking and cleanup yourself |
+| Potluck | A pool of a team's own machines for agent sandboxes and Actions jobs | Tart on Apple silicon; Docker or Podman with Kata or gVisor on Linux | Macs and Linux boxes you own, joined over Tailscale | Early; Linux hand-back is only a time window today |
+
+## Why teams move agent sandboxes off the cloud
+
+Managed sandboxes are the least work. One API call and a box appears, and someone else patches the kernels. That is worth a lot, and for a team with no spare hardware it is often the right call.
+
+The reasons people search for local alternatives are usually three:
+
+- **Where the code runs.** Some repositories cannot leave company machines because of a client contract or policy.
+- **The meter.** One agent session is cheap. Many agents running all day on per-second billing adds up, especially when Macs and Linux boxes sit idle on desks.
+- **Control.** You pick the image, the network rules and when a box dies.
+
+Running locally does not make the model provider go away. Your prompts and code still go to whichever model the agent calls, unless you run the model yourself too.
+
+## The options, one by one
+
+### E2B's open-source runtime
+
+The runtime behind E2B's managed service is open source. It runs Firecracker microVMs with snapshot, pause and resume, and can be deployed into cloud accounts you operate. It is the closest thing to self-hosted E2B, and the most operational work on this list.
+
+### microsandbox
+
+microsandbox runs OCI images in microVMs built on libkrun, as a library with no server. It works on Apple silicon Macs, Linux with KVM and Windows, has SDKs for several languages, and supports secrets that never enter the VM. Good for builders who want sandboxing inside their own program.
+
+### Hotcell
+
+Hotcell runs as many sandboxes as one machine can hold, using Docker, Firecracker on Linux with KVM, or Apple Virtualization on macOS. Its strength is credentials: each sandbox gets a short-lived token, and a gateway on the host swaps it for the real key. Its own documentation says credentials that do not travel in an HTTP header still have to be injected.
+
+### agent-sandbox for Kubernetes
+
+If agents already run on Kubernetes, agent-sandbox adds a Sandbox resource with templates and warm pools. Isolation comes from the cluster's RuntimeClass, usually gVisor or Kata. It is a good fit for platform teams and a heavy one for a team without a cluster.
+
+### agentbox
+
+agentbox wraps a coding agent in a Docker container with an egress proxy, and injects secrets through the proxy so the agent never sees them. Lightweight, and aimed at a single developer.
+
+### The building blocks
+
+Firecracker gives a separate guest kernel through KVM. gVisor puts a user-space kernel between the container and the host. Kata gives VM-backed containers that keep OCI and Kubernetes interfaces. nsjail and bubblewrap confine a Linux process with namespaces, mounts and syscall filters. All are solid, and none is a finished agent product: you write the lifecycle, mounts, network policy and cleanup. Agent harnesses such as OpenHands sit on top and still need one of these as the boundary.
+
+### What about Daytona?
+
+Daytona's README says core development moved to a private codebase and the public repository no longer gets updates. You can fork the last open release, but it is not a maintained local option.
+
+## A different approach: pool the machines you already own
+
+Every tool above answers "how do I isolate code on this machine or cluster?" Potluck answers a different question: "we have spare Macs and Linux boxes on desks; how do we put them to work for agents and CI?"
+
+Potluck is not a sandbox runtime of its own. It drives Tart, Kata, gVisor and Incus. It is not a hosted cloud and not a scheduler for clusters. One machine runs a pool, teammates and invited friends join it, and some of them lend machines to it. Machines reach each other over Tailscale, or over a tunnel you configure.
+
+What that changes for the reader:
+
+- **The Mac on someone's desk is usable.** A Mac sandbox ends when its owner touches the keyboard or pointer, and when an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.
+- **One pool, two jobs.** The same pool serves coding-agent sandboxes and GitHub Actions jobs, each in a fresh VM or sandbox. A real Actions job has been run through the runner broker, by hand, on a Mac with Tart and on a Linux box with gVisor. It is not yet running daily in our own CI. `potluck agent-runner` runs a coding-agent vendor's self-hosted runners in fresh sandboxes.
+- **Agents get tools directly.** `potluck --pool friends mcp` is an MCP server that exposes sandbox tools to an agent. More in [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp).
+
+## What a local sandbox still has to get right
+
+Local does not mean safe by default. With Potluck, `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet, and on the OCI layer the default is no network at all.
+
+Be clear about trust. The machine that runs a VM can read everything in it, including secrets. The machine that runs a pool can read commands and output passing through it. Potluck does not swap API keys behind a gateway the way Hotcell, microsandbox or agentbox aim to. Join only a pool whose owner you trust, and use it at your own risk.
+
+For Macs, Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a macOS guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.
+
+## How to choose
+
+| If you need | Start with |
+|---|---|
+| Self-hosted E2B at cloud scale | E2B's open-source runtime |
+| A microVM library inside your own program | microsandbox |
+| Real API keys never inside the sandbox, on one host | Hotcell |
+| Sandboxes as Kubernetes resources | agent-sandbox |
+| A quick container for one developer's agent | agentbox |
+| Full control of every layer on Linux | Firecracker, gVisor, Kata, nsjail or bubblewrap |
+| Agent sandboxes and Actions jobs on the team's spare Macs and Linux boxes | Potluck |
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that will run the pool, create it. The first time, it prints a Tailscale login URL.
+
+```
+potluck create friends
+potluck invite ana
+potluck invite carl --host
+```
+
+Ana runs `potluck join '<code>'` to use sandboxes. Carl runs `potluck host '<code>'` to share a machine. Before that, `potluck doctor` shows what the machine can share and `potluck host --dry-run` prints the plan. `potluck host` checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes. `--share` sets the fraction of cores and RAM shared (default 0.5, per the Potluck docs). `potluck host stop` stops sharing.
+
+Sharing needs Tart on an Apple silicon Mac (see [Tart](/tart)), or Docker or Podman with Kata or gVisor on Linux. Then try a sandbox:
+
+```
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+For a longer walk-through, read [run coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines) and [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## What makes Potluck different
+
+- **It uses the machines you already own.** Instead of renting sandboxes, agents run on the team's idle Macs and Linux boxes, each in a fresh VM or sandbox.
+- **A Mac goes back to its owner the moment they touch the keyboard or pointer**, so lending a desk machine does not mean giving it up.
+- **One pool serves agents and CI.** Coding-agent sandboxes and GitHub Actions jobs come from the same pool, though Actions is not yet in daily use in our own CI.
+- **Teammates and invited friends can lend machines to the same pool**, and agents reach it through sandbox tools over MCP.
+- **It is free and open source (Apache-2.0)** and runs without Sengi and without a Sengi account.
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues. The source is at https://github.com/sengirunners/potluck.
+
+## Questions people ask
+
+### What is the best local alternative to E2B?
+
+For E2B's own architecture on cloud accounts you run, use E2B's open-source runtime. For one machine with keys kept out of the sandbox, look at Hotcell or microsandbox. For a pool of the team's own Macs and Linux boxes, try Potluck.
+
+### Can I run AI coding sandboxes on a Mac?
+
+Yes. microsandbox and Hotcell support Apple silicon, and Potluck runs macOS guests through Tart, capped at two per Mac to match Apple's licence.
+
+### Do local sandboxes keep my code private?
+
+They keep execution on machines you control. Code and prompts still go to the model provider the agent calls, and with Potluck the machine running a VM can read everything inside it.
+
+### Does Potluck keep API keys out of the sandbox?
+
+No, it does not claim to. The host machine can read secrets in a VM, so if key isolation is your main need, Hotcell, microsandbox or agentbox focus on it.
+
+### Is Daytona still open source?
+
+Its last open release can still be forked, but its README says development moved to a private codebase and the public code gets no further updates.
+
+### Can Potluck run GitHub Actions jobs too?
+
+A real Actions job has been run through its runner broker by hand on a Mac and on a Linux box, but not yet daily in our own CI. See [GitHub Actions runner](/github-actions-runner) for the current state.
+
+### Is Potluck a hosted service?
+
+No. It is free, open-source software you run yourself, and it needs no Sengi account.
+
+---
+
+Source: https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents
+
+# Open source sandbox for AI coding agents, self-hosted (2026): Claude Code sandboxing and your own hardware
+
+Published 2026-11-24. https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents
+
+**Short answer:** In November 2026 you have two layers to choose from. The first is the sandbox built into Claude Code. It is off by default; you turn it on with `/sandbox`. It confines only the shell commands Claude runs: writes are limited to the working directory, and network access goes through a proxy that checks each host against an allowlist. The second layer puts the whole agent, or the commands it runs, inside a container or VM. Open-source tools for that second layer include Anthropic's sandbox runtime, OpenSandbox (Apache-2.0, on Docker or Kubernetes) and Potluck (Apache-2.0, free, early). Potluck runs each sandbox in a fresh VM or sandbox on Macs and Linux boxes your team already owns. Potluck is made by Sengi, which sells hosted GitHub Actions runners; Potluck itself is a separate free project.
+
+## The options compared
+
+| Option | What it isolates | Where it runs | Open source | Where it costs more or needs more work |
+|---|---|---|---|---|
+| Claude Code Bash sandbox | Shell commands and their child processes | Your own machine: Seatbelt on macOS, bubblewrap on Linux and WSL2 | Built on Anthropic's open-source sandbox runtime | File tools, MCP servers and hooks run outside it; reads most of your disk by default |
+| Anthropic sandbox runtime around the whole process | The Claude Code process itself | Your own machine | Yes | You write and maintain the filesystem and network policy |
+| Dev container or local VM | Everything inside the container or VM | Your own machine | Depends on the tool | Uses your laptop's cores and RAM; setup per project |
+| OpenSandbox | Agent commands, code interpreters, browsers | Your servers on Docker or Kubernetes; gVisor, Kata or Firecracker | Yes, Apache-2.0 | You run and scale the servers |
+| E2B, Daytona | Agent code in hosted sandboxes | The vendor's cloud, with an open-source core | Partly | Pay as you go; code runs on someone else's machines |
+| Potluck | Each job in a fresh VM or sandbox | Spare Macs (Tart) and Linux boxes (Docker or Podman with Kata or gVisor) on your team | Yes, Apache-2.0 | Early; the host machine can read what runs on it |
+
+The hosted services do well when you want no machines to look after. The self-hosted options do well when you already have hardware and want code to stay on it.
+
+## What the Claude Code sandbox restricts
+
+Anthropic's Claude Code documentation describes the Bash sandbox as a boundary that the operating system enforces around shell commands. On macOS it uses Seatbelt, which ships with the system. On Linux and WSL2 it needs bubblewrap and socat from your package manager. On native Windows, commands run unsandboxed, so the docs point Windows users to WSL2.
+
+With it on, by default:
+
+- **Writes** go only to the working directory, a per-user temp directory and directories you added. Claude Code's own settings, hooks directories and shell startup files stay write-protected.
+- **Reads** cover most of the machine, including `~/.ssh` and `~/.aws/credentials`. You close that with `sandbox.filesystem.denyRead` or the `sandbox.credentials` block.
+- **Network** has no direct route out. Traffic goes through a local proxy that checks each hostname against `allowedDomains`, which starts empty. Tools that ignore proxy variables, such as plain `ssh` and most database drivers, cannot connect at all.
+- **Environment variables** are inherited, secrets included, unless you deny or mask them.
+
+To turn it on, run `/sandbox` in a session and pick auto-allow or regular permissions. To turn it on everywhere, set `sandbox.enabled` to `true` in `~/.claude/settings.json`. To check it works, ask Claude (not the `!` prompt) to run `touch ~/sandbox-probe`; inside the sandbox it should fail.
+
+## What runs outside it
+
+This is the part people miss. The Claude Code docs list what the Bash sandbox does not cover:
+
+- The built-in Read, Edit, Write, WebFetch and WebSearch tools, which follow permission rules instead.
+- Hooks, local MCP servers, LSP servers and helper commands, which run with your full access.
+- Commands you type yourself at the `!` prompt, in most sessions.
+- Commands matched by `excludedCommands`, and commands Claude retries unsandboxed after a failure. Setting `allowUnsandboxedCommands` to `false` turns that retry off.
+
+The docs also say plainly that the sandbox reduces risk but is not a complete isolation boundary, and that the proxy does not inspect TLS by default. Their advice for putting everything behind one boundary is to run the Claude Code process itself in a container, a VM or the sandbox runtime.
+
+Some common tools also fail inside it: `docker`, jest with watchman, and on Linux, Chromium and rootless Podman. Each workaround gives up some isolation.
+
+## How to run Claude Code in a sandbox on your own computer
+
+Pick by what you want to protect:
+
+1. **Protect your files and network from stray shell commands.** Turn on `/sandbox`, deny reads of credential paths, keep `allowedDomains` short, and turn off unsandboxed retries. This costs nothing and stays on your laptop.
+2. **Protect your whole machine from the agent.** Run Claude Code inside a dev container, a local VM or the sandbox runtime. Everything the agent starts is inside the boundary, but it shares your laptop's CPU and memory.
+3. **Keep the agent's commands off your laptop entirely.** Send the commands to a throwaway sandbox on another machine. This is where OpenSandbox, the hosted services and Potluck sit.
+
+Many teams do 1 and 3 together: the built-in sandbox for local work, and a separate box for builds, tests and anything that needs network access you would not grant on your own machine.
+
+## Open-source, self-hosted sandboxes for AI coding agents
+
+**OpenSandbox** manages the sandbox lifecycle (start, monitor, pause, terminate) on Docker for local testing and Kubernetes for production. It ships SDKs in several languages, lets you choose gVisor, Kata Containers or Firecracker for isolation, and has an MCP server so Claude Code or Cursor can call it. You run and scale the servers yourself.
+
+**Anthropic's sandbox runtime** is the open-source package the Claude Code sandbox is built on. You can use it on its own to wrap the whole Claude Code process on one machine.
+
+**Potluck** takes a different angle: it does not ship its own sandbox runtime. It drives Tart on Apple silicon Macs, and Docker or Podman with Kata or gVisor on Linux (Incus is also supported), and it pools the idle machines a team already owns. Each job gets a fresh VM or sandbox. It runs without Sengi and without a Sengi account. It is not a hosted cloud and not a scheduler for clusters.
+
+What Potluck does for agents today:
+
+- `potluck --pool friends mcp` runs an MCP server that exposes sandbox tools to an agent, so Claude Code can run commands in a pooled sandbox instead of on your laptop. More in [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp).
+- `potluck agent-runner` runs a coding-agent vendor's self-hosted runners in fresh sandboxes.
+- On the OCI layer the default is no network at all, and `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet.
+
+What to know before you use it:
+
+- The machine that runs a VM can read everything in it, secrets included. The machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust.
+- A Mac sandbox ends when its owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.
+- Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac (Potluck facts). Lending them to your team is fine; selling Mac time to the public is not. This is not legal advice.
+
+See [the agent sandbox page](/agent-sandbox) and [run coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines) for more.
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that will run the pool:
+
+```
+potluck create friends
+potluck invite ana
+potluck invite carl --host
+```
+
+The first `create` prints a Tailscale login URL. Machines reach each other over Tailscale, or over a tunnel you configure. Ana runs `potluck join '<code>'` to use sandboxes. Carl first checks his spare box with `potluck doctor` and `potluck host --dry-run`, then runs `potluck host '<code>'`. That checks the machine, pulls the image, runs a quick conformance check per size, and joins only when a size passes. By default `--share` is 0.5, so half the cores and RAM are shared (Potluck facts). `potluck host stop` ends sharing.
+
+A worked example from Ana's laptop:
+
+```
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+To hand the pool to Claude Code, register `potluck --pool friends mcp` as an MCP server. For Mac specifics, see [Tart](/tart); for spreading work over several boxes, see [pool spare Macs and Linux boxes](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### Is the Claude Code sandbox on by default?
+
+No. Anthropic's docs say it is off until you run `/sandbox` or set `sandbox.enabled` to `true` in a settings file.
+
+### Does the Claude Code sandbox cover file edits and MCP servers?
+
+No. It covers shell commands and their child processes. The Read, Edit and Write tools, hooks and local MCP servers run outside it.
+
+### What is an open-source sandbox for AI coding agents I can run on my own hardware?
+
+Anthropic's sandbox runtime for one machine, OpenSandbox on your own Docker or Kubernetes servers, and Potluck for pooling a team's spare Macs and Linux boxes. All are open source; you supply the hardware.
+
+### Can I sandbox Claude Code on Windows?
+
+The Claude Code docs say native Windows runs commands unsandboxed and recommend WSL2. To share a machine in a Potluck pool you need an Apple silicon Mac or a Linux box.
+
+### Does Potluck cost anything or need a Sengi account?
+
+Potluck is free and open source under Apache-2.0, and it runs without Sengi and without a Sengi account. Sengi, its maker, sells hosted GitHub Actions runners as a separate product.
+
+### Can the person who hosts my sandbox see my code?
+
+Yes. The machine that runs a VM can read everything in it, including secrets, so join only pools whose owners you trust.
+
+### Does Potluck run GitHub Actions too?
+
+A real Actions job has been run through the runner broker by hand, on a Mac with Tart and on a Linux box with gVisor. It is not yet running daily in Potluck's own CI. See [the GitHub Actions runner page](/github-actions-runner).
+
+---
+
+Source: https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci
+
+# Open-Source Self-Hosted Coding Agents and CI on Your Own Machines (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci
+
+**Short answer**: To run coding agents and CI jobs on machines you already own with open-source software, you need two pieces: an agent and a safe place to run it and your builds. For the agent, OpenHands and OpenCode are MIT-licensed according to their repositories, and Cline's CLI, Desktop and VS Code surfaces are Apache-2.0 according to its repository. For the machines, Potluck, free and Apache-2.0, made by Sengi, Inc., pools a team's idle Macs and Linux boxes and runs GitHub Actions jobs and coding agents on them, each in a fresh VM or sandbox, with at most two macOS guests per Mac (Apple's licence). Potluck is early: a real Actions job has gone through it by hand on a Mac and on a Linux box, but it does not yet run daily in its makers' own CI.
+
+## Two jobs: the agent, and the machine it runs on
+
+Most pages about self-hosted coding agents compare agents. That is half the question. The searches behind this post ask for something that runs agents and CI jobs on machines you already own, which splits into:
+
+- **The agent or harness.** The program that reads code, calls a model and runs commands. OpenHands, OpenCode, Cline, Coder Agents, or a CLI such as Claude Code or Codex.
+- **The execution layer.** The machine, VM or sandbox where those commands and your CI jobs actually run, and what that box can reach.
+
+An agent on your laptop runs with your shell, your files and your network. A CI job on a self-hosted runner runs on whatever host you installed it on. Neither is isolated unless you add isolation. Potluck works on the second job: it turns spare Macs and Linux boxes into a pool that hands out fresh VMs and sandboxes, and it drives existing runtimes (Tart, Kata, gVisor and Incus) instead of shipping its own.
+
+## The options at a glance (November 2026)
+
+Potluck is made by Sengi, which sells hosted GitHub Actions runners. Potluck is a separate free project that runs without Sengi or a Sengi account. Licences below are as stated by each project's own repository or docs.
+
+| Option | What it is | Runs on your machines | Licence | Where it needs more work or costs more |
+|---|---|---|---|---|
+| Agent CLI on a box you own, in tmux | Claude Code, Codex or OpenCode on a Linux machine, kept alive with tmux over SSH | Execution, clone, credentials | Depends on the CLI; Codex CLI is Apache 2.0 | One shared checkout, sessions lost on reboot, no isolation from the host |
+| OpenHands | Agent harness with a web UI; each conversation can get its own Docker container | Harness, UI, execution | MIT | You run Docker, upgrades and access control; its docs say the UI is unauthenticated as installed |
+| OpenCode | Agent CLI with a headless server mode and local model support | CLI and execution | MIT | Isolation is whatever machine you start it on |
+| Cline CLI, Desktop, VS Code | Agent surfaces using your own provider or a local runtime | Execution, credentials | Apache-2.0; the JetBrains plugin is not open source | Its docs say telemetry is on by default; check the approval defaults |
+| Coder Agents | Agent platform for your data center or cloud account | Platform and execution | AGPL v3 | A platform to deploy and operate |
+| GitHub's self-hosted runner | GitHub's runner program installed on a machine you own | Actions jobs | Open source, published by GitHub | Jobs run on the host itself unless you add your own VM or container wrapping and cleanup |
+| Potluck | Pools owned Macs and Linux boxes; Actions jobs and agents in fresh VMs or sandboxes | Actions jobs, agent sandboxes, vendor agent runners | Apache-2.0 | Early; Linux hand-back only as a time window; Actions not yet daily in its makers' CI |
+| Hosted runners (GitHub-hosted, Sengi and others) | Someone else's machines, paid by use | Nothing | Not self-hosted | Recurring cost; in exchange there is no hardware to maintain |
+
+These combine. A team can run OpenCode or OpenHands as the agent and point its command execution at Potluck sandboxes, and keep GitHub's runner for some jobs while moving others to fresh VMs.
+
+## How Potluck plugs into agents and CI
+
+Potluck exposes the pool in four ways.
+
+**Sandboxes from the command line.** `potluck sandbox create` prints an id, `potluck sandbox exec <id> -- uname -a` runs a command inside it, and `potluck sandbox rm <id>` removes it. Any script or agent that can run a shell command can use these. More in [run coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines) and on the [agent sandbox](/agent-sandbox) page.
+
+**An MCP server for agents.** `potluck --pool friends mcp` starts an MCP server that exposes sandbox tools to an agent, so an agent that speaks MCP can create a box, run commands in it and throw it away. See [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp).
+
+**Vendor agent runners.** `potluck agent-runner` runs a coding-agent vendor's self-hosted runners in fresh sandboxes, so a hosted agent product that supports self-hosted runners executes on your hardware instead of a long-lived host.
+
+**GitHub Actions.** A runner broker sends Actions jobs to fresh VMs or sandboxes. As of today a real Actions job has been run through it, by hand, on a Mac with Tart and on a Linux box on another machine using OCI with gVisor. It is not yet running daily in our own CI, so treat it as something to try, not something to move your release pipeline onto. Details on the [GitHub Actions runner](/github-actions-runner) page and in [self-hosted GitHub Actions runner on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac).
+
+## What stays on your machines, and what still leaves
+
+Self-hosting execution keeps the repository clone, build outputs and the credentials the job uses on hardware you own. It does not, by itself, keep everything local:
+
+- **The model request.** Where prompts and the file contents an agent reads are sent is set by the agent's own configuration. With a hosted model they go to that provider. OpenHands, OpenCode and Cline each document local model servers such as Ollama, LM Studio or vLLM if prompts must stay in your network.
+- **The host can read the guest.** In Potluck, the machine that runs a VM can read everything in it, including secrets. The machine that runs a pool can read the commands and output passing through it. Join only a pool whose owner you trust, and keep production secrets out of pools that include machines you do not control.
+- **Network reach.** Whatever a box can reach, an agent in it can reach. `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer the default is no network at all, which also means a job that needs to download packages needs network you choose to give it.
+
+There are no promises here: use it at your own risk, and verify the boundaries you care about on your own setup.
+
+## What each machine needs
+
+- **Mac:** Tart on an Apple silicon Mac. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a macOS guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice. See the [Tart](/tart) page.
+- **Linux:** Docker or Podman with Kata or gVisor.
+- **Sharing:** `--share` sets the fraction of cores and RAM shared, and Potluck's default is 0.5, half the machine.
+- **Taking a machine back:** a Mac sandbox ends when its owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.
+
+Machines reach each other over Tailscale, or over a tunnel you configure. For a longer walkthrough of a mixed pool, see [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 potluck daemon --detach
 ```
 
@@ -455,9 +1906,11 @@ potluck invite ana
 potluck invite carl --host
 ```
 
-The first `potluck create` prints a Tailscale login URL. Machines reach each other over Tailscale or over a tunnel you configure. Ana runs `potluck join '<code>'` to use sandboxes; Carl runs `potluck host '<code>'` to share a machine. Before sharing, `potluck doctor` shows what a machine can share and `potluck host --dry-run` prints the plan. `potluck host stop` stops sharing.
+The first `potluck create` prints a Tailscale login URL. `potluck invite ana` makes a code for a friend who runs sandboxes; `potluck invite carl --host` makes a code for a friend who shares a machine.
 
-Try a sandbox:
+A friend who wants sandboxes runs `potluck join '<code>'`. A friend sharing a machine first runs `potluck doctor` to see what it can share and `potluck host --dry-run` to print the plan, then `potluck host '<code>'`. That checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes. `potluck host stop` stops sharing.
+
+Then try a box:
 
 ```
 potluck sandbox create
@@ -465,41 +1918,624 @@ potluck sandbox exec <id> -- uname -a
 potluck sandbox rm <id>
 ```
 
-The code is in the sengirunners/potluck repository on GitHub, under Apache-2.0.
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks: a machine that fails the conformance check, a runner job that hangs, an agent that cannot reach its sandbox. Start a thread at https://github.com/sengirunners/potluck/discussions with what you ran and what happened. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues. The source is at https://github.com/sengirunners/potluck.
 
 ## Questions people ask
 
-### What are the main volunteer computing projects in 2026?
+### What open-source tools run coding agents and CI jobs on machines I already own?
 
-On BOINC: Einstein@Home, Rosetta@home, World Community Grid, PrimeGrid, LHC@home, climateprediction.net, MilkyWay@home and Asteroids@home. Outside BOINC: Folding@home, GIMPS and distributed.net, plus GPU pools for AI such as Petals and AI Horde.
+For the agent, OpenHands, OpenCode, Cline's open-source surfaces and Coder Agents all run on your own hardware. For execution, GitHub's self-hosted runner runs Actions jobs on a host you own, and Potluck runs Actions jobs and coding agents in fresh VMs or sandboxes across a pool of your Macs and Linux boxes.
 
-### How many BOINC projects are there?
+### Is Potluck a coding agent?
 
-BOINC's official list had 26 projects as of 7 February 2026, according to the BOINC article on Wikipedia. More BOINC projects run outside the official list, and the Wikipedia list of volunteer computing projects tracks many of them.
+No. Potluck gives agents and CI jobs a place to run: fresh sandboxes from the command line, an MCP server with sandbox tools, and `potluck agent-runner` for a vendor's self-hosted runners. You bring the agent.
 
-### Which BOINC projects use the GPU?
+### Can I run an open-source coding agent fully locally?
 
-GPUGRID (NVIDIA only), Einstein@Home, PrimeGrid and World Community Grid have GPU applications, and MilkyWay@home has had them for years. Check each project's Applications page for your card and operating system, since GPU work is not always available.
+The agent and its commands can run entirely on your machines. The model request leaves unless you point the agent at a local model server, which OpenHands, OpenCode and Cline each document; check the agent's telemetry and update settings too.
 
-### Is BOINC still maintained?
+### Does Potluck run GitHub Actions jobs today?
 
-Yes. The BOINC article on Wikipedia lists client release 8.2.11 for Windows and macOS in April 2026 and 8.2.13 for Linux in May 2026, and Berkeley runs BOINC Central as a shared project.
+A real Actions job has been run through its runner broker by hand, on a Mac with Tart and on a Linux box with OCI and gVisor. It is not yet running daily in its makers' own CI, so it is ready to try, not to depend on.
 
-### What is a good alternative to BOINC for my own machines?
+### What does Potluck cost?
 
-If you want to keep the compute in your own group rather than donate it, run a private pool. Potluck pools a team's Macs and Linux boxes for GitHub Actions jobs and coding-agent sandboxes; for ML training, Hivemind is the closer fit.
+Potluck is free and open source under Apache-2.0, and it runs without Sengi or a Sengi account. Your cost is the machines you already own.
 
-### Is Potluck a volunteer computing project?
+### Can I lend my Mac to friends for builds?
 
-No. It does not send work to science projects; it lets you and people you invite share idle machines for builds and agents, each job in a fresh VM or sandbox.
+Yes, to your team or invited friends, with at most two macOS guests per Mac as Apple's licence allows. Selling Mac time to the public or pooling iOS Simulator time is not allowed; this is not legal advice.
 
-### Is it safe to run other people's work on my computer?
+### Is my code safe on someone else's machine?
 
-BOINC projects run code from the research group you attach to, so pick projects you trust. In Potluck, work runs in a VM or sandbox and `potluck isolation test <size>` checks network isolation, but the trust rules still apply: join or host only with people you trust.
+The machine that runs a VM can read everything in it, including secrets, and the pool's machine can read commands and output. Join only pools whose owner you trust, and keep secrets you cannot afford to expose out of shared pools.
 
-### Can I share only part of a machine?
+### Do I need Kubernetes?
 
-In BOINC you set CPU and GPU limits in the client preferences. In Potluck, `--share` sets the fraction of cores and RAM, default 0.5, and a Mac sandbox ends as soon as the owner touches the keyboard or pointer.
+No. Potluck is not a cluster scheduler; it runs on individual Macs and Linux boxes with Tart, or Docker or Podman with Kata or gVisor.
+
+---
+
+Source: https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer
+
+# Claude Code Docker sandbox and devcontainer setup (2026)
+
+Published 2026-11-24. https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer
+
+**Short answer:** As of November 2026 there are four common ways to run Claude Code locally in a sandbox. The first is its built-in sandbox, turned on with the `/sandbox` command or the `sandbox` block in `.claude/settings.local.json`, which uses Seatbelt on macOS and bubblewrap on Linux. The second is Anthropic's reference devcontainer, a Docker container plus a firewall. The third is Docker Sandboxes, where `sbx run claude ~/my-project` starts one microVM per sandbox. The fourth is your own Docker image run as a non-root user. The Claude Code material these searches lead to describes no `claude sandbox` subcommand. The Claude Code program runs on your machine, but the default models run at Anthropic, so you need an API key or a Claude subscription. Anthropic says its sandbox cuts permission prompts by 84%, as quoted in a write-up by the consultancy Sourcelabs. If you want the commands to run on a spare Mac or Linux box instead of your laptop, Potluck is a different route. It is free, open source and early, and it gives an agent fresh sandboxes on machines your team already owns, with at most two macOS guests per Mac.
+
+## The options compared
+
+| Option | How you start it | Isolation boundary | Network control | Where it costs more or needs more work |
+|---|---|---|---|---|
+| Claude Code built-in sandbox | `/sandbox` in a session, or `sandbox` in settings | OS level: Seatbelt (macOS), bubblewrap (Linux) | Allow lists in settings | The sandboxed shell skips your profile, so tools may be missing from PATH. Settings live on each machine |
+| Anthropic reference devcontainer | Reopen the repo in the container from your editor | Docker container plus a firewall script | Firewall limits outbound hosts | Needs Docker and an editor that understands devcontainers. You maintain the image |
+| Docker Sandboxes (`sbx`) | `sbx run claude ~/my-project` | microVM with its own Docker daemon, filesystem and network | Policy presets such as Balanced and Locked Down | Needs the sbx CLI and a Docker sign-in. Does not read your `~/.claude` |
+| Your own Docker image | `docker run`, then `docker exec` | Container | Whatever you configure | You handle credentials, the non-root user, caches and cleanup |
+| Potluck | `potluck sandbox create`, or `potluck --pool friends mcp` | Fresh VM (Tart on a Mac) or sandbox (Kata or gVisor on Linux) on a team machine | No network at all by default on the OCI layer | Early. Needs a spare machine and Tailscale or a tunnel. The host machine can read what runs in it |
+
+Potluck is made by Sengi, Inc., which also sells hosted GitHub Actions runners. Potluck is a separate free project and needs no Sengi account.
+
+## Is there a `claude sandbox` command?
+
+People search for `claude sandbox`, `claude --sandbox` and `claude sandbox run`. The Claude Code material these searches lead to describes switching sandboxing on in two ways: the `/sandbox` command inside an interactive session, or the `sandbox` block in a settings file. It does not describe a separate `claude sandbox` subcommand.
+
+The command that does start Claude Code in a sandbox from one line is Docker's: `sbx run claude`. That is the Docker Sandboxes CLI, not Claude Code.
+
+## Claude Code's built-in sandbox and settings.local.json
+
+Claude Code reads settings from three places:
+
+- `~/.claude/settings.json` is your user file and applies to every project.
+- `.claude/settings.json` is the project file you commit.
+- `.claude/settings.local.json` is a project file you keep out of git, which suits per-machine sandbox paths.
+
+The smallest useful local file turns the sandbox on:
+
+```json
+{
+  "sandbox": {
+    "enabled": true
+  }
+}
+```
+
+The filesystem and network rules people search for as `sandbox.filesystem` and `sandbox.network` go inside that same `sandbox` block. In them you list extra write paths, such as build caches like `~/.m2` and `~/.npm`, and the hosts the shell may reach, such as your package registry. Key names have shifted between Claude Code releases, so copy them from the settings reference that matches your installed version rather than from an old blog post.
+
+Two lessons from the Sourcelabs write-up, whose authors ran Claude Code headless in a pipeline:
+
+- **PATH.** Inside the Seatbelt sandbox the shell did not load `.zshrc` or `.bashrc`, so `node` and `mvn` were not found. They had to resolve tool paths on the host and pass them in.
+- **Headless settings.** In their setup, project-level sandbox settings did not apply to `claude -p` runs, so they fell back to the user file in `~/.claude`.
+
+The built-in sandbox works well for interactive sessions on your own laptop, where you can answer a prompt when a rule blocks something. For unattended runs it needs more setup up front.
+
+## Anthropic's reference devcontainer
+
+Anthropic publishes a reference devcontainer that runs Claude Code inside a Docker container, with a firewall layer limiting where it can connect. You open the repository in an editor that supports devcontainers and reopen it in the container. Claude Code then runs inside, against your mounted project.
+
+This is the setup Anthropic points to when you want `--dangerously-skip-permissions`: the container is the boundary, so skipping prompts is less risky.
+
+The cost is that you own the image. Your toolchain, caches and credentials all have to be set up in it. The Sourcelabs team chose to disable Claude Code's own sandbox inside their container, with `{ "sandbox": { "enabled": false } }`, because Seatbelt and bubblewrap rules can clash with a containerised environment. Anthropic's reference keeps it on and adds the firewall.
+
+## Docker Sandboxes: `sbx run claude`
+
+Docker Sandboxes is the shortest path from nothing to Claude Code in an isolated box, according to Docker's documentation:
+
+1. Install the `sbx` CLI and sign in to Docker.
+2. Store an API key with `sbx secret set anthropic`, or skip it and use `/login` inside Claude Code for a subscription.
+3. Run `sbx run --name my-sandbox claude` from your project directory. On the first run, pick a network preset. Balanced allows common development services and asks about the rest.
+4. Check status with `sbx ls`, stop with `sbx stop my-sandbox`, and remove with `sbx rm my-sandbox`.
+
+What Docker's docs say it does:
+
+- Each sandbox is a microVM with its own Docker daemon. The agent can build images and start containers without touching your host.
+- The default start command is `claude --dangerously-skip-permissions`.
+- Your project directory is mounted read-write. `--clone` gives the agent a private clone instead, which helps when several agents work on one repository.
+- Hosts can be allowed one by one with `sbx policy allow network`.
+
+One catch: the sandbox does not pick up user-level configuration such as `~/.claude`, only project-level files in the working directory.
+
+## Your own Docker image
+
+If you run Claude Code in a pipeline, a plain image is easy to reason about. This one follows the Sourcelabs example:
+
+```dockerfile
+FROM node:22-slim
+RUN apt-get update && apt-get install -y git jq
+RUN npm install -g @anthropic-ai/claude-code
+RUN useradd -m -s /bin/bash claude
+USER claude
+```
+
+The non-root user matters. Sourcelabs found that Claude Code refuses `--dangerously-skip-permissions` when run as root.
+
+They also changed how they used containers. At first every step started a fresh container, which re-downloaded dependencies each time. They switched to one named container per ticket and ran each step in it with `docker exec`.
+
+You also have to get credentials in. That means an `ANTHROPIC_API_KEY` environment variable, or the OAuth credentials file on Linux.
+
+## Running the sandbox on another machine with Potluck
+
+Every option above runs on the machine in front of you. Potluck asks a different question: what if the commands Claude Code runs happen on a spare Mac mini or Linux box in the office, in a fresh VM or sandbox each time, while Claude Code stays on your laptop?
+
+Potluck exposes sandbox tools to an agent over MCP with `potluck --pool friends mcp`. You register that command as an MCP server in Claude Code. The agent can then create a sandbox, run commands in it and remove it, on whichever pool machine has room. There is more on this in [give your AI agent a sandbox over MCP](/blog/give-your-ai-agent-a-sandbox-over-mcp).
+
+On the Linux OCI layer the default is no network at all. That suits running untrusted build and test commands, but it means you would not run Claude Code itself inside such a box by default, since it has to reach Anthropic. Keep Claude Code where your credentials already are and send the commands out.
+
+Also keep the trust model in mind. The machine that runs a VM can read everything in it, including secrets. The machine that runs the pool can read commands and output passing through it.
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed), then start the daemon:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+**Create a pool and invite people.** On the machine that runs the pool, run `potluck create friends`. The first time, it prints a Tailscale login URL. Then:
+
+- `potluck invite ana` makes a code for someone who will run sandboxes.
+- `potluck invite carl --host` makes a code for someone who will share a machine.
+
+They run `potluck join '<code>'` or `potluck host '<code>'`.
+
+**Share a machine.** Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux. Check first with `potluck doctor` and `potluck host --dry-run`. `--share` sets the fraction of cores and RAM shared; the default is 0.5, per the Potluck docs. `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet. `potluck host stop` stops sharing.
+
+**Try a sandbox by hand:**
+
+```sh
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+See [the agent sandbox page](/agent-sandbox) and [running coding agents in a sandbox on your own machines](/blog/run-coding-agents-in-a-sandbox-on-your-own-machines) for longer walkthroughs.
+
+## What makes Potluck different
+
+- **It uses machines you already own.** Claude Code's commands run on the Macs and Linux boxes your team already has, not on your laptop and not on rented machines.
+- **A borrowed Mac goes back to its owner.** A Mac sandbox ends the moment its owner touches the keyboard or pointer. On Linux, hand-back works only as a time window today.
+- **One pool for agents and CI.** The same pool serves coding-agent sandboxes and GitHub Actions jobs, each in a fresh VM or sandbox. A real Actions job has been run through it by hand on a Mac and on Linux, but it is not yet in daily use in Potluck's own CI.
+- **Agents get sandbox tools over MCP.** Claude Code calls sandbox tools directly instead of shelling into your host.
+- **Free and open source.** Potluck is Apache-2.0 and runs without a Sengi account. Teammates and invited friends can lend machines to the same pool.
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it with Claude Code and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### Can I run Claude Code fully locally?
+
+The Claude Code program runs locally, but with the default Anthropic models the model runs at Anthropic and needs an API key or a Claude subscription. Docker's documentation covers pointing Claude Code at local or hosted models instead.
+
+### How do I turn on the Claude Code sandbox?
+
+Type `/sandbox` in an interactive session, or set `"sandbox": { "enabled": true }` in `.claude/settings.local.json` or another settings file. It uses Seatbelt on macOS and bubblewrap on Linux.
+
+### Should I use the devcontainer or Docker Sandboxes?
+
+The devcontainer gives you a container you fully control and can commit to the repo. Docker Sandboxes gives you a microVM with its own Docker daemon and network policy from one command, but needs the sbx CLI and a Docker sign-in.
+
+### Why does Claude Code fail as root in Docker?
+
+Claude Code refuses `--dangerously-skip-permissions` when run as root, as the Sourcelabs write-up reports. Create a non-root user in your Dockerfile and switch to it.
+
+### Can Potluck run Claude Code's commands on a spare Mac?
+
+Potluck gives Claude Code sandbox tools over MCP, so its commands run in fresh VMs on a spare Mac (Tart, Apple silicon) or Linux box. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac.
+
+### Is a Potluck sandbox safe for my API key?
+
+The machine that runs a VM can read everything in it, including secrets, so only put keys on machines whose owners you trust. Potluck makes no promises; use it at your own risk.
+
+---
+
+Source: https://potluck.sh/blog/self-hosted-github-actions-runner-alternatives-blacksmith-cirrus
+
+# Self-Hosted GitHub Actions Runner Alternatives to Blacksmith and Cirrus Runners (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/self-hosted-github-actions-runner-alternatives-blacksmith-cirrus
+
+**Short answer**: if you already own Macs or Linux boxes, the alternatives to Blacksmith and Cirrus Runners are GitHub's own self-hosted runner, Actions Runner Controller on a Kubernetes cluster, or a pool such as Potluck that runs each job in a fresh VM or sandbox on machines your team owns. GitHub's billing documentation describes self-hosted runner usage as free of a per-minute charge as of autumn 2026, so on your own hardware you pay for the machines, the power and your time rather than a rate per minute. Blacksmith and Cirrus Runners are managed services: you pay them for machines they run, and in return you do no hardware work. Potluck is free and open source, made by Sengi, Inc., which also sells hosted GitHub Actions runners, so weigh our view with that in mind. Potluck is early: a real Actions job has run through it by hand on a Mac and on a Linux box, but it does not yet run our own CI every day.
+
+## The options side by side
+
+This table compares the options for someone deciding between paying for hosted runners and using hardware they already have. Prices change often, so check each vendor's pricing page on the day you decide; we only describe how each one bills.
+
+| Option | Who runs the hardware | How you pay | macOS jobs | Linux jobs | Fresh machine per job | Work for you |
+|---|---|---|---|---|---|---|
+| GitHub-hosted runners | GitHub | Per minute after plan allowance | Yes | Yes | Yes | None |
+| Blacksmith | Blacksmith | Per minute, with a free monthly allowance | Yes, Apple silicon | Yes, x64 and ARM | Yes, microVMs | Install an app, change the label |
+| Cirrus Runners | Cirrus Labs | Flat fee per runner per month | Yes, Apple silicon | Check their site | Yes | Install an app, change the label |
+| GitHub self-hosted runner app | You | Your machines and time | Yes | Yes | Only if you build it | Patching, cleanup, isolation |
+| Actions Runner Controller | You, on Kubernetes | Your cluster and time | No, Linux containers | Yes | Yes, ephemeral pods | Run and upgrade a cluster |
+| Potluck (early) | You and your team | Free; your machines | Yes, via Tart | Yes, via Kata or gVisor | Yes, VM or sandbox per job | Install, host, join a pool |
+
+## Blacksmith: what it does well and what it costs you
+
+Blacksmith is a managed runner service for GitHub Actions focused on speed and price. You install its GitHub App and change `runs-on` to a Blacksmith label. Jobs run in microVMs on Linux x64 and ARM, with macOS on Apple silicon and Windows not yet generally available, and it adds a colocated cache, Docker layer caching on persistent disks, and SSH into running jobs. It bills per minute with a free monthly allowance.
+
+It costs more than self-hosting when you already own idle machines, because you pay for every minute on hardware someone else runs. It costs less in your time: there is nothing to patch and no box under a desk to reboot.
+
+## Cirrus Runners and Cirrus CI: which is which
+
+Cirrus Labs has made several products, and the names get mixed up in searches:
+
+- **Cirrus CI** is a full CI service with its own configuration file, separate from GitHub Actions.
+- **Cirrus Runners** are managed Apple silicon machines that plug into GitHub Actions as runners. They are billed as a flat monthly fee per runner instead of per minute, which suits teams with steady macOS load.
+- **Tart** is Cirrus Labs' open-source tool for running macOS and Linux VMs on Apple silicon. Potluck drives Tart on Macs; see [Tart](/tart).
+
+Cirrus Labs has announced changes to Cirrus CI over time, so check their site for what is offered today before you plan around either product. If the reason you looked at Cirrus Runners was "fresh macOS VMs for Actions jobs", the self-hosted version of that is Tart on a Mac you own, which is what Potluck sets up for you.
+
+## What self-hosting costs per minute in 2026
+
+The search "GitHub self-hosted runner pricing per minute 2026" has a short answer and a caveat.
+
+- **GitHub's charge**: GitHub's billing documentation describes self-hosted runner usage as free. GitHub did announce a per-minute platform charge for self-hosted usage in private repositories and then postponed it to re-evaluate. It has not been cancelled, so check GitHub's billing page and budget for it returning in some form.
+- **Your hardware**: a Mac or Linux box you already own and leave idle overnight costs you power, not a new purchase.
+- **Your time**: this is the real cost. GitHub's runner app does not give you a clean VM per job; leftover files, caches and processes carry from one job to the next unless you build cleanup. GitHub also warns against self-hosted runners on public repositories, because a pull request from a stranger runs on your machine.
+
+Potluck's aim is to cut the time cost: each job gets a fresh VM or sandbox, and the machine joins a pool only after it passes a conformance check.
+
+## Can you run GitHub Actions on spare Macs instead of hosted macOS runners?
+
+Yes. macOS minutes are the most expensive kind on hosted services, and a spare Apple silicon Mac is often sitting idle. There are three ways to do it:
+
+1. **GitHub's runner app directly on the Mac.** Fastest to set up, no isolation between jobs. We walk through it in [a self-hosted GitHub Actions runner on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac).
+2. **Tart VMs you script yourself.** Each job gets a fresh macOS VM; you write the glue that starts the VM, registers the runner and deletes it.
+3. **Potluck.** It drives Tart for you and hands each job a fresh VM. A real Actions job has been run through Potluck's runner broker by hand on a Mac with Tart, and on a Linux box on another machine with gVisor. It is not yet running in our own CI every day, so treat it as early. See [GitHub Actions runner](/github-actions-runner) for the current state.
+
+Two limits apply to any Mac option:
+
+- **Apple's licence** allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a macOS guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.
+- **Owners come first.** In Potluck, a Mac sandbox ends when its owner touches the keyboard or pointer. A build on a Mac someone is using will be cut off, so pool Macs that sit idle, such as an old Mac mini or a laptop overnight.
+
+## What Potluck is and is not
+
+Potluck puts a team's idle Macs and Linux boxes to work, running GitHub Actions jobs and coding agents on machines you already own, each in a fresh VM or sandbox. It is not a hosted cloud, it is not a sandbox runtime of its own (it drives Tart, Kata, gVisor and Incus), and it is not a cluster scheduler. It runs without Sengi and without a Sengi account.
+
+To share a machine you need Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux. Machines reach each other over Tailscale, or over a tunnel you configure. When an owner takes a machine back, running VMs end and new work is refused. Hand-back when the owner returns works on a Mac; on Linux it works only as a time window today.
+
+Trust matters here. The machine that runs a VM can read everything in it, including secrets passed to a build. The machine that runs the pool can read commands and output passing through it. Join only a pool whose owner you trust, and use it at your own risk. For more on pooling, read [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## Which option fits
+
+- **No spare hardware, want zero upkeep:** GitHub-hosted runners or Blacksmith.
+- **Steady macOS load, want a fixed monthly bill:** a flat-fee managed Mac service such as Cirrus Runners, if it is offered when you read this.
+- **A Kubernetes cluster already running, Linux jobs only:** Actions Runner Controller.
+- **One spare Mac, a private repository, and you accept shared state between jobs:** GitHub's runner app on the Mac.
+- **Several idle Macs and Linux boxes across a team, want a fresh VM per job, willing to try early software:** Potluck.
+
+You can mix them. The runner is chosen per job by the `runs-on` label, so Linux jobs can stay on a hosted service while macOS jobs move to a Mac you own.
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that will run the pool, create it. The first time, it prints a Tailscale login URL. Then make an invite code for a friend who will share a machine:
+
+```
+potluck create friends
+potluck invite carl --host
+```
+
+On the spare Mac or Linux box, check what it can share, look at the plan, then host:
+
+```
+potluck doctor
+potluck host --dry-run
+potluck host '<code>'
+```
+
+`potluck host` checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes. `--share` sets the fraction of cores and RAM shared, 0.5 by default. `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet; on the OCI layer the default is no network at all. `potluck host stop` stops sharing.
+
+To try a sandbox by hand:
+
+```
+potluck sandbox create
+potluck sandbox exec <id> -- uname -a
+potluck sandbox rm <id>
+```
+
+For coding agents, `potluck --pool friends mcp` exposes sandbox tools over MCP, and `potluck agent-runner` runs a coding-agent vendor's self-hosted runners in fresh sandboxes. See [agent sandbox](/agent-sandbox).
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to install it, host a machine, run a job and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions with your hardware and what happened. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### What are the alternatives to Cirrus Runners and Blacksmith if I have my own hardware?
+
+GitHub's self-hosted runner app, Actions Runner Controller on Kubernetes, scripted Tart VMs on Macs, or Potluck, which runs each job in a fresh VM or sandbox on machines your team owns. All of them use hardware you already pay for instead of a per-minute or per-runner fee.
+
+### Does GitHub charge per minute for self-hosted runners in 2026?
+
+GitHub's billing documentation describes self-hosted runner usage as free of a per-minute charge as of autumn 2026. GitHub announced a platform charge for self-hosted usage and postponed it, so check its billing page before you budget.
+
+### What is the difference between Cirrus CI and Cirrus Runners?
+
+Cirrus CI is a separate CI service with its own configuration, while Cirrus Runners are managed Apple silicon machines that run GitHub Actions jobs for a flat monthly fee per runner. Cirrus Labs also makes Tart, the VM tool Potluck uses on Macs.
+
+### How many macOS VMs can I run on one Mac?
+
+Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending them to your team is fine; selling Mac time to the public is not. This is not legal advice.
+
+### Can Potluck replace Blacksmith for my whole CI today?
+
+Not yet. A real Actions job has run through Potluck by hand on a Mac and on a Linux box, but it is not yet running in our own CI every day, so start with a few jobs, not your main pipeline.
+
+### Is it safe to run builds on a teammate's machine?
+
+Only if you trust them. The machine that runs a VM can read everything in it, including secrets, and the pool's machine can read commands and output, so join only pools whose owner you trust.
+
+### What happens if the Mac's owner sits down during a build?
+
+The Mac sandbox ends as soon as the owner touches the keyboard or pointer, and the job fails. Pool Macs that are idle for long stretches.
+
+---
+
+Source: https://potluck.sh/blog/self-hosted-macos-runners-fresh-vm-every-job
+
+# The best way to get self-hosted macOS runners with a fresh VM for every job (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/self-hosted-macos-runners-fresh-vm-every-job
+
+**Short answer:** The best way to get self-hosted macOS runners with a fresh VM for every job is to run each job in a throwaway Tart VM on an Apple silicon Mac, cloned from a runner image and deleted after that one job. The number to plan around is two: Apple's macOS licence allows up to two macOS VMs on a Mac you own, so each Mac runs at most two fresh-VM jobs at once, and four parallel macOS jobs need two Macs. You can get there with a hosted macOS runner service, with Tart and Cilicon on a Mac you own or rent, or with Potluck, a free, early, Apache-2.0 project that pools the Macs your team already owns and caps macOS guests at two per Mac. If you are leaving Cirrus Runners, its macOS runner images are public OCI images, so any Tart-based path keeps the same build environment.
+
+Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project. This post compares both kinds of option.
+
+## The options compared
+
+| Option | Where jobs run | Fresh VM per job | Setup work | Cost shape | Status |
+|---|---|---|---|---|---|
+| GitHub-hosted macOS runners | GitHub's Macs | Yes | None | Per-minute billing | Mature |
+| Other hosted runner services (Sengi is one) | The provider's Macs | Depends on provider | Low | Per minute or per month | Varies |
+| Rented dedicated Mac with Tart and Cilicon | A Mac you rent, for example from OakHost | Yes, Cilicon cycles VMs | GitHub App, config file, auto-login | Monthly rent | Tools in public use |
+| Your own Mac with Tart and Cilicon | Hardware you own | Yes | Same as above, plus hardware care | Hardware you already paid for | Tools in public use |
+| Potluck on Macs your team owns | Spare Macs and Linux boxes in a pool | Yes, fresh Tart VM or sandbox | Install script, create pool, host | Free, Apache-2.0 | Early; Actions jobs run by hand so far |
+
+No prices are shown because they change. Check each provider's own page.
+
+## Why people are looking for this now
+
+OakHost, a Mac hosting company, published a migration guide this year. It reports that Cirrus Labs is joining OpenAI's Agent Infrastructure group, that Cirrus CI is shutting down, and that Cirrus Runners no longer accepts new customers. Cirrus Runners gave teams what this search asks for: each GitHub Actions job ran in a fresh macOS VM built with Tart, the VM tool Cirrus Labs wrote. Teams that relied on it now have to rebuild that setup somewhere else, and most want to keep the one-job-per-VM model.
+
+## Why a fresh VM per job matters
+
+A long-lived macOS runner collects state. Homebrew packages, simulator runtimes, keychain entries, DerivedData and environment changes stay behind, so a build can pass only because of something an earlier job left. A fresh VM per job removes that:
+
+- **Clean start:** every job boots from the same image, so a green build means the image and your code are enough.
+- **No leftover secrets:** tokens and signing material from one job are gone before the next job starts.
+- **Easy rollback:** a bad image change is fixed by pointing back at the previous image tag.
+
+The cost is boot time and disk space. Plan room for at least one full image on each Mac.
+
+## Option 1: hosted macOS runners
+
+GitHub's own macOS runners give each job a new VM with no setup. They are the simplest choice if GitHub's images suit you and the per-minute bill fits. Other hosted services, including Sengi, run Macs for you and differ in image choice, concurrency and billing. Hosted runners do well on zero maintenance, no hardware and no licence counting on your side. They cost more as your minutes grow, and you depend on the provider staying in business, which is what the Cirrus Runners shutdown shows.
+
+## Option 2: Tart and Cilicon on a Mac you own or rent
+
+This is the path OakHost's guide describes, and it is closest to what Cirrus Runners did. Tart creates and runs macOS VMs on Apple silicon using Apple's Virtualization framework, and its images are OCI images. Cilicon is a macOS app on top of Tart: it clones the image, boots the VM, registers an ephemeral GitHub Actions runner inside it, waits for one job, destroys the VM and repeats.
+
+The work, in outline:
+
+1. Get an Apple silicon Mac, your own or a rented dedicated one.
+2. Create a GitHub App for your organisation with read and write access to self-hosted runners, download its private key, and install the app.
+3. Write a Cilicon config that points at your runner image. Cirrus users can point at the same public macos-runner image tag.
+4. Start Cilicon, turn on automatic login and add Cilicon to login items so it survives a reboot.
+5. Change `runs-on` in your workflows from the Cirrus image reference to your self-hosted labels.
+
+This works well on a dedicated machine and keeps your images unchanged. You patch the Mac, watch disk space and handle the GUI login requirement, and each Mac still tops out at two VMs. For the runner side, see [self-hosted GitHub Actions runners on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac) and our [Tart page](/tart).
+
+## Option 3: Potluck on the Macs your team already owns
+
+Many teams have Apple silicon Macs that sit idle much of the day: an old Mac mini, a spare laptop, a build box nobody watches. Potluck puts those machines in a pool and runs GitHub Actions jobs and coding agents on them, each in a fresh VM or sandbox. On a Mac it uses Tart. On Linux it uses Docker or Podman with Kata or gVisor, so Linux jobs can go to Linux boxes in the same pool. It runs without Sengi and without a Sengi account.
+
+What is true today, from the Potluck project facts:
+
+- A real GitHub Actions job has been run through Potluck's runner broker, by hand, on a Mac with Tart and on a Linux box on another machine with gVisor. It is not yet running daily in the project's own CI.
+- When a machine joins as a host, Potluck checks it, pulls the image, runs a quick conformance check per size, and joins the pool only when a size passes.
+- `--share` sets the fraction of cores and RAM a host gives the pool; the default is 0.5.
+- Potluck caps macOS guests at two per Mac, matching Apple's licence.
+- A Mac sandbox ends when its owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.
+
+That last point decides where Potluck fits. On a Mac someone is using, a job can be cut short when they sit down, so use Macs nobody sits at for CI, or expect reruns. See [the GitHub Actions runner page](/github-actions-runner) and [pooling spare Macs and Linux boxes](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## What to check before you move jobs
+
+- **Concurrency:** divide your peak number of parallel macOS jobs by two to get the number of Macs you need on any self-hosted path.
+- **Images:** keep your current image tag at first, and change images separately from changing where jobs run.
+- **Trust:** the machine that runs a VM can read everything in it, including secrets. With Potluck, the machine that runs the pool can also read commands and output passing through it. Join only a pool whose owner you trust.
+- **Licence:** lending a macOS guest to your team or invited friends is fine. Selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.
+- **Network:** decide what a job may reach. `potluck isolation test <size>` checks that a box cannot reach the host, its LAN or its tailnet.
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+```
+curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+```
+
+On the machine that will run the pool:
+
+```
+potluck create friends
+potluck invite carl --host
+```
+
+The first `create` prints a Tailscale login URL. Machines reach each other over Tailscale or over a tunnel you configure. On each spare Mac, check it and then share it:
+
+```
+potluck doctor
+potluck host --dry-run
+potluck host '<code>'
+```
+
+Run `potluck isolation test <size>` to confirm isolation, and `potluck host stop` to stop sharing. To try a sandbox by hand: `potluck sandbox create`, then `potluck sandbox exec <id> -- uname -a`, then `potluck sandbox rm <id>`. Sharing a Mac needs Tart on Apple silicon. The code is at https://github.com/sengirunners/potluck.
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to install it, run a job or a sandbox, and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions with what you tried and what happened. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### How many fresh macOS VMs can one Mac run at once?
+
+Two. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac for that reason.
+
+### Can I keep using my Cirrus Runners images?
+
+Yes, on any Tart-based path. OakHost's migration guide notes that the Cirrus macOS runner images are public OCI images, so Tart can pull the same tag you used before.
+
+### Is Potluck ready to replace my Mac CI today?
+
+Not yet for critical pipelines. A real Actions job has run through its runner broker by hand on a Mac and on Linux, but it is not yet running daily in the project's own CI, so try it on a workflow you can afford to rerun.
+
+### Do I need a Sengi account to use Potluck?
+
+No. Potluck is free, Apache-2.0 licensed, and runs without Sengi or a Sengi account. Sengi sells hosted runners as a separate business.
+
+### Can I pool iOS Simulator time or rent my spare Macs to the public?
+
+No. Lending a macOS guest to your team or invited friends is fine, but selling Mac time to the public and pooling iOS Simulator time are not. This is not legal advice.
+
+### Who can see my secrets on a self-hosted runner?
+
+The machine that runs the VM can read everything in it, including secrets. In a Potluck pool, the machine that runs the pool can also read commands and output passing through it, so join only pools whose owner you trust.
+
+---
+
+Source: https://potluck.sh/blog/tart-based-github-actions-runners-compared-tartelet-cilicon
+
+# Tartelet vs Cilicon: ephemeral macOS GitHub Actions runners on Tart, autoscaling and Kubernetes (November 2026)
+
+Published 2026-11-24. https://potluck.sh/blog/tart-based-github-actions-runners-compared-tartelet-cilicon
+
+**Short answer:** Every Tart-based GitHub Actions runner tops out at two macOS VMs per Mac. Apple's licence allows two macOS VMs on a Mac you own, and the Tartelet, Cilicon and macos-ephemeral-runners READMEs all name the same limit in Apple's Virtualization framework. Tartelet is a macOS app that keeps up to two ephemeral runners going on one Mac. Cilicon is a macOS app that runs ephemeral VMs for GitHub Actions, GitLab Runner, Buildkite Agent or a script. KnobanLabs' macos-ephemeral-runners adds scale-from-zero autoscaling through GitHub's runner scale set API and runs Ubuntu ARM64 jobs beside macOS ones. None of the four tools here uses Kubernetes. To run more than two macOS jobs at once you add Macs, and Potluck, an early, free, open-source project, pools a team's spare Macs and Linux boxes for that.
+
+Disclosure: Potluck is made by Sengi, which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without Sengi.
+
+## The four options at a glance
+
+The details below come from each project's README as of November 2026, and from the Potluck facts for Potluck.
+
+| | Tartelet | Cilicon | macos-ephemeral-runners | Potluck |
+|---|---|---|---|---|
+| What it is | macOS app | macOS app | Go controller run as a LaunchAgent | Daemon and CLI that pools machines |
+| CI systems | GitHub Actions | GitHub Actions, GitLab Runner, Buildkite Agent, scripts | GitHub Actions | GitHub Actions through a runner broker, coding-agent runners, sandboxes |
+| macOS VMs at once per Mac | Up to 2 | 1; running 2 is listed under future ideas | Capped at 2 | Capped at 2 |
+| Linux jobs | No | No | Ubuntu ARM64 VMs on the same Mac | Linux boxes with Docker or Podman plus Kata or gVisor |
+| Scaling model | Fixed slots, VM recreated after each job | One VM, recreated each cycle | Runner scale sets, scales from zero, optional warm VMs | Across every machine in a pool |
+| Network isolation | Not covered in README | Not covered in README | Softnet isolated mode by default | Isolation check command; no network by default on the OCI layer |
+| Status | Performance numbers dated January/February 2023 | Version 2.0; warns about macOS 15.0 to 15.3 | Marked experimental | Early; Actions job run by hand, not yet daily |
+
+## Tartelet: two runners on one Mac, little to configure
+
+Tartelet, from Shape in Denmark, is a macOS app built on Tart. Its README describes the cycle: Tart clones a VM, the VM boots, a setup script downloads the newest GitHub runner and registers it with your organization, the runner takes one job and removes itself, and Tartelet shuts down and deletes the VM before starting over.
+
+What it does well: it is the shortest path from one Mac to two parallel, clean runners. The Tartelet README reports, on a 2020 Mac mini M1 with 16 GB of memory, jobs running 3 to 4 times faster than on GitHub's runners, about 12% slower per job when two VMs run in parallel, and 25 to 30 seconds to destroy and recreate a VM. It also notes that recreation overhead mostly disappears because the next VM boots while no job is waiting. Those numbers were last updated in January/February 2023, so treat them as a rough guide on current hardware.
+
+Where it costs more: it is GitHub Actions only, it registers at the organization level, it runs on one Mac, and scaling past two jobs means another Mac with another copy of the app.
+
+## Cilicon: one config file, several CI systems
+
+Cilicon, from Trade Republic, is the project Tartelet credits as its inspiration. Version 2.0 dropped the login-item script inside the VM: Cilicon now connects over SSH and runs commands directly. It reads a cilicon.yml in the host user's home directory, pulls Tart-format images over OCI, and supports GitHub Actions, GitLab Runner, Buildkite Agent and arbitrary scripts as provisioners.
+
+What it does well: if your team runs more than one CI system, Cilicon covers them with one tool. Its GitHub provisioner has a liveness probe that restarts the VM when a health command fails (by default every 30 seconds after a 60-second delay, per its README), and an SSH retry setting that defaults to 10 attempts.
+
+Where it costs more: the README recommends a dedicated, freshly restored Mac with automatic login, automatic updates off and screen lock off. It lists running two VMs in parallel as a future idea, so plan on one job at a time per Mac. It warns of an SSH issue on macOS 15.0 to 15.3 and asks for 15.4 or later. GitHub use needs a GitHub App with self-hosted runner read and write permission at the organization level.
+
+## macos-ephemeral-runners: autoscaling with scale sets
+
+This is the closest match to the search for an autoscaling, ephemeral macOS runner. KnobanLabs' controller registers one GitHub runner scale set per pool, long-polls GitHub for waiting jobs, scales from zero, and gives each VM a just-in-time registration valid for one job. Its README gives boot times of about 8 seconds for Linux and about 30 seconds for macOS.
+
+What it does well: macOS and Ubuntu ARM64 jobs share one Mac's memory and vCPU budget, one Mac can serve several organizations, and pools default to Tart's Softnet isolated network, which keeps VMs off the Mac and your local network. Its capacity table, with 7 GB per macOS job, 8 GB per Ubuntu job and 8 GB held back for the host, shows a 24 GB, 8-core Mac fitting two macOS jobs, and a 64 GB, 16-core Mac fitting two macOS plus five Ubuntu jobs.
+
+Where it costs more: the README marks it experimental, notes that the scale set API is in public preview, and asks for Tart 2.30.0 or later, Homebrew, Go, about 93 GB of images, and a logged-in user session. It is for private repositories only. Scaling is still bounded by one Mac at a time per deployment.
+
+## What about Kubernetes?
+
+None of the four tools runs on Kubernetes, and the macOS side cannot move into a Linux cluster: every one of them runs macOS guests through Tart on Apple silicon Macs. Autoscaling macOS runners therefore comes in two layers. Inside one Mac, a controller such as macos-ephemeral-runners scales from zero up to two macOS guests plus whatever Linux VMs fit. Across Macs, you add machines. If your Linux runners already live in a cluster, keep them there; the question is how to get more Macs into rotation without a rack of dedicated hardware.
+
+## Where Potluck fits
+
+Potluck is not a scheduler for clusters and not a sandbox runtime of its own. It drives Tart on Apple silicon Macs and Docker or Podman with Kata or gVisor on Linux, and puts idle machines your team already owns into a pool. Each job gets a fresh VM or sandbox, and macOS guests are capped at two per Mac to match Apple's licence.
+
+What is true today: a real GitHub Actions job has been run through Potluck's runner broker, by hand, on a Mac with Tart and on a Linux box on another machine with OCI and gVisor. It does not yet run daily in its makers' own CI. A Mac sandbox ends when its owner touches the keyboard or pointer, and when an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.
+
+Trust matters more here than with a single dedicated Mac: the machine that runs a VM can read everything in it, including secrets, and the machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust. Lending a macOS guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.
+
+If you want one Mac with two clean runners, Tartelet or Cilicon is less to set up. If you want autoscaling on one Mac, macos-ephemeral-runners is built for it. If you have several part-time Macs and Linux boxes on desks, Potluck is aimed at that. For more background, see [Potluck on Tart](/tart), [GitHub Actions runners with Potluck](/github-actions-runner) and [a self-hosted GitHub Actions runner on your Mac](/blog/self-hosted-github-actions-runner-on-your-mac).
+
+## How to start with Potluck
+
+Install on macOS or Linux (no Go needed) and start the daemon:
+
+`curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh`
+
+`potluck daemon --detach`
+
+On the machine that runs the pool, create it and invite a teammate who will share a Mac. The first time, `create` prints a Tailscale login URL:
+
+`potluck create friends`
+
+`potluck invite carl --host`
+
+On Carl's Mac, check what it can share and preview the plan, then share it:
+
+`potluck doctor`
+
+`potluck host --dry-run`
+
+`potluck host '<code>'`
+
+`potluck host` pulls the image, runs a quick conformance check per size, and joins only when a size passes. `--share` (default 0.5) sets the fraction of cores and RAM shared, and `potluck host stop` stops sharing. Run `potluck isolation test <size>` to check that a box cannot reach the host, its LAN or its tailnet. To try a sandbox by hand: `potluck sandbox create`, then `potluck sandbox exec <id> -- uname -a`, then `potluck sandbox rm <id>`. The longer walkthrough is in [pool spare Macs and Linux boxes for builds and agents](/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents).
+
+## Try it early
+
+Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions with what you ran and what happened. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.
+
+## Questions people ask
+
+### How many macOS runners can one Mac run with Tart?
+
+Two. Apple's licence allows up to two macOS VMs on a Mac you own, and the Tartelet, Cilicon and macos-ephemeral-runners READMEs all cite the same limit in Apple's Virtualization framework.
+
+### Is Tartelet or Cilicon better for GitHub Actions?
+
+Tartelet runs up to two GitHub Actions runners per Mac with little configuration. Cilicon supports GitHub Actions, GitLab Runner, Buildkite Agent and scripts from one config file, but its README lists running two VMs in parallel as a future idea.
+
+### Can I autoscale macOS GitHub Actions runners on Kubernetes?
+
+Not with these tools; all of them run macOS guests through Tart on Apple silicon Macs, outside Kubernetes. macos-ephemeral-runners scales from zero on one Mac through GitHub's runner scale set API, and beyond two macOS jobs you add Macs.
+
+### Can Tart runners run Linux jobs too?
+
+macos-ephemeral-runners runs Ubuntu ARM64 VMs on the same Mac as its macOS VMs. Potluck runs Linux sandboxes on Linux boxes with Docker or Podman plus Kata or gVisor.
+
+### Are these runners safe for public repositories?
+
+The macos-ephemeral-runners README says never to let public repositories use its runners, because anyone can open a pull request from a fork. The same caution applies to any self-hosted runner on a machine you care about.
+
+### Does Potluck run GitHub Actions in production?
+
+No. A real Actions job has been run through its runner broker by hand on a Mac and on a Linux box, but it is not yet daily in its makers' own CI.
+
+### Does Potluck cost anything or need a Sengi account?
+
+Potluck is free and open source under Apache-2.0, and it runs without Sengi and without a Sengi account. Sengi, its maker, sells hosted GitHub Actions runners as a separate product.
 
 ---
 

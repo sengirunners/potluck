@@ -278,7 +278,7 @@ stderr.`,
 			if err != nil {
 				return err
 			}
-			r, err := a.join(cmd.Context(), c, req)
+			r, err := a.join(cmd.Context(), c, req, nil)
 			if err != nil {
 				return err
 			}
@@ -311,8 +311,9 @@ stderr.`,
 
 // join sends req until it is done (joinUntilDone) and says what it joined.
 // Under --json a join by name answers as soon as it needs a person.
-func (a *app) join(ctx context.Context, c *client.Client, req api.JoinRequest) (api.JoinResponse, error) {
-	r, err := a.joinUntilDone(ctx, c, req)
+// onLogin, when set, is told each new tailnet login URL the join waits for.
+func (a *app) join(ctx context.Context, c *client.Client, req api.JoinRequest, onLogin func(url string)) (api.JoinResponse, error) {
+	r, err := a.joinUntilDone(ctx, c, req, onLogin)
 	var bad *api.Error
 	if errors.As(err, &bad) && bad.Code == project.ErrBadCode.Code && bad.Message == project.ErrBadCode.Message {
 		// kit's hint names only a team project's invite; a code may be a pool's.
@@ -335,14 +336,15 @@ func (a *app) join(ctx context.Context, c *client.Client, req api.JoinRequest) (
 	return r, nil
 }
 
-// poolJoin redeems an invite code (host's '<invite code>').
-func (a *app) poolJoin(ctx context.Context, c *client.Client, code, authKey string) (api.Remote, error) {
+// poolJoin redeems an invite code (host's '<invite code>'); onLogin is
+// join's.
+func (a *app) poolJoin(ctx context.Context, c *client.Client, code, authKey string, onLogin func(url string)) (api.Remote, error) {
 	if !project.LooksLikeJoinCode(code) {
 		return api.Remote{}, fmt.Errorf("%q is not an invite code: the pool's owner prints one with %s", code, a.cmd("invite <you>"))
 	}
 	req := api.JoinRequest{Code: strings.TrimSpace(code), AuthKey: authKey, WaitMS: 10000}
 	req.Cwd, _ = os.Getwd()
-	r, err := a.join(ctx, c, req)
+	r, err := a.join(ctx, c, req, onLogin)
 	if err != nil {
 		return api.Remote{}, err
 	}
@@ -355,7 +357,8 @@ func (a *app) poolJoin(ctx context.Context, c *client.Client, code, authKey stri
 // joinUntilDone sends the join, waiting out a tailnet login and, for a
 // join by name, asking the person for the authority and GitHub's code
 // (askForJoin; with --json it answers the first such answer instead).
-func (a *app) joinUntilDone(ctx context.Context, c *client.Client, req api.JoinRequest) (api.JoinResponse, error) {
+// Each new login URL goes to stderr and to onLogin, when set.
+func (a *app) joinUntilDone(ctx context.Context, c *client.Client, req api.JoinRequest, onLogin func(url string)) (api.JoinResponse, error) {
 	deadline := time.Now().Add(10 * time.Minute)
 	shown := ""
 	for {
@@ -380,6 +383,9 @@ func (a *app) joinUntilDone(ctx context.Context, c *client.Client, req api.JoinR
 		if r.AuthURL != shown {
 			fmt.Fprintf(a.host.Stderr, "%s: log in to your tailnet to continue (waiting): %s\n", a.name(), r.AuthURL)
 			shown = r.AuthURL
+			if onLogin != nil {
+				onLogin(r.AuthURL)
+			}
 		}
 		req.AuthKey = "" // used once
 		select {

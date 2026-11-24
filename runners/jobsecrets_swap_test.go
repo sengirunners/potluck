@@ -612,3 +612,39 @@ func TestJobGrantUngrantedTakerOfAnUnguardedBoxIsLeftAlone(t *testing.T) {
 		t.Fatalf("re-runs %v, want none", r)
 	}
 }
+
+// GitHub's completed for B (granted, served on its own box) on the runner of
+// the ungranted job's unguarded box is applied before its in_progress (or
+// the in_progress never comes): B ran there without its secrets, so it is
+// still recorded bounced, the ungranted job is served again, and B is
+// re-run once; the late in_progress changes nothing and nothing is issued.
+func TestJobGrantTakerOfAnUnguardedBoxCompletedFirst(t *testing.T) {
+	df := newDoorFixture(t, true, grantGH)
+	twoWorkflows(t, df)
+	ctx := context.Background()
+	if g := df.served(t, 9421, 942, 1); g.Run != nil {
+		t.Fatalf("the ungranted job's box is guarded %+v, want unguarded", g.Run)
+	}
+	df.served(t, 9401, 940, 2)
+	df.failedOnGitHub(9401, 940)
+	df.applied(t, endOn(9401, 940, "failure", 1, "potluck-9421"))
+	eventually(t, "B re-run", func() bool { return slices.Contains(df.reruns(), "job 9401") })
+	if why, bounced := df.svc.LostWhy(ctx, 9401); !bounced || !strings.Contains(why, "not guarded to any run") {
+		t.Fatalf("B's record %q (bounced %v), want a bounce off an unguarded box", why, bounced)
+	}
+	eventuallyBox(t, "the ungranted job served again", func() bool { return len(df.guards()) >= 3 && df.svc.Undone(ctx) == 0 })
+	if g := df.guards()[2]; g == nil || g.Run != nil {
+		t.Fatalf("the ungranted job served again with guard %+v, want an unguarded box", g)
+	}
+	df.applied(t, df.startOn(9401, 940, "acme/app", "potluck-9421")) // the late in_progress
+	time.Sleep(500 * time.Millisecond)
+	if all, _ := df.issued(); len(all) != 0 || len(df.boxWrites()) != 0 {
+		t.Fatalf("issued %+v, box writes %v; want nothing anywhere", all, df.boxWrites())
+	}
+	if r := df.reruns(); len(r) != 1 {
+		t.Fatalf("re-runs %v, want B's once", r)
+	}
+	if g := df.guards(); len(g) != 3 {
+		t.Fatalf("%d serves, want 3: the ungranted job served again once", len(g))
+	}
+}

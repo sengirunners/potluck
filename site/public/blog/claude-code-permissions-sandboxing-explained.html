@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code Permissions &amp; Sandbox (2026) | Potluck</title>
+<meta name="description" content="How Claude Code permission rules, permission modes and the Bash sandbox fit together in 2026, what each blocks, and when to isolate the whole agent.">
+<link rel="canonical" href="https://potluck.sh/blog/claude-code-permissions-sandboxing-explained">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Claude Code Permissions &amp; Sandbox (2026) | Potluck">
+<meta property="og:description" content="How Claude Code permission rules, permission modes and the Bash sandbox fit together in 2026, what each blocks, and when to isolate the whole agent.">
+<meta property="og:url" content="https://potluck.sh/blog/claude-code-permissions-sandboxing-explained">
+<meta property="og:image" content="https://potluck.sh/og/blog/claude-code-permissions-sandboxing-explained.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Claude Code permissions and sandbox settings explained (2026)">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Claude Code Permissions &amp; Sandbox (2026) | Potluck">
+<meta name="twitter:description" content="How Claude Code permission rules, permission modes and the Bash sandbox fit together in 2026, what each blocks, and when to isolate the whole agent.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/claude-code-permissions-sandboxing-explained.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/claude-code-permissions-sandboxing-explained.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/claude-code-permissions-sandboxing-explained#post","mainEntityOfPage":"https://potluck.sh/blog/claude-code-permissions-sandboxing-explained","url":"https://potluck.sh/blog/claude-code-permissions-sandboxing-explained","headline":"Claude Code permissions and sandbox settings explained (2026)","description":"How Claude Code permission rules, permission modes and the Bash sandbox fit together in 2026, what each blocks, and when to isolate the whole agent.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"Claude Code permissions and sandbox settings explained","image":"https://potluck.sh/og/blog/claude-code-permissions-sandboxing-explained.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Claude Code permissions and sandbox settings explained (2026)","item":"https://potluck.sh/blog/claude-code-permissions-sandboxing-explained"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Claude Code permissions and sandbox settings explained (2026)</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer</strong>: Claude Code has two separate controls. Permission rules (allow, ask, deny) and permission modes decide whether a tool call runs and whether you are asked first, and they apply to every tool: Read, Edit, Bash, WebFetch, MCP. The Bash sandbox is a boundary the operating system enforces (Seatbelt on macOS, bubblewrap on Linux and WSL2) around shell commands only. It is off by default. When on, commands can write only to the working directory, a per-user temp directory and directories you added; they can read most of the machine, including <code>~/.ssh</code>, unless you deny it; and their network traffic goes through a local proxy whose allowed domains list starts empty. Claude's file tools, MCP servers and hooks run outside the sandbox. For one boundary around everything the agent does, run it in a container, a VM, or a sandbox on another machine. This follows Anthropic's Claude Code documentation as of November 2026.</p>
+<h2 id="the-layers-at-a-glance">The layers at a glance</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Layer</th><th>What it controls</th><th>Enforced by</th><th>Covers</th></tr></thead>
+<tbody>
+<tr><td>Permission rules</td><td>Which tool calls run, prompt, or are blocked</td><td>Claude Code, before the tool runs</td><td>All tools</td></tr>
+<tr><td>Permission modes</td><td>Whether you get a prompt</td><td>Claude Code (auto mode adds a classifier)</td><td>All tools</td></tr>
+<tr><td>Bash sandbox</td><td>What a running shell command can read, write and reach</td><td>The OS kernel</td><td>Bash, PowerShell and Monitor commands and their child processes</td></tr>
+<tr><td>Whole-process boundary</td><td>Everything the agent process does</td><td>A container, VM or remote sandbox</td><td>The agent, its file tools, MCP servers and hooks</td></tr>
+</tbody>
+</table></div>
+<p>The University of Vermont IT knowledge base names the most common mistake: assuming the sandbox restricts everything Claude reads. It does not. A sandbox <code>denyRead</code> entry does not stop the Read tool, and <code>allowedDomains</code> does not limit WebFetch. Block a secret in both places, or the other path still reaches it.</p>
+<h2 id="permission-rules-allow-ask-deny">Permission rules: allow, ask, deny</h2>
+<p>Rules live in <code>permissions</code> in a settings file and use patterns such as <code>Read(...)</code>, <code>Edit(...)</code>, <code>Bash(git push *)</code> and <code>WebFetch(domain:example.com)</code>. Per the UVM article, they are evaluated deny first, then ask, then allow, and a deny set in managed settings cannot be re-allowed by a user. Watch the path syntax: in Read and Edit rules, <code>//path</code> is absolute and <code>/path</code> is relative to the project, while sandbox filesystem settings use ordinary paths such as <code>/tmp/build</code> and <code>~/.kube</code>.</p>
+<h2 id="permission-modes">Permission modes</h2>
+<p>Modes decide who approves a call. Manual mode prompts; acceptEdits approves file edits; auto mode hands the decision to a classifier model; dontAsk refuses anything not already allowed; plan mode gates commands while you plan; bypassPermissions (the <code>--dangerously-skip-permissions</code> flag) skips prompts. <code>/sandbox</code> is not a mode. The sandbox's own auto-allow setting approves Bash commands because the sandbox contains them, which is different from auto mode's classifier. You can combine the two.</p>
+<h2 id="what-the-bash-sandbox-restricts-by-default">What the Bash sandbox restricts by default</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Access</th><th>Default when enabled</th><th>Change it with</th></tr></thead>
+<tbody>
+<tr><td>Writes</td><td>Working directory, per-user temp directory, added directories; protected paths such as <code>.claude</code> settings, <code>.mcp.json</code> and <code>.bashrc</code> stay write-denied</td><td><code>filesystem.allowWrite</code>, <code>filesystem.denyWrite</code></td></tr>
+<tr><td>Reads</td><td>Most of the machine, including credential files</td><td><code>filesystem.denyRead</code>, <code>filesystem.allowRead</code>, <code>credentials</code></td></tr>
+<tr><td>Network</td><td>No direct route out; a proxy checks each host against an allowlist that starts empty</td><td><code>network.allowedDomains</code>, <code>network.deniedDomains</code>, <code>network.strictAllowlist</code></td></tr>
+<tr><td>Environment</td><td>Inherited from Claude Code, secrets included</td><td><code>credentials.envVars</code>, <code>CLAUDE_CODE_SUBPROCESS_ENV_SCRUB</code></td></tr>
+</tbody>
+</table></div>
+<p>Turn it on with <code>/sandbox</code> in a session and pick auto-allow or regular permissions, or set <code>sandbox.enabled</code> to true in <code>~/.claude/settings.json</code>. On Linux and WSL2, install <code>bubblewrap</code> and <code>socat</code> first. To check it works, ask Claude (not the <code>!</code> prompt, which runs unsandboxed) to run <code>touch ~/sandbox-probe</code>; it should fail.</p>
+<p>A starting point for user settings that blocks SSH and AWS keys, strips a token, allows two registries and stops unsandboxed retries:</p>
+<pre><code class="language-json">{
+  &quot;sandbox&quot;: {
+    &quot;enabled&quot;: true,
+    &quot;allowUnsandboxedCommands&quot;: false,
+    &quot;failIfUnavailable&quot;: true,
+    &quot;network&quot;: { &quot;allowedDomains&quot;: [&quot;github.com&quot;, &quot;*.npmjs.org&quot;] },
+    &quot;credentials&quot;: {
+      &quot;files&quot;: [
+        { &quot;path&quot;: &quot;~/.ssh&quot;, &quot;mode&quot;: &quot;deny&quot; },
+        { &quot;path&quot;: &quot;~/.aws/credentials&quot;, &quot;mode&quot;: &quot;deny&quot; }
+      ],
+      &quot;envVars&quot;: [ { &quot;name&quot;: &quot;GITHUB_TOKEN&quot;, &quot;mode&quot;: &quot;deny&quot; } ]
+    }
+  }
+}
+</code></pre>
+<p>There is no built-in credential deny list; only what you name is protected.</p>
+<h2 id="the-escape-hatches">The escape hatches</h2>
+<ul>
+<li><strong>Unsandboxed retry</strong>: after a failure Claude can retry with <code>dangerouslyDisableSandbox</code>. Setting <code>allowUnsandboxedCommands</code> to false (strict sandbox mode) removes it.</li>
+<li><strong>excludedCommands</strong>: matching commands run with your full access. Docker does not work inside the sandbox, so <code>docker compose *</code> here is common; keep patterns narrow.</li>
+<li><strong>Weakening switches</strong>: <code>allowAppleEvents</code> on macOS, <code>allowNestedUserNamespaces</code> and <code>enableWeakerNestedSandbox</code> on Linux each trade isolation for compatibility.</li>
+</ul>
+<h2 id="settings-for-a-team">Settings for a team</h2>
+<p>Administrators deliver keys through managed settings. <code>enabled</code>, <code>failIfUnavailable</code> and <code>allowUnsandboxedCommands: false</code> together make the sandbox admin-required, and Claude Code then ignores repository settings that loosen it, such as a repo's <code>excludedCommands</code> or <code>allowedDomains</code>. <code>allowManagedDomainsOnly</code> and <code>allowManagedReadPathsOnly</code> lock network and read lists to managed values. Native Windows has no sandbox, so with <code>failIfUnavailable</code> set Claude Code exits there; move those users to WSL2 or a container.</p>
+<h2 id="limits-anthropic-lists">Limits Anthropic lists</h2>
+<p>The documentation says the sandbox reduces risk but is not a complete isolation boundary. The proxy decides on hostname and does not inspect TLS by default, so a broad entry like <code>github.com</code> can be an exfiltration path and domain fronting is possible. Allowing a Unix socket such as <code>/var/run/docker.sock</code> effectively hands over the host. Broad write rules to <code>$PATH</code> directories or shell startup files can lead to code running elsewhere.</p>
+<h2 id="when-to-put-the-whole-agent-in-a-box">When to put the whole agent in a box</h2>
+<p>If MCP servers, hooks and file tools need a boundary too, the documentation points to running the Claude Code process itself in a container, VM or the sandbox runtime. Your options:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>Covers file tools and MCP</th><th>Runs on</th><th>What it costs you</th></tr></thead>
+<tbody>
+<tr><td>Claude Code Bash sandbox</td><td>No</td><td>Your machine</td><td>Little setup; shell commands only</td></tr>
+<tr><td>Dev container</td><td>Yes</td><td>Your machine</td><td>Image upkeep; shares your laptop's CPU and RAM</td></tr>
+<tr><td>Local VM</td><td>Yes</td><td>Your machine</td><td>Strong boundary; heavy on a laptop</td></tr>
+<tr><td>Hosted sandbox service</td><td>Yes, for what you send it</td><td>Rented machines</td><td>Easy to scale; usage bills and your code leaves your hardware</td></tr>
+<tr><td>Potluck sandbox</td><td>Commands sent to it</td><td>A spare Mac or Linux box your team owns</td><td>Early software; you run the pool</td></tr>
+</tbody>
+</table></div>
+<p>Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without a Sengi account.</p>
+<p>Potluck is not a replacement for Claude Code's settings. It is not a sandbox runtime of its own; it drives Tart on Apple silicon Macs and Kata, gVisor or Incus on Linux, and puts each sandbox on a machine that is not your laptop. On the OCI layer the default is no network at all. Trust still applies: the machine that runs a VM can read everything in it, including secrets, and the machine that runs a pool can read commands and output passing through it.</p>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install on macOS or Linux (no Go needed) and start the daemon:</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>Create a pool with <code>potluck create friends</code> (the first time it prints a Tailscale login URL). <code>potluck invite carl --host</code> makes a code for someone sharing a machine, who runs <code>potluck host '&lt;code&gt;'</code>; <code>potluck doctor</code> and <code>potluck host --dry-run</code> show what will be shared first. Then:</p>
+<pre><code class="language-sh">potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p><code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet. To hand an agent sandbox tools, run <code>potluck --pool friends mcp</code>; see <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a> and <a href="/agent-sandbox">agent sandboxes</a>.</p>
+<h2 id="what-makes-potluck-different">What makes Potluck different</h2>
+<ul>
+<li>When the Bash sandbox is not enough, it uses the Macs and Linux boxes your team already owns instead of rented machines.</li>
+<li>Each command an agent sends lands in a fresh VM or sandbox, and the same pool can also run GitHub Actions jobs (run by hand so far, not yet daily in Potluck's own CI).</li>
+<li>Agents get sandbox tools over MCP with <code>potluck --pool friends mcp</code>.</li>
+<li>A lent Mac goes back to its owner the moment they touch the keyboard or pointer; on Linux, hand-back works only as a time window today.</li>
+<li>It is free and open source (Apache-2.0) and runs without a Sengi account.</li>
+</ul>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions, and if you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="is-the-claude-code-sandbox-on-by-default">Is the Claude Code sandbox on by default?</h3>
+<p>No. Turn it on with <code>/sandbox</code> in a session or set <code>sandbox.enabled</code> to true in a settings file.</p>
+<h3 id="does-the-sandbox-stop-claude-from-reading-my-env-file">Does the sandbox stop Claude from reading my .env file?</h3>
+<p>Only for shell commands. The Read tool follows permission rules, so add a Read deny rule as well as a sandbox <code>denyRead</code> or <code>credentials</code> entry.</p>
+<h3 id="does-the-sandbox-work-on-windows">Does the sandbox work on Windows?</h3>
+<p>Not natively; commands run unsandboxed there. Run Claude Code inside WSL2 to get it.</p>
+<h3 id="what-is-dangerouslydisablesandbox">What is dangerouslyDisableSandbox?</h3>
+<p>It is the parameter Claude uses to retry a failed command outside the sandbox. Set <code>allowUnsandboxedCommands</code> to false to make Claude Code ignore it.</p>
+<h3 id="is-the-sandbox-a-full-security-boundary">Is the sandbox a full security boundary?</h3>
+<p>Anthropic's documentation says no: the proxy filters by hostname without inspecting TLS, and broad allowlists or sockets can undo it. For a harder line, isolate the whole agent process.</p>
+<h3 id="does-potluck-replace-claude-codes-sandbox">Does Potluck replace Claude Code's sandbox?</h3>
+<p>No. It gives agents fresh VMs or sandboxes on machines your team owns, over MCP or the <code>potluck sandbox</code> commands. Keep your permission rules either way.</p>
+<h3 id="is-potluck-free">Is Potluck free?</h3>
+<p>Yes. It is open source under Apache-2.0, and you can read the code at https://github.com/sengirunners/potluck.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/claude-code-permissions-sandboxing-explained.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

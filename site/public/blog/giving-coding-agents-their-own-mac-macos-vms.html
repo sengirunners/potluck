@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Give Coding Agents Their Own Mac in 2026 | Potluck</title>
+<meta name="description" content="One Mac mini can give coding agents two macOS VMs at once. How Tart, UTM, Lima and Potluck compare for safe, disposable agent sandboxes on Apple silicon.">
+<link rel="canonical" href="https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Give Coding Agents Their Own Mac in 2026 | Potluck">
+<meta property="og:description" content="One Mac mini can give coding agents two macOS VMs at once. How Tart, UTM, Lima and Potluck compare for safe, disposable agent sandboxes on Apple silicon.">
+<meta property="og:url" content="https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms">
+<meta property="og:image" content="https://potluck.sh/og/blog/giving-coding-agents-their-own-mac-macos-vms.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Give Coding Agents Their Own Mac: macOS VMs on a Mac mini (2026)">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Give Coding Agents Their Own Mac in 2026 | Potluck">
+<meta name="twitter:description" content="One Mac mini can give coding agents two macOS VMs at once. How Tart, UTM, Lima and Potluck compare for safe, disposable agent sandboxes on Apple silicon.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/giving-coding-agents-their-own-mac-macos-vms.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/giving-coding-agents-their-own-mac-macos-vms.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms#post","mainEntityOfPage":"https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms","url":"https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms","headline":"Give Coding Agents Their Own Mac: macOS VMs on a Mac mini (2026)","description":"One Mac mini can give coding agents two macOS VMs at once. How Tart, UTM, Lima and Potluck compare for safe, disposable agent sandboxes on Apple silicon.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"give coding agents their own Mac macOS VM, Tart UTM Lima macOS VM sandbox AI coding agent Mac mini, Tart macOS VM Apple Silicon sandbox AI agent, how do I give an AI coding agent a safe disposable VM on a Mac mini","image":"https://potluck.sh/og/blog/giving-coding-agents-their-own-mac-macos-vms.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Give Coding Agents Their Own Mac: macOS VMs on a Mac mini (2026)","item":"https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Give Coding Agents Their Own Mac: macOS VMs on a Mac mini (2026)</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer</strong>: one Apple silicon Mac mini can give coding agents two macOS VMs at a time, because Apple's licence allows up to two macOS VMs on a Mac you own. Potluck caps macOS guests at two per Mac for the same reason. The usual way to do it is Tart: clone a fresh macOS VM for each task, run the agent in it headless, and delete the VM when the task ends. UTM suits people who want the VM in a window, and Lima is built around Linux guests. Potluck, an early, free and open-source (Apache-2.0) project, drives Tart on your Macs and Kata or gVisor on Linux, so an agent gets a fresh sandbox per task through a command line or an MCP server without you writing the VM lifecycle yourself.</p>
+<h2 id="the-options-compared">The options compared</h2>
+<p>Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without Sengi or a Sengi account.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>What it runs on a Mac</th><th>Best at</th><th>Disposable per task</th><th>How an agent gets in</th><th>Work you do</th></tr></thead>
+<tbody>
+<tr><td>Tart</td><td>macOS and Linux VMs on Apple silicon</td><td>Headless, scripted macOS guests from registry images</td><td>Yes, if you clone and delete per task</td><td>Your own scripts around its exec command</td><td>Write and maintain the lifecycle scripts</td></tr>
+<tr><td>UTM</td><td>macOS, Linux and Windows guests, with a GUI</td><td>Interactive use, trying an OS in a window</td><td>Possible, mostly by hand</td><td>You shell into the guest</td><td>More manual steps for automation</td></tr>
+<tr><td>Lima</td><td>Linux VMs, often used for containers</td><td>Linux dev environments on a Mac</td><td>Yes, for Linux guests</td><td>Shell or container tools</td><td>Not the tool for a macOS guest</td></tr>
+<tr><td>Hosted Macs (cloud or hosted runners)</td><td>Machines you rent</td><td>No hardware to look after</td><td>Depends on the provider</td><td>Provider's API or runner</td><td>You pay for rented time</td></tr>
+<tr><td>Potluck</td><td>Tart guests on Macs, Kata or gVisor sandboxes on Linux</td><td>Fresh sandboxes for agents and Actions jobs on machines you own</td><td>Yes, each run in a fresh VM or sandbox</td><td><code>potluck sandbox</code> commands or the MCP server</td><td>Install, create a pool, host a machine</td></tr>
+</tbody>
+</table></div>
+<h2 id="why-an-agent-needs-its-own-mac">Why an agent needs its own Mac</h2>
+<p>A coding agent that builds a Mac app, clicks through its UI or installs tools wants the whole machine. On your desktop it competes with you for the keyboard, the pointer and the front window, and it can reach your files, your keychain and your shell history. A macOS VM fixes both: the agent gets a desktop of its own, and when the task ends you throw the VM away so the next task starts clean.</p>
+<p>A developer blog post from November 2026, about running a Mac card game's UI tests in a VM, describes the pattern well: Xcode and the source stay on the host, the host builds a Debug app, the app is copied into a headless macOS guest, and the agent drives it there and reads back a screenshot and the accessibility tree. The host Mac stays usable the whole time.</p>
+<h2 id="the-two-vm-limit-on-a-mac-mini">The two-VM limit on a Mac mini</h2>
+<p>The number that shapes every plan is two. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac to match. A Mac mini therefore gives you at most two agent Macs at once. For more parallel macOS agents you need more Macs, and Linux sandboxes on other boxes can take the work that does not need macOS.</p>
+<p>The licence also limits who uses those guests. Lending a macOS guest to your team or to invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.</p>
+<h2 id="doing-it-by-hand-with-tart">Doing it by hand with Tart</h2>
+<p>Tart, from Cirrus Labs, is the most direct route. You install it with Homebrew, use <code>tart clone</code> to pull a macOS image from a container registry into a named VM, start it headless with <code>tart run</code>, and send commands into the guest with <code>tart exec</code>. Use the prebuilt images that include Tart's guest agent, since exec needs it; the vanilla images lack it. The images are large, so check free disk space first, and pick the macOS version your app needs as its minimum.</p>
+<p>To make the VM disposable, clone a fresh copy from the base image for each task and delete it afterwards. That loop is what you end up scripting: create, wait for the desktop, copy the build in, run, collect output, delete. It works well, and you own every line of it. For more on Tart, see our <a href="/tart">Tart page</a>.</p>
+<h2 id="utm-and-lima-where-they-fit">UTM and Lima: where they fit</h2>
+<p>UTM is a good app for running macOS, Linux and Windows guests in a window on Apple silicon. It is the friendlier choice when a person sits in front of the VM. For an agent that needs a fresh guest every few minutes, you do more by hand than with Tart.</p>
+<p>Lima is a solid way to run Linux VMs on a Mac, often as the base for containers. If your agent only needs a Linux shell, a Lima VM on the Mac mini is a fine sandbox. For a macOS guest, people reach for Tart or UTM instead.</p>
+<h2 id="making-the-vm-safe-and-what-safe-means">Making the VM safe, and what safe means</h2>
+<p>A fresh VM per task stops one task from leaving files or processes behind for the next. Beyond that:</p>
+<ul>
+<li><strong>Network.</strong> Decide what the guest can reach. With Potluck, <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet. On Potluck's OCI layer on Linux, the default is no network at all.</li>
+<li><strong>Secrets.</strong> The machine that runs a VM can read everything in it, including any secret you pass in. Give an agent only the tokens the task needs.</li>
+<li><strong>The person at the Mac.</strong> On a desk Mac, Potluck ends a Mac sandbox when its owner touches the keyboard or pointer. A Mac mini in a cupboard has nobody touching it, so it stays available.</li>
+</ul>
+<h2 id="start-with-potluck">Start with Potluck</h2>
+<p>Potluck is early. On macOS or Linux, with no Go needed:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>On the machine that runs the pool (the first time, it prints a Tailscale login URL), create the pool and make a code for a machine to share:</p>
+<pre><code>potluck create friends
+potluck invite carl --host
+</code></pre>
+<p>On the Mac mini you want to share, which needs Tart on Apple silicon, check it, look at the plan, then host:</p>
+<pre><code>potluck doctor
+potluck host --dry-run
+potluck host '&lt;code&gt;'
+</code></pre>
+<p><code>potluck host</code> checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes. <code>--share</code> (default 0.5) sets the fraction of cores and RAM shared. <code>potluck host stop</code> stops sharing.</p>
+<p>Then create a sandbox, run a command in it and remove it:</p>
+<pre><code>potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>To give an agent sandbox tools directly, run <code>potluck --pool friends mcp</code>, an MCP server the agent connects to. There is more in <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a> and <a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">run coding agents in a sandbox on your own machines</a>. If you use a coding-agent vendor's self-hosted runners, <code>potluck agent-runner</code> runs them in fresh sandboxes.</p>
+<h2 id="what-makes-potluck-different">What makes Potluck different</h2>
+<ul>
+<li><strong>It uses the Mac mini you already own.</strong> Your agent's VMs run on Macs and Linux boxes the team already has, instead of rented machines.</li>
+<li><strong>A desk Mac goes back to its owner the moment they touch the keyboard or pointer.</strong> You can lend a work Mac to agents when it is idle without losing it when you sit down. On Linux, hand-back is only a time window today.</li>
+<li><strong>One pool, a fresh VM or sandbox per run, for agents and CI.</strong> The same machines serve coding-agent sandboxes and GitHub Actions jobs. A real Actions job has been run through the runner broker by hand on a Mac and on a Linux box; it is not yet daily in our own CI.</li>
+<li><strong>Agents get sandbox tools over MCP,</strong> and teammates or invited friends can lend their own machines to the same pool.</li>
+<li><strong>Free and open source (Apache-2.0), no Sengi account needed.</strong> It drives Tart, Kata, gVisor and Incus rather than replacing them, and it is not a hosted cloud or a cluster scheduler.</li>
+</ul>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early, and its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues. The code is at https://github.com/sengirunners/potluck. For a wider view, read <a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">pool spare Macs and Linux boxes for builds and agents</a>.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="how-many-macos-vms-can-a-coding-agent-use-on-one-mac-mini">How many macOS VMs can a coding agent use on one Mac mini?</h3>
+<p>Two at once. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac.</p>
+<h3 id="is-tart-or-utm-better-for-an-ai-agent-sandbox">Is Tart or UTM better for an AI agent sandbox?</h3>
+<p>Tart, for most agent setups, because it is built for headless, scripted guests and has a guest agent for running commands. UTM is better when a person wants to use the VM in a window.</p>
+<h3 id="can-i-use-lima-to-give-an-agent-a-macos-vm">Can I use Lima to give an agent a macOS VM?</h3>
+<p>Lima is built around Linux guests. Use it when a Linux shell is enough, and use Tart or UTM when the agent needs macOS.</p>
+<h3 id="are-secrets-safe-inside-the-agents-vm">Are secrets safe inside the agent's VM?</h3>
+<p>Not from the machine running it: that machine can read everything in the VM, including secrets, and a pool's machine can read commands and output passing through it. Pass in only what the task needs and join only pools whose owner you trust.</p>
+<h3 id="can-the-agents-vm-reach-my-home-or-office-network">Can the agent's VM reach my home or office network?</h3>
+<p>It depends on your setup. With Potluck, <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet.</p>
+<h3 id="can-i-rent-out-my-mac-minis-macos-vms">Can I rent out my Mac mini's macOS VMs?</h3>
+<p>No. Lending a macOS guest to your team or invited friends is fine, but selling Mac time to the public is not allowed under Apple's licence. This is not legal advice.</p>
+<h3 id="do-i-need-a-sengi-account-to-use-potluck">Do I need a Sengi account to use Potluck?</h3>
+<p>No. Potluck is free, open source under Apache-2.0, and runs without Sengi or a Sengi account.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/giving-coding-agents-their-own-mac-macos-vms.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

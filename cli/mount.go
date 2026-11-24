@@ -52,8 +52,9 @@ type Host struct {
 	// for nothing): setup prints that after its own line, and its --json
 	// carries it as "route". home is the client config's home.
 	RunnersRoute func(ctx context.Context, home string, st runners.Setup) (string, error)
-	// Stdin is the commands' input (nil: none). Stdout and Stderr are
-	// required.
+	// Stdin is the commands' input (nil: none, but host --invite-stdin, which
+	// the background run of host --detach gets, then reads the process's
+	// own). Stdout and Stderr are required.
 	Stdin          io.Reader
 	Stdout, Stderr io.Writer
 	// JoinLink is the host's invite page (https://example.com/join): invite
@@ -121,10 +122,11 @@ var flagName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // newApp is one run of the commands for h.
 func newApp(h Host) *app {
-	if h.Stdin == nil {
+	noStdin := h.Stdin == nil
+	if noStdin {
 		h.Stdin = strings.NewReader("")
 	}
-	return &app{host: h}
+	return &app{host: h, noStdin: noStdin}
 }
 
 // mountable are Potluck's commands but ProgramCommands: what Commands
@@ -132,7 +134,7 @@ func newApp(h Host) *app {
 func (a *app) mountable() []*cobra.Command {
 	return []*cobra.Command{a.tryCmd(), a.createCmd(), a.inviteCmd(), a.joinCmd(), a.leaveCmd(), a.disbandCmd(), a.forgetCmd(), a.remotesCmd(), a.authorityCmd(),
 		a.doctorCmd(), a.isolationCmd(), a.hostCmd(), a.ciCmd(), a.sandboxCmd(), a.usageCmd(), a.sealingCmd(),
-		a.runCmd(), a.agentTaskCmd(), a.agentRunnerCmd(), a.runnersCmd(), a.secretsCmd(), a.driverCmd(), a.softnetCmd()}
+		a.runCmd(), a.agentTaskCmd(), a.agentRunnerCmd(), a.runnersCmd(), a.secretsCmd(), a.driverCmd(), a.softnetCmd(), a.tartCmd()}
 }
 
 // programCommands are ProgramCommands, built.

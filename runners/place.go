@@ -242,6 +242,7 @@ type placed struct {
 	// reguards: its driver lists protocol.CapJITGuardReguard, so a box held
 	// to one run can be re-guarded to a job of another run (takeOver).
 	reguards bool
+	size     *computeapi.RunTargetSize // its driver's box size; nil when it names none
 }
 
 // place answers the box bindings to try for w, best first (at most
@@ -264,6 +265,10 @@ func (s *Service) place(ctx context.Context, sub *authz.Subject, svc rt.Service,
 			if v.Name == n && v.Describe != nil {
 				p.guardsPrivate = slices.Contains(v.Describe.Capabilities, protocol.CapJITGuardPrivate)
 				p.reguards = slices.Contains(v.Describe.Capabilities, protocol.CapJITGuardReguard)
+				if sz := v.Describe.Size; sz != nil {
+					c := *sz // a subscriber gets its own copy
+					p.size = &c
+				}
 			}
 		}
 		if needPrivate && !p.guardsPrivate {

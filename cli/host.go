@@ -350,11 +350,14 @@ type shareFlags struct {
 	volumeMaxGB int
 	// when is --when (any or away), detach --detach, and skipAfter the
 	// host program's flag that skips its AfterLend.
-	when       string
-	detach     bool
-	skipAfter  bool
-	linuxSlots int
-	wait       time.Duration // --wait: a size's check waits this long for a free slot (roomwait)
+	when      string
+	detach    bool
+	skipAfter bool
+	// inviteStdin is --invite-stdin: host's argument (the invite code, or
+	// a pool) is read from stdin, so it is in no process's argv.
+	inviteStdin bool
+	linuxSlots  int
+	wait        time.Duration // --wait: a size's check waits this long for a free slot (roomwait)
 }
 
 func (s *shareFlags) add(cmd *cobra.Command, a *app) {
@@ -389,6 +392,7 @@ func (s *shareFlags) add(cmd *cobra.Command, a *app) {
 	fl.IntVar(&o.ReclaimIdleS, "reclaim-idle-s", 0, fmt.Sprintf("macOS: a sandbox ends when you touch the keyboard or pointer and starts only after this many idle seconds; 0 shares all the time (default: what an earlier host run chose, else %d on macOS, 0 elsewhere)", hostprobe.DefaultReclaimIdleS))
 	fl.StringVar(&s.when, "when", "", fmt.Sprintf("when sandboxes may run: any (any time; --reclaim-idle-s 0) or away (macOS: only while you are away from the keyboard and pointer; --reclaim-idle-s %d) (default: what an earlier host run chose, else away on macOS, any elsewhere)", hostprobe.DefaultReclaimIdleS))
 	fl.BoolVar(&s.detach, "detach", false, "after the checks and the admin step, go on in the background, its words in the home's host.log ("+a.cmd("host status")+" says how it goes)")
+	fl.BoolVar(&s.inviteStdin, flagInviteStdin, false, "read the invite code (or pool) as one line from stdin instead of an argument, so no other user sees it in the process list")
 	if al := a.host.AfterLend; al != nil && al.Skip != "" {
 		fl.BoolVar(&s.skipAfter, al.Skip, false, al.SkipUsage)
 	}

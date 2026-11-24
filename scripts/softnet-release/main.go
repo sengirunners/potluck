@@ -26,7 +26,7 @@ import (
 func main() {
 	binary := flag.String("binary", "", "the reviewed Softnet executable")
 	out := flag.String("out", "", "a new directory for the release files")
-	id := flag.String("id", "", "the build (default: the newest in softnet.Builds)")
+	id := flag.String("id", "", "the build (default: the newest of Potluck's own in softnet.Builds)")
 	flag.Parse()
 	if err := run(os.Stdout, *binary, *out, *id); err != nil {
 		fmt.Fprintln(os.Stderr, "softnet-release:", err)
@@ -38,14 +38,24 @@ func run(w io.Writer, binary, out, id string) error {
 	if binary == "" || out == "" {
 		return errors.New("-binary and -out are required")
 	}
-	if len(softnet.Builds) == 0 {
-		return errors.New("softnet.Builds pins no build")
-	}
-	b := softnet.Builds[0]
+	var b softnet.Build
 	if id != "" {
 		var ok bool
 		if b, ok = softnet.ByID(id); !ok {
 			return fmt.Errorf("softnet.Builds pins no build %s", id)
+		}
+		if b.UpstreamRelease {
+			return fmt.Errorf("Softnet %s is an upstream release, published by upstream at %s, not by Potluck", id, b.URL)
+		}
+	} else {
+		for _, p := range softnet.Builds {
+			if !p.UpstreamRelease {
+				b = p
+				break
+			}
+		}
+		if b.ID == "" {
+			return errors.New("softnet.Builds pins no build of Potluck's own")
 		}
 	}
 	data, err := os.ReadFile(binary)

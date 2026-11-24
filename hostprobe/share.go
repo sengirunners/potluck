@@ -684,7 +684,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		// Softnet gives every Tart box egress, so every Tart box's checks
 		// forbid the forward path: the LAN's router and the tailnet.
 		o.NetForbid = forbidForward(o, &res)
-		pull = func(im string) []string { return []string{cmp.Or(layer.CLI, "tart"), "pull", "--", im} }
+		pull = func(im string) []string { return []string{tartCLI(layer), "pull", "--", im} }
 	}
 	res.RunnerDir = runner
 

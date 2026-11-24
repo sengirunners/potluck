@@ -101,6 +101,38 @@ token, capped to the pool project and the area, so the area's budget and ledger 
 to another area is refused (`conflict`; its admin unlinks it first); one already linked to the same area is answered
 as it is. The App needs no Members read for it.
 
+## Seeing, holding and ending the broker's jobs
+
+The same program reads, holds and ends jobs in-process (`runners/embed.go`, `runtarget/rt/rt.go`); none of it has a
+route.
+
+```go
+func (s *runners.Service) Job(ctx context.Context, id int64) (runners.Job, error)
+func (s *runners.Service) Jobs(ctx context.Context, installation int64, limit int) ([]runners.Job, error)
+func (s *runners.Service) EndJob(ctx context.Context, id int64, why string) error
+rt.From(d).OnBoxRequest(func(ctx context.Context, project, area string, req rt.BoxRequest, live func() ([]computeapi.RunTargetHandle, error)) error)
+```
+
+- `Job` is one job as the broker recorded it: id, run, repository, installation, linked area, labels, state and
+  why, the binding and handle of the box it runs on (or waits to start on), and GitHub's `started_at` and
+  `completed_at` (when the broker saw the start or end, where GitHub gave no time). A job the broker never had is `not_found`. `Jobs` lists one installation's, most recently changed
+  first.
+- `OnBoxRequest` is `OnBoxAcquire` with the request: the binding, its size as its driver describes it, whether it is
+  the start of a stopped box, and, for a box the broker acquires, the job (`req.Job`: id, repository, installation,
+  labels). Only code in the daemon can set `req.Job`. The live boxes `live` reads carry their binding and size name;
+  the binding's describe (`List` with describe) gives that size's CPUs and memory. A broker job's box is asked about
+  twice per try: once before the runner is minted (`BoxAllowed`), once by the acquire itself. Subscribe while
+  wiring, before the daemon starts; `OnBoxAcquire` subscribers (the usage module's limits) are asked as before.
+- A subscriber that refuses a broker job's box holds the job: the broker asks before it mints a runner, so nothing
+  is minted; the job stays `waiting` with the refusal on its row, and is asked again on the waiting serve's backoff
+  (at most `WaitMax`, 5 minutes, apart, and when a box is freed). The binding is not counted as refusing, so other
+  areas' jobs go on being served there. GitHub cancels a job queued for a day, and the broker gives up on it then.
+- `EndJob` ends a job running on a pool box: its box is released, so GitHub fails the job, and the broker neither
+  serves it again nor re-runs it. `why` is written on its row. A job not running yet, or being ended for another
+  reason (its time limit), is `conflict`. A release the host does not answer is the error, and the job is as it
+  was until the program asks again (if the host did release the box, the broker then takes its end for a loss and
+  re-runs the job). A job that ran on a runner minted for another job leaves that job queued, served on a new box.
+
 ## Kit's messages
 
 Messages from kit and the compute packages (an API error's hint, a refusal from the daemon or a driver) name

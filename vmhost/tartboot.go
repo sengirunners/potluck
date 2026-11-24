@@ -51,7 +51,7 @@ func TartHardeningArguments() []TartHardening {
 }
 
 // TartUpdateHint says how to get a newer Tart.
-const TartUpdateHint = "download the latest tart.tar.gz from https://github.com/openai/tart/releases/latest and replace the tart on your PATH (brew upgrade tart, if Homebrew installed it)"
+const TartUpdateHint = "download the latest tart.tar.gz from https://github.com/openai/tart/releases/latest and replace tart.app in Applications with it (or the tart on your PATH; brew upgrade tart, if Homebrew installed it)"
 
 // TartHelpHas reports whether `tart run --help` output lists flag.
 func TartHelpHas(help, flag string) bool {

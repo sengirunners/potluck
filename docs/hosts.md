@@ -17,12 +17,42 @@ detected at run time or given in flags (`hostprobe/`).
   passed.
 
 On a Mac, doctor and host use the same compatibility preflight. It reads the macOS product version and
-hardware architecture, resolves Tart on PATH and Softnet (the managed install of [softnet.md](softnet.md) when
+hardware architecture, resolves Tart and Softnet (the managed install of [softnet.md](softnet.md) when
 there is one, else PATH), pins those paths in the binding, and runs bounded executable and isolation checks.
 Softnet must parse the exact host DNS exception and outbound SMTP blocks used at boot. The probe returns
 before sudo, bootpd or vmnet setup; a version string alone is insufficient. Stock Softnet 0.23 lacks these
 rules, and newer releases need macOS 26. Which Softnet each macOS uses, and Potluck's own macOS 15 build (a
 candidate until it passes real-Mac validation), are in [softnet.md](softnet.md).
+
+Tart is found by one rule (`vmhost.FindTart`), used by the preflight, the driver and the VM layer: a `tart` on PATH
+wins; then `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` (a daemon started through launchd does not have
+your Terminal's PATH); then `tart.app/Contents/MacOS/tart` in `/Applications`, then `~/Applications`, so a lender who
+dragged the downloaded `tart.app` into Applications needs no Terminal. The program found is run (`--version`,
+`run --help`) like any other: a copy that will not run, or a `tart.app` with no program inside it, is a problem
+`doctor` reports with the path, never taken for "not installed". Tart's repository is
+[github.com/openai/tart](https://github.com/openai/tart) (`tart.tar.gz` on its releases page).
+`potluck tart path` prints the program this rule finds (exit 1 when there is none), for a script that should run
+the same Tart.
+
+`potluck tart install` installs Tart for a lender without root. It takes
+the release pinned in `tartpin/builds.go` (version, the release's `tart.tar.gz` URL, its exact size and SHA-256,
+the SHA-256 of the program inside, the oldest macOS it runs on and its architectures), downloads it, checks the size
+and then the SHA-256 before unpacking, and on any mismatch installs nothing. It unpacks only plain files and folders
+under `tart.app/` (a link, a device, or a name outside `tart.app` refuses the whole file), checks the program's
+SHA-256, and moves the bundle to `~/Applications/tart.app` in one rename, where `FindTart` looks. When Tart is
+already found (on PATH, in a bin folder, or a `tart.app` in `/Applications`) it is left as it is and nothing is
+installed. A `~/Applications/tart.app` is replaced only when it is
+the very bundle Potluck made (the record, `~/Library/Application Support/potluck/tart-install.json`, written before
+the bundle moves there, holds its inode and a SHA-256 over everything in it), and only by a newer pinned release or
+over a withdrawn one. It is swapped in atomically and the bundle that came out is checked, so a copy the lender put
+there meanwhile is swapped back. An older potluck keeps the newer release a newer one installed. The hidden folders
+an interrupted install left in `~/Applications` are removed by a later `potluck tart install` that finds Potluck's
+copy or installs one, once they are an hour old; one used for a swap is kept unless it is empty or holds a bundle Potluck made, unchanged.
+`--dry-run` prints the plan; `--json` answers
+`{"installed", "already_present", "path", "version"}` (`path` is the Tart program). A pinned release never leaves the
+table; one that must not be installed again is marked withdrawn (`tartpin/builds_test.go` holds the list). Tart is
+under FSL-1.1-ALv2 (OpenAI), not Potluck's Apache-2.0; `tartpin/UPSTREAM-LICENSE` is the licence text from the
+release.
 
 Each supported Tart digest carries `arch` and `min_host_macos` in `imagepins/images.pin`. These are conservative
 support floors: Tahoe guests are selected on Tahoe hosts, Sequoia on macOS 15, while the ARM Linux guest uses
@@ -212,6 +242,7 @@ potluck host ['<invite code>' | <pool>] [--image name@sha256:<64 hex>]... [--lay
   [--docker] [--root] [--shelf-gb] [--shelf-fill] [--volume-max-gb] [--linux-slots]
   [--admission-url] [--admission-token-file] [--admission-ttl-s] [--full] [--reclaim-idle-s | --when any|away]
   [--share] [--max-cores] [--max-ram-mb] [--state-dir] [--no-sudo] [--dry-run] [--detach] [--yes]
+  [--invite-stdin]
 ```
 
 `potluck host` shares with a pool. `potluck host stop [--force]` removes every size it shared; when it removed
@@ -242,9 +273,28 @@ again leaves it out (or, when an earlier share kept `--docker`, adds `--docker=f
 went through ends with `next:`, the one thing left to do. The pull and conformance command lines are diagnostics: `--show-commands` prints them.
 
 The run writes its stages to the home's `host-setup.json` as they change (never the invite code; the command that
-runs it again names it `'<invite code>'`). `potluck host status` reads that file with what else is set up and prints
-the checklist, and `--json` carries it as `setup` (`state`, `stages`, `checks`, `next`):
+runs it again names it `'<invite code>'`). Beside that command as a person types it (`again`), the record holds it
+for a program to run: `again_args`, the arguments after the program (`["host", "--no-sudo=true"]`; no shell, no
+quoting), and `needs_invite`, true while the invite code must be appended to them because nothing was joined yet.
+Once the run joined, the pool's name stands in the invite's place and `needs_invite` is gone. While the join waits
+for a tailnet login, the join stage carries the login page as `open_url` (the same URL as the stderr line `log in to
+your tailnet to continue (waiting): <url>`); the stage's next change clears it. `potluck host status` reads that file
+with what else is set up and prints the checklist, and `--json` carries it as `setup` (`state`, `stages`,
+`stage_order`, `again_args`, `needs_invite`, `checks`, `next`, `next_id`; a stage's `open_url` only while the run
+goes on). `stage_order` is every stage in order, reached or not, each with its `name` and `label`. Each check has an
+`id`, a `state` (done, todo, blocked, running, unknown, info) and its words (`detail`); one with something to do
+has `action`, the command as a person types it, and `do`, the same thing for a program, so the menu bar app never
+reads words to know what to run: `label` (the button's words) and one of `args` (the program's arguments, no
+shell; with `invite`, they end in `--` and the app appends the invite code the person gives after it, or runs
+them as they are when they give none, as the words say; the code is never in `args`), `url`
+(a page to open: the tailnet login while the join waits for it, only an `https` page) or `app` (an act only the app
+can do; no check gives one yet); `auto` means it may be done without a click (no check sets it yet). The setup
+check's `args` are the record's `again_args` with `--json` before them and `--yes --no-sudo --detach` after (a press asks for
+the run, so one where this machine already shares sizes goes on, and a root step is handed back, below), or
+`--json host --yes --no-sudo --detach --` with the invite when there is no record. One check has an `action` but no `do`: a setup blocked on a refused setting an
+earlier share kept and no flag turns off, where running it again fails the same way. `next_id` is the `id` of the check `next` is the action of, or, with no `next`, of a blocked check nothing Potluck runs fixes (an Intel Mac, a full disk): the walk stops there, and `next:` points at that line. The checklist covers:
 
+- with `--probe`, on a Mac, what the Mac needs before a host run can work (below);
 - Potluck's version and whether its daemon runs;
 - the last setup: none, running, succeeded, blocked at a stage, or interrupted (its record says it was still going,
   but no run holds the lock);
@@ -253,6 +303,45 @@ the checklist, and `--json` carries it as `setup` (`state`, `stages`, `checks`, 
 - on a Mac, the menu bar item ([menubar.md](menubar.md#what-host-status-knows-of-the-app)): installed, running
   (only once the app itself has read this status), and Login Items, which Potluck cannot read;
 - the daily update (`potluck upgrade enable`), which covers Potluck alone: not the menu bar item, Tart or Softnet.
+
+`potluck host status --probe` adds, on a Mac, checks made from what `potluck doctor` reads, part by part, so each
+state comes from a fact and never from a problem's words (the words are the detail). They come first, in this order:
+
+- `mac`: Apple silicon, macOS 13 or newer, and virtualization (`kern.hv_support`). When any is missing the check is
+  blocked with plain words and nothing to run, and the tart, softnet and disk checks are left out: nothing Potluck
+  installs makes such a Mac able to lend.
+- `potluck`: done, unless the app that started it carries a signed release (`POTLUCK_BUNDLED_RELEASE`, a directory
+  with `manifest.json`, its signature and the tarballs) and this program does not run from the install directory
+  (`$POTLUCK_INSTALL_DIR`, else `~/.local/bin`). Then it is todo, and its `do` runs `upgrade --release <dir> --dir
+  <install dir>`; unknown when there is no home and `POTLUCK_INSTALL_DIR` is unset. This one is read without
+  `--probe` too.
+- `tart`: found where `vmhost.FindTart` looks (PATH, the usual bin directories, then `tart.app` in Applications or
+  `~/Applications`), and it runs with Potluck's run options. Missing, a `tart.app` with no program in it, or a
+  dragged `tart.app` too old: todo, and `do` opens Tart's releases page. A Tart installed another way (Homebrew, a
+  link on PATH) that is too old: blocked, with how to update it, since a download would not replace it.
+- `softnet`: usable, else what `softnet.For` says this Mac's macOS can have. A Potluck build validated for it: todo,
+  `do` runs `--json softnet install --no-sudo`, whose answer names the one admin step ([softnet.md](softnet.md)).
+  Where only upstream's own release fits, `do` opens its releases page; where only its permissions are wrong and
+  no build can be installed: blocked, with the root command. macOS 15, whose only build is a candidate
+  not yet validated, or a macOS no build covers: blocked, nothing to run. A managed Softnet that cannot be used, left
+  on a Mac that has no use for it, comes first: todo, `do` runs `--json softnet uninstall --no-sudo`.
+- `disk`: the free disk where Tart keeps images against what Potluck's image for this Mac needs (its pin's
+  `min_free_gb`). Done when Tart already has that image. Short: blocked, with how much to free, on a Mac that shares
+  nothing yet; only `info` (next steps go on) when it shares a size, a host run is going on, or the last one's
+  preflight went through, since that run checked the room for the image it pulls, which may be a smaller one; or
+  when what it shares or the last run's record cannot be read (with the daemon
+  stopped only that record says it).
+- `other`: a problem the preflight found that none of the above explains, blocked with Potluck's words. Nothing the preflight
+  reads today can end up here; it is there so a problem added later is never left out.
+
+Reading these runs Tart and Softnet, so plain `host status`, which the menu bar item asks every 15 seconds, leaves
+them out. `--probe` works with no home and no daemon, and never starts one. On Linux it adds nothing.
+
+Reading all of it takes about 12 s, 15 at most (`hostprobe.CheckMacSetup`), whatever wedges, beside what the daemon is asked. A
+command that gave no answer in time (the processor, the macOS version, `kern.hv_support`, Tart, Softnet, Tart's
+images when the disk is short) makes its check unknown, never blocked or todo: it says nothing about the Mac, the
+walk goes on past it, and the host run's own preflight decides. A disk too full is info, not blocked, while the
+daemon does not answer: starting it comes first.
 
 Where this machine already shares sizes, a later blocked run stays in the checklist, as "the last setup run was
 blocked at <stage>: <why>; what was shared before still lends", until another host run replaces its record.
@@ -274,8 +363,21 @@ With no pool named, on a machine in more than one pool, host names them and the 
 
 One host run at a time per home (`host.lock`): a second is refused, naming the first. `--detach` runs the checks,
 the admin step and a dry run of the plan here, then the same command (its flags as given, without `--detach` and
-`--json`, with `--no-sudo`) again in the background, hands it the lock held, and returns; its words go to the
-home's `host.log`, and `potluck host status` (and the menu bar item) says that it goes on, with its last line.
+`--json`, with `--no-sudo` and `--invite-stdin`) again in the background, hands it the lock held, and returns; its
+words go to the home's `host.log`, and `potluck host status` (and the menu bar item) says that it goes on, with its
+last line. The background run gets the invite code (or pool) as one line on its stdin, never in its arguments or
+environment, where any user on the machine could read it with `ps` while the pulls and checks run; one that gets
+no line refuses and spends nothing.
+
+With `--json --no-sudo --detach`, a Mac whose Softnet alone stops the run (missing, or its file no longer owned
+by root, say) and that has a validated managed Softnet (docs/softnet.md) gets that install's root step as the answer,
+`{"admin_step": {"why": ..., "argv": [...]}}`, exit 0: nothing is started, no invite is spent, and the caller runs
+the step as root and the same command again. Anything else that stops the run refuses it, with the root line where
+there is one.
+
+`--invite-stdin` is that way in for any caller: host reads the invite code (or pool) as the first line of stdin
+instead of an argument (one given as well is a usage error), so a program such as the Mac app can start host
+without the code in the process list. It is not a setting: no record, hint or command to run again repeats it.
 
 `potluck host pause [--for 2h | --until 23:00]` closes the host switch (no new work; what is shared stays shared)
 and is refused while work runs on a shared size, which it would end, or when whether it runs cannot be read

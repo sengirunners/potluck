@@ -782,8 +782,12 @@ func (s *Service) reserveOwner(ctx context.Context, owner, taker int64, runner s
 // re-guarded to job's (takeOver), and not an open guard's, job was stopped
 // there by the box's hook, whatever order GitHub's in_progress and completed
 // were applied in (or the in_progress never came): it is recorded bounced
-// before lostEnded reads its record. A box guarded to job's own run (a swap
-// within the run), or to no run, is not.
+// before lostEnded reads its record. So is a job whose own serve recorded
+// job grants of its run that ran on a box no job grant names, an open
+// guard's too: it ran there without them (unguardedTaker; with no such row,
+// a job never served, only the in_progress route catches it). A box guarded
+// to job's own run (a swap within the run), or to no run for a job no grant
+// names, is not.
 func (s *Service) endedOnGuardedBox(ctx context.Context, installation int64, repo string, job, run int64, attempt int, runner string) {
 	m := ourRunner.FindStringSubmatch(runner)
 	if m == nil || run == 0 {
@@ -794,17 +798,27 @@ func (s *Service) endedOnGuardedBox(ctx context.Context, installation int64, rep
 	var open bool
 	err := s.db().QueryRowContext(ctx, `SELECT job, run, open_guard FROM runners_jobs WHERE installation = ? AND repo = ? COLLATE NOCASE AND (runner = ? OR job = ?)
 		ORDER BY runner = ? DESC LIMIT 1`, installation, repo, runner, minted, runner).Scan(&owner, &ownerRun, &open)
-	if err != nil || owner == job || ownerRun == run || open {
+	if err != nil || owner == job || ownerRun == run {
 		return
 	}
-	var guarded, ours int
+	var guarded, ours, granted int
 	if err := s.db().QueryRowContext(ctx, `SELECT
 		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND run = ?),
-		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND holder = ? AND run = ? AND state IN (?, ?, ?))`,
-		owner, ownerRun, owner, job, run, secretsIssuing, secretsIssued, secretsEnded).Scan(&guarded, &ours); err != nil || guarded == 0 || ours > 0 {
+		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND holder = ? AND run = ? AND state IN (?, ?, ?)),
+		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND run = ?)`,
+		owner, ownerRun, owner, job, run, secretsIssuing, secretsIssued, secretsEnded, job, run).Scan(&guarded, &ours, &granted); err != nil || ours > 0 {
 		return
 	}
-	s.recordBounce(ctx, installation, repo, job, run, attempt, guardedBounceWhy(owner, "GitHub says it ran on runner "+runner))
+	switch {
+	case guarded > 0 && !open:
+		s.recordBounce(ctx, installation, repo, job, run, attempt, guardedBounceWhy(owner, "GitHub says it ran on runner "+runner))
+	case guarded == 0 && granted > 0:
+		// recordBounce logs it once (its redeliveries and the sweep record nothing new).
+		s.recordBounce(ctx, installation, repo, job, run, attempt,
+			"it ran on the runner "+runner+" of job "+itoa(owner)+", whose box is not guarded to any run and could not hold it for its secrets (GitHub says it completed there)")
+	default:
+		return
+	}
 	s.reserveOwner(ctx, owner, job, runner)
 }
 

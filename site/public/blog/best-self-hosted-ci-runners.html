@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Source Self-Hosted CI Runners 2026 | Potluck</title>
+<meta name="description" content="Open-source tools that run CI jobs and coding agents on machines you already own, compared for November 2026: isolation, setup and where Potluck fits.">
+<link rel="canonical" href="https://potluck.sh/blog/best-self-hosted-ci-runners">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Open Source Self-Hosted CI Runners 2026 | Potluck">
+<meta property="og:description" content="Open-source tools that run CI jobs and coding agents on machines you already own, compared for November 2026: isolation, setup and where Potluck fits.">
+<meta property="og:url" content="https://potluck.sh/blog/best-self-hosted-ci-runners">
+<meta property="og:image" content="https://potluck.sh/og/blog/best-self-hosted-ci-runners.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Open Source Self-Hosted CI Runner Tools for CI Jobs and Coding Agents on Your Own Machines (November 2026)">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Open Source Self-Hosted CI Runners 2026 | Potluck">
+<meta name="twitter:description" content="Open-source tools that run CI jobs and coding agents on machines you already own, compared for November 2026: isolation, setup and where Potluck fits.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/best-self-hosted-ci-runners.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/best-self-hosted-ci-runners.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/best-self-hosted-ci-runners#post","mainEntityOfPage":"https://potluck.sh/blog/best-self-hosted-ci-runners","url":"https://potluck.sh/blog/best-self-hosted-ci-runners","headline":"Open Source Self-Hosted CI Runner Tools for CI Jobs and Coding Agents on Your Own Machines (November 2026)","description":"Open-source tools that run CI jobs and coding agents on machines you already own, compared for November 2026: isolation, setup and where Potluck fits.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"open source self-hosted CI runner tools, open source self-hosted coding agent runner CI own machines 2026, open source self-hosted coding agent runner CI on own machines 2026, what open source tools run coding agents and CI jobs on machines I already own","image":"https://potluck.sh/og/blog/best-self-hosted-ci-runners.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Open Source Self-Hosted CI Runner Tools for CI Jobs and Coding Agents on Your Own Machines (November 2026)","item":"https://potluck.sh/blog/best-self-hosted-ci-runners"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Open Source Self-Hosted CI Runner Tools for CI Jobs and Coding Agents on Your Own Machines (November 2026)</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer</strong>: in November 2026 there are eight open-source tools worth a look for running CI jobs, and in one case coding agents, on hardware you already own. They are the GitHub Actions runner with actions-runner-controller, GitLab Runner, the Buildkite Agent, Jenkins with agent clouds, Woodpecker CI, Tekton, Concourse and Potluck. The first seven are CI systems or CI agents that run jobs on Linux servers or a Kubernetes cluster you operate. Potluck is different: it pools a team's idle Macs and Linux boxes, runs GitHub Actions jobs and coding-agent sandboxes there, and gives every job a fresh VM or sandbox. Potluck is free, Apache-2.0 licensed and early. Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners; Potluck is a separate free project and runs without Sengi or a Sengi account.</p>
+<p>The tools differ less in what they can build than in what separates one job from the next. Pick on that first, then on what you already run.</p>
+<h2 id="the-options-side-by-side">The options side by side</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Tool</th><th>What it runs</th><th>What separates jobs</th><th>Where it fits</th><th>Where it costs more work</th></tr></thead>
+<tbody>
+<tr><td>GitHub Actions runner + actions-runner-controller</td><td>GitHub Actions jobs</td><td>A pod per job on Kubernetes, shared node kernel unless you add Kata or gVisor</td><td>GitHub teams already running Kubernetes</td><td>You need a cluster; GitHub's own docs warn against self-hosted runners on public repos</td></tr>
+<tr><td>GitLab Runner</td><td>GitLab CI jobs</td><td>Depends on the executor: shell (none), docker (container), kubernetes (pod), instance executors (VM)</td><td>GitLab teams who choose the executor on purpose</td><td>The executor line is easy to set once and forget</td></tr>
+<tr><td>Buildkite Agent</td><td>Buildkite pipelines</td><td>A host process by default; containers through plugins or hooks</td><td>Teams that want hosted coordination with all compute on their side</td><td>Coordination is a Buildkite service; isolation is yours to build</td></tr>
+<tr><td>Jenkins with agent clouds</td><td>Jenkins pipelines</td><td>A pod, container or instance per build, by cloud plugin</td><td>Existing Jenkins installs with plugins nothing else has</td><td>Controller and plugin upkeep; agent images go stale</td></tr>
+<tr><td>Woodpecker CI</td><td>Container pipelines</td><td>A container per step</td><td>Small setups, homelabs, Gitea or Forgejo</td><td>Smaller ecosystem; privileged steps for image builds</td></tr>
+<tr><td>Tekton</td><td>Kubernetes-native pipelines</td><td>A pod per run</td><td>Platform teams building CI as an internal product</td><td>Verbose; most teams add a layer on top</td></tr>
+<tr><td>Concourse</td><td>Resource-and-job pipelines</td><td>A container per step with declared inputs and outputs</td><td>Teams that want reproducible builds enforced by the tool</td><td>An unfamiliar model and its own ecosystem</td></tr>
+<tr><td>Potluck</td><td>GitHub Actions jobs and coding-agent sandboxes</td><td>A fresh Tart VM on Apple silicon, or a Kata or gVisor sandbox on Linux</td><td>Teams with spare Macs and Linux boxes, including macOS work</td><td>Early; Linux hand-back is only a time window today</td></tr>
+</tbody>
+</table></div>
+<h2 id="the-ci-runners-one-by-one">The CI runners, one by one</h2>
+<h3 id="github-actions-runner-with-actions-runner-controller">GitHub Actions runner with actions-runner-controller</h3>
+<p>If your code is on GitHub and you run Kubernetes, this is the default. The runner is GitHub's own agent, and actions-runner-controller scales it as ephemeral runners that take one job and go away. You get a reset filesystem per job and autoscaling on queue depth. The boundary is a pod, so concurrent jobs on a node share a kernel. GitHub's documentation warns against self-hosted runners on public repositories, because a fork pull request can run code on your runner. If you build forks, put a VM-backed runtime under the pods or run those jobs elsewhere.</p>
+<h3 id="gitlab-runner">GitLab Runner</h3>
+<p>GitLab Runner is one binary with several executors, and the executor is your isolation model. The shell executor runs jobs on the host in a reused build directory. The docker executor gives a fresh container per job. The kubernetes executor gives a pod per job. Instance executors give a VM per job at the cost of provisioning time. All are reasonable for the right repo; the risk is picking one from a setup prompt and never revisiting it, or adding privileged mode or a mounted Docker socket to make image builds work.</p>
+<h3 id="buildkite-agent">Buildkite Agent</h3>
+<p>Buildkite splits the work: pipelines, scheduling and the UI are a hosted service, and the open-source agent runs on your machines. Source, secrets and artifacts stay on your side. This suits fleets spread across data centres and clouds. By default the agent runs jobs as host processes, so containers or VMs are something you set up through plugins or hooks.</p>
+<h3 id="jenkins-with-agent-clouds">Jenkins with agent clouds</h3>
+<p>Jenkins still has a huge installed base. With a Kubernetes, Docker or cloud plugin it creates an agent per build and tears it down after. The work is in keeping agent images fresh, patching plugins and keeping builds off the controller, which holds credentials for everything it builds.</p>
+<h3 id="woodpecker-ci">Woodpecker CI</h3>
+<p>Woodpecker, a community fork of Drone, is a small server plus agents where every pipeline step is a container. Setup is short and one person can hold the whole thing in their head. It fits trusted code on small fleets, often next to a self-hosted Gitea or Forgejo.</p>
+<h3 id="tekton">Tekton</h3>
+<p>Tekton models CI as Kubernetes resources: Tasks, Pipelines, PipelineRuns. You get the cluster's RBAC, GitOps and monitoring for free. A simple build takes more YAML than in other tools, so teams usually put a generator or dashboard in front.</p>
+<h3 id="concourse">Concourse</h3>
+<p>Concourse runs every step in a container with declared inputs and outputs and no ambient state. Builds come out reproducible by design. Migrating an existing pipeline means modelling it properly, which takes time.</p>
+<h2 id="what-about-coding-agents">What about coding agents?</h2>
+<p>The seven CI tools above run pipelines. A coding agent needs something else: a place to run commands, install packages and run tests that is not your laptop, created on demand and thrown away after. You can build that yourself with containers plus Kata or gVisor, or with VMs, and wire it to the agent. That works and is a fair amount of glue.</p>
+<p>Potluck covers two agent cases on machines you own. <code>potluck agent-runner</code> runs a coding-agent vendor's self-hosted runners in fresh sandboxes. <code>potluck --pool friends mcp</code> is an MCP server that exposes sandbox tools to an agent, so the agent can create a sandbox, run commands in it and remove it. More on that in <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a> and <a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">run coding agents in a sandbox on your own machines</a>, or the <a href="/agent-sandbox">agent sandbox page</a>.</p>
+<h2 id="where-potluck-fits-and-where-it-does-not">Where Potluck fits, and where it does not</h2>
+<p>Potluck is not a hosted cloud, not a sandbox runtime of its own and not a scheduler for clusters. It drives Tart, Kata, gVisor and Incus. What it adds is the pool: one machine runs it, friends join or share machines, and machines reach each other over Tailscale or a tunnel you configure.</p>
+<p>What works today, from the Potluck facts:</p>
+<ul>
+<li>A real GitHub Actions job has been run through the runner broker, by hand, on a Mac with Tart and on a Linux box on another machine with OCI and gVisor. It is not yet running daily in Potluck's own CI. See the <a href="/github-actions-runner">GitHub Actions runner page</a>.</li>
+<li>Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux.</li>
+<li><code>potluck host</code> checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes.</li>
+<li>On the OCI layer the default is no network at all, and <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet.</li>
+<li>A Mac sandbox ends when its owner touches the keyboard or pointer. On Linux, hand-back works only as a time window today.</li>
+</ul>
+<p>If you already run Kubernetes and actions-runner-controller or GitLab Runner covers your needs, keep it. Potluck is for the case where the spare capacity is a few desks of Macs and Linux boxes, not a cluster.</p>
+<h2 id="macos-jobs-on-a-mac-you-own">macOS jobs on a Mac you own</h2>
+<p>The GitHub, GitLab and Buildkite agents all have macOS builds, but on a bare Mac they run jobs on the host, so one job can leave state for the next. A VM per job fixes that. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a macOS guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice. Details in <a href="/blog/self-hosted-github-actions-runner-on-your-mac">self-hosted GitHub Actions runner on your Mac</a> and the <a href="/tart">Tart page</a>.</p>
+<h2 id="trust-before-you-pool-anything">Trust, before you pool anything</h2>
+<p>The machine that runs a VM can read everything in it, including secrets. The machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust. Potluck comes with no promises; use it at your own risk. The same reasoning applies to every tool above: whoever controls the host controls the job.</p>
+<h2 id="how-to-choose">How to choose</h2>
+<ol>
+<li>On GitHub with Kubernetes: actions-runner-controller.</li>
+<li>On GitLab: GitLab Runner, with the docker or kubernetes executor chosen on purpose.</li>
+<li>Already on Jenkins: keep it and move to agent clouds.</li>
+<li>Small and self-hosted: Woodpecker. Building CI as a platform: Tekton. Reproducible by construction: Concourse. Hosted coordination with your compute: Buildkite.</li>
+<li>Idle Macs and Linux boxes, macOS jobs, or coding agents that need throwaway sandboxes: try Potluck, knowing it is early.</li>
+<li>Building fork pull requests or running agent-written code: put a VM or a Kata or gVisor sandbox under each job, whichever tool you pick.</li>
+</ol>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install on macOS or Linux, no Go needed:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>On the machine that will run the pool:</p>
+<pre><code>potluck create friends
+potluck invite ana
+potluck invite carl --host
+</code></pre>
+<p>The first <code>potluck create</code> prints a Tailscale login URL. Ana runs <code>potluck join '&lt;code&gt;'</code> to use sandboxes. Carl checks his box with <code>potluck doctor</code> and <code>potluck host --dry-run</code>, then runs <code>potluck host '&lt;code&gt;'</code> to share it. <code>--share</code> (default 0.5) sets the fraction of cores and RAM shared, and <code>potluck host stop</code> stops sharing.</p>
+<p>Try a sandbox:</p>
+<pre><code>potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>A longer walkthrough is in <a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">pool spare Macs and Linux boxes for builds and agents</a>.</p>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions with what you ran and what happened. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="what-open-source-tools-run-coding-agents-and-ci-jobs-on-machines-i-already-own">What open source tools run coding agents and CI jobs on machines I already own?</h3>
+<p>For CI jobs: the GitHub Actions runner with actions-runner-controller, GitLab Runner, the Buildkite Agent, Jenkins, Woodpecker, Tekton and Concourse. Potluck runs both GitHub Actions jobs and coding-agent sandboxes on idle Macs and Linux boxes, through <code>potluck agent-runner</code> and an MCP server.</p>
+<h3 id="is-potluck-free-and-who-makes-it">Is Potluck free, and who makes it?</h3>
+<p>Potluck is free and open source under Apache-2.0. It is made by Sengi, Inc., which sells hosted GitHub Actions runners, but Potluck runs without Sengi and without a Sengi account.</p>
+<h3 id="is-it-safe-to-run-self-hosted-runners-on-a-public-repository">Is it safe to run self-hosted runners on a public repository?</h3>
+<p>GitHub's own documentation warns against it, because a fork pull request can run code on your runner. If you must, give each job its own VM or a Kata or gVisor sandbox with no secrets and no network access it does not need.</p>
+<h3 id="can-potluck-run-macos-ci-jobs">Can Potluck run macOS CI jobs?</h3>
+<p>Yes, on an Apple silicon Mac with Tart, at most two macOS guests per Mac under Apple's licence. A real Actions job has been run this way by hand; it is not yet in daily use in Potluck's own CI.</p>
+<h3 id="does-potluck-replace-actions-runner-controller-or-gitlab-runner">Does Potluck replace actions-runner-controller or GitLab Runner?</h3>
+<p>No. Those run jobs on servers or clusters you operate; Potluck pools desk machines and spare boxes. If your cluster setup works, keep it.</p>
+<h3 id="what-does-a-linux-box-need-to-share-work-through-potluck">What does a Linux box need to share work through Potluck?</h3>
+<p>Docker or Podman with Kata or gVisor. Run <code>potluck doctor</code> to see what the machine can share before you host.</p>
+<h3 id="what-happens-when-a-machines-owner-wants-it-back">What happens when a machine's owner wants it back?</h3>
+<p>On a Mac, a sandbox ends when the owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused; on Linux, hand-back works only as a time window today.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/best-self-hosted-ci-runners.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

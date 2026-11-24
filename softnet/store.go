@@ -586,6 +586,8 @@ func (b Build) valid() error {
 		return fmt.Errorf("Softnet build ID %q is not a plain name", b.ID)
 	case len(b.SHA256) != 64 || b.Bytes <= 0:
 		return fmt.Errorf("Softnet %s has no pinned SHA-256 and size", b.ID)
+	case b.Archive != nil && (len(b.Archive.SHA256) != 64 || b.Archive.Bytes <= 0 || b.Archive.Member == ""):
+		return fmt.Errorf("Softnet %s has no pinned archive SHA-256, size and member", b.ID)
 	case b.LicenseSHA256 != licenseSHA256:
 		return fmt.Errorf("Softnet %s names license SHA-256 %s; the license this potluck carries has %s", b.ID, b.LicenseSHA256, licenseSHA256)
 	}

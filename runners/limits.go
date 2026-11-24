@@ -292,7 +292,7 @@ func (s *Service) activeJob(ctx context.Context, holder job) (job, error) {
 
 func (s *Service) runtimeExpired(ctx context.Context, j job) bool {
 	actual, err := s.activeJob(ctx, j)
-	if err == nil && actual.stopCause == "github_timeout" {
+	if err == nil && actual.stopCause == causeGitHubTimeout {
 		_ = s.jobEnded(ctx, actual.id)
 		return true
 	}
@@ -308,41 +308,77 @@ func (s *Service) runtimeExpired(ctx context.Context, j job) bool {
 		}
 	}
 	victim := actual.id
-	why := timeoutReason("broker_timeout", actual.limit, actual.limitSource)
-	flag, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET stop_cause = 'broker_timeout' WHERE job = ? AND stop_cause IN ('','broker_timeout') AND EXISTS (SELECT 1 FROM runners_jobs carrier WHERE carrier.job = ? AND carrier.state = ? AND carrier.runs = ? AND carrier.handle = ?)`, victim, j.id, jobServing, victim, j.handle)
-	if err != nil {
-		return true
-	}
-	if n, _ := flag.RowsAffected(); n == 0 {
-		return true
-	}
-	// Keep the handle retryable if the link or host cannot release it.
+	carrierWhy := "job " + itoa(victim) + " on its runner reached its time limit; its box was released"
+	_ = s.stopRunning(ctx, j, victim, causeBrokerTimeout, timeoutReason(causeBrokerTimeout, actual.limit, actual.limitSource), carrierWhy)
+	return true
+}
+
+// Stop causes (runners_jobs.stop_cause): why the broker ended a running job
+// itself, so a box that goes with it is no loss to re-run (lost.go).
+const (
+	causeBrokerTimeout = "broker_timeout" // its time limit (runtimeExpired)
+	causeGitHubTimeout = "github_timeout" // GitHub's timed_out (githubEnded)
+	causeProgram       = "program_stop"   // the embedding program ended it (EndJob)
+)
+
+// releaseCarrier releases carrier j's box (one already gone counts as released).
+func (s *Service) releaseCarrier(ctx context.Context, j job) error {
 	l, err := s.link(ctx, j.installation)
 	if err != nil {
-		return true
+		return err
 	}
 	sub, svc, err := s.poolSubject(ctx, l)
 	if err != nil {
-		return true
+		return err
 	}
 	if _, err = svc.Release(ctx, sub, l.project, j.target, handleID(j.handle)); err != nil && !api.IsCode(err, api.CodeNotFound) {
-		return true
+		return err
+	}
+	return nil
+}
+
+// stopRunning ends job victim, running on carrier j's box, for cause: the
+// cause flagged on victim first (so the box's end is not taken for a loss),
+// then the box released, then the rows ended. why is victim's; carrierWhy is
+// j's when j is another job, whose own job, still queued on GitHub, is
+// served again. A victim already flagged for another cause, or no longer on
+// j's box, is not stopped (a conflict); a host that does not answer the
+// release leaves the rows for the next try (the time limit's) or for the
+// program to ask again (its end).
+func (s *Service) stopRunning(ctx context.Context, j job, victim int64, cause, why, carrierWhy string) error {
+	flag, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET stop_cause = ? WHERE job = ? AND stop_cause IN ('', ?) AND EXISTS (SELECT 1 FROM runners_jobs carrier WHERE carrier.job = ? AND carrier.state = ? AND carrier.runs = ? AND carrier.handle = ?)`, cause, victim, cause, j.id, jobServing, victim, j.handle)
+	if err != nil {
+		return err
+	}
+	if n, _ := flag.RowsAffected(); n == 0 {
+		return api.Errorf(api.CodeConflict, "job %d is no longer running on the box of job %d, or is being ended for another reason", victim, j.id)
+	}
+	if err := s.releaseCarrier(ctx, j); err != nil {
+		// The time limit keeps its flag: runtimeExpired tries again on the next
+		// watch. Nothing retries a program's end but the program, so its flag
+		// goes, and the job is as it was (its box's loss is a loss again).
+		// A host that released the box but whose answer was lost makes the
+		// next watch take it for a loss, and re-run the job: the program's
+		// end was never confirmed, so that is its fallback.
+		if cause == causeProgram {
+			if _, cerr := s.db().ExecContext(context.WithoutCancel(ctx), `UPDATE runners_jobs SET stop_cause = '' WHERE job = ? AND stop_cause = ?`, victim, cause); cerr != nil {
+				return errors.Join(err, cerr)
+			}
+		}
+		return err
 	}
 	state := jobDone
 	if victim != j.id {
 		state = jobTaken
-	}
-	carrierWhy := why
-	if victim != j.id {
-		carrierWhy = "job " + itoa(victim) + " on its runner reached its time limit; its box was released"
+	} else {
+		carrierWhy = why
 	}
 	res, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = ?, handle = '', updated = ? WHERE job = ? AND state = ? AND runs = ? AND handle = ?`, state, clip(carrierWhy), s.now().Unix(), j.id, jobServing, victim, j.handle)
 	if err != nil {
-		return true
+		return err
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return true
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil // ended meanwhile (completed, in the other lane)
 	}
 	s.logf("runners: job %d: %s", victim, why)
 	if victim != j.id {
@@ -352,17 +388,22 @@ func (s *Service) runtimeExpired(ctx context.Context, j job) bool {
 		_ = s.jobEnded(ctx, victim)
 		_ = s.requeue(ctx, j.id, j.runner)
 	}
-	return true
+	return nil
 }
 
 // githubEnded preserves GitHub's authoritative timeout conclusion. A generic
 // failure or cancellation alone does not establish that a time limit fired.
 func (s *Service) githubEnded(ctx context.Context, id int64, conclusion string) error {
 	if conclusion == "timed_out" {
-		_, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET stop_cause = 'github_timeout' WHERE job = ? AND stop_cause = ''`, id)
+		_, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET stop_cause = ? WHERE job = ? AND stop_cause = ''`, causeGitHubTimeout, id)
 		if err != nil {
 			return err
 		}
+	}
+	// GitHub's completed_at, when a delivery brought it (markEnded), else when
+	// the broker saw the end.
+	if _, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET ended_at = ? WHERE job = ? AND ended_at = 0`, s.now().Unix(), id); err != nil {
+		return err
 	}
 	_, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET state = ?, updated = ? WHERE job = ? AND state = ?`, jobDone, s.now().Unix(), id, jobRunning)
 	if err != nil {
@@ -376,9 +417,9 @@ func (s *Service) githubEnded(ctx context.Context, id int64, conclusion string) 
 // that an unreachable host has already stopped the process.
 func timeoutReason(cause string, limit int, source string) string {
 	switch cause {
-	case "broker_timeout":
+	case causeBrokerTimeout:
 		return fmt.Sprintf("job time limit reached (%d s; %s); stop requested; not re-run", limit, source)
-	case "github_timeout":
+	case causeGitHubTimeout:
 		return "GitHub stopped the job at its workflow time limit (timed_out); not re-run"
 	default:
 		return ""

@@ -976,8 +976,16 @@ means no bytes are ready yet. A read and write can progress independently under
 backpressure. Read EOF leaves the upload direction usable until close. The
 net.Conn adapter serializes each direction; the guest helper retains at most one
 active operation and one queued 64 KiB page per direction. Additional concurrent
-calls may be refused. Pages are not replayed or automatically retried. An acknowledged write may still be buffered; it does
-not certify that the peer has drained its bytes. Read EOF leaves the upload
+calls may be refused. A page the guest has taken is never replayed. An acknowledged write may still be buffered; it does
+not certify that the peer has drained its bytes. While the peer is not reading,
+the guest holds one acknowledged page and answers the next one busy; the driver
+sends that page again for up to 20 s, then refuses the write as `unavailable`.
+So a write fails only when the peer reads nothing for about 20 s. After a write fails in the guest,
+every later write on the stream is refused, and so is close. Close still delivers an acknowledged
+page, until the lease deadline or 60 s; a page lost after close answered is not reported.
+The busy answer is new: an older driver writing to a stream a newer driver opened reads it as a
+taken page and drops that page. Each call ships its own helper, so only a stream that outlives a
+driver upgrade is affected. Read EOF leaves the upload
 direction available until close or lease end.
 
 Every operation checks that the original box is ready and before its lease

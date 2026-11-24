@@ -1,7 +1,9 @@
 // Package softnet is Potluck's one record of which Softnet a Mac can use
 // for Tart's isolated network (For), the Softnet builds Potluck itself
-// pins (Builds), and the managed install of one of them (Store): root
-// owned, setuid, kept beside the build it replaced so it can roll back.
+// pins (Builds: its own builds for a macOS upstream does not support, and
+// an upstream release for the macOS it does), and the managed install of
+// one of them (Store): root owned, setuid, kept beside the build it
+// replaced so it can roll back.
 //
 // Softnet is the helper Tart starts for each VM on its isolated network. It
 // runs as root (setuid), so a build here is identified by the SHA-256 of the
@@ -12,6 +14,7 @@ package softnet
 import (
 	_ "embed"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -27,20 +30,33 @@ type Build struct {
 	Bytes  int64
 	// Arch is the hardware it runs on ("arm64").
 	Arch string
-	// MinMacOS and MaxMacOS are the macOS major versions For offers it on.
+	// MinMacOS and MaxMacOS are the macOS major versions For offers it on
+	// (MaxMacOS AnyNewer: every version from MinMacOS on).
 	MinMacOS, MaxMacOS int
 	// Validated is true once the build has passed Potluck's isolation
 	// checks on a real Mac of each offered macOS version. Until then For
-	// does not recommend it and an install needs --candidate.
+	// does not recommend it and an install needs --candidate, unless it is
+	// an UpstreamRelease.
 	Validated bool
+	// UpstreamRelease is true for an unchanged upstream release, at or
+	// above UpstreamMinVersion, offered only on the macOS upstream supports
+	// (UpstreamMinMacOS and newer): the same Softnet Potluck sends those
+	// Macs to when they install it themselves, so For recommends it
+	// without Potluck's own validation. Its URL is upstream's release
+	// asset.
+	UpstreamRelease bool
 	// Source is where the build came from.
 	Source Source
 	// LicenseSHA256 is the SHA-256 of the upstream license it is under
 	// (License), installed beside it.
 	LicenseSHA256 string
-	// URL is where an install downloads it. The file there is trusted
-	// only for its SHA256.
+	// URL is where an install downloads it: the executable itself, or,
+	// when Archive is set, the archive holding it. What is there is trusted
+	// only for its pinned SHA-256 and size.
 	URL string
+	// Archive, when set, pins the gzipped tar file at URL that holds the
+	// executable (upstream publishes its releases that way).
+	Archive *Archive
 	// Withdrawn, when set, is why the build must no longer run: For never
 	// offers it, an install refuses it, and an installed copy fails its
 	// check, so preflight stops a Mac lending on it. A build is never
@@ -87,7 +103,12 @@ func releaseURL(id, arch string) string {
 	return "https://github.com/" + ReleaseRepo + "/releases/download/" + ReleaseTag(id) + "/" + AssetName(id, arch)
 }
 
-// Builds are the Softnet builds Potluck pins, newest first.
+// AnyNewer as a build's MaxMacOS covers every macOS from its MinMacOS on.
+const AnyNewer = math.MaxInt32
+
+// Builds are the Softnet builds Potluck pins. For offers a Mac the first
+// one that covers it, so a newer build for the same macOS goes before the
+// one it replaces.
 var Builds = []Build{{
 	ID:       "0.23.0-potluck-pr227-candidate.1",
 	Version:  "softnet 0.23.0-potluck-pr227-candidate.1-1f987609106e827034b2d1d059523c74d4486dc0",
@@ -105,6 +126,33 @@ var Builds = []Build{{
 	},
 	LicenseSHA256: licenseSHA256,
 	URL:           releaseURL("0.23.0-potluck-pr227-candidate.1", "arm64"),
+}, {
+	// Upstream's 0.26.0 release asset softnet.tar.gz. Its SHA-256 was
+	// computed from the downloaded file and matches upstream's
+	// softnet_0.26.0_checksums.txt and GitHub's digest for the asset. The
+	// executable is universal (arm64 and x86_64) and needs macOS 26. Its
+	// LICENSE is byte for byte UPSTREAM-LICENSE (FSL-1.1-ALv2).
+	ID:       "0.26.0",
+	Version:  "softnet 0.26.0-816f07a",
+	SHA256:   "2ea5572268f814317bc3944d1352032f1f4dafe00bfe453eefc64e9dc32627a3",
+	Bytes:    19652992,
+	Arch:     "arm64",
+	MinMacOS: 26, MaxMacOS: AnyNewer,
+	UpstreamRelease: true,
+	Source: Source{
+		Upstream: "https://github.com/openai/softnet",
+		Base:     "816f07a7c0109a40f9fa16299fe6e22db29538a5 (0.26.0)",
+		Commit:   "816f07a7c0109a40f9fa16299fe6e22db29538a5",
+		Tree:     "27efc2b36e3ba3dc6d1f82172557d755ac4de1e5",
+		Recipe:   "upstream's release build (https://github.com/openai/softnet/releases/tag/0.26.0)",
+	},
+	LicenseSHA256: licenseSHA256,
+	URL:           "https://github.com/openai/softnet/releases/download/0.26.0/softnet.tar.gz",
+	Archive: &Archive{
+		SHA256: "8469759f9cdfaaba52a150b629877985129308461702bc074c3ad7727837db82",
+		Bytes:  6585957,
+		Member: "softnet",
+	},
 }}
 
 // BySHA256 is the pinned build whose executable has this SHA-256.
@@ -157,7 +205,7 @@ const (
 type Advice struct {
 	Kind  Kind
 	Build Build // Kind Managed
-	// Candidate is true for a Managed build that is not Validated yet.
+	// Candidate is Build.Candidate() for a Managed build.
 	Candidate bool
 }
 
@@ -168,16 +216,20 @@ func For(major int, arch string) Advice {
 	if arch != "arm64" || major == 0 {
 		return Advice{Kind: None}
 	}
+	for _, b := range Builds {
+		if b.Withdrawn == "" && b.Covers(major, arch) {
+			return Advice{Kind: Managed, Build: b, Candidate: b.Candidate()}
+		}
+	}
 	if major >= UpstreamMinMacOS {
 		return Advice{Kind: Upstream}
 	}
-	for _, b := range Builds {
-		if b.Withdrawn == "" && b.Covers(major, arch) {
-			return Advice{Kind: Managed, Build: b, Candidate: !b.Validated}
-		}
-	}
 	return Advice{Kind: None}
 }
+
+// Candidate is true for a build For does not recommend yet: neither
+// Validated nor an UpstreamRelease. An install needs --candidate.
+func (b Build) Candidate() bool { return !b.Validated && !b.UpstreamRelease }
 
 // Covers is true when b is built for this macOS major version and
 // architecture.
@@ -193,6 +245,8 @@ func (a Advice) Text(major int, command string) string {
 	switch {
 	case a.Kind == Upstream:
 		return fmt.Sprintf("install the latest upstream Softnet (%s or newer, %s)", UpstreamMinVersion, UpstreamReleases)
+	case a.Kind == Managed && a.Build.UpstreamRelease:
+		return fmt.Sprintf("install upstream Softnet %s with `%s` (one admin password; it is placed owned by root and setuid), or install the latest upstream Softnet yourself (%s or newer, %s), owned by root and setuid", a.Build.ID, install, UpstreamMinVersion, UpstreamReleases)
 	case a.Kind == Managed && !a.Candidate:
 		return fmt.Sprintf("install Potluck's Softnet build for macOS %d with `%s` (upstream %s and newer need macOS %d)", major, install, UpstreamMinVersion, UpstreamMinMacOS)
 	case a.Kind == Managed:
@@ -211,9 +265,12 @@ func managedRange() string {
 		if b.Withdrawn != "" {
 			continue
 		}
-		if b.MinMacOS == b.MaxMacOS {
+		switch {
+		case b.UpstreamRelease:
+			continue
+		case b.MinMacOS == b.MaxMacOS:
 			vs = append(vs, fmt.Sprintf("%d", b.MinMacOS))
-		} else {
+		default:
 			vs = append(vs, fmt.Sprintf("%d-%d", b.MinMacOS, b.MaxMacOS))
 		}
 	}
@@ -228,6 +285,6 @@ func managedRange() string {
 // on a Mac too old for it.
 // command is how a person types Potluck's softnet command.
 func BootHint(command string) string {
-	return fmt.Sprintf("on macOS %d or newer install the latest upstream Softnet (%s or newer, %s); on an older macOS run `%s status` for the build that covers it, if any",
-		UpstreamMinMacOS, UpstreamMinVersion, UpstreamReleases, command)
+	return fmt.Sprintf("on macOS %d or newer run `%s install` (or install the latest upstream Softnet, %s or newer, yourself: %s); on an older macOS run `%s status` for the build that covers it, if any",
+		UpstreamMinMacOS, command, UpstreamMinVersion, UpstreamReleases, command)
 }

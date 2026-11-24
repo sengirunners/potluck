@@ -121,6 +121,9 @@ type app struct {
 	// and home follow attach.go's rule; a mounted run uses the host's
 	// client and home.
 	own bool
+	// noStdin: the host gave no Stdin, so commands read an empty one; host
+	// --invite-stdin reads the process's own (stdinInvite).
+	noStdin bool
 	// running is the command being executed (set before its RunE), so
 	// the potluck program's client can tell whether it may start the daemon.
 	running *cobra.Command

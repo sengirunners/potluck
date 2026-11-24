@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/menubar"
 )
 
@@ -43,25 +45,46 @@ func TestHostStatusChecklistReadsMenuAndUpdates(t *testing.T) {
 	}
 
 	s := status()
-	if c := byID(s, "menu"); c.State != menubar.Todo || c.Action != installScript+" --menubar" {
+	if c := byID(s, "menu"); c.State != menubar.Todo || c.Action != installScript+" --menubar" || c.Do == nil || !strings.HasPrefix(c.Do.URL, "https://") {
 		t.Errorf("no app: %+v", c)
 	}
 	if c := byID(s, "updates"); c.State != menubar.Todo || c.Action != "potluck upgrade enable" {
 		t.Errorf("updates off: %+v", c)
 	}
-	if s.Next != "potluck daemon --detach" { // no daemon here: that comes first
-		t.Errorf("next %q", s.Next)
+	if s.Next != "potluck daemon --detach" || s.NextID != "daemon" { // no daemon here: that comes first
+		t.Errorf("next %q (%s)", s.Next, s.NextID)
 	}
+	if c := byID(s, "daemon"); c.Do == nil || strings.Join(c.Do.Args, " ") != "daemon --detach" {
+		t.Errorf("daemon: %+v", c.Do)
+	}
+	upgrade := byID(s, "updates").Do
 
 	app := filepath.Join(apps, "Potluck Menu.app")
 	if err := os.MkdirAll(filepath.Join(app, "Contents", "MacOS"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if c := byID(status(), "menu"); c.State != menubar.Todo || !strings.Contains(c.Detail, "never read this status") || c.Action != "open "+shellQuote(app) {
-		t.Errorf("installed, never asked: %+v", c)
+	if c := byID(status(), "menu"); c.State != menubar.Todo || !strings.Contains(c.Detail, "never read this status") || c.Action != "open "+shellQuote(app) ||
+		c.Do == nil || c.Do.URL != (&url.URL{Scheme: "file", Path: app}).String() {
+		t.Errorf("installed, never asked: %+v %+v", c, c.Do)
 	}
-	// The app asks (it starts potluck): from then on it counts as running.
-	menuParent = func() string { return filepath.Join(app, "Contents", "MacOS", "PotluckMenu") }
+	// The app asks (it starts potluck): it counts as running, and with no
+	// home (before setup, or after an uninstall) none is made to note it in.
+	asApp := func() string { return filepath.Join(app, "Contents", "MacOS", "PotluckMenu") }
+	menuParent = asApp
+	home, err := config.HomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := byID(status(), "menu"); c.State != menubar.Done {
+		t.Errorf("the app asks, no home: %+v", c)
+	}
+	if lexists(home) {
+		t.Fatalf("host status made the home %s", home)
+	}
+	// With a home it counts as running for a while after its ask.
+	if err := os.Mkdir(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	status()
 	menuParent = func() string { return "/bin/zsh" }
 	if c := byID(status(), "menu"); c.State != menubar.Done || !strings.Contains(c.Detail, "is running") {
@@ -70,8 +93,13 @@ func TestHostStatusChecklistReadsMenuAndUpdates(t *testing.T) {
 	if e.count("bootstrap") != 0 {
 		t.Fatalf("host status loaded an update job: %v", e.calls)
 	}
-	if out, code := e.potluck("enable"); code != 0 {
-		t.Fatalf("upgrade enable: %d\n%s", code, out)
+	// The updates check's button is what turns it on.
+	if upgrade == nil || len(upgrade.Args) == 0 {
+		t.Fatalf("updates off: no do: %+v", upgrade)
+	}
+	var o, er bytes.Buffer
+	if code := Run(context.Background(), upgrade.Args, strings.NewReader(""), &o, &er); code != 0 {
+		t.Fatalf("%q: exit %d\n%s%s", upgrade.Args, code, o.String(), er.String())
 	}
 	if c := byID(status(), "updates"); c.State != menubar.Done {
 		t.Errorf("updates on: %+v", c)

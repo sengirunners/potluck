@@ -295,6 +295,9 @@ type delivery struct {
 		RunnerName string   `json:"runner_name"`
 		Conclusion string   `json:"conclusion"`
 		RunAttempt int      `json:"run_attempt"`
+		// CompletedAt is GitHub's completed_at (RFC 3339), kept as text: a
+		// value that does not parse must not drop the delivery.
+		CompletedAt string `json:"completed_at"`
 	} `json:"workflow_job"`
 	Repo struct {
 		ID         int64  `json:"id"`
@@ -511,6 +514,9 @@ func (s *Service) try(ctx context.Context, l link, d delivery, w want, again boo
 func (s *Service) launch(ctx context.Context, cl *ghapp.Client, sub *authz.Subject, svc rt.Service, l link, d delivery,
 	at placed) (stop bool, refusal string, err error) {
 	target := at.name
+	if refusal, err := s.held(ctx, svc, l, d, at); err != nil || refusal != "" { // embed.go: before a runner is minted
+		return false, refusal, err
+	}
 	d, why, err := s.ready(ctx, cl, d)
 	if err != nil {
 		return false, "", err
@@ -578,13 +584,15 @@ func (s *Service) launch(ctx context.Context, cl *ghapp.Client, sub *authz.Subje
 		return false, "", err
 	}
 	ttl, leased := budget.limit+startupAllowance, s.now().Unix() // the job's limit from here on, whatever job_ttl_s becomes
-	h, err := svc.Acquire(ctx, sub, l.project, target, computeapi.AcquireRunTargetRequest{RequestID: key, TTLS: ttl, JITConfig: jit,
+	h, err := svc.Acquire(rt.WithRunnerJob(ctx, runnerJob(d)), sub, l.project, target, computeapi.AcquireRunTargetRequest{RequestID: key, TTLS: ttl, JITConfig: jit,
 		JITGuard: withRun(guard(d, open), run)})
 	jit = ""
 	if err != nil {
 		_ = cl.DeleteRunner(ctx, d.Installation.ID, scope, id)
 		_ = s.move(ctx, d.Job.ID, jobServing, jobWaiting, "no box: "+oneLine(err.Error()))
-		s.refusedBy(target, err.Error())
+		if !refusedByArea(err) { // embed.go: a subscriber's no is the area's, not the binding's
+			s.refusedBy(target, err.Error())
+		}
 		return false, oneLine(err.Error()), nil // the next box, else retried: a pool that was full may have room later
 	}
 	// The handle is what releases the box: keep trying to record it. (A crash
@@ -1039,6 +1047,9 @@ func (s *Service) ended(ctx context.Context, d delivery) error {
 			"completed on GitHub before a box took it", now, now, jobWaiting, jobFailed, jobTaken); err != nil {
 			return err
 		}
+	}
+	if err := s.markEnded(ctx, d); err != nil { // embed.go
+		return err
 	}
 	secretsErr := s.endJobSecrets(ctx, d.Job.ID) // revoked now, not only when its box ends
 	// Stopped on a box guarded to another run, whichever of GitHub's

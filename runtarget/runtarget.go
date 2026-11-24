@@ -77,7 +77,7 @@ type Service struct {
 	// subscribers.
 	endMu     sync.Mutex
 	ends      []rt.EndFunc
-	boxChecks []rt.BoxAcquireFunc
+	boxChecks []rt.BoxRequestFunc
 	// link is teamlink (nil in a daemon without it); adverts and rtmem are
 	// the authority's side of boxes across machines (relay.go).
 	link    *teamlink.Service

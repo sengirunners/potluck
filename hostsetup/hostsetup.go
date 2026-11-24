@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -69,6 +70,10 @@ type Stage struct {
 	// --docker=true" (the flag left out) or "with --docker=false" (turned
 	// off where an earlier share kept it); "" when it could not be.
 	Fix string `json:"fix,omitempty"`
+	// OpenURL, on a running stage, is a page the person must open for it to
+	// go on: the tailnet login a join waits for. Any change to the stage
+	// clears it.
+	OpenURL string `json:"open_url,omitempty"`
 }
 
 // OptionError is a host run's refusal of a flag that the layer this
@@ -94,8 +99,16 @@ type Run struct {
 	// holds no host lock was cut off (Interrupted).
 	Ended string `json:"ended,omitempty"`
 	// Again is the command that runs this setup again, as a person types
-	// it (an invite code stands as <invite code>).
+	// it (an invite code stands as '<invite code>').
 	Again string `json:"again,omitempty"`
+	// AgainArgs is the same command as the program's arguments (the words
+	// after the program), for a program to run: no shell, no quoting. The
+	// invite code is never in it: NeedsInvite says to append it.
+	AgainArgs []string `json:"again_args,omitempty"`
+	// NeedsInvite is that AgainArgs needs the invite code appended: the run
+	// was given one and has not joined its pool yet (once it has, the pool's
+	// name stands in its place).
+	NeedsInvite bool `json:"needs_invite,omitempty"`
 	// Stages are the stages reached, in Order.
 	Stages []Stage `json:"stages"`
 }
@@ -153,6 +166,33 @@ func Read(home string) (*Run, error) {
 	return &r, nil
 }
 
+// InviteWord stands for the invite code in Again.
+const InviteWord = "'<invite code>'"
+
+// Command is the command a host run was given, from which the record's
+// Again, AgainArgs and NeedsInvite are made.
+type Command struct {
+	// Prefix is the command as a person types it, up to its argument
+	// ("potluck host").
+	Prefix string
+	// Path is the same command as the program's arguments (["host"]).
+	Path []string
+	// Pool is the pool it shares with; "" when it was given an invite code.
+	Pool string
+	// Flags are the flags given, in order.
+	Flags []Flag
+}
+
+// Flag is one flag of a Command.
+type Flag struct {
+	Name string
+	// Text is the flag as it stands in Again, leading space included
+	// (" --linux-slots 8").
+	Text string
+	// Args are its arguments for AgainArgs (["--linux-slots=8"]).
+	Args []string
+}
+
 // Tracker records one host run's stages. Its methods are safe on a nil
 // Tracker, which records nothing (a dry run) but still answers each line.
 type Tracker struct {
@@ -166,21 +206,9 @@ type Tracker struct {
 	// err is the first failure to write the record (the run goes on: the
 	// record serves host status, not the run).
 	err error
-	// flagArgs is a flag's arguments as they stand in Again (" --docker=true"),
-	// "" when the command does not carry it (SetFlagArgs).
-	flagArgs func(name string) string
-}
-
-// SetFlagArgs tells the tracker how each flag stands in Again (the exact
-// text Again was made with, leading space included; "" when the command does
-// not carry it), so an OptionError's flag can be left out of Again.
-func (t *Tracker) SetFlagArgs(f func(name string) string) {
-	if t == nil {
-		return
-	}
-	t.mu.Lock()
-	t.flagArgs = f
-	t.mu.Unlock()
+	// again is the command that runs the setup again; the record's Again,
+	// AgainArgs and NeedsInvite are made from it (setAgain).
+	again Command
 }
 
 // Err is the first failure to write the record, or nil.
@@ -196,7 +224,7 @@ func (t *Tracker) Err() error {
 // Start begins home's record for a new run, replacing the last one's.
 // again is the command that runs it again; redact is text never written
 // (the invite code). home "" records nothing.
-func Start(home, again string, redact ...string) *Tracker {
+func Start(home string, again Command, redact ...string) *Tracker {
 	t := &Tracker{now: time.Now}
 	for _, r := range redact {
 		if r != "" {
@@ -206,7 +234,9 @@ func Start(home, again string, redact ...string) *Tracker {
 	if home != "" {
 		t.path = filepath.Join(home, FileName)
 	}
-	t.run.Started, t.run.Again = t.stamp(), t.clean(again)
+	t.run.Started = t.stamp()
+	t.again = again
+	t.setAgain()
 	t.run.Stages = []Stage{}
 	t.save()
 	return t
@@ -254,18 +284,17 @@ func (t *Tracker) End(failure error) *Stage {
 	var oe *OptionError
 	if b := t.run.Blocked(); b != nil && !blocked && errors.As(failure, &oe) { // the stage this failure blocked, not an earlier one
 		b.Flag = "--" + oe.Flag
-		args := ""
-		if t.flagArgs != nil {
-			args = t.flagArgs(oe.Flag)
-		}
+		flags := t.again.Flags
+		i := slices.IndexFunc(flags, func(f Flag) bool { return f.Name == oe.Flag })
 		switch {
-		case args != "" && strings.Contains(t.run.Again, args):
-			t.run.Again = strings.Replace(t.run.Again, args, "", 1)
-			b.Fix = "without " + strings.TrimSpace(args)
-		case args == "" && oe.Off != "" && t.run.Again != "":
-			t.run.Again += " " + oe.Off
+		case i >= 0:
+			b.Fix = "without " + strings.TrimSpace(flags[i].Text)
+			t.again.Flags = slices.Delete(slices.Clone(flags), i, i+1)
+		case oe.Off != "":
 			b.Fix = "with " + oe.Off
+			t.again.Flags = append(slices.Clone(flags), Flag{Name: oe.Flag, Text: " " + oe.Off, Args: []string{oe.Off}})
 		}
+		t.setAgain()
 	}
 	t.run.Ended = t.stamp()
 	b := t.run.Blocked()
@@ -279,16 +308,54 @@ func (t *Tracker) End(failure error) *Stage {
 	return out
 }
 
-// SetAgain changes the command that runs this setup again (after a join,
-// the pool's name stands for the invite).
-func (t *Tracker) SetAgain(again string) {
+// Joined says the run joined pool: from now on the command that runs this
+// setup again names the pool, not the invite.
+func (t *Tracker) Joined(pool string) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
-	t.run.Again = t.clean(again)
+	t.again.Pool = pool
+	t.setAgain()
 	t.mu.Unlock()
 	t.save()
+}
+
+// Open sets the page the person must open for stage, running now, to go on
+// (the tailnet login a join waits for); "" clears it. A stage that is not
+// the one running is left alone.
+func (t *Tracker) Open(stage, url string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	cur := t.run.Current()
+	if cur == nil || cur.Name != stage || cur.OpenURL == t.clean(url) {
+		t.mu.Unlock()
+		return
+	}
+	cur.OpenURL = t.clean(url)
+	t.mu.Unlock()
+	t.save()
+}
+
+// setAgain makes the record's Again, AgainArgs and NeedsInvite from
+// t.again. t.mu is held (or t is not shared yet).
+func (t *Tracker) setAgain() {
+	c := t.again
+	word, args := InviteWord, slices.Clone(c.Path)
+	if c.Pool != "" {
+		word, args = c.Pool, append(args, c.Pool)
+	}
+	again := c.Prefix + " " + word
+	for _, f := range c.Flags {
+		again += f.Text
+		args = append(args, f.Args...)
+	}
+	for i := range args {
+		args[i] = t.clean(args[i])
+	}
+	t.run.Again, t.run.AgainArgs, t.run.NeedsInvite = t.clean(again), args, c.Pool == ""
 }
 
 // Run is a copy of the record as it stands.
@@ -300,6 +367,7 @@ func (t *Tracker) Run() Run {
 	defer t.mu.Unlock()
 	r := t.run
 	r.Stages = append([]Stage(nil), t.run.Stages...)
+	r.AgainArgs = slices.Clone(t.run.AgainArgs)
 	return r
 }
 
@@ -324,7 +392,7 @@ func (t *Tracker) set(stage, result, detail string) string {
 		t.run.Stages[i] = st
 	default:
 		if i >= 0 && t.run.Stages[i].Result == Running { // reached the next stage: the last one went through
-			t.run.Stages[i].Result = Succeeded
+			t.run.Stages[i].Result, t.run.Stages[i].OpenURL = Succeeded, ""
 		}
 		t.run.Stages = append(t.run.Stages, st)
 	}

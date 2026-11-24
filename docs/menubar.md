@@ -17,7 +17,9 @@ Memory pressure normal; Potluck's jobs may use up to 12 GB of 48 GB (25%); swap 
   Memory lent: all shared, 12 GB                  ▸
   Disk kept free for you: none set (300 GB free)  ▸
 ─────────────
+  Set up and check…
   Jobs this Mac ran…
+  Uninstall Potluck…
 ```
 
 | item | runs | what happens |
@@ -88,6 +90,84 @@ ones `potluck` was installed with. Then `potluck host lend` still writes the dia
 menu's note say which sizes they do not limit ("the dials (cores, memory and disk kept free) limit no size this
 machine shares (...)"); `host status --json` lists them as `lending.dials_ignored_by`. They hold those sizes once
 the daemon runs a driver that lists `host-lend`.
+
+## Set up and check
+
+"Set up and check…" opens a window of what `potluck --json host status --probe` says about setting up:
+the title, the one next step, the setup checklist (each check's mark, its words and the command it names), the five
+stages of the last host run (preflight, images, validation, join, usable capacity: a mark and the stage's last words,
+a dot for one not reached) and, when a `host --detach` run has gone on, the last line it wrote (`background.last`, also for one that ended). The window runs that status
+when it opens and again every 3 seconds while it is open, and keeps the last good picture, with a red "not current"
+line, when an ask fails. The commands under each check are for a terminal. Each check that has a command also
+carries `do`, what the app may run (potluck's arguments, a page to open, or an act of the app's own), and `next_id`
+names the check the next step is from, or a blocked check with nothing to run
+([hosts.md](hosts.md#stages-and-the-setup-checklist)); the app reads those, never the words. `--probe` puts this
+Mac's own checks first: Apple silicon, macOS and virtualization (`mac`), Tart, Softnet and the free disk where Tart
+keeps images. The menu's own 15-second ask leaves them out, since reading them runs Tart and Softnet.
+
+The window has one button: the `do` of the `next_id` check, with its label. A `do` with `url` opens that page in the
+browser (only an `https` page, or the `file://` URL of an installed app). A `do` with `args` runs potluck with them;
+when it has `invite`, an invite field shows above the button and what is pasted there is added as the last argument,
+after the `--` potluck puts in those arguments, so it is never read as a flag. The app runs potluck directly, never
+through a shell, writes nothing of the run to a log, and empties the field when the run ends (while it runs, the invite is among potluck's process arguments, as it is when
+typed in a terminal). With the field empty
+it runs the arguments as they are (`potluck host` then shares with the one pool this machine is already in). A
+`do` with only `app` (an act only the app can do) has no button yet, and `auto` is read but not acted on yet.
+
+An action runs with no time limit (the status asks are ended after 25 seconds) and shows "<label>…" while it runs.
+If potluck fails, the window shows its error in red (the message and hint of its `--json` error). The button stays
+off until a status asked after the action, or after the window opened, is drawn. Closing the window empties the invite field. If the action's `--json` answer holds `admin_step`
+(`{"why", "argv"}`, from `--no-sudo`, [softnet.md](softnet.md#without-a-terminal---no-sudo)), the window shows `why` with Continue and Cancel;
+Continue runs `argv` as root through macOS's own administrator password dialog (AppleScript `do shell script ...
+with administrator privileges`, each word quoted for the shell; the app never sees the password), then runs the
+same action once more, with the same program. Cancel, at either question, says what the action's answer (`done`)
+says was already done, and "Nothing was changed" only when that list is there and empty; an action that does not
+say what it did gets "The admin step did not run". Then potluck's reason again, and
+Ask again, which runs that action again with the same arguments (the invite too, held in memory only while that
+action is still the next step and the window is open), as often as the person likes. A
+failed root step shows its error text. A failure stays until the next action, closing the window, or the next step
+changing after the failure was shown.
+
+The code is `Run.swift` (finding and running potluck, and that action rule), `Admin.swift` (the admin step: its
+answer, the quoting, the AppleScript) and `SetupWindow.swift`.
+
+The Go side is `menubar.Setup` (`setup` in the status JSON) and `menubar.Background` (`background`); the Swift side
+is `StatusModel.swift` (the fields it reads) and `SetupWindow.swift`. The window draws the stages from the
+answer's `stage_order` (`hostsetup.Order` with each stage's label), so a new stage needs no Swift change. `go test
+./menubar` writes nothing, but checks five sample answers (never set up, setup running, the join waiting for a
+tailnet login, blocked at validation, lending) against
+`menubar/testdata/status-*.json`; `go test ./menubar -run TestStatusFixtures -update` rewrites them, and
+`macos/PotluckMenu/test.sh` compiles the app's decoder structs with `swiftc` and decodes each of them. It also
+decodes sample action answers with and without `admin_step` (`macos/PotluckMenu/test/answers`), runs the action rule
+against a fake potluck with a stand-in for the password dialog, and checks that an
+argv with spaces, quotes, `$`, backticks and a newline reaches a program word for word through the same shell
+quoting and AppleScript the admin step uses (without administrator privileges).
+
+## Uninstall Potluck
+
+"Uninstall Potluck…" opens a window of what `potluck --json uninstall --dry-run` answers
+([install.md](install.md#removing-it)): the steps in order (`left`), what stays (`not_removed`: Tart's images,
+Tailscale and so on), and, in red, what is lost for good (`warning`: this Mac's identity, and the pools it runs,
+which end for all their members; when its daemon does not say which those are, the warning says that). Opening it
+changes nothing.
+
+Remove… asks for the plan again, then asks for a yes with that plan's warning, and runs the plan's own arguments
+(`remove.args`: `potluck --json uninstall --yes --no-sudo`), with the admin step rule above. Return never removes.
+
+- Cancelled at the admin step: the window lists what was already done (lending has stopped, the pools were left)
+  and offers Continue removing….
+- A failed step: potluck's error, what was done before it, and that the step may be partly done.
+- Sandboxes running: potluck's refusal. The app never forces by itself; Remove anyway… shows what forcing does
+  (`force`), with the plan's warning as it is then, and asks once more.
+- Removed: what was done, what is left for you to remove, and "Move the app to the Trash and quit", which moves only
+  this app's own bundle, to the Trash, when clicked. It does not change Login Items.
+
+While a removal runs the app asks potluck nothing else (the 15-second status included), the menu offers nothing, the
+window stays open and Quit is refused; it starts once the status asks already under way have ended. A `potluck host`
+run going on is stopped first, and none can start while its steps run (one started while the admin step waits is stopped by the run after it). A removal does not start while a setup step or
+a menu choice runs. The window also stays open while a question is up. After a removal, the app asks nothing again. `host status` never makes a home to note the app in, so none comes back.
+
+The code is `UninstallWindow.swift`, and `Trash.swift` for the move.
 
 ## Jobs this Mac ran
 
@@ -189,6 +269,29 @@ open ~/Applications/"Potluck Menu.app"
 ```
 
 `POTLUCK_MENU_UNIVERSAL=1` builds both CPUs, as the release does.
+
+## Signing and notarizing
+
+`build.sh` signs ad hoc, which runs on the Mac that built the app and nowhere else. `macos/PotluckMenu/sign.sh <app>`
+turns that into a Developer ID signature, and notarizes it, when the environment names them:
+
+| variable | meaning |
+| --- | --- |
+| `POTLUCK_SIGN_IDENTITY` | a "Developer ID Application" identity in the keychain (its name or SHA-1) |
+| `POTLUCK_NOTARY_PROFILE` | a keychain profile made with `xcrun notarytool store-credentials` |
+| `POTLUCK_NOTARY_KEY`, `POTLUCK_NOTARY_KEY_ID`, `POTLUCK_NOTARY_ISSUER` | instead of a profile: an App Store Connect API key (path to `AuthKey_*.p8`, its key id, its issuer id) |
+
+- With an identity it signs nested code first and the app last (hardened runtime, secure timestamp, never `--deep`),
+  then runs `codesign --verify --deep --strict`.
+- With a notary profile or key as well it zips the app with `ditto`, runs `notarytool submit --wait`, staples the
+  ticket, and checks `spctl --assess -t exec`. If Apple rejects it, the script prints Apple's log and fails.
+- With neither, it leaves the ad hoc build as it is and says so.
+- It never falls back to ad hoc when a signature was asked for. An identity the keychain does not hold, notary
+  settings without an identity, notary key variables with one missing, and a profile together with a key all fail.
+- It prints no secret. The notary key file is read by `notarytool` only.
+
+Only the signing path is tested so far (with an Apple Development identity); notarizing has not been run against
+Apple's service yet.
 
 ## How the release builds it
 

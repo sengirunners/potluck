@@ -46,19 +46,27 @@ func Exchange(ctx context.Context, a protocol.PortRequest, deadline time.Time, c
 	default:
 		return protocol.PortResult{}, refusal("bad_request", "port operation is open, read, write or close")
 	}
-	// Unix socket name includes this lease's VM identity. Streams from an old
-	// stopped lease cannot be addressed after a restart with a new VM.
-	path := a.Stream
-	out, errb := boundedBuffer{limit: protocol.PortPage + 1}, boundedBuffer{limit: 4096}
-	cmd := command(bytes.NewReader(a.Data), &out, &errb, "perl", "-e", guestScript, a.Op, path, strconv.Itoa(a.Port), strconv.FormatInt(deadline.Unix(), 10))
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	if err := runPortCommand(ctx, cmd); err != nil {
-		return protocol.PortResult{}, refusal("unavailable", "sandbox port channel failed: %v", err)
-	}
-	b := out.Bytes()
-	if out.cut || len(b) > protocol.PortPage+1 || len(b) == 0 {
-		return protocol.PortResult{}, refusal("unavailable", "invalid sandbox port answer")
+	// A busy answer means the guest took nothing (the stream's previous page is
+	// still waiting for its peer to read), so the same page is sent again until
+	// busyWait passes, which keeps the whole call under the daemon's verb limit.
+	busyUntil := time.Now().Add(busyWait)
+	var b []byte
+	for {
+		var err error
+		if b, err = exchangeOnce(ctx, a, deadline, command); err != nil {
+			return protocol.PortResult{}, err
+		}
+		if len(b) != 1 || b[0] != 'B' {
+			break
+		}
+		if !time.Now().Before(busyUntil) || !time.Now().Before(deadline) {
+			return protocol.PortResult{}, refusal("unavailable", "sandbox port peer is not reading")
+		}
+		select {
+		case <-ctx.Done():
+			return protocol.PortResult{}, refusal("unavailable", "sandbox port channel failed: %v", ctx.Err())
+		case <-time.After(busyRetry):
+		}
 	}
 	if b[0] == 'E' {
 		return protocol.PortResult{}, refusal("unavailable", "sandbox port is unavailable")
@@ -67,6 +75,29 @@ func Exchange(ctx context.Context, a protocol.PortRequest, deadline time.Time, c
 		return protocol.PortResult{Stream: a.Stream}, nil
 	}
 	return protocol.PortResult{Data: b[1:], EOF: b[0] == 'F'}, nil
+}
+
+const (
+	busyWait  = 20 * time.Second // below the daemon's 30 s limit on a driver call
+	busyRetry = 50 * time.Millisecond
+)
+
+// exchangeOnce runs the guest helper once and returns its non-empty answer.
+func exchangeOnce(ctx context.Context, a protocol.PortRequest, deadline time.Time, command Command) ([]byte, error) {
+	// Unix socket name includes this lease's VM identity. Streams from an old
+	// stopped lease cannot be addressed after a restart with a new VM.
+	out, errb := boundedBuffer{limit: protocol.PortPage + 1}, boundedBuffer{limit: 4096}
+	cmd := command(bytes.NewReader(a.Data), &out, &errb, "perl", "-e", guestScript, a.Op, a.Stream, strconv.Itoa(a.Port), strconv.FormatInt(deadline.Unix(), 10))
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	if err := runPortCommand(ctx, cmd); err != nil {
+		return nil, refusal("unavailable", "sandbox port channel failed: %v", err)
+	}
+	b := out.Bytes()
+	if out.cut || len(b) > protocol.PortPage+1 || len(b) == 0 {
+		return nil, refusal("unavailable", "invalid sandbox port answer")
+	}
+	return b, nil
 }
 
 func runPortCommand(ctx context.Context, cmd *exec.Cmd) error {

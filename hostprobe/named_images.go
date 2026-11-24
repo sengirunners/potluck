@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/sengirunners/potluck/computeapi"
-	"github.com/sengirunners/potluck/imagepins"
 	"strings"
 	"time"
+
+	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/imagepins"
 )
 
 // selectedPin keeps named images separate from sandbox templates.
@@ -144,7 +145,7 @@ func tartList(ctx context.Context, run Runner, cli string) ([]tartEntry, error) 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if cli == "" {
-		cli = "tart"
+		cli = resolveTart()
 	}
 	r, err := run.Run(ctx, cli, "list", "--format", "json")
 	if err != nil {

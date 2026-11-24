@@ -24,10 +24,11 @@ import (
 	"github.com/sengirunners/potluck/kit/project"
 )
 
-// sameShare are host's flags that change how a run goes, not what it
-// shares: a run with only these (and the host program's AfterLend skip) is
-// a bare re-run.
-var sameShare = []string{"yes", "no-sudo", "pull-timeout", "show-commands", "detach", "wait"}
+// sameShare are host's flags that change how a run goes (or, for
+// --invite-stdin, where its argument comes from), not what it shares: a
+// run with only these (and the host program's AfterLend skip) is a bare
+// re-run.
+var sameShare = []string{"yes", "no-sudo", "pull-timeout", "show-commands", "detach", "wait", flagInviteStdin}
 
 // shapesShare says whether cmd was given one of its own flags that shapes
 // the share (the program's --json and pool flags are not its own).

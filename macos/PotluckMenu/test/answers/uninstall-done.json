@@ -1,0 +1,18 @@
+{
+  "done": [
+    "stop sharing whatever this machine lends (as potluck host stop does)",
+    "stop the daemon",
+    "remove the home ~/.potluck: this machine's identity, the pools it runs and their data, and the daemon's log",
+    "remove the programs in ~/.local/bin: potluck, potluck-driver-tart (this one last)"
+  ],
+  "left": [],
+  "not_removed": [
+    "Tart, its images and any VM it still holds (the macOS image Potluck pulled is about 27 GB, and the current one is never removed by potluck host images --remove): `tart list` shows them and `tart delete <name>` removes one. Potluck deletes none of them: some may be yours",
+    "Potluck Menu, if you installed it: quit it from its menu, remove it from System Settings > General > Login Items, and delete the app (docs/menubar.md)",
+    "a Tailscale node named potluck-<this Mac's host name>-potluck, if you used Tailscale: remove it in the Tailscale admin console (https://login.tailscale.com/admin/machines)"
+  ],
+  "pools_run": [
+    "friends"
+  ],
+  "warning": "This deletes this machine's identity for good. This machine runs these pools, and they end for all their members: friends."
+}

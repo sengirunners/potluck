@@ -8,9 +8,12 @@ package menubar
 
 import (
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/protocol"
 )
@@ -31,9 +34,19 @@ type SetupFacts struct {
 	Updates *Updates
 	// The commands the checklist names, as the program that answers spells
 	// them.
-	InstallMenu string // installs the menu bar item
-	Upgrade     string // turns the daily update on
-	Doctor      string // says which Tart and Softnet this Mac needs
+	InstallMenu      string // installs the menu bar item
+	Upgrade          string // turns the daily update on
+	Doctor           string // says which Tart and Softnet this Mac needs
+	SoftnetInstall   string // installs this Mac's Softnet build
+	SoftnetUninstall string // removes the managed Softnet
+	// Exe is this program (symlinks resolved), InstallDir where Potluck is
+	// installed, and BundledRelease a signed release the app carries
+	// (POTLUCK_BUNDLED_RELEASE; "" for none); InstallBundled is the
+	// command that installs it into InstallDir.
+	Exe, InstallDir, BundledRelease, InstallBundled string
+	// Mac is this Mac's preflight, part by part (host status --probe on a
+	// Mac); nil: not read.
+	Mac *hostprobe.MacParts
 }
 
 // MenuApp is the menu bar item as this machine shows it.
@@ -73,12 +86,67 @@ const (
 )
 
 // Check is one line of the checklist. Action, when set, is the one thing
-// that completes it.
+// that completes it, as words for a terminal; Do is the same thing for a
+// program (the menu bar app), so it never reads Action to know what to run.
+// Every check with an Action has a Do, but one: a setup blocked on a
+// refused setting an earlier share kept that no flag of the command turns
+// off, where running it again fails the same way.
 type Check struct {
 	ID     string `json:"id"`
 	State  string `json:"state"`
 	Detail string `json:"detail"`
 	Action string `json:"action,omitempty"`
+	Do     *Do    `json:"do,omitempty"`
+}
+
+// Do is a check's action for a program. Exactly one of Args, URL and App
+// says what to do.
+type Do struct {
+	// Label is the button's words.
+	Label string `json:"label"`
+	// Args are potluck's arguments that do it, run as the user (no shell).
+	Args []string `json:"args,omitempty"`
+	// Invite is that the app asks for an invite code and appends it to Args
+	// as their last argument (they end in "--"); it is never in Args. When
+	// the person gives none, Args run as they are, as the action's words
+	// say: a host run with no argument shares with the one pool this machine
+	// is in.
+	Invite bool `json:"invite,omitempty"`
+	// URL is a page to open (in the browser, or a file URL the system
+	// opens) instead of running anything.
+	URL string `json:"url,omitempty"`
+	// App is an act only the app itself can do. No check gives one yet.
+	App string `json:"app,omitempty"`
+	// Auto is that the app may do it without a click. No check sets it yet.
+	Auto bool `json:"auto,omitempty"`
+}
+
+// The arguments the checklist's Do runs: the same commands as SetupFacts'
+// and Facts' words, as the program's arguments below its root. The app runs
+// potluck, or a program built on Potluck with its commands at the root, as
+// it does for the menu's own items (Menu.Windows); a record's again_args are
+// spelled the same way.
+var (
+	startArgs   = []string{"daemon", "--detach"}
+	upgradeArgs = []string{"--json", "upgrade", "enable"}
+	// hostArgs run a setup with no record in the background; the invite
+	// is appended after the "--", so a paste that starts with "-" is never
+	// read as a flag. --yes: a press asks for the run, so one where this
+	// machine already shares sizes goes on rather than only saying what it
+	// would do.
+	// --no-sudo: the app has no terminal to ask at, so a root step the run
+	// stops at is its answer (admin_step), never skipped.
+	hostArgs = []string{"--json", "host", "--yes", "--no-sudo", "--detach", "--"}
+)
+
+// menuInstallDoc is where installing the menu bar item is written down:
+// its installer is a shell pipeline, not potluck's arguments.
+const menuInstallDoc = "https://github.com/sengirunners/potluck/blob/main/docs/menubar.md#install-it"
+
+// StageName is one stage of a host run with how a person reads it.
+type StageName struct {
+	Name  string `json:"name"`
+	Label string `json:"label"`
 }
 
 // Setup is the checklist as host status answers it.
@@ -86,12 +154,25 @@ type Setup struct {
 	// State is the last host run's: none, running, succeeded, blocked or
 	// interrupted (it stopped before it ended), or unreadable.
 	State string `json:"state"`
-	// Stages are that run's stages.
+	// Stages are that run's stages. A stage's open_url shows only while
+	// the run goes on.
 	Stages []hostsetup.Stage `json:"stages,omitempty"`
-	Checks []Check           `json:"checks"`
+	// AgainArgs and NeedsInvite are that run's: the program's arguments
+	// that run the setup again, and whether the invite code must be
+	// appended to them (hostsetup.Run).
+	AgainArgs   []string `json:"again_args,omitempty"`
+	NeedsInvite bool     `json:"needs_invite,omitempty"`
+	// StageOrder is every stage a host run goes through, in order
+	// (hostsetup.Order), reached or not.
+	StageOrder []StageName `json:"stage_order"`
+	Checks     []Check     `json:"checks"`
 	// Next is the one thing to do now ("" when nothing Potluck can read is
-	// left).
-	Next string `json:"next,omitempty"`
+	// left), and NextID the id of the check it is the action of. A blocked
+	// check with no action stops there: NextID is its id and Next is
+	// empty, since nothing Potluck runs fixes it (its detail says what to
+	// do).
+	Next   string `json:"next,omitempty"`
+	NextID string `json:"next_id,omitempty"`
 }
 
 // The last host run's states.
@@ -128,63 +209,114 @@ func runState(s SetupFacts) string {
 func buildSetup(f Facts, st Status) Setup {
 	s := f.Setup
 	out := Setup{State: runState(s)}
+	for _, n := range hostsetup.Order {
+		out.StageOrder = append(out.StageOrder, StageName{Name: n, Label: hostsetup.Label(n)})
+	}
 	if s.Run != nil {
-		out.Stages = s.Run.Stages
+		out.Stages = slices.Clone(s.Run.Stages)
+		for i := range out.Stages {
+			// A page nobody waits on any more, or one the app should not
+			// open (only an https page is a login).
+			if u := out.Stages[i].OpenURL; out.State != SetupRunning || !strings.HasPrefix(u, "https://") {
+				out.Stages[i].OpenURL = ""
+			}
+		}
+		out.AgainArgs, out.NeedsInvite = s.Run.AgainArgs, s.Run.NeedsInvite
 	}
-	add := func(id, state, detail, action string) {
-		out.Checks = append(out.Checks, Check{ID: id, State: state, Detail: detail, Action: action})
+	add := func(id, state, detail, action string, do *Do) {
+		out.Checks = append(out.Checks, Check{ID: id, State: state, Detail: detail, Action: action, Do: do})
 	}
-	version := s.Version
-	if version == "" {
-		version = "(version unknown)"
-	}
-	add("potluck", Done, "Potluck "+version+" is installed", "")
-	if f.Daemon != "" {
-		add("daemon", Todo, "the Potluck daemon is not running: "+f.Daemon, f.Start)
+	if s.Mac != nil {
+		mac := macCheck(s.Mac)
+		out.Checks = append(out.Checks, mac, potluckCheck(s))
+		if mac.State != Blocked {
+			out.Checks = append(out.Checks, probeChecks(s.Mac, s, st.Lending.Sizes > 0 || f.ListErr != "" || f.Daemon != "")...)
+		}
 	} else {
-		add("daemon", Done, "the Potluck daemon is running", "")
+		out.Checks = append(out.Checks, potluckCheck(s))
 	}
-	add(setupCheck(f, out.State, st.Lending.Sizes > 0))
+	if f.Daemon != "" {
+		add("daemon", Todo, "the Potluck daemon is not running: "+f.Daemon, f.Start, &Do{Label: "Start Potluck", Args: startArgs})
+	} else {
+		add("daemon", Done, "the Potluck daemon is running", "", nil)
+	}
+	out.Checks = append(out.Checks, setupCheck(f, out.State, st.Lending.Sizes > 0))
 	lendingCheck(&out, f, st)
 	if m := s.Menu; m != nil {
 		switch {
 		case m.Path == "":
-			add("menu", Todo, "the menu bar item is not installed (optional: it shows what this Mac lends and pauses it without a terminal)", s.InstallMenu)
+			add("menu", Todo, "the menu bar item is not installed (optional: it shows what this Mac lends and pauses it without a terminal)", s.InstallMenu,
+				&Do{Label: "How to install it", URL: menuInstallDoc})
 		case !m.Seen.IsZero() && now().Sub(m.Seen) <= MenuSeenWithin:
-			add("menu", Done, fmt.Sprintf("the menu bar item is running: it read this status at %s (%s)", m.Seen.In(locOf(f)).Format("15:04:05"), m.Path), "")
+			add("menu", Done, fmt.Sprintf("the menu bar item is running: it read this status at %s (%s)", m.Seen.In(locOf(f)).Format("15:04:05"), m.Path), "", nil)
 		case m.Seen.IsZero():
-			add("menu", Todo, "the menu bar item is installed at "+m.Path+" but has never read this status, so it is not running", m.Open)
+			add("menu", Todo, "the menu bar item is installed at "+m.Path+" but has never read this status, so it is not running", m.Open, openApp(m.Path))
 		default:
-			add("menu", Todo, fmt.Sprintf("the menu bar item is installed at %s but has not read this status since %s, so it is not running now", m.Path, m.Seen.In(locOf(f)).Format("Jan 2 15:04")), m.Open)
+			add("menu", Todo, fmt.Sprintf("the menu bar item is installed at %s but has not read this status since %s, so it is not running now", m.Path, m.Seen.In(locOf(f)).Format("Jan 2 15:04")), m.Open, openApp(m.Path))
 		}
 		if m.Path != "" {
-			add("login", Unknown, "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings > General > Login Items", "")
+			add("login", Unknown, "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings > General > Login Items", "", nil)
 		}
 	}
 	if u := s.Updates; u != nil {
 		switch {
 		case u.Err != "":
-			add("updates", Unknown, "the daily update's state cannot be read: "+u.Err, "")
+			add("updates", Unknown, "the daily update's state cannot be read: "+u.Err, "", nil)
 		case u.Foreign != "":
-			add("updates", Done, "another updater runs this program's upgrade ("+u.Foreign+"); Potluck leaves it as it is", "")
+			add("updates", Done, "another updater runs this program's upgrade ("+u.Foreign+"); Potluck leaves it as it is", "", nil)
 		case u.Enabled && u.Loaded:
-			add("updates", Done, "the daily update is on: it installs Potluck's newest signed release", "")
+			add("updates", Done, "the daily update is on: it installs Potluck's newest signed release", "", nil)
 		case u.Enabled:
-			add("updates", Todo, "the daily update is installed but not loaded, so it does not run", s.Upgrade)
+			add("updates", Todo, "the daily update is installed but not loaded, so it does not run", s.Upgrade, &Do{Label: "Load the daily update", Args: upgradeArgs})
 		default:
-			add("updates", Todo, "the daily update is off (optional: your choice; Potluck never turns it on by itself)", s.Upgrade)
+			add("updates", Todo, "the daily update is off (optional: your choice; Potluck never turns it on by itself)", s.Upgrade, &Do{Label: "Turn on the daily update", Args: upgradeArgs})
 		}
 		if s.Menu != nil {
-			add("coverage", Info, "the daily update covers Potluck itself only: to update the menu bar item, run its installer again ("+s.InstallMenu+"); Tart and Softnet are updated the way you installed them, and "+s.Doctor+" says which versions this Mac needs", "")
+			add("coverage", Info, "the daily update covers Potluck itself only: to update the menu bar item, run its installer again ("+s.InstallMenu+"); Tart and Softnet are updated the way you installed them, and "+s.Doctor+" says which versions this Mac needs", "", nil)
 		}
 	}
+	// The first step left that has an action is next. A blocked check with
+	// none (this Mac cannot lend, or the person must free disk or update
+	// what Potluck cannot) stops the walk: what follows cannot help, so
+	// NextID names it and Next is empty.
 	for _, c := range out.Checks {
-		if (c.State == Todo || c.State == Blocked) && c.Action != "" {
-			out.Next = c.Action
+		if (c.State == Todo || c.State == Blocked || c.State == Running) && c.Action != "" {
+			out.Next, out.NextID = c.Action, c.ID
+			break
+		}
+		if c.State == Blocked {
+			out.NextID = c.ID
 			break
 		}
 	}
 	return out
+}
+
+// openApp opens the app at path (a file URL the system opens).
+func openApp(path string) *Do {
+	return &Do{Label: "Open the menu bar item", URL: (&url.URL{Scheme: "file", Path: path}).String()}
+}
+
+// againDo runs the last host run again in the background (label: the
+// button's words): its own arguments when the record has them, else
+// hostArgs, the invite asked for. Like hostArgs it goes on where this
+// machine already shares sizes (--yes) and hands back a root step
+// (--no-sudo).
+func againDo(r *hostsetup.Run, label string) *Do {
+	if r == nil || len(r.AgainArgs) == 0 { // never run, or a record written before again_args
+		return &Do{Label: label, Args: hostArgs, Invite: true}
+	}
+	args := append([]string{"--json"}, r.AgainArgs...) // a record's again_args never hold --json or --detach (cli startSetup)
+	for _, flag := range []string{"--yes", "--no-sudo"} {
+		if !slices.ContainsFunc(args, func(a string) bool { return a == flag || a == flag+"=true" }) {
+			args = append(args, flag)
+		}
+	}
+	args = append(args, "--detach")
+	if r.NeedsInvite {
+		args = append(args, "--")
+	}
+	return &Do{Label: label, Args: args, Invite: r.NeedsInvite}
 }
 
 // RunAgain is how to run the last setup again (share: the command when the
@@ -207,26 +339,33 @@ func RunAgain(r *hostsetup.Run, share string) string {
 
 // setupCheck is the last host run as a check; shares: this machine shares
 // sizes already.
-func setupCheck(f Facts, state string, shares bool) (id, st, detail, action string) {
+func setupCheck(f Facts, state string, shares bool) Check {
 	r := f.Setup.Run
 	again := f.Share
 	if r != nil && r.Again != "" {
 		again = r.Again
 	}
+	c := func(st, detail, action string, do *Do) Check {
+		return Check{ID: "setup", State: st, Detail: detail, Action: action, Do: do}
+	}
 	switch state {
 	case SetupUnreadable:
-		return "setup", Unknown, "the last setup's record cannot be read: " + f.Setup.RunErr, ""
+		return c(Unknown, "the last setup's record cannot be read: "+f.Setup.RunErr, "", nil)
 	case SetupNone:
-		return "setup", Todo, "this machine has not been set up to lend yet", f.Share
+		return c(Todo, "this machine has not been set up to lend yet", f.Share, againDo(nil, "Set up this Mac"))
 	case SetupRunning:
-		c := r.Current()
+		cur := r.Current()
 		switch {
-		case c == nil && len(r.Stages) == 0: // just started
-			return "setup", Running, "setting up now: starting", ""
-		case c == nil: // between two stages
-			c = &r.Stages[len(r.Stages)-1]
+		case cur == nil && len(r.Stages) == 0: // just started
+			return c(Running, "setting up now: starting", "", nil)
+		case cur == nil: // between two stages
+			cur = &r.Stages[len(r.Stages)-1]
 		}
-		return "setup", Running, "setting up now: " + hostsetup.Line(c.Name, c.Result, c.Detail), ""
+		detail := "setting up now: " + hostsetup.Line(cur.Name, cur.Result, cur.Detail)
+		if u := cur.OpenURL; cur.Result == hostsetup.Running && strings.HasPrefix(u, "https://") { // the run waits on this page
+			return c(Running, detail, "open this page and sign in for the setup to go on: "+u, &Do{Label: "Sign in to continue", URL: u})
+		}
+		return c(Running, detail, "", nil)
 	case SetupBlocked:
 		b := r.Blocked()
 		detail := fmt.Sprintf("setup blocked at %s (%d of %d): %s", hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail)
@@ -234,18 +373,21 @@ func setupCheck(f Facts, state string, shares bool) (id, st, detail, action stri
 			detail = fmt.Sprintf("the last setup run was blocked at %s (%d of %d): %s; what was shared before still lends",
 				hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail)
 		}
-		if b.Flag != "" {
-			return "setup", Blocked, detail, RunAgain(r, f.Share)
+		switch {
+		case b.Flag != "" && b.Fix == "": // an earlier share kept the refused setting and no flag turns it off: running again fails the same way
+			return c(Blocked, detail, RunAgain(r, f.Share), nil)
+		case b.Flag != "":
+			return c(Blocked, detail, RunAgain(r, f.Share), againDo(r, "Run setup again"))
 		}
-		return "setup", Blocked, detail, "fix what the " + hostsetup.Label(b.Name) + " stage says, then " + RunAgain(r, f.Share)
+		return c(Blocked, detail, "fix what the "+hostsetup.Label(b.Name)+" stage says, then "+RunAgain(r, f.Share), againDo(r, "Run setup again"))
 	case SetupInterrupted:
 		at := "before its first stage"
 		if n := len(r.Stages); n > 0 {
 			at = "at " + hostsetup.Label(r.Stages[n-1].Name)
 		}
-		return "setup", Blocked, "the last setup stopped " + at + " before it finished (a pull that stopped resumes)", again
+		return c(Blocked, "the last setup stopped "+at+" before it finished (a pull that stopped resumes)", again, againDo(r, "Go on with setup"))
 	}
-	return "setup", Done, fmt.Sprintf("set up: all %d stages succeeded (%s)", len(hostsetup.Order), strings.Join(stageNames(), ", ")), ""
+	return c(Done, fmt.Sprintf("set up: all %d stages succeeded (%s)", len(hostsetup.Order), strings.Join(stageNames(), ", ")), "", nil)
 }
 
 // lendingCheck adds what this machine lends now and when it may lend:
@@ -261,7 +403,7 @@ func lendingCheck(out *Setup, f Facts, st Status) {
 	case l.Sizes == 0:
 		c := Check{ID: "lending", State: Todo, Detail: "this machine shares no size with a pool yet"}
 		if out.State == SetupNone || out.State == SetupSucceeded {
-			c.Action = f.Share
+			c.Action, c.Do = f.Share, againDo(f.Setup.Run, "Share this Mac")
 		}
 		out.Checks = append(out.Checks, c)
 		return

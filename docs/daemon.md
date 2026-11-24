@@ -2180,6 +2180,12 @@ box, and nothing is minted before GitHub says the right job holds it.
   box was acquired for is served again at once. Bounce re-runs have a cap of their own (5 per run, an `ALERT` log line
   at the cap) and do not count against the 3 attempts of a run whose jobs lost their box. A bounce re-run keeps the
   run's grants even after the default branch moved on (see the tip rule above).
+- **A taker a grant names on a box no grant names**: that box is guarded to no run (an open guard counts as none),
+  so its hook holds nothing and passes the taker at once with none of its tokens, and none are ever issued there.
+  When GitHub says the taker is in progress on that runner, the broker releases the box (ending the taker's steps),
+  logs an `ALERT`, records it bounced, and serves the box's own job again at once; the taker is re-run on a box of its
+  own as above. Its steps may run, without secrets, until the release ends them. A `completed` that comes first is
+  recorded the same way when the taker's own serve recorded its run's grants. A taker no grant names is left alone.
 - **Fails closed**: GitHub not answering, a grant gone, an issue refused (two grants giving one name different
   permissions among them), the issuer not started within the 240 s, or the marker not written revokes what the box
   got and writes no marker; the hook stops the job before its first step when the hold ends. The broker records why (`runners_job_secrets`).

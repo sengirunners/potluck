@@ -316,7 +316,7 @@ func (s *Service) acquireBoxWithVolumes(ctx context.Context, t core.Target, b co
 			return nil, err
 		}
 		if b.Kind == computeapi.RunTargetKindBox {
-			if err := s.boxAllowed(ctx, t.Project.ID, t.Area, db); err != nil { // ends.go
+			if err := s.boxAllowed(ctx, t.Project.ID, t.Area, rt.BoxRequest{Target: b.Name, Size: sizeCopy(d.Size), Job: rt.RunnerJobFrom(ctx)}, db); err != nil { // ends.go
 				return nil, err
 			}
 		}

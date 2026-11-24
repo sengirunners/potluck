@@ -390,7 +390,7 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 	}
 	if byCode {
 		say(o.Stages.Begin(hostsetup.Join, "joining the pool of your invite"))
-		rem, err := a.poolJoin(ctx, c, arg, "")
+		rem, err := a.poolJoin(ctx, c, arg, "", func(url string) { o.Stages.Open(hostsetup.Join, url) })
 		if err != nil {
 			if ours := joinedAtAuthority(ctx, c, arg); len(ours) > 0 && api.IsCode(err, api.CodeForbidden) {
 				return &spentCodeError{err: err, Pools: ours, p: prefix(a.host.Prefix)}
@@ -399,7 +399,7 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 		}
 		pool, machine = rem.Project.Slug, rem.Machine
 		say(o.Stages.Succeed(hostsetup.Join, "joined pool "+pool))
-		o.Stages.SetAgain(strings.Replace(o.Stages.Run().Again, inviteWord, pool, 1)) // the flags stay
+		o.Stages.Joined(pool) // the flags stay
 	} else if machine != "" {
 		say(o.Stages.Succeed(hostsetup.Join, "already in pool "+pool))
 	} else {
@@ -538,38 +538,40 @@ func joinedAtAuthority(ctx context.Context, c *client.Client, code string) []str
 // shareFlagArgs renders the flags the user set as arguments to retype.
 func shareFlagArgs(cmd *cobra.Command, skip ...string) string {
 	var b strings.Builder
+	for _, f := range givenFlags(cmd, skip...) {
+		b.WriteString(f.Text)
+	}
+	return b.String()
+}
+
+// givenFlags are the flags the user set, but skip, in order: each as a
+// person retypes it (each argument with a leading space) and as a
+// program's arguments. Never host's --invite-stdin: it says where the
+// argument came from, not how to share, and a command built from these
+// gets the argument some other way (the setup record's command to run
+// again, a hint, the background run's argv with its own --invite-stdin).
+func givenFlags(cmd *cobra.Command, skip ...string) []hostsetup.Flag {
+	var out []hostsetup.Flag
 	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if !slices.Contains(skip, f.Name) {
-			b.WriteString(flagArgs(f))
+		if f.Name == flagInviteStdin || slices.Contains(skip, f.Name) {
+			return
 		}
+		hf := hostsetup.Flag{Name: f.Name}
+		vals := []string{f.Value.String()}
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			vals = sv.GetSlice()
+		}
+		for _, v := range vals {
+			if f.Value.Type() == "bool" {
+				hf.Text += fmt.Sprintf(" --%s=%s", f.Name, v)
+			} else {
+				hf.Text += fmt.Sprintf(" --%s %s", f.Name, shellQuote(v))
+			}
+			hf.Args = append(hf.Args, "--"+f.Name+"="+v)
+		}
+		out = append(out, hf)
 	})
-	return b.String()
-}
-
-// givenFlagArgs is the flag name's arguments as shareFlagArgs writes them,
-// "" when this command was not given it.
-func givenFlagArgs(cmd *cobra.Command, name string) string {
-	if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
-		return flagArgs(f)
-	}
-	return ""
-}
-
-// flagArgs is one flag's arguments, each with a leading space.
-func flagArgs(f *pflag.Flag) string {
-	var b strings.Builder
-	vals := []string{f.Value.String()}
-	if sv, ok := f.Value.(pflag.SliceValue); ok {
-		vals = sv.GetSlice()
-	}
-	for _, v := range vals {
-		if f.Value.Type() == "bool" {
-			fmt.Fprintf(&b, " --%s=%s", f.Name, v)
-		} else {
-			fmt.Fprintf(&b, " --%s %s", f.Name, shellQuote(v))
-		}
-	}
-	return b.String()
+	return out
 }
 
 // poolBinder is where host shares: machine-level, with the pool's machine
@@ -681,6 +683,12 @@ sandboxes is always refused.`,
 	return cmd
 }
 
+// needsForce is hostStop's refusal that --force overrides: sandboxes run, or
+// may run, on a size shared with a pool this machine joined.
+type needsForce struct{ error }
+
+func (e *needsForce) Unwrap() error { return e.error }
+
 // hostStop removes this machine's shared sizes: those shared with pools it
 // joined (machine-level) and those in pools it runs (only pool, when set).
 // It goes on past a refusal and returns the first error. The daemon refuses
@@ -707,10 +715,10 @@ func hostStop(ctx context.Context, c *client.Client, only string, force bool, wa
 		case force && len(t.Live) > 0:
 			fmt.Fprintf(warn, "%s: %s: %s still running; removed anyway (--force): they go on until their lease ends\n", name, t.Name, sandboxCount(len(t.Live)))
 		case t.Error != "":
-			fail(fmt.Errorf("%s: could not tell whether sandboxes run on it (%s): try again, or pass --force", t.Name, t.Error))
+			fail(&needsForce{fmt.Errorf("%s: could not tell whether sandboxes run on it (%s): try again, or pass --force", t.Name, t.Error)})
 			continue
 		case len(t.Live) > 0:
-			fail(fmt.Errorf("%s still running on %s: stop them first or pass --force", sandboxCount(len(t.Live)), t.Name))
+			fail(&needsForce{fmt.Errorf("%s still running on %s: stop them first or pass --force", sandboxCount(len(t.Live)), t.Name)})
 			continue
 		}
 		if err := computeclient.UnbindHostRunTarget(ctx, c, t.Name); err != nil {

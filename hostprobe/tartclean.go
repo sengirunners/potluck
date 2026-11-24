@@ -452,7 +452,7 @@ func RemoveTartImages(ctx context.Context, run Runner, r Report, read BindingsRe
 		}
 	}
 	layer, _ := r.Layer("tart")
-	cli := cmp.Or(layer.CLI, "tart")
+	cli := tartCLI(layer)
 	failed := map[string]string{}
 	for _, it := range todo {
 		rm := TartRemoval{TartItem: it}

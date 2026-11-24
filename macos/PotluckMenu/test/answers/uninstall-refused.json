@@ -1,0 +1,32 @@
+{
+  "done": [],
+  "left": [
+    "stop sharing mac-c4m8 (as potluck host stop does)",
+    "leave the pools this machine joined, asking each pool's machine to revoke this one's token: studio",
+    "remove the managed Softnet in /Library/Application Support/Potluck/softnet (the one root step: asks for your Mac password)",
+    "stop the daemon",
+    "remove the home ~/.potluck: this machine's identity, the pools it runs and their data, and the daemon's log",
+    "remove the programs in ~/.local/bin: potluck, potluck-driver-tart (this one last)"
+  ],
+  "not_removed": [
+    "Tart, its images and any VM it still holds (the macOS image Potluck pulled is about 27 GB, and the current one is never removed by potluck host images --remove): `tart list` shows them and `tart delete <name>` removes one. Potluck deletes none of them: some may be yours",
+    "Potluck Menu, if you installed it: quit it from its menu, remove it from System Settings > General > Login Items, and delete the app (docs/menubar.md)",
+    "a Tailscale node named potluck-<this Mac's host name>-potluck, if you used Tailscale: remove it in the Tailscale admin console (https://login.tailscale.com/admin/machines)"
+  ],
+  "pools_run": [
+    "friends"
+  ],
+  "warning": "This deletes this machine's identity for good. This machine runs these pools, and they end for all their members: friends.",
+  "error": "step 1 (stop sharing mac-c4m8 (as potluck host stop does)) did not finish: 1 sandbox is still running on mac-c4m8: stop them first or pass --force\nnothing after it was done; fix that and run potluck uninstall again (each step is safe to repeat)",
+  "force": {
+    "confirm": "Remove Potluck though sandboxes run, or may run, on this machine?",
+    "detail": "They go on until their lease ends, out of reach of the members who made them.",
+    "args": [
+      "--json",
+      "uninstall",
+      "--yes",
+      "--no-sudo",
+      "--force"
+    ]
+  }
+}

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code Docker Sandbox and Devcontainer Setup | Potluck</title>
+<meta name="description" content="Four ways to run Claude Code in a sandbox in 2026: built-in sandbox, devcontainer, Docker Sandboxes, your own image, plus spare team machines.">
+<link rel="canonical" href="https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Claude Code Docker Sandbox and Devcontainer Setup | Potluck">
+<meta property="og:description" content="Four ways to run Claude Code in a sandbox in 2026: built-in sandbox, devcontainer, Docker Sandboxes, your own image, plus spare team machines.">
+<meta property="og:url" content="https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer">
+<meta property="og:image" content="https://potluck.sh/og/blog/run-claude-code-docker-sandbox-devcontainer.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Claude Code Docker sandbox and devcontainer setup (2026)">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Claude Code Docker Sandbox and Devcontainer Setup | Potluck">
+<meta name="twitter:description" content="Four ways to run Claude Code in a sandbox in 2026: built-in sandbox, devcontainer, Docker Sandboxes, your own image, plus spare team machines.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/run-claude-code-docker-sandbox-devcontainer.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/run-claude-code-docker-sandbox-devcontainer.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer#post","mainEntityOfPage":"https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer","url":"https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer","headline":"Claude Code Docker sandbox and devcontainer setup (2026)","description":"Four ways to run Claude Code in a sandbox in 2026: built-in sandbox, devcontainer, Docker Sandboxes, your own image, plus spare team machines.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"Claude Code Docker sandbox devcontainer setup, Claude Code run locally, Claude Code sandbox run locally Claude Code Anthropic run Claude locally, claude code sandbox create command 'claude sandbox' 'claude --sandbox' 'claude sandbox run', claude code settings.local.json sandbox.filesystem example 'sandbox.filesystem' 'sandbox.network' 'settings.local.json' claude","image":"https://potluck.sh/og/blog/run-claude-code-docker-sandbox-devcontainer.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Claude Code Docker sandbox and devcontainer setup (2026)","item":"https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Claude Code Docker sandbox and devcontainer setup (2026)</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer:</strong> As of November 2026 there are four common ways to run Claude Code locally in a sandbox. The first is its built-in sandbox, turned on with the <code>/sandbox</code> command or the <code>sandbox</code> block in <code>.claude/settings.local.json</code>, which uses Seatbelt on macOS and bubblewrap on Linux. The second is Anthropic's reference devcontainer, a Docker container plus a firewall. The third is Docker Sandboxes, where <code>sbx run claude ~/my-project</code> starts one microVM per sandbox. The fourth is your own Docker image run as a non-root user. The Claude Code material these searches lead to describes no <code>claude sandbox</code> subcommand. The Claude Code program runs on your machine, but the default models run at Anthropic, so you need an API key or a Claude subscription. Anthropic says its sandbox cuts permission prompts by 84%, as quoted in a write-up by the consultancy Sourcelabs. If you want the commands to run on a spare Mac or Linux box instead of your laptop, Potluck is a different route. It is free, open source and early, and it gives an agent fresh sandboxes on machines your team already owns, with at most two macOS guests per Mac.</p>
+<h2 id="the-options-compared">The options compared</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>How you start it</th><th>Isolation boundary</th><th>Network control</th><th>Where it costs more or needs more work</th></tr></thead>
+<tbody>
+<tr><td>Claude Code built-in sandbox</td><td><code>/sandbox</code> in a session, or <code>sandbox</code> in settings</td><td>OS level: Seatbelt (macOS), bubblewrap (Linux)</td><td>Allow lists in settings</td><td>The sandboxed shell skips your profile, so tools may be missing from PATH. Settings live on each machine</td></tr>
+<tr><td>Anthropic reference devcontainer</td><td>Reopen the repo in the container from your editor</td><td>Docker container plus a firewall script</td><td>Firewall limits outbound hosts</td><td>Needs Docker and an editor that understands devcontainers. You maintain the image</td></tr>
+<tr><td>Docker Sandboxes (<code>sbx</code>)</td><td><code>sbx run claude ~/my-project</code></td><td>microVM with its own Docker daemon, filesystem and network</td><td>Policy presets such as Balanced and Locked Down</td><td>Needs the sbx CLI and a Docker sign-in. Does not read your <code>~/.claude</code></td></tr>
+<tr><td>Your own Docker image</td><td><code>docker run</code>, then <code>docker exec</code></td><td>Container</td><td>Whatever you configure</td><td>You handle credentials, the non-root user, caches and cleanup</td></tr>
+<tr><td>Potluck</td><td><code>potluck sandbox create</code>, or <code>potluck --pool friends mcp</code></td><td>Fresh VM (Tart on a Mac) or sandbox (Kata or gVisor on Linux) on a team machine</td><td>No network at all by default on the OCI layer</td><td>Early. Needs a spare machine and Tailscale or a tunnel. The host machine can read what runs in it</td></tr>
+</tbody>
+</table></div>
+<p>Potluck is made by Sengi, Inc., which also sells hosted GitHub Actions runners. Potluck is a separate free project and needs no Sengi account.</p>
+<h2 id="is-there-a-claude-sandbox-command">Is there a <code>claude sandbox</code> command?</h2>
+<p>People search for <code>claude sandbox</code>, <code>claude --sandbox</code> and <code>claude sandbox run</code>. The Claude Code material these searches lead to describes switching sandboxing on in two ways: the <code>/sandbox</code> command inside an interactive session, or the <code>sandbox</code> block in a settings file. It does not describe a separate <code>claude sandbox</code> subcommand.</p>
+<p>The command that does start Claude Code in a sandbox from one line is Docker's: <code>sbx run claude</code>. That is the Docker Sandboxes CLI, not Claude Code.</p>
+<h2 id="claude-codes-built-in-sandbox-and-settingslocaljson">Claude Code's built-in sandbox and settings.local.json</h2>
+<p>Claude Code reads settings from three places:</p>
+<ul>
+<li><code>~/.claude/settings.json</code> is your user file and applies to every project.</li>
+<li><code>.claude/settings.json</code> is the project file you commit.</li>
+<li><code>.claude/settings.local.json</code> is a project file you keep out of git, which suits per-machine sandbox paths.</li>
+</ul>
+<p>The smallest useful local file turns the sandbox on:</p>
+<pre><code class="language-json">{
+  &quot;sandbox&quot;: {
+    &quot;enabled&quot;: true
+  }
+}
+</code></pre>
+<p>The filesystem and network rules people search for as <code>sandbox.filesystem</code> and <code>sandbox.network</code> go inside that same <code>sandbox</code> block. In them you list extra write paths, such as build caches like <code>~/.m2</code> and <code>~/.npm</code>, and the hosts the shell may reach, such as your package registry. Key names have shifted between Claude Code releases, so copy them from the settings reference that matches your installed version rather than from an old blog post.</p>
+<p>Two lessons from the Sourcelabs write-up, whose authors ran Claude Code headless in a pipeline:</p>
+<ul>
+<li><strong>PATH.</strong> Inside the Seatbelt sandbox the shell did not load <code>.zshrc</code> or <code>.bashrc</code>, so <code>node</code> and <code>mvn</code> were not found. They had to resolve tool paths on the host and pass them in.</li>
+<li><strong>Headless settings.</strong> In their setup, project-level sandbox settings did not apply to <code>claude -p</code> runs, so they fell back to the user file in <code>~/.claude</code>.</li>
+</ul>
+<p>The built-in sandbox works well for interactive sessions on your own laptop, where you can answer a prompt when a rule blocks something. For unattended runs it needs more setup up front.</p>
+<h2 id="anthropics-reference-devcontainer">Anthropic's reference devcontainer</h2>
+<p>Anthropic publishes a reference devcontainer that runs Claude Code inside a Docker container, with a firewall layer limiting where it can connect. You open the repository in an editor that supports devcontainers and reopen it in the container. Claude Code then runs inside, against your mounted project.</p>
+<p>This is the setup Anthropic points to when you want <code>--dangerously-skip-permissions</code>: the container is the boundary, so skipping prompts is less risky.</p>
+<p>The cost is that you own the image. Your toolchain, caches and credentials all have to be set up in it. The Sourcelabs team chose to disable Claude Code's own sandbox inside their container, with <code>{ &quot;sandbox&quot;: { &quot;enabled&quot;: false } }</code>, because Seatbelt and bubblewrap rules can clash with a containerised environment. Anthropic's reference keeps it on and adds the firewall.</p>
+<h2 id="docker-sandboxes-sbx-run-claude">Docker Sandboxes: <code>sbx run claude</code></h2>
+<p>Docker Sandboxes is the shortest path from nothing to Claude Code in an isolated box, according to Docker's documentation:</p>
+<ol>
+<li>Install the <code>sbx</code> CLI and sign in to Docker.</li>
+<li>Store an API key with <code>sbx secret set anthropic</code>, or skip it and use <code>/login</code> inside Claude Code for a subscription.</li>
+<li>Run <code>sbx run --name my-sandbox claude</code> from your project directory. On the first run, pick a network preset. Balanced allows common development services and asks about the rest.</li>
+<li>Check status with <code>sbx ls</code>, stop with <code>sbx stop my-sandbox</code>, and remove with <code>sbx rm my-sandbox</code>.</li>
+</ol>
+<p>What Docker's docs say it does:</p>
+<ul>
+<li>Each sandbox is a microVM with its own Docker daemon. The agent can build images and start containers without touching your host.</li>
+<li>The default start command is <code>claude --dangerously-skip-permissions</code>.</li>
+<li>Your project directory is mounted read-write. <code>--clone</code> gives the agent a private clone instead, which helps when several agents work on one repository.</li>
+<li>Hosts can be allowed one by one with <code>sbx policy allow network</code>.</li>
+</ul>
+<p>One catch: the sandbox does not pick up user-level configuration such as <code>~/.claude</code>, only project-level files in the working directory.</p>
+<h2 id="your-own-docker-image">Your own Docker image</h2>
+<p>If you run Claude Code in a pipeline, a plain image is easy to reason about. This one follows the Sourcelabs example:</p>
+<pre><code class="language-dockerfile">FROM node:22-slim
+RUN apt-get update &amp;&amp; apt-get install -y git jq
+RUN npm install -g @anthropic-ai/claude-code
+RUN useradd -m -s /bin/bash claude
+USER claude
+</code></pre>
+<p>The non-root user matters. Sourcelabs found that Claude Code refuses <code>--dangerously-skip-permissions</code> when run as root.</p>
+<p>They also changed how they used containers. At first every step started a fresh container, which re-downloaded dependencies each time. They switched to one named container per ticket and ran each step in it with <code>docker exec</code>.</p>
+<p>You also have to get credentials in. That means an <code>ANTHROPIC_API_KEY</code> environment variable, or the OAuth credentials file on Linux.</p>
+<h2 id="running-the-sandbox-on-another-machine-with-potluck">Running the sandbox on another machine with Potluck</h2>
+<p>Every option above runs on the machine in front of you. Potluck asks a different question: what if the commands Claude Code runs happen on a spare Mac mini or Linux box in the office, in a fresh VM or sandbox each time, while Claude Code stays on your laptop?</p>
+<p>Potluck exposes sandbox tools to an agent over MCP with <code>potluck --pool friends mcp</code>. You register that command as an MCP server in Claude Code. The agent can then create a sandbox, run commands in it and remove it, on whichever pool machine has room. There is more on this in <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a>.</p>
+<p>On the Linux OCI layer the default is no network at all. That suits running untrusted build and test commands, but it means you would not run Claude Code itself inside such a box by default, since it has to reach Anthropic. Keep Claude Code where your credentials already are and send the commands out.</p>
+<p>Also keep the trust model in mind. The machine that runs a VM can read everything in it, including secrets. The machine that runs the pool can read commands and output passing through it.</p>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install on macOS or Linux (no Go needed), then start the daemon:</p>
+<pre><code class="language-sh">curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p><strong>Create a pool and invite people.</strong> On the machine that runs the pool, run <code>potluck create friends</code>. The first time, it prints a Tailscale login URL. Then:</p>
+<ul>
+<li><code>potluck invite ana</code> makes a code for someone who will run sandboxes.</li>
+<li><code>potluck invite carl --host</code> makes a code for someone who will share a machine.</li>
+</ul>
+<p>They run <code>potluck join '&lt;code&gt;'</code> or <code>potluck host '&lt;code&gt;'</code>.</p>
+<p><strong>Share a machine.</strong> Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux. Check first with <code>potluck doctor</code> and <code>potluck host --dry-run</code>. <code>--share</code> sets the fraction of cores and RAM shared; the default is 0.5, per the Potluck docs. <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet. <code>potluck host stop</code> stops sharing.</p>
+<p><strong>Try a sandbox by hand:</strong></p>
+<pre><code class="language-sh">potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>See <a href="/agent-sandbox">the agent sandbox page</a> and <a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">running coding agents in a sandbox on your own machines</a> for longer walkthroughs.</p>
+<h2 id="what-makes-potluck-different">What makes Potluck different</h2>
+<ul>
+<li><strong>It uses machines you already own.</strong> Claude Code's commands run on the Macs and Linux boxes your team already has, not on your laptop and not on rented machines.</li>
+<li><strong>A borrowed Mac goes back to its owner.</strong> A Mac sandbox ends the moment its owner touches the keyboard or pointer. On Linux, hand-back works only as a time window today.</li>
+<li><strong>One pool for agents and CI.</strong> The same pool serves coding-agent sandboxes and GitHub Actions jobs, each in a fresh VM or sandbox. A real Actions job has been run through it by hand on a Mac and on Linux, but it is not yet in daily use in Potluck's own CI.</li>
+<li><strong>Agents get sandbox tools over MCP.</strong> Claude Code calls sandbox tools directly instead of shelling into your host.</li>
+<li><strong>Free and open source.</strong> Potluck is Apache-2.0 and runs without a Sengi account. Teammates and invited friends can lend machines to the same pool.</li>
+</ul>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it with Claude Code and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="can-i-run-claude-code-fully-locally">Can I run Claude Code fully locally?</h3>
+<p>The Claude Code program runs locally, but with the default Anthropic models the model runs at Anthropic and needs an API key or a Claude subscription. Docker's documentation covers pointing Claude Code at local or hosted models instead.</p>
+<h3 id="how-do-i-turn-on-the-claude-code-sandbox">How do I turn on the Claude Code sandbox?</h3>
+<p>Type <code>/sandbox</code> in an interactive session, or set <code>&quot;sandbox&quot;: { &quot;enabled&quot;: true }</code> in <code>.claude/settings.local.json</code> or another settings file. It uses Seatbelt on macOS and bubblewrap on Linux.</p>
+<h3 id="should-i-use-the-devcontainer-or-docker-sandboxes">Should I use the devcontainer or Docker Sandboxes?</h3>
+<p>The devcontainer gives you a container you fully control and can commit to the repo. Docker Sandboxes gives you a microVM with its own Docker daemon and network policy from one command, but needs the sbx CLI and a Docker sign-in.</p>
+<h3 id="why-does-claude-code-fail-as-root-in-docker">Why does Claude Code fail as root in Docker?</h3>
+<p>Claude Code refuses <code>--dangerously-skip-permissions</code> when run as root, as the Sourcelabs write-up reports. Create a non-root user in your Dockerfile and switch to it.</p>
+<h3 id="can-potluck-run-claude-codes-commands-on-a-spare-mac">Can Potluck run Claude Code's commands on a spare Mac?</h3>
+<p>Potluck gives Claude Code sandbox tools over MCP, so its commands run in fresh VMs on a spare Mac (Tart, Apple silicon) or Linux box. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac.</p>
+<h3 id="is-a-potluck-sandbox-safe-for-my-api-key">Is a Potluck sandbox safe for my API key?</h3>
+<p>The machine that runs a VM can read everything in it, including secrets, so only put keys on machines whose owners you trust. Potluck makes no promises; use it at your own risk.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/run-claude-code-docker-sandbox-devcontainer.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

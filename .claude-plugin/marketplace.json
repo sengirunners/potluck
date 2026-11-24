@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "potluck",
-      "source": "./",
+      "source": "./plugin",
       "description": "Throwaway VMs and sandboxes for coding agents on Macs and Linux boxes you own: the Potluck skill and its MCP server."
     }
   ],

@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coding Agent Sandboxing: gVisor vs microVMs 2026 | Potluck</title>
+<meta name="description" content="Containers vs gVisor vs microVMs for coding agents, November 2026: what each boundary stops, what it costs, and how to run one on machines you own.">
+<link rel="canonical" href="https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Coding Agent Sandboxing: gVisor vs microVMs 2026 | Potluck">
+<meta property="og:description" content="Containers vs gVisor vs microVMs for coding agents, November 2026: what each boundary stops, what it costs, and how to run one on machines you own.">
+<meta property="og:url" content="https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared">
+<meta property="og:image" content="https://potluck.sh/og/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Coding Agent Sandboxing Guide: Containers vs gVisor vs microVMs (November 2026)">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Coding Agent Sandboxing: gVisor vs microVMs 2026 | Potluck">
+<meta name="twitter:description" content="Containers vs gVisor vs microVMs for coding agents, November 2026: what each boundary stops, what it costs, and how to run one on machines you own.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared#post","mainEntityOfPage":"https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared","url":"https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared","headline":"Coding Agent Sandboxing Guide: Containers vs gVisor vs microVMs (November 2026)","description":"Containers vs gVisor vs microVMs for coding agents, November 2026: what each boundary stops, what it costs, and how to run one on machines you own.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"coding agent sandboxing guide containers gVisor microVMs","image":"https://potluck.sh/og/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Coding Agent Sandboxing Guide: Containers vs gVisor vs microVMs (November 2026)","item":"https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Coding Agent Sandboxing Guide: Containers vs gVisor vs microVMs (November 2026)</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer</strong>: a plain container (Docker or Podman with the default runc runtime) shares the host kernel, so it is a packaging boundary, not a sandbox for code an agent writes. gVisor puts a user-space kernel between the agent and the host, and a microVM or full VM (Firecracker, Kata, Tart) gives the agent its own kernel, which is the strongest of the three. Then pick where the boundary runs: hosted platforms such as E2B, Modal and Daytona rent it to you, while self-hosting puts gVisor or a VM on hardware you already pay for. Potluck, a free, open-source (Apache-2.0) and early project, takes the self-hosted route. It runs each agent task in a fresh Tart VM on an Apple silicon Mac, or in a Kata or gVisor sandbox on Linux, on a team's idle machines. Per the Potluck docs, it caps macOS guests at two per Mac under Apple's licence.</p>
+<h2 id="the-isolation-options-at-a-glance">The isolation options at a glance</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Boundary</th><th>Kernel the agent talks to</th><th>What it stops</th><th>What it costs you</th></tr></thead>
+<tbody>
+<tr><td>Process sandbox (Seatbelt, Bubblewrap, Landlock, seccomp)</td><td>The host kernel, with rules</td><td>File and syscall access outside allowed paths</td><td>Rules are easy to get wrong; agents have been seen probing for gaps</td></tr>
+<tr><td>Container (Docker or Podman, runc)</td><td>The host kernel, shared</td><td>Casual mistakes, dependency mess</td><td>A kernel bug or a bad mount reaches the host</td></tr>
+<tr><td>gVisor</td><td>A user-space kernel that re-implements syscalls</td><td>Direct calls into the host kernel</td><td>Some software hits syscalls gVisor does not emulate the same way</td></tr>
+<tr><td>microVM (Firecracker, Kata Containers)</td><td>Its own guest kernel on hardware virtualization</td><td>Kernel exploits reaching the host</td><td>Needs KVM; you manage images and networking yourself</td></tr>
+<tr><td>Full VM (Tart on a Mac, Incus on Linux)</td><td>Its own full OS</td><td>Same as a microVM, and you get macOS</td><td>Slower to start, more memory per guest</td></tr>
+</tbody>
+</table></div>
+<p>The order runs weakest to strongest. Every step up costs some start time and memory, and buys a smaller surface the agent can attack.</p>
+<h2 id="why-a-coding-agent-needs-more-than-a-container">Why a coding agent needs more than a container</h2>
+<p>A coding agent writes a command and runs it before you read it. It installs packages, runs test suites, starts servers and deletes files. Most of the time that is fine. The cases that hurt are the ordinary ones: a cleanup step with a bad path, an install script piped from an unknown host, a test that forks until the machine stalls, or a dependency that reads environment variables and sends them somewhere.</p>
+<p>A container handles the dependency mess well. It does not handle a hostile or broken process well, because every syscall still lands in the host kernel. That is why the hosted sandbox vendors and the cloud providers all reach for gVisor or a VM when the code is untrusted. Treat agent-written code as untrusted even when the agent is yours.</p>
+<p>Three things matter as much as the kernel boundary:</p>
+<ul>
+<li><strong>Network.</strong> Default to no egress. Most real damage needs a way out, so a box that cannot reach the internet, your LAN or your tailnet is far safer than one that can.</li>
+<li><strong>Secrets.</strong> A sandbox does not scrub the API keys you pass in. Give the agent only the tokens the task needs.</li>
+<li><strong>Lifetime.</strong> A fresh sandbox per task means a bad run cannot leave something behind for the next one.</li>
+</ul>
+<h2 id="containers-vs-gvisor-vs-microvms-how-to-choose">Containers vs gVisor vs microVMs: how to choose</h2>
+<p>Ask how much you trust the code and what it needs to run.</p>
+<ul>
+<li><strong>Your own scripts that passed review:</strong> a container is enough.</li>
+<li><strong>Agent-written code on Linux, mostly language tooling:</strong> gVisor is a good default. It runs ordinary OCI images and fits into Docker or Podman as a runtime. Test your toolchain first, since a few programs behave differently under it.</li>
+<li><strong>Agent-written code that installs arbitrary packages or binaries, or anything you would call hostile:</strong> use a VM boundary, Kata on Linux or a microVM platform.</li>
+<li><strong>Anything that needs macOS or Xcode:</strong> a full macOS VM, which on Apple silicon means a tool like Tart. No container or gVisor option runs macOS.</li>
+</ul>
+<h2 id="hosted-platforms-vs-your-own-machines">Hosted platforms vs your own machines</h2>
+<p>Once you know the boundary, decide who runs it. Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners; Potluck itself is a separate free project, so weigh this table with that in mind.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>Isolation</th><th>Where it runs</th><th>Good at</th><th>Costs more or needs more work</th></tr></thead>
+<tbody>
+<tr><td>E2B</td><td>Firecracker microVMs</td><td>Hosted; open source, self-hostable</td><td>Clean SDKs, fast start for short tasks</td><td>Usage billing adds up for long sessions</td></tr>
+<tr><td>Modal</td><td>gVisor</td><td>Hosted only</td><td>GPUs and Python workloads</td><td>No self-hosting; images defined in its SDK</td></tr>
+<tr><td>Daytona</td><td>Docker by default, Kata optional</td><td>Hosted or self-hosted</td><td>Persistent dev environments</td><td>You must opt into Kata for a VM boundary</td></tr>
+<tr><td>Google Agent Sandbox</td><td>gVisor or Kata on Kubernetes</td><td>Your cluster</td><td>Warm pools, no new vendor</td><td>You run the Kubernetes cluster</td></tr>
+<tr><td>DIY Firecracker or gVisor</td><td>Your choice</td><td>Your servers</td><td>Full control</td><td>You build images, networking, scheduling</td></tr>
+<tr><td>Potluck</td><td>Tart VMs on Mac; Kata or gVisor on Linux</td><td>Macs and Linux boxes you already own</td><td>Fresh sandbox per task on idle hardware, macOS guests</td><td>Early; machines are shared desktops, not a fleet</td></tr>
+</tbody>
+</table></div>
+<p>Hosted platforms win when you need many sandboxes at once, GPUs or no hardware to look after. Self-hosting wins when you already own the machines, need macOS, or do not want agent code and repo contents on someone else's servers. Potluck sits in the self-hosted column but does not ask you to build a fleet: it drives Tart, Kata, gVisor and Incus on the computers your team already has.</p>
+<h2 id="what-potluck-checks-before-a-machine-takes-work">What Potluck checks before a machine takes work</h2>
+<p><code>potluck host</code> checks the machine, pulls the image, runs a quick conformance check per sandbox size and joins the pool only when a size passes. <code>potluck doctor</code> shows what a machine can share, and <code>potluck host --dry-run</code> prints the plan without changing anything. The <code>--share</code> flag sets the fraction of cores and RAM shared; the Potluck docs give the default as 0.5.</p>
+<p>For network isolation, <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer (Docker or Podman with Kata or gVisor) the default is no network at all.</p>
+<p>Be clear about the trust model. The machine that runs a VM can read everything in it, including secrets, and the machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust. There are no promises; use it at your own risk.</p>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install on macOS or Linux (no Go needed) and start the daemon:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>Create a pool on the machine that will run it. The first time, it prints a Tailscale login URL:</p>
+<pre><code>potluck create friends
+potluck invite ana
+potluck invite carl --host
+</code></pre>
+<p>Ana runs <code>potluck join '&lt;code&gt;'</code> to use sandboxes. Carl runs <code>potluck host '&lt;code&gt;'</code> to share a machine, and <code>potluck host stop</code> when he wants it back. Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux.</p>
+<p>Run a sandbox by hand:</p>
+<pre><code>potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>To hand sandboxes to an agent, run <code>potluck --pool friends mcp</code>, which is an MCP server exposing sandbox tools. More on that in <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a> and <a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">run coding agents in a sandbox on your own machines</a>. If your coding-agent vendor offers self-hosted runners, <code>potluck agent-runner</code> runs them in fresh sandboxes. See also the <a href="/agent-sandbox">agent sandbox</a> page.</p>
+<h2 id="what-makes-potluck-different">What makes Potluck different</h2>
+<ul>
+<li><strong>It uses the Macs and Linux boxes your team already owns</strong> instead of rented machines, so a gVisor, Kata or Tart boundary for agent code runs on hardware you have already paid for.</li>
+<li><strong>A Mac goes back to its owner the moment they touch the keyboard or pointer.</strong> The sandbox ends, running VMs end and new work is refused, so lending a desktop does not mean losing it. On Linux, hand-back works only as a time window today.</li>
+<li><strong>One pool serves coding-agent sandboxes and GitHub Actions jobs,</strong> each in a fresh VM or sandbox. A real Actions job has run through the runner broker by hand on a Mac (Tart) and on a Linux box (OCI with gVisor), though not yet daily in our own CI. See <a href="/github-actions-runner">GitHub Actions runner</a>.</li>
+<li><strong>Agents get sandbox tools over MCP,</strong> and teammates and invited friends can lend machines to the same pool.</li>
+<li><strong>It is free and open source (Apache-2.0) and runs without a Sengi account.</strong> It is not a hosted cloud, not a sandbox runtime of its own and not a cluster scheduler.</li>
+</ul>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it on real agent work and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="is-docker-safe-enough-for-a-coding-agent">Is Docker safe enough for a coding agent?</h3>
+<p>Not on its own with the default runc runtime, because the container shares the host kernel. Add gVisor or Kata as the runtime, or use a VM, and turn off network access unless the task needs it.</p>
+<h3 id="what-is-the-difference-between-gvisor-and-a-microvm">What is the difference between gVisor and a microVM?</h3>
+<p>gVisor intercepts the agent's syscalls with a user-space kernel, so the agent never calls the host kernel directly. A microVM such as Firecracker or Kata gives the agent its own guest kernel on hardware virtualization, which is a stronger boundary but needs KVM and more setup.</p>
+<h3 id="can-i-sandbox-a-coding-agent-on-macos">Can I sandbox a coding agent on macOS?</h3>
+<p>Yes, with a macOS or Linux VM on an Apple silicon Mac using Tart, which is what Potluck drives. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac; see <a href="/tart">Tart</a>.</p>
+<h3 id="does-a-sandbox-protect-my-api-keys">Does a sandbox protect my API keys?</h3>
+<p>No. Anything you pass into the sandbox is readable by the code inside it, and with Potluck the machine running the VM can read it too, so pass only the keys the task needs.</p>
+<h3 id="can-i-lend-mac-time-to-people-outside-my-team">Can I lend Mac time to people outside my team?</h3>
+<p>Lending a macOS guest to your team or invited friends is fine under Apple's licence; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice.</p>
+<h3 id="how-much-does-potluck-cost">How much does Potluck cost?</h3>
+<p>Potluck is free and open source under Apache-2.0. You supply the machines and their power.</p>
+<h3 id="is-potluck-ready-to-replace-a-hosted-sandbox-platform">Is Potluck ready to replace a hosted sandbox platform?</h3>
+<p>Not for every team. It is early, it runs on shared desktops rather than a fleet, and Linux hand-back is only a time window today, so try it on non-critical agent work first.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

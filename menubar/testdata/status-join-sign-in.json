@@ -1,0 +1,202 @@
+{
+  "mode": "auto",
+  "state": "accepting",
+  "cores": 8,
+  "lending": {
+    "shared": 0,
+    "lent": 0,
+    "in_use": 0,
+    "jobs": 0,
+    "memory_shared_mb": 0,
+    "memory_lent_mb": 0,
+    "memory_in_use_mb": 0,
+    "groups": 0,
+    "sizes": 0
+  },
+  "menu": {
+    "title": "Setting up: join (4 of 5)",
+    "detail": "nothing running",
+    "note": "waiting for a tailnet login",
+    "cores": "········",
+    "items": [
+      {
+        "id": "keep",
+        "label": "Keep lending",
+        "checked": true
+      },
+      {
+        "id": "wind",
+        "label": "Wind down",
+        "sub": "finish jobs, take no new ones",
+        "checked": false,
+        "args": [
+          "host",
+          "set",
+          "drain"
+        ]
+      },
+      {
+        "id": "stop",
+        "label": "Stop now",
+        "sub": "end jobs now",
+        "checked": false,
+        "args": [
+          "host",
+          "set",
+          "closed"
+        ]
+      }
+    ],
+    "windows": [
+      {
+        "id": "setup",
+        "label": "Set up and check…",
+        "sub": "what this Mac has, what it lacks, and the next step",
+        "checked": false,
+        "args": [
+          "--json",
+          "host",
+          "status",
+          "--probe"
+        ]
+      },
+      {
+        "id": "jobs",
+        "label": "Jobs this Mac ran…",
+        "sub": "when, how long, counts and electricity",
+        "checked": false,
+        "args": [
+          "--json",
+          "host",
+          "jobs"
+        ]
+      },
+      {
+        "id": "uninstall",
+        "label": "Uninstall Potluck…",
+        "sub": "shows what it would remove first, and asks",
+        "checked": false,
+        "args": [
+          "--json",
+          "uninstall",
+          "--dry-run"
+        ]
+      }
+    ]
+  },
+  "background": {
+    "state": "running",
+    "last": "join: waiting for a tailnet login"
+  },
+  "setup": {
+    "state": "running",
+    "stages": [
+      {
+        "name": "preflight",
+        "result": "succeeded",
+        "at": "2026-11-19T11:58:00Z"
+      },
+      {
+        "name": "images",
+        "result": "succeeded",
+        "at": "2026-11-19T11:58:00Z"
+      },
+      {
+        "name": "validation",
+        "result": "succeeded",
+        "at": "2026-11-19T11:58:00Z"
+      },
+      {
+        "name": "join",
+        "result": "running",
+        "detail": "waiting for a tailnet login",
+        "at": "2026-11-19T11:58:00Z",
+        "open_url": "https://login.example/a/1"
+      }
+    ],
+    "again_args": [
+      "host"
+    ],
+    "needs_invite": true,
+    "stage_order": [
+      {
+        "name": "preflight",
+        "label": "preflight"
+      },
+      {
+        "name": "images",
+        "label": "images"
+      },
+      {
+        "name": "validation",
+        "label": "validation"
+      },
+      {
+        "name": "join",
+        "label": "join"
+      },
+      {
+        "name": "capacity",
+        "label": "usable capacity"
+      }
+    ],
+    "checks": [
+      {
+        "id": "potluck",
+        "state": "done",
+        "detail": "Potluck v1.2.3 is installed"
+      },
+      {
+        "id": "daemon",
+        "state": "done",
+        "detail": "the Potluck daemon is running"
+      },
+      {
+        "id": "setup",
+        "state": "running",
+        "detail": "setting up now: [4/5] join: waiting for a tailnet login",
+        "action": "open this page and sign in for the setup to go on: https://login.example/a/1",
+        "do": {
+          "label": "Sign in to continue",
+          "url": "https://login.example/a/1"
+        }
+      },
+      {
+        "id": "lending",
+        "state": "todo",
+        "detail": "this machine shares no size with a pool yet"
+      },
+      {
+        "id": "menu",
+        "state": "done",
+        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck Menu.app)"
+      },
+      {
+        "id": "login",
+        "state": "unknown",
+        "detail": "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+      },
+      {
+        "id": "updates",
+        "state": "todo",
+        "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
+        "action": "potluck upgrade enable",
+        "do": {
+          "label": "Turn on the daily update",
+          "args": [
+            "--json",
+            "upgrade",
+            "enable"
+          ]
+        }
+      },
+      {
+        "id": "coverage",
+        "state": "info",
+        "detail": "the daily update covers Potluck itself only: to update the menu bar item, run its installer again (install-menu); Tart and Softnet are updated the way you installed them, and potluck doctor says which versions this Mac needs"
+      }
+    ],
+    "next": "open this page and sign in for the setup to go on: https://login.example/a/1",
+    "next_id": "setup"
+  }
+}

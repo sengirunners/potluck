@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -366,6 +367,15 @@ func TestQuickStartAcrossTwoMachines(t *testing.T) {
 	// B cannot stop sharing while A's sandbox runs there.
 	if o, e, code := b.run(t, "host", "stop"); code != 1 || !strings.Contains(e, "1 sandbox is still running on lender-c1m2: stop them first or pass --force") || strings.Contains(o, "no longer shared") {
 		t.Fatalf("host stop with a live sandbox: exit %d stdout %q stderr %q", code, o, e)
+	}
+	// So B's uninstall stops at its first step, naming what --force does.
+	newLender(t)
+	t.Setenv(EnvHome, b.home)
+	answer, words, code := softnetRunJSON(t, "uninstall", "--yes", "--no-sudo")
+	var un uninstallAnswer
+	if err := json.Unmarshal(answer, &un); code == 0 || err != nil || len(un.Done) != 0 || !strings.Contains(un.Error, "1 sandbox is still running") || un.Force == nil ||
+		!slices.Contains(un.Force.Args, "--force") || !strings.Contains(un.Force.Confirm, "sandboxes run") {
+		t.Fatalf("uninstall with a live sandbox: exit %d (%v): %s\n%s", code, err, answer, words)
 	}
 	if o := a.ok(t, "sandbox", "exec", id, "--", "cat", "note"); o != "hi\n" {
 		t.Fatalf("the sandbox is gone after a refused host stop: %q", o)

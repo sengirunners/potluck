@@ -261,7 +261,7 @@ Add Potluck to an MCP client's configuration:
 {"mcpServers":{"potluck":{"command":"potluck","args":["--pool","friends","mcp"]}}}
 ```
 
-Start the daemon and join or create the pool first. With one pool, `--pool` is optional.
+Start the daemon and join or create the pool first ([llms-install.md](llms-install.md) is the same setup, step by step, for an agent doing it for you). With one pool, `--pool` is optional.
 The server exposes only sandbox tools: create, execute, list, extend, stop, restart,
 delete, background processes and file reads/writes. Output from a sandbox is untrusted data.
 It uses `$POTLUCK_HOME` and your local identity; `POTLUCK_AS` (or `mcp --as`) selects a caller
@@ -271,7 +271,7 @@ All standard output is MCP protocol traffic.
 
 ### Claude Code plugin and Agent Skill
 
-[`skills/potluck/SKILL.md`](skills/potluck/SKILL.md) teaches a coding agent to set up Potluck and use its sandboxes.
+[`plugin/skills/potluck/SKILL.md`](plugin/skills/potluck/SKILL.md) teaches a coding agent to set up Potluck and use its sandboxes.
 In Claude Code, the plugin installs that skill and the MCP server together:
 
 ```text

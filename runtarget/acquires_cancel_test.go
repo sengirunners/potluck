@@ -345,11 +345,20 @@ func TestProgressAnswers(t *testing.T) {
 // TestCancelAnsweredHere: a cancel of an acquire still queued here counts
 // against the quota, and a repeat of a cancel that stood is answered
 // without the driver, so a caller cannot grow the driver's state past the
-// quota with either.
+// quota with either. While DIR/hold exists, an acquire's answer waits for
+// it: the reference driver ends an acquire within moments of its cancel,
+// and the daemon then forgets the key, so without the hold a repeat cancel
+// could find no acquire here and be counted against the full quota.
 func TestCancelAnsweredHere(t *testing.T) {
 	r := newCancelRig(t, map[string]rigDriver{
-		"box": {wrap: `*'"verb":"cancel"'*) echo x >> DIR/cancels; printf %s "$in" | exec REF ;;`},
+		"box": {wrap: `*'"verb":"cancel"'*) echo x >> DIR/cancels; printf %s "$in" | exec REF ;;
+*'"verb":"acquire"'*)
+	out=$(printf %s "$in" | REF); rc=$?
+	while [ -e DIR/hold ]; do sleep 0.02; done
+	printf '%s\n' "$out"; exit $rc ;;`},
 	})
+	hold := filepath.Join(r.fix, "box", "hold")
+	t.Cleanup(func() { os.Remove(hold) })   // a failed run leaves no acquire waiting
 	r.svc.SetAcquireLimit(30 * time.Second) // holder stays with the driver through every step below
 	ana := r.member("ana")
 	sent := func() int {
@@ -395,6 +404,9 @@ func TestCancelAnsweredHere(t *testing.T) {
 	}
 
 	r.closeGate(true)
+	if err := os.WriteFile(hold, nil, 0o600); err != nil { // first stays with the driver through its repeat cancels
+		t.Fatal(err)
+	}
 	first := r.start(r.ctx, ana, "box", "first")
 	r.waitFor("first booting", progress("first", "booting"))
 	before := sent()
@@ -405,6 +417,9 @@ func TestCancelAnsweredHere(t *testing.T) {
 	}
 	if n := sent() - before; n != 1 {
 		t.Errorf("3 cancels of one acquire with the driver sent it %d cancels, want 1", n)
+	}
+	if err := os.Remove(hold); err != nil {
+		t.Fatal(err)
 	}
 	r.closeGate(false)
 	if err := <-first; code(err) != api.CodeConflict {

@@ -28,6 +28,14 @@ die() {
 	exit 1
 }
 
+# tart_cli prints the Tart program Potluck itself runs on this Mac (`potluck tart path`, built from this
+# checkout), so the run finds Tart where Potluck does: on PATH, in the usual bin folders, or tart.app in
+# Applications.
+tart_cli() {
+	(cd "$HERE/../.." && go run ./cmd/potluck tart path) ||
+		die "the run needs Tart on this Mac (\`potluck tart install\` installs it)"
+}
+
 cleanup() {
 	run=$1
 	[ -f "$run/machine" ] || die "$run is not a stranger-test run directory"
@@ -48,17 +56,20 @@ cleanup() {
 			esac
 		done
 		if [ -d "$run/home/.tart/vms" ]; then
+			TART=$(tart_cli) || die "its VMs may still run, so nothing was deleted: $run"
 			for v in "$run"/home/.tart/vms/*; do
 				[ -d "$v" ] || continue
-				TART_HOME=$run/home/.tart timeout 60 tart stop "$(basename "$v")" 2>/dev/null || true
-				TART_HOME=$run/home/.tart timeout 60 tart delete "$(basename "$v")" || true
+				TART_HOME=$run/home/.tart timeout 60 "$TART" stop "$(basename "$v")" 2>/dev/null || true
+				TART_HOME=$run/home/.tart timeout 60 "$TART" delete "$(basename "$v")" || true
 			done
 		fi
 		rm -rf "$run/home/.tart"
 		;;
 	linux)
-		TART_HOME=$run/tart timeout 60 tart stop "$vm" 2>/dev/null || true
-		TART_HOME=$run/tart timeout 60 tart delete "$vm" || true
+		TART=$(cat "$run/tart-cli" 2>/dev/null || true) # what the run itself used
+		[ -x "$TART" ] || TART=$(tart_cli) || die "its VM may still run, so nothing was deleted: $run"
+		TART_HOME=$run/tart timeout 60 "$TART" stop "$vm" 2>/dev/null || true
+		TART_HOME=$run/tart timeout 60 "$TART" delete "$vm" || true
 		rm -rf "$run/tart"
 		;;
 	esac
@@ -117,31 +128,32 @@ SHIM
 
 setup_linux() {
 	run=$1
-	command -v tart >/dev/null || die "the Linux run needs Tart on this Mac"
+	TART=$(tart_cli)
+	echo "$TART" >"$run/tart-cli" # nc.sh runs the same one
 	# The VM's disk is sparse; the run fills about 15 GB of it (Docker and Potluck's box images).
 	preflight "$run" "${STRANGER_MIN_FREE_GB:-25}" no
-	if ! TART_HOME=$BASE_TART tart list --format json 2>/dev/null | grep -q "\"$UBUNTU\""; then
+	if ! TART_HOME=$BASE_TART "$TART" list --format json 2>/dev/null | grep -q "\"$UBUNTU\""; then
 		echo "pulling $UBUNTU once into $BASE_TART (about 3 GB)"
-		TART_HOME=$BASE_TART timeout 3600 tart pull "$UBUNTU"
+		TART_HOME=$BASE_TART timeout 3600 "$TART" pull "$UBUNTU"
 	fi
 	vm=stranger-$(date -u +%H%M%S)
 	mkdir -p "$run/tart"
 	# A clone from the cache, so the run's TART_HOME is its own and deleting it touches nothing else.
 	cp -c -R "$BASE_TART/." "$run/tart/" 2>/dev/null || cp -R "$BASE_TART/." "$run/tart/"
-	TART_HOME=$run/tart timeout 600 tart clone "$UBUNTU" "$vm"
+	TART_HOME=$run/tart timeout 600 "$TART" clone "$UBUNTU" "$vm"
 	# 8 GB by default: at Cirrus's 4 GB no sandbox size fits in the half Potluck shares (run linux-scripted-2).
-	TART_HOME=$run/tart timeout 60 tart set "$vm" --disk-size 60 --cpu "${STRANGER_LINUX_CPUS:-4}" --memory "${STRANGER_LINUX_MEMORY_MB:-8192}"
+	TART_HOME=$run/tart timeout 60 "$TART" set "$vm" --disk-size 60 --cpu "${STRANGER_LINUX_CPUS:-4}" --memory "${STRANGER_LINUX_MEMORY_MB:-8192}"
 	echo "linux $vm" >"$run/machine"
-	(TART_HOME=$run/tart tart run --no-graphics "$vm" >"$run/vm.log" 2>&1 &)
+	(TART_HOME=$run/tart "$TART" run --no-graphics "$vm" >"$run/vm.log" 2>&1 &)
 	for _ in $(seq 60); do
-		TART_HOME=$run/tart timeout 10 tart exec "$vm" true 2>/dev/null && break
+		TART_HOME=$run/tart timeout 10 "$TART" exec "$vm" true 2>/dev/null && break
 		sleep 5
 	done
-	TART_HOME=$run/tart timeout 10 tart exec "$vm" true || die "the VM did not answer tart exec in 5 minutes ($run/vm.log)"
-	TART_HOME=$run/tart tart exec "$vm" sh -c 'sudo growpart /dev/vda 1 >/dev/null 2>&1; sudo resize2fs /dev/vda1 >/dev/null 2>&1; true'
+	TART_HOME=$run/tart timeout 10 "$TART" exec "$vm" true || die "the VM did not answer tart exec in 5 minutes ($run/vm.log)"
+	TART_HOME=$run/tart "$TART" exec "$vm" sh -c 'sudo growpart /dev/vda 1 >/dev/null 2>&1; sudo resize2fs /dev/vda1 >/dev/null 2>&1; true'
 	{
 		echo "== host: a fresh Tart VM from $UBUNTU on $(sw_vers -productName) $(sw_vers -productVersion)"
-		TART_HOME=$run/tart tart exec "$vm" sh -c '. /etc/os-release; echo "== guest: $PRETTY_NAME, $(uname -m), $(nproc) cpus, $(free -m | awk "NR==2{print \$2}") MB RAM, $(df -h / | awk "NR==2{print \$4}") free"
+		TART_HOME=$run/tart "$TART" exec "$vm" sh -c '. /etc/os-release; echo "== guest: $PRETTY_NAME, $(uname -m), $(nproc) cpus, $(free -m | awk "NR==2{print \$2}") MB RAM, $(df -h / | awk "NR==2{print \$4}") free"
 			for c in docker potluck zm runsc kata-runtime go; do p=$(command -v $c); [ -n "$p" ] && echo "  already has $c: $p"; done; true'
 		echo "== the guest is Cirrus Labs' stock image: user admin with passwordless sudo, Tart's guest agent"
 	} >"$run/machine-before.txt"

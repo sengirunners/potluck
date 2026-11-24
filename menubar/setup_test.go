@@ -1,6 +1,7 @@
 package menubar
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,25 @@ func TestSetupBlockedMenuAndChecklistAgree(t *testing.T) {
 	}
 	if c := check(st.Setup, "setup"); !strings.Contains(c.Detail, "the last setup run was blocked at validation (3 of 5): conformance failed at boot; what was shared before still lends") {
 		t.Errorf("lending, re-run blocked, checklist: %+v", c)
+	}
+}
+
+// The run's again_args and needs_invite reach the setup view, and a join's
+// login page shows only while the run goes on: a cut-off run's is a page
+// nobody waits on.
+func TestSetupCarriesAgainArgsAndOpenURL(t *testing.T) {
+	const url = "https://login.example/a/1"
+	f := Facts{Cores: 8, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"}, Start: "potluck daemon --detach", Share: "potluck host"}
+	f.Setup.Run = &hostsetup.Run{Started: "x", Again: "potluck host '<invite code>' --no-sudo=true", AgainArgs: []string{"host", "--no-sudo=true"}, NeedsInvite: true,
+		Stages: append(stages(hostsetup.Preflight, hostsetup.Images, hostsetup.Validation), hostsetup.Stage{Name: hostsetup.Join, Result: hostsetup.Running, OpenURL: url})}
+	f.Setup.RunLive = true
+	st := Build(f)
+	if st.Setup.Stages[3].OpenURL != url || !slices.Equal(st.Setup.AgainArgs, []string{"host", "--no-sudo=true"}) || !st.Setup.NeedsInvite {
+		t.Errorf("running: %+v", st.Setup)
+	}
+	f.Setup.RunLive = false
+	if st := Build(f); st.Setup.State != SetupInterrupted || st.Setup.Stages[3].OpenURL != "" || f.Setup.Run.Stages[3].OpenURL != url {
+		t.Errorf("cut off: %s %+v (the record itself is left alone: %+v)", st.Setup.State, st.Setup.Stages, f.Setup.Run.Stages[3])
 	}
 }
 
@@ -178,5 +198,137 @@ func TestSetupChecklistOnAMac(t *testing.T) {
 	f.Daemon, f.Targets, f.Setup.Run = "", nil, nil
 	if st := Build(f); st.Setup.State != SetupNone || st.Setup.Next != "potluck host" || st.Menu.Title != "Not lending" {
 		t.Errorf("never set up: %s next %q %q", st.Setup.State, st.Setup.Next, st.Menu.Title)
+	}
+}
+
+// The app never reads a check's words to know what to run: every check
+// with an action has a do that says it, next_id names the check next is
+// from, and no do's arguments hold the invite (the app appends it).
+func TestEveryActionHasADo(t *testing.T) {
+	t.Cleanup(func() { now = time.Now })
+	cases := statusFixtures()
+	at := now()
+	base := cases["status-lending.json"]
+	add := func(name string, edit func(f *Facts)) {
+		f := base
+		f.Setup.Menu, f.Setup.Updates = &MenuApp{}, &Updates{}
+		if base.Setup.Run != nil {
+			r := *base.Setup.Run
+			f.Setup.Run = &r
+		}
+		edit(&f)
+		cases[name] = f
+	}
+	blocked := func(flag, fix string) *hostsetup.Run {
+		args := []string{"host"} // as hostsetup.End leaves it: with the fix, or unchanged when there is none
+		if fix != "" {
+			args = append(args, "--docker=false")
+		}
+		return &hostsetup.Run{Started: "x", Ended: "y", Again: "potluck host '<invite code>'", AgainArgs: args, NeedsInvite: true,
+			Stages: append(stages(hostsetup.Preflight), hostsetup.Stage{Name: hostsetup.Images, Result: hostsetup.Blocked, Detail: "no", Flag: flag, Fix: fix})}
+	}
+	add("never, no daemon", func(f *Facts) { f.Setup.Run, f.Daemon, f.Targets = nil, "down", nil })
+	add("never", func(f *Facts) { f.Setup.Run, f.Targets = nil, nil })
+	add("blocked by a flag", func(f *Facts) { f.Setup.Run, f.Targets = blocked("--docker", "with --docker=false"), nil })
+	add("blocked by a flag it keeps", func(f *Facts) { f.Setup.Run, f.Targets = blocked("--docker", ""), nil })
+	add("blocked", func(f *Facts) { f.Setup.Run, f.Targets = blocked("", ""), nil })
+	add("join on a page that is no login", func(f *Facts) {
+		f.Setup.Run, f.Setup.RunLive, f.Targets = &hostsetup.Run{Started: "x", Again: "potluck host trial",
+			Stages: []hostsetup.Stage{{Name: hostsetup.Join, Result: hostsetup.Running, OpenURL: "file:///etc/passwd"}}}, true, nil
+	})
+	add("interrupted", func(f *Facts) {
+		f.Setup.Run, f.Targets = &hostsetup.Run{Started: "x", Again: "potluck host trial", AgainArgs: []string{"host", "trial"}, Stages: stages(hostsetup.Preflight)}, nil
+	})
+	add("interrupted, run with --yes", func(f *Facts) {
+		f.Setup.Run, f.Targets = &hostsetup.Run{Started: "x", Again: "potluck host trial --yes", AgainArgs: []string{"host", "trial", "--yes=true"}, Stages: stages(hostsetup.Preflight)}, nil
+	})
+	add("old record", func(f *Facts) {
+		f.Setup.Run, f.Targets = &hostsetup.Run{Started: "x", Again: "potluck host trial", Stages: stages(hostsetup.Preflight)}, nil
+	})
+	add("succeeded, nothing shared", func(f *Facts) { f.Targets = nil })
+	add("unreadable", func(f *Facts) { f.Setup.Run, f.Setup.RunErr = nil, "bad json" })
+	add("menu installed", func(f *Facts) { f.Setup.Menu = &MenuApp{Path: "/Applications/Potluck Menu.app", Open: "open x"} })
+	add("menu stale", func(f *Facts) {
+		f.Setup.Menu = &MenuApp{Path: "/Applications/Potluck Menu.app", Open: "open x", Seen: at.Add(-time.Hour)}
+	})
+	add("updates not loaded", func(f *Facts) { f.Setup.Updates = &Updates{Enabled: true} })
+
+	ids := map[string]bool{}
+	for name, f := range cases {
+		s := Build(f).Setup
+		if len(s.StageOrder) != len(hostsetup.Order) {
+			t.Errorf("%s: stage_order %v", name, s.StageOrder)
+		}
+		for _, st := range s.Stages {
+			if st.OpenURL != "" && !strings.HasPrefix(st.OpenURL, "https://") {
+				t.Errorf("%s: stage %s opens %q", name, st.Name, st.OpenURL)
+			}
+		}
+		for _, c := range s.Checks {
+			if name == "blocked by a flag it keeps" && c.ID == "setup" { // running again fails the same way
+				if c.Action == "" || c.Do != nil {
+					t.Errorf("%s: %+v %+v", name, c, c.Do)
+				}
+				continue
+			}
+			if (c.Action != "") != (c.Do != nil) {
+				t.Errorf("%s: %s: action %q, do %+v", name, c.ID, c.Action, c.Do)
+				continue
+			}
+			if c.Do == nil {
+				continue
+			}
+			ids[c.ID] = true
+			n := 0
+			for _, set := range []bool{len(c.Do.Args) > 0, c.Do.URL != "", c.Do.App != ""} {
+				if set {
+					n++
+				}
+			}
+			if n != 1 || c.Do.Label == "" || c.Do.Invite && len(c.Do.Args) == 0 {
+				t.Errorf("%s: %s: do %+v", name, c.ID, c.Do)
+			}
+			for _, a := range c.Do.Args {
+				if strings.Contains(a, "invite code") {
+					t.Errorf("%s: %s: args hold the invite: %q", name, c.ID, c.Do.Args)
+				}
+			}
+		}
+		// next comes from next_id's check; next_id alone is a blocked check
+		// with no action.
+		if c := check(s, s.NextID); s.Next != "" && s.NextID == "" || s.NextID != "" && c.Action != s.Next ||
+			s.NextID != "" && s.Next == "" && c.State != Blocked {
+			t.Errorf("%s: next %q from %q", name, s.Next, s.NextID)
+		}
+	}
+	for _, id := range []string{"daemon", "setup", "lending", "menu", "updates"} {
+		if !ids[id] {
+			t.Errorf("no case gives %s a do", id)
+		}
+	}
+
+	// The setup button for each record.
+	for name, want := range map[string]string{
+		"never":                           "--json host --yes --no-sudo --detach -- +invite",
+		"blocked by a flag":               "--json host --docker=false --yes --no-sudo --detach -- +invite",
+		"interrupted":                     "--json host trial --yes --no-sudo --detach",
+		"interrupted, run with --yes":     "--json host trial --yes=true --no-sudo --detach",
+		"old record":                      "--json host --yes --no-sudo --detach -- +invite",
+		"join on a page that is no login": "",
+	} {
+		got := ""
+		d := check(Build(cases[name]).Setup, "setup").Do
+		if d != nil {
+			got = strings.Join(d.Args, " ")
+		}
+		if d != nil && d.Invite {
+			got += " +invite"
+		}
+		if got != want {
+			t.Errorf("%s: setup do %q, want %q", name, got, want)
+		}
+	}
+	if s := Build(cases["status-join-sign-in.json"]).Setup; s.NextID != "setup" || check(s, "setup").Do.URL != "https://login.example/a/1" {
+		t.Errorf("join: next_id %q, do %+v", s.NextID, check(s, "setup").Do)
 	}
 }

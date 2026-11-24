@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds Potluck Menu.app (docs/menubar.md) with Apple's swiftc: no packages.
+# Builds Potluck Menu.app (docs/menubar.md) with Apple's swiftc: no packages. Compiles every *.swift beside this script.
 # Usage: macos/PotluckMenu/build.sh [output dir, default ./dist]
 # POTLUCK_MENU_UNIVERSAL=1 builds arm64 and x86_64 and joins them (the release does); otherwise this Mac's own.
 # The app is signed ad hoc: enough to run on the Mac that built it, not a Developer ID signature (docs/menubar.md).
@@ -12,7 +12,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
 cp "$here/Info.plist" "$app/Contents/Info.plist"
 build() { # build ARCH OUTPUT
-	swiftc -O -target "$1-apple-macos13" -framework AppKit -o "$2" "$here/main.swift"
+	swiftc -O -target "$1-apple-macos13" -framework AppKit -o "$2" "$here"/*.swift
 }
 if [ "${POTLUCK_MENU_UNIVERSAL:-}" = 1 ]; then
 	tmp=$(mktemp -d)

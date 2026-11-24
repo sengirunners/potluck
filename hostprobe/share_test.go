@@ -328,6 +328,8 @@ func TestMain(m *testing.M) {
 	// Tests never probe this machine's real router or tailnet; withForward
 	// gives a test its targets.
 	forwardTargets = func() []string { return nil }
+	// Nor this Mac's Tart: a report with no Tart path runs plain "tart".
+	resolveTart = func() string { return "tart" }
 	os.Exit(m.Run())
 }
 

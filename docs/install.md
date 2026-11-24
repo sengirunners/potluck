@@ -101,6 +101,25 @@ If another unit or agent on the machine already runs `potluck upgrade`, `enable`
 `.prev` copies, the PATH line in your shell's startup file, the daily update job, the host override file, the home (`~/.potluck`) and, on a Mac, the managed Softnet. It prints its plan first and asks; `--dry-run` only prints. What it does, in order, and what
 it leaves for you to remove (Tart's images, Tailscale, the menu bar app) is in [lending.md](lending.md#pause-leave-and-remove-everything).
 
+On a Mac the managed Softnet's removal is a root step, which `uninstall` runs through sudo. An app without a
+terminal runs `potluck uninstall --yes --no-sudo --json` instead: it does the steps before the root step and stops
+there, answering
+
+```json
+{"done": ["stop sharing ..."], "admin_step": {"why": "...", "argv": ["/Users/you/.local/bin/potluck", "softnet", "uninstall", "--admin-step"]}, "left": ["remove the managed Softnet ...", "..."], "not_removed": ["..."]}
+```
+
+The app runs `argv` as root (see [softnet.md](softnet.md#without-a-terminal---no-sudo)) and runs the same
+uninstall again, which goes on to the end and answers with no `admin_step` and an empty `left`. Every step is safe
+to repeat. Without `--json` it says the root command in words. A step that fails exits non-zero with the same
+answer plus `"error"`, that step first in `left`; when `--force` would let it go on, also `"force"`, with a question
+to ask the person (`confirm`, `detail`) and the arguments to run (`args`).
+
+`potluck --json uninstall --dry-run` answers the plan and changes nothing: `left` is every step, `pools_run` the pools
+this machine runs, `warning` what removing the home loses for good, and `remove` the question to ask and the
+arguments that run the plan. Potluck Menu's uninstall window ([menubar.md](menubar.md#uninstall-potluck)) is drawn
+from it.
+
 ## From source
 
 ```sh

@@ -38,7 +38,7 @@ func TestManagedSoftnetWinsOverPATH(t *testing.T) {
 	if !l.Available || l.SoftnetPath != "/managed/current/softnet" || l.SoftnetBuild != softnet.Builds[0].ID {
 		t.Fatalf("layer %+v", l)
 	}
-	if w := strings.Join(l.Warnings, ";"); !strings.Contains(w, "the softnet first on PATH (/fake/softnet) is not the one they run") {
+	if w := strings.Join(l.Warnings, ";"); !strings.Contains(w, "the other softnet (/fake/softnet) is not the one they run") {
 		t.Fatalf("warnings %q", w)
 	}
 }
@@ -131,5 +131,43 @@ func TestAWithdrawnSoleManagedBuildIsAProblemWithItsReason(t *testing.T) {
 	p := strings.Join(l.Problems, ";")
 	if l.Available || !strings.Contains(p, "withdrawn: it lets a box reach the LAN") || !strings.Contains(p, "softnet uninstall") || strings.Contains(p, "is not for this Mac's macOS") {
 		t.Fatalf("problems %q", p)
+	}
+}
+
+// On macOS 26 the pinned upstream release, installed through the managed
+// store, is what Potluck pins for Tart, whatever softnet PATH finds first.
+func TestMacOS26UsesItsManagedUpstreamRelease(t *testing.T) {
+	b := softnet.For(26, "arm64").Build
+	if !b.UpstreamRelease {
+		t.Fatalf("macOS 26 has no pinned upstream release: %+v", b)
+	}
+	f := managedMac{mac(true), softnet.Status{Current: &softnet.Installed{ID: b.ID, Pinned: true}}}
+	run := managedRunner("26.1")
+	run.out["/managed/current/softnet --version"] = ok(b.Version + "\n")
+	l, _ := Detect(context.Background(), run, f, "/state").Layer("tart")
+	if !l.Available || l.SoftnetPath != "/managed/current/softnet" || l.SoftnetBuild != b.ID {
+		t.Fatalf("layer %+v", l)
+	}
+}
+
+// A managed upstream release withdrawn on macOS 26 is never pinned, even
+// with a sound softnet on PATH: it is a setuid file that must go.
+func TestMacOS26NeverPinsAWithdrawnUpstreamRelease(t *testing.T) {
+	b := softnet.For(26, "arm64").Build
+	old := softnet.Builds
+	t.Cleanup(func() { softnet.Builds = old })
+	softnet.Builds = nil
+	for _, p := range old {
+		if p.ID == b.ID {
+			p.Withdrawn = "test"
+		}
+		softnet.Builds = append(softnet.Builds, p)
+	}
+	f := managedMac{mac(true), softnet.Status{Current: &softnet.Installed{ID: b.ID, Problem: "Softnet " + b.ID + " is withdrawn: test"}}}
+	run := managedRunner("26.1")
+	run.out[softnetProbeLine("/fake/softnet")] = ok("")
+	l, _ := Detect(context.Background(), run, f, "/state").Layer("tart")
+	if l.Available || l.SoftnetPath == "/managed/current/softnet" || !strings.Contains(strings.Join(l.Problems, ";"), "is withdrawn") {
+		t.Fatalf("layer %+v", l)
 	}
 }

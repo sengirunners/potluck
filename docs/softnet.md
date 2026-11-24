@@ -12,7 +12,7 @@ read it.
 
 | macOS | Softnet |
 | --- | --- |
-| 26 or newer | the [latest upstream release](https://github.com/openai/softnet/releases/latest), 0.25.0 or newer |
+| 26 or newer | upstream's release `0.26.0`, through `potluck softnet install`; or an upstream release 0.25.0 or newer you set up yourself, owned by root and setuid |
 | 15 | Potluck's build `0.23.0-potluck-pr227-candidate.1`, through `potluck softnet install` |
 | 14 and older | none that enforces Potluck's rules: this Mac cannot lend isolated boxes |
 
@@ -21,7 +21,15 @@ macOS 26. Potluck's macOS 15 build is upstream 0.23.0 with upstream's rule chang
 ([openai/softnet#227](https://github.com/openai/softnet/pull/227)) carried onto it, using only vmnet calls macOS
 15 has.
 
-That build is a **candidate**: it has not yet passed Potluck's isolation checks on a real macOS 15 Mac. Until it
+On macOS 26 or newer, Potluck pins upstream's own release, unchanged: the `softnet.tar.gz` asset of
+[0.26.0](https://github.com/openai/softnet/releases/tag/0.26.0), by the archive's size and SHA-256 (the same
+SHA-256 upstream publishes in `softnet_0.26.0_checksums.txt`) and the executable's. It is the Softnet these Macs
+were already sent to, so it needs no `--candidate`. A Softnet you set up yourself from upstream's releases, owned by
+root and setuid, keeps working: Potluck's boxes use the managed copy only when one is installed, else the
+`softnet` on PATH or, with none there, in `/opt/homebrew/bin` or `/usr/local/bin`, and `potluck host` still offers the `chown`/`chmod` root step for one that is not yet root
+owned.
+
+The macOS 15 build is a **candidate**: it has not yet passed Potluck's isolation checks on a real macOS 15 Mac. Until it
 does, preflight does not tell people to install it, and `potluck softnet install` needs `--candidate`. A Mac that
 installs it still runs every preflight check before it lends.
 
@@ -41,9 +49,11 @@ Run them as yourself, not with sudo. `install`:
 
 1. checks this is an Apple-silicon Mac on a macOS that has a build, and that Tart is installed and has the run
    options Potluck boots a box with;
-2. downloads the build (or reads `--from`) and checks its size and SHA-256 against the build this potluck pins
-   (`softnet.Builds`). A potluck from a signed release carries those pins, so a file from anywhere is accepted
-   only if it is that exact build;
+2. downloads the build (or reads `--from`, which is the executable itself) and checks its size and SHA-256 against
+   the build this potluck pins (`softnet.Builds`). A build published as an archive (upstream's `softnet.tar.gz`)
+   is checked against the archive's pinned size and SHA-256 before anything in it is read; then only its
+   `softnet` file is taken, and checked the same way. A potluck from a signed release carries those pins, so a
+   file from anywhere is accepted only if it is that exact build;
 3. runs the admin step through `sudo -k`, which asks for your Mac password (always: a recent sudo sign-in is not
    reused). As root it copies the file into a
    private directory (never reading the original again), checks the copy's SHA-256 again, makes it owned by root
@@ -66,6 +76,27 @@ before it starts it, so no isolated box starts on a withdrawn build; preflight n
 has another build, `install` puts it in use and the withdrawn copy is disarmed and removed; when it has none,
 preflight refuses to lend until the withdrawn copy is removed with `potluck softnet uninstall` (it is still a
 setuid root file).
+
+### Without a terminal: `--no-sudo`
+
+An app has no terminal for sudo to ask on, so it runs the root step itself, through macOS's administrator
+password dialog. `install`, `rollback` and `uninstall` take `--no-sudo`: each does its part as you (for `install`,
+the checks above and the download), then, in place of running sudo, says the root command and exits 0. With
+`--json` the answer is data:
+
+```json
+{"admin_step": {"why": "The admin step installs Softnet ...", "argv": ["/Users/you/.local/bin/potluck", "softnet", "install", "--admin-step", "--from", "/Users/you/Library/Caches/potluck/softnet/softnet-<build>-darwin-arm64"]}}
+```
+
+`argv[0]` is the absolute path of this potluck program. Run `argv` as root as a list of words: an app that hands it
+to a shell (AppleScript's `do shell script ... with administrator privileges`) must quote every word. `why` is for
+the person, in plain words; the other lines go to stderr. A command that needed no root step answers `{}`.
+
+`install --no-sudo` keeps the download in your cache directory (`~/Library/Caches/potluck/softnet`), since the
+root step runs after the command has ended. The root step trusts nothing from that file but its bytes: as root it
+checks that it runs as root, copies the file and checks the copy's size and SHA-256 against the pinned build, as
+above. Run `install` again after the root step: with the build in use it says nothing to do, checks which Softnet
+the boxes run, and removes the kept download.
 
 Nothing outside the managed directory changes. Another `softnet` on PATH (Homebrew's, or one in
 `/usr/local/bin`) stays where it is; Potluck's boxes use the managed copy, and preflight warns that the one on
@@ -90,9 +121,11 @@ effect for the next box. Run `potluck host` after the first install so a Mac tha
 
 To remove it: `potluck softnet uninstall`. A box already running keeps its Softnet process. A Mac that lends still
 pins the removed path, so its isolated boxes do not start until `potluck host` runs again and pins the `softnet`
-on PATH (if one passes its checks). On a Mac upgraded to a macOS that upstream Softnet covers, preflight stops
-using the managed copy and warns that it is not for this macOS: install upstream's release, remove the managed
-copy the same way, and run `potluck host` again.
+on PATH (if one passes its checks). On a Mac upgraded from macOS 15 to 26 or newer, preflight stops using the managed
+macOS 15 build, warns that it is not for this macOS and checks the `softnet` on PATH instead (a release you set up
+yourself). Run `potluck softnet install` to put the upstream release in use (the macOS 15 build is kept as the
+previous one, which `rollback` refuses on this macOS), or remove the managed copy with `potluck softnet uninstall`;
+then `potluck host` again.
 
 ## Updates
 
@@ -106,11 +139,19 @@ the command: run `potluck softnet install` to update. The build in use keeps wor
 Softnet is under the Functional Source License 1.1, ALv2 Future License (FSL-1.1-ALv2, copyright OpenAI), not
 Potluck's Apache-2.0. Its text is `softnet/UPSTREAM-LICENSE`; it is installed beside every build and published
 with it. Each build's source (upstream commit, the change carried onto it, the commit and tree built, the build
-recipe) is in `softnet.Builds` and in the `provenance.json` beside it.
+recipe) is in `softnet.Builds` and in the `provenance.json` beside it. The upstream release Potluck pins for macOS
+26 and newer is under the same license: the `LICENSE` in its archive is byte for byte `softnet/UPSTREAM-LICENSE`,
+the copy an install places beside it. Potluck does not republish it; `install` downloads it
+from upstream's release.
 
 ## Publishing a build
 
-Publishing a build is an owner's decision (it distributes third-party code under its license). The steps:
+An upstream release (`UpstreamRelease`) is published by upstream; pinning a newer one is step 1 alone: its
+release asset's URL, the archive's size and SHA-256 (computed from the downloaded file and compared with
+upstream's checksums file), the executable's size, SHA-256 and exact `--version`, and its source commit and tree.
+Add it before the release it replaces, so `softnet.For` offers it first. Steps 2 and 3 are for Potluck's own builds.
+
+Publishing a build of Potluck's own is an owner's decision (it distributes third-party code under its license). The steps:
 
 1. **Pin it.** Add the build to `softnet.Builds` (ID, the exact `--version`, SHA-256, size, the macOS versions
    it covers, its source) and merge. `Validated` stays false until real-Mac validation passes; then a second

@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -70,6 +71,64 @@ func TestPortBinaryEOFAndClose(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A peer may stop reading for longer than any one guest call lasts. An upload
+// waits instead of failing, and a close right after the last write still
+// delivers every acknowledged byte. The kernel buffers about two pages here, so
+// three pages end with one page held in the guest when Close runs, and sixteen
+// keep later pages waiting until the peer reads again.
+func TestPortWriteOutlastsPausedPeer(t *testing.T) {
+	for _, pages := range []int{3, 16} {
+		t.Run(strconv.Itoa(pages)+" pages", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			payload := bytes.Repeat([]byte{7, 0, 255, 9}, pages*protocol.PortPage/4)
+			received := make(chan []byte, 1)
+			go func() {
+				c, err := listener.Accept()
+				if err != nil {
+					received <- nil
+					return
+				}
+				defer c.Close()
+				c.SetDeadline(time.Now().Add(40 * time.Second))
+				c.(*net.TCPConn).SetReadBuffer(32768)
+				time.Sleep(9 * time.Second) // longer than a guest call's 6 s alarm
+				b, _ := io.ReadAll(c)
+				received <- b
+			}()
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+			defer cancel()
+			call := func(ctx context.Context, req protocol.PortRequest) (protocol.PortResult, error) {
+				return boxport.Exchange(ctx, req, time.Now().Add(60*time.Second), func(in io.Reader, out, errout io.Writer, argv ...string) *exec.Cmd {
+					cmd := exec.Command(argv[0], argv[1:]...)
+					cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, errout
+					cmd.Env = append(os.Environ(), "HOME="+dir, "TMPDIR="+dir)
+					return cmd
+				})
+			}
+			c, err := portstream.Dial(ctx, listener.Addr().(*net.TCPAddr).Port, call)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n, err := c.Write(payload); err != nil || n != len(payload) {
+				t.Fatalf("upload to a paused peer: %d bytes: %v", n, err)
+			}
+			if err := c.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-received; !bytes.Equal(got, payload) {
+				t.Fatalf("peer received %d of %d bytes, or changed bytes", len(got), len(payload))
+			}
+		})
+	}
+}
+
 func TestPortRejectsBeforeCommand(t *testing.T) {
 	for _, req := range []protocol.PortRequest{{Op: "open", Port: 0}, {Op: "open", Port: 65536}, {Op: "read", Stream: "../../host"}, {Op: "write", Stream: "012345678901234567890123456789012345678901234567", Data: make([]byte, protocol.PortPage+1)}, {Op: "connect", Port: 80}} {
 		_, err := boxport.Exchange(context.Background(), req, time.Now().Add(time.Minute), func(io.Reader, io.Writer, io.Writer, ...string) *exec.Cmd {
@@ -98,6 +157,9 @@ func TestPortOpposingLargeTransfers(t *testing.T) {
 	}
 	defer listener.Close()
 	payload := bytes.Repeat([]byte{0, 255, 128, 42}, 512<<10)
+	// The deadlines below only catch a hang: the transfer takes about 2 s, and
+	// on a loaded host each guest call is slower, so it can take several times
+	// that without anything being wrong.
 	peerDone := make(chan error, 1)
 	go func() {
 		c, err := listener.Accept()
@@ -106,7 +168,7 @@ func TestPortOpposingLargeTransfers(t *testing.T) {
 			return
 		}
 		defer c.Close()
-		c.SetDeadline(time.Now().Add(12 * time.Second))
+		c.SetDeadline(time.Now().Add(40 * time.Second))
 		tcp := c.(*net.TCPConn)
 		tcp.SetReadBuffer(32768)
 		tcp.SetWriteBuffer(32768)
@@ -121,10 +183,10 @@ func TestPortOpposingLargeTransfers(t *testing.T) {
 		}
 		peerDone <- err
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 	call := func(ctx context.Context, req protocol.PortRequest) (protocol.PortResult, error) {
-		return boxport.Exchange(ctx, req, time.Now().Add(15*time.Second), func(in io.Reader, out, errout io.Writer, argv ...string) *exec.Cmd {
+		return boxport.Exchange(ctx, req, time.Now().Add(60*time.Second), func(in io.Reader, out, errout io.Writer, argv ...string) *exec.Cmd {
 			cmd := exec.Command(argv[0], argv[1:]...)
 			cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, errout
 			cmd.Env = append(os.Environ(), "TMPDIR="+dir)

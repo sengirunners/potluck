@@ -2,7 +2,7 @@
   "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "Potluck",
   "description": "Self-hosted sandboxes for coding agents and GitHub Actions runners on a team's idle Macs and Linux boxes: each job in a fresh VM or sandbox.",
-  "folders": ["docs", "skills", "cmd/potluck-driver-tart"],
+  "folders": ["docs", "plugin/skills", "cmd/potluck-driver-tart"],
   "excludeFolders": ["docs/design", "docs/img"],
   "excludeFiles": ["public-sync.md", "release-keys.md", "coming-from-zm.md", "layout.md"],
   "rules": [

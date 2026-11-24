@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"time"
 
@@ -54,38 +53,76 @@ var (
 		}
 		return append(dirs, "/Applications")
 	}
+	// probeMac reads this Mac's preflight part by part (host status
+	// --probe).
+	probeMac = func(ctx context.Context) hostprobe.MacParts {
+		return hostprobe.CheckMacSetup(ctx, hostprobe.ExecRunner{WaitDelay: time.Second}, hostprobe.SystemFacts{})
+	}
 )
 
-// inviteWord stands for the invite code in the command that runs a setup
-// again.
-const inviteWord = "'<invite code>'"
+// EnvBundledRelease names a signed release's directory (manifest.json, its
+// signature and the tarballs) that the Mac app carries: when this program
+// does not run from the install directory, the setup checklist's first
+// step installs it from there.
+const EnvBundledRelease = "POTLUCK_BUNDLED_RELEASE"
+
+// installDir is where the installer puts Potluck: $POTLUCK_INSTALL_DIR,
+// else ~/.local/bin (install.sh), symlinks resolved ("" when no home).
+func installDir() string {
+	d := os.Getenv("POTLUCK_INSTALL_DIR")
+	if d == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		d = filepath.Join(h, ".local", "bin")
+	}
+	d, err := filepath.Abs(d)
+	if err != nil {
+		return ""
+	}
+	if r, err := filepath.EvalSymlinks(d); err == nil {
+		d = r
+	}
+	return d
+}
 
 // startSetup begins home's setup record for this host run of arg (an invite
 // code, which is never written, or a pool), and says preflight began.
 // background is a run another one started (host --detach), whose --no-sudo
 // is that run's, not the owner's.
 func (a *app) startSetup(cmd *cobra.Command, o *hostprobe.ShareOptions, home, arg string, background bool) *hostsetup.Tracker {
-	word, redact := arg, ""
+	again := hostsetup.Command{Prefix: a.cmd("host"), Path: hostPath(cmd), Pool: arg}
+	redact := ""
 	if project.LooksLikeJoinCode(arg) {
-		word, redact = inviteWord, arg
+		again.Pool, redact = "", arg
 	}
-	skip := []string{"detach", "json"}
+	// The pool (or invite) is the command's argument, whichever flag gave it.
+	skip := []string{"detach", "json", "pool"}
 	if background {
 		skip = append(skip, "no-sudo")
 	}
-	again := a.cmd("host "+word) + shareFlagArgs(cmd, skip...)
+	again.Flags = givenFlags(cmd, skip...)
 	st := hostsetup.Start(home, again, redact)
-	st.SetFlagArgs(func(name string) string {
-		if slices.Contains(skip, name) {
-			return ""
-		}
-		return givenFlagArgs(cmd, name)
-	})
 	o.Stages = st
 	if o.Progress != nil {
 		o.Progress(st.Begin(hostsetup.Preflight, "checking this machine before any download"))
 	}
 	return st
+}
+
+// hostPath is the host command's path below the program's root (["host"]),
+// for cmd or the old spelling below it (host share), which takes no argument:
+// the command that runs a setup again is always host.
+func hostPath(cmd *cobra.Command) []string {
+	c := cmd
+	for c.Name() != "host" && c.HasParent() {
+		c = c.Parent()
+	}
+	if c.Name() != "host" {
+		c = cmd
+	}
+	return strings.Fields(c.CommandPath())[1:]
 }
 
 // endSetup ends the record with the run's error and says, beside the
@@ -176,8 +213,18 @@ func (a *app) setupFacts() menubar.SetupFacts {
 		}
 		s.Run, s.RunLive = r, hostBusy(home)
 	}
+	s.SoftnetInstall, s.SoftnetUninstall = a.cmd("softnet install"), a.cmd("softnet uninstall")
 	if !a.own { // a program that mounts Potluck installs and updates itself its own way
 		return s
+	}
+	if rel, err := filepath.Abs(os.Getenv(EnvBundledRelease)); os.Getenv(EnvBundledRelease) != "" && err == nil {
+		if exe, err := executable(); err == nil {
+			if r, err := filepath.EvalSymlinks(exe); err == nil {
+				exe = r
+			}
+			s.Exe, s.InstallDir, s.BundledRelease = exe, installDir(), rel
+			s.InstallBundled = a.cmd("upgrade") + " --release " + shellQuote(rel) + " --dir " + shellQuote(s.InstallDir)
+		}
 	}
 	if setupGOOS == "darwin" {
 		s.Menu = menuApp(home)
@@ -193,15 +240,17 @@ type menuSeen struct {
 }
 
 // noteMenuSeen notes in home that the menu bar item asked for this status
-// now, when the program that started this one is the app.
+// now, when the program that started this one is the app. It never makes the
+// home: the app still asks after an uninstall removed it, and a home with
+// only this note in it is none that anything uses.
 func noteMenuSeen(home string) {
 	app := menuAppOf(menuParent())
-	if app == "" || home == "" {
+	if app == "" || home == "" || !isDir(home) {
 		return
 	}
 	b, _ := json.Marshal(menuSeen{App: app, At: time.Now().UTC().Format(time.RFC3339)})
 	tmp := filepath.Join(home, "."+menuSeenName+".new")
-	if os.MkdirAll(home, 0o700) == nil && os.WriteFile(tmp, b, 0o600) == nil {
+	if os.WriteFile(tmp, b, 0o600) == nil {
 		_ = os.Rename(tmp, filepath.Join(home, menuSeenName))
 	}
 }
@@ -218,8 +267,8 @@ func menuAppOf(exe string) string {
 	return app
 }
 
-// menuApp is the menu bar item: where it is installed (the one that last
-// asked, else the first of menuAppDirs), and when it last asked.
+// menuApp is the menu bar item: where it is installed (the one that asks
+// now or last asked, else the first of menuAppDirs), and when it last asked.
 func menuApp(home string) *menubar.MenuApp {
 	m := &menubar.MenuApp{}
 	if b, err := os.ReadFile(filepath.Join(home, menuSeenName)); err == nil {
@@ -228,6 +277,9 @@ func menuApp(home string) *menubar.MenuApp {
 			m.Path = s.App
 			m.Seen, _ = time.Parse(time.RFC3339, s.At)
 		}
+	}
+	if app := menuAppOf(menuParent()); app != "" { // no home may be there to have noted it in
+		m.Path, m.Seen = app, time.Now().UTC()
 	}
 	for _, d := range menuAppDirs() {
 		if p := filepath.Join(d, "Potluck Menu.app"); m.Path == "" && isDir(p) {
@@ -271,9 +323,12 @@ func (a *app) printSetup(s menubar.Setup) {
 	for _, c := range s.Checks {
 		lines = append(lines, fmt.Sprintf("  %-8s %s", c.State, c.Detail))
 	}
-	if s.Next != "" {
+	switch {
+	case s.Next != "":
 		lines = append(lines, "next: "+s.Next)
-	} else {
+	case s.NextID != "": // blocked with nothing Potluck runs to fix it
+		lines = append(lines, "next: what the "+s.NextID+" line says (Potluck has no command for it)")
+	default:
 		lines = append(lines, "next: nothing Potluck can check is left to set up")
 	}
 	a.say("%s", strings.Join(lines, "\n"))

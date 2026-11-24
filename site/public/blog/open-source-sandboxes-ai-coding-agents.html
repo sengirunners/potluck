@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Source Sandbox for AI Coding Agents (2026) | Potluck</title>
+<meta name="description" content="What Claude Code's Bash sandbox isolates, what it leaves out, and open-source sandboxes for AI coding agents you can run on your own hardware in 2026.">
+<link rel="canonical" href="https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Open Source Sandbox for AI Coding Agents (2026) | Potluck">
+<meta property="og:description" content="What Claude Code's Bash sandbox isolates, what it leaves out, and open-source sandboxes for AI coding agents you can run on your own hardware in 2026.">
+<meta property="og:url" content="https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents">
+<meta property="og:image" content="https://potluck.sh/og/blog/open-source-sandboxes-ai-coding-agents.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Open source sandbox for AI coding agents, self-hosted (2026): Claude Code sandboxing and your own hardware">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Open Source Sandbox for AI Coding Agents (2026) | Potluck">
+<meta name="twitter:description" content="What Claude Code's Bash sandbox isolates, what it leaves out, and open-source sandboxes for AI coding agents you can run on your own hardware in 2026.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/open-source-sandboxes-ai-coding-agents.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/open-source-sandboxes-ai-coding-agents.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents#post","mainEntityOfPage":"https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents","url":"https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents","headline":"Open source sandbox for AI coding agents, self-hosted (2026): Claude Code sandboxing and your own hardware","description":"What Claude Code's Bash sandbox isolates, what it leaves out, and open-source sandboxes for AI coding agents you can run on your own hardware in 2026.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"open source sandbox for AI coding agents self-hosted, Claude Code sandboxing docs, Claude Code sandboxing bash filesystem network isolation, what is an open source sandbox for AI coding agents I can run on my own hardware, how do I run Claude Code in a sandbox on my own computer","image":"https://potluck.sh/og/blog/open-source-sandboxes-ai-coding-agents.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Open source sandbox for AI coding agents, self-hosted (2026): Claude Code sandboxing and your own hardware","item":"https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Open source sandbox for AI coding agents, self-hosted (2026): Claude Code sandboxing and your own hardware</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer:</strong> In November 2026 you have two layers to choose from. The first is the sandbox built into Claude Code. It is off by default; you turn it on with <code>/sandbox</code>. It confines only the shell commands Claude runs: writes are limited to the working directory, and network access goes through a proxy that checks each host against an allowlist. The second layer puts the whole agent, or the commands it runs, inside a container or VM. Open-source tools for that second layer include Anthropic's sandbox runtime, OpenSandbox (Apache-2.0, on Docker or Kubernetes) and Potluck (Apache-2.0, free, early). Potluck runs each sandbox in a fresh VM or sandbox on Macs and Linux boxes your team already owns. Potluck is made by Sengi, which sells hosted GitHub Actions runners; Potluck itself is a separate free project.</p>
+<h2 id="the-options-compared">The options compared</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>What it isolates</th><th>Where it runs</th><th>Open source</th><th>Where it costs more or needs more work</th></tr></thead>
+<tbody>
+<tr><td>Claude Code Bash sandbox</td><td>Shell commands and their child processes</td><td>Your own machine: Seatbelt on macOS, bubblewrap on Linux and WSL2</td><td>Built on Anthropic's open-source sandbox runtime</td><td>File tools, MCP servers and hooks run outside it; reads most of your disk by default</td></tr>
+<tr><td>Anthropic sandbox runtime around the whole process</td><td>The Claude Code process itself</td><td>Your own machine</td><td>Yes</td><td>You write and maintain the filesystem and network policy</td></tr>
+<tr><td>Dev container or local VM</td><td>Everything inside the container or VM</td><td>Your own machine</td><td>Depends on the tool</td><td>Uses your laptop's cores and RAM; setup per project</td></tr>
+<tr><td>OpenSandbox</td><td>Agent commands, code interpreters, browsers</td><td>Your servers on Docker or Kubernetes; gVisor, Kata or Firecracker</td><td>Yes, Apache-2.0</td><td>You run and scale the servers</td></tr>
+<tr><td>E2B, Daytona</td><td>Agent code in hosted sandboxes</td><td>The vendor's cloud, with an open-source core</td><td>Partly</td><td>Pay as you go; code runs on someone else's machines</td></tr>
+<tr><td>Potluck</td><td>Each job in a fresh VM or sandbox</td><td>Spare Macs (Tart) and Linux boxes (Docker or Podman with Kata or gVisor) on your team</td><td>Yes, Apache-2.0</td><td>Early; the host machine can read what runs on it</td></tr>
+</tbody>
+</table></div>
+<p>The hosted services do well when you want no machines to look after. The self-hosted options do well when you already have hardware and want code to stay on it.</p>
+<h2 id="what-the-claude-code-sandbox-restricts">What the Claude Code sandbox restricts</h2>
+<p>Anthropic's Claude Code documentation describes the Bash sandbox as a boundary that the operating system enforces around shell commands. On macOS it uses Seatbelt, which ships with the system. On Linux and WSL2 it needs bubblewrap and socat from your package manager. On native Windows, commands run unsandboxed, so the docs point Windows users to WSL2.</p>
+<p>With it on, by default:</p>
+<ul>
+<li><strong>Writes</strong> go only to the working directory, a per-user temp directory and directories you added. Claude Code's own settings, hooks directories and shell startup files stay write-protected.</li>
+<li><strong>Reads</strong> cover most of the machine, including <code>~/.ssh</code> and <code>~/.aws/credentials</code>. You close that with <code>sandbox.filesystem.denyRead</code> or the <code>sandbox.credentials</code> block.</li>
+<li><strong>Network</strong> has no direct route out. Traffic goes through a local proxy that checks each hostname against <code>allowedDomains</code>, which starts empty. Tools that ignore proxy variables, such as plain <code>ssh</code> and most database drivers, cannot connect at all.</li>
+<li><strong>Environment variables</strong> are inherited, secrets included, unless you deny or mask them.</li>
+</ul>
+<p>To turn it on, run <code>/sandbox</code> in a session and pick auto-allow or regular permissions. To turn it on everywhere, set <code>sandbox.enabled</code> to <code>true</code> in <code>~/.claude/settings.json</code>. To check it works, ask Claude (not the <code>!</code> prompt) to run <code>touch ~/sandbox-probe</code>; inside the sandbox it should fail.</p>
+<h2 id="what-runs-outside-it">What runs outside it</h2>
+<p>This is the part people miss. The Claude Code docs list what the Bash sandbox does not cover:</p>
+<ul>
+<li>The built-in Read, Edit, Write, WebFetch and WebSearch tools, which follow permission rules instead.</li>
+<li>Hooks, local MCP servers, LSP servers and helper commands, which run with your full access.</li>
+<li>Commands you type yourself at the <code>!</code> prompt, in most sessions.</li>
+<li>Commands matched by <code>excludedCommands</code>, and commands Claude retries unsandboxed after a failure. Setting <code>allowUnsandboxedCommands</code> to <code>false</code> turns that retry off.</li>
+</ul>
+<p>The docs also say plainly that the sandbox reduces risk but is not a complete isolation boundary, and that the proxy does not inspect TLS by default. Their advice for putting everything behind one boundary is to run the Claude Code process itself in a container, a VM or the sandbox runtime.</p>
+<p>Some common tools also fail inside it: <code>docker</code>, jest with watchman, and on Linux, Chromium and rootless Podman. Each workaround gives up some isolation.</p>
+<h2 id="how-to-run-claude-code-in-a-sandbox-on-your-own-computer">How to run Claude Code in a sandbox on your own computer</h2>
+<p>Pick by what you want to protect:</p>
+<ol>
+<li><strong>Protect your files and network from stray shell commands.</strong> Turn on <code>/sandbox</code>, deny reads of credential paths, keep <code>allowedDomains</code> short, and turn off unsandboxed retries. This costs nothing and stays on your laptop.</li>
+<li><strong>Protect your whole machine from the agent.</strong> Run Claude Code inside a dev container, a local VM or the sandbox runtime. Everything the agent starts is inside the boundary, but it shares your laptop's CPU and memory.</li>
+<li><strong>Keep the agent's commands off your laptop entirely.</strong> Send the commands to a throwaway sandbox on another machine. This is where OpenSandbox, the hosted services and Potluck sit.</li>
+</ol>
+<p>Many teams do 1 and 3 together: the built-in sandbox for local work, and a separate box for builds, tests and anything that needs network access you would not grant on your own machine.</p>
+<h2 id="open-source-self-hosted-sandboxes-for-ai-coding-agents">Open-source, self-hosted sandboxes for AI coding agents</h2>
+<p><strong>OpenSandbox</strong> manages the sandbox lifecycle (start, monitor, pause, terminate) on Docker for local testing and Kubernetes for production. It ships SDKs in several languages, lets you choose gVisor, Kata Containers or Firecracker for isolation, and has an MCP server so Claude Code or Cursor can call it. You run and scale the servers yourself.</p>
+<p><strong>Anthropic's sandbox runtime</strong> is the open-source package the Claude Code sandbox is built on. You can use it on its own to wrap the whole Claude Code process on one machine.</p>
+<p><strong>Potluck</strong> takes a different angle: it does not ship its own sandbox runtime. It drives Tart on Apple silicon Macs, and Docker or Podman with Kata or gVisor on Linux (Incus is also supported), and it pools the idle machines a team already owns. Each job gets a fresh VM or sandbox. It runs without Sengi and without a Sengi account. It is not a hosted cloud and not a scheduler for clusters.</p>
+<p>What Potluck does for agents today:</p>
+<ul>
+<li><code>potluck --pool friends mcp</code> runs an MCP server that exposes sandbox tools to an agent, so Claude Code can run commands in a pooled sandbox instead of on your laptop. More in <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a>.</li>
+<li><code>potluck agent-runner</code> runs a coding-agent vendor's self-hosted runners in fresh sandboxes.</li>
+<li>On the OCI layer the default is no network at all, and <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet.</li>
+</ul>
+<p>What to know before you use it:</p>
+<ul>
+<li>The machine that runs a VM can read everything in it, secrets included. The machine that runs a pool can read commands and output passing through it. Join only a pool whose owner you trust.</li>
+<li>A Mac sandbox ends when its owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.</li>
+<li>Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac (Potluck facts). Lending them to your team is fine; selling Mac time to the public is not. This is not legal advice.</li>
+</ul>
+<p>See <a href="/agent-sandbox">the agent sandbox page</a> and <a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">run coding agents in a sandbox on your own machines</a> for more.</p>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install on macOS or Linux (no Go needed) and start the daemon:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>On the machine that will run the pool:</p>
+<pre><code>potluck create friends
+potluck invite ana
+potluck invite carl --host
+</code></pre>
+<p>The first <code>create</code> prints a Tailscale login URL. Machines reach each other over Tailscale, or over a tunnel you configure. Ana runs <code>potluck join '&lt;code&gt;'</code> to use sandboxes. Carl first checks his spare box with <code>potluck doctor</code> and <code>potluck host --dry-run</code>, then runs <code>potluck host '&lt;code&gt;'</code>. That checks the machine, pulls the image, runs a quick conformance check per size, and joins only when a size passes. By default <code>--share</code> is 0.5, so half the cores and RAM are shared (Potluck facts). <code>potluck host stop</code> ends sharing.</p>
+<p>A worked example from Ana's laptop:</p>
+<pre><code>potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>To hand the pool to Claude Code, register <code>potluck --pool friends mcp</code> as an MCP server. For Mac specifics, see <a href="/tart">Tart</a>; for spreading work over several boxes, see <a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">pool spare Macs and Linux boxes</a>.</p>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="is-the-claude-code-sandbox-on-by-default">Is the Claude Code sandbox on by default?</h3>
+<p>No. Anthropic's docs say it is off until you run <code>/sandbox</code> or set <code>sandbox.enabled</code> to <code>true</code> in a settings file.</p>
+<h3 id="does-the-claude-code-sandbox-cover-file-edits-and-mcp-servers">Does the Claude Code sandbox cover file edits and MCP servers?</h3>
+<p>No. It covers shell commands and their child processes. The Read, Edit and Write tools, hooks and local MCP servers run outside it.</p>
+<h3 id="what-is-an-open-source-sandbox-for-ai-coding-agents-i-can-run-on-my-own-hardware">What is an open-source sandbox for AI coding agents I can run on my own hardware?</h3>
+<p>Anthropic's sandbox runtime for one machine, OpenSandbox on your own Docker or Kubernetes servers, and Potluck for pooling a team's spare Macs and Linux boxes. All are open source; you supply the hardware.</p>
+<h3 id="can-i-sandbox-claude-code-on-windows">Can I sandbox Claude Code on Windows?</h3>
+<p>The Claude Code docs say native Windows runs commands unsandboxed and recommend WSL2. To share a machine in a Potluck pool you need an Apple silicon Mac or a Linux box.</p>
+<h3 id="does-potluck-cost-anything-or-need-a-sengi-account">Does Potluck cost anything or need a Sengi account?</h3>
+<p>Potluck is free and open source under Apache-2.0, and it runs without Sengi and without a Sengi account. Sengi, its maker, sells hosted GitHub Actions runners as a separate product.</p>
+<h3 id="can-the-person-who-hosts-my-sandbox-see-my-code">Can the person who hosts my sandbox see my code?</h3>
+<p>Yes. The machine that runs a VM can read everything in it, including secrets, so join only pools whose owners you trust.</p>
+<h3 id="does-potluck-run-github-actions-too">Does Potluck run GitHub Actions too?</h3>
+<p>A real Actions job has been run through the runner broker by hand, on a Mac with Tart and on a Linux box with gVisor. It is not yet running daily in Potluck's own CI. See <a href="/github-actions-runner">the GitHub Actions runner page</a>.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/open-source-sandboxes-ai-coding-agents.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

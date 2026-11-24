@@ -425,3 +425,9 @@ func (s *Service) LostWhy(ctx context.Context, job int64) (why string, bounced b
 	_ = s.db().QueryRowContext(ctx, `SELECT why, bounced FROM runners_lost WHERE job = ?`, job).Scan(&why, &bounced)
 	return why, bounced
 }
+
+// StopCause is job id's stop_cause: why the broker ended it itself ("" none).
+func (s *Service) StopCause(ctx context.Context, id int64) (cause string) {
+	_ = s.db().QueryRowContext(ctx, `SELECT stop_cause FROM runners_jobs WHERE job = ?`, id).Scan(&cause)
+	return cause
+}

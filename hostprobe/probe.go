@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Result is a finished command.
@@ -42,13 +43,22 @@ type Runner interface {
 }
 
 // ExecRunner runs real commands.
-type ExecRunner struct{}
+type ExecRunner struct {
+	// WaitDelay is how long a command that ended, or whose context did, is
+	// waited for while a child keeps its output open (0: until the child
+	// closes it). What it wrote by then is its output.
+	WaitDelay time.Duration
+}
 
-func (ExecRunner) Run(ctx context.Context, name string, args ...string) (Result, error) {
+func (e ExecRunner) Run(ctx context.Context, name string, args ...string) (Result, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = e.WaitDelay
 	var out, errb strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	err := cmd.Run()
+	if errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil { // it ended well; only a child it left holds its output
+		err = nil
+	}
 	res := Result{Stdout: out.String(), Stderr: errb.String()}
 	if ee, ok := err.(*exec.ExitError); ok {
 		res.Exit = ee.ExitCode()
@@ -103,8 +113,15 @@ type Layer struct {
 	Problems []string `json:"problems,omitempty"` // plain words
 	// Warnings are what the owner should know but do not stop the layer
 	// (tart: low disk, a Mac that sleeps).
-	Warnings  []string `json:"warnings,omitempty"`
-	RootSteps []string `json:"root_steps,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	// Unread is why this layer's program could not be asked in time (tart:
+	// Tart, or in MacParts.Softnet Softnet): its problem says so too, but
+	// nothing was learned about the program ("": it answered).
+	Unread string `json:"-"`
+	// SoftnetAlone (tart) is that Softnet, missing or not usable as it is, is
+	// all that is wrong, and nothing about it was left unread.
+	SoftnetAlone bool     `json:"-"`
+	RootSteps    []string `json:"root_steps,omitempty"`
 	// Network (oci) is Potluck's filtered network for boxes that serve GitHub
 	// runners, set when it is ready (boxnet.go); else NetworkProblem says
 	// why, and NetworkSteps are the root steps that make it. Neither makes
@@ -530,26 +547,10 @@ func firstVersion(out string) string {
 }
 
 func detectTart(ctx context.Context, run Runner, f Facts, r *Report) Layer {
-	l := Layer{Name: "tart", Isolation: "vm"}
 	if r.OS != "darwin" {
-		l.Problems = []string{"tart runs on macOS"}
-		return l
+		return Layer{Name: "tart", Isolation: "vm", Problems: []string{"tart runs on macOS"}}
 	}
-	if res, err := runBounded(ctx, run, "sysctl", "-n", "kern.hv_support"); err != nil || res.Exit != 0 || strings.TrimSpace(res.Stdout) != "1" {
-		l.Problems = append(l.Problems, "Virtualization.framework is not available on this Mac")
-	}
-	detectMacOS(ctx, run, r, &l)
-	detectTartCLI(ctx, run, f, &l)
-	detectSoftnet(ctx, run, f, *r, &l)
-	if p, err := HostDefaultImage(*r, "tart"); err != nil {
-		l.Warnings = append(l.Warnings, err.Error())
-	} else if p.Name == SmallLinux {
-		l.Warnings = append(l.Warnings, "the default macOS guest is not supported on this host; the host default is the small Linux image (no GitHub Actions runner)")
-	}
-	detectTartDisk(f, r, &l)
-	detectSleep(ctx, run, &l)
-	l.Available = len(l.Problems) == 0
-	return l
+	return macParts(ctx, run, f, r).layer()
 }
 
 // packageManager names the first known package manager on PATH.

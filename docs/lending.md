@@ -34,11 +34,18 @@ This is the whole list, in the order things appear.
 | `potluck host` | A macOS image, about 27 GB (60 GB free are needed) | Tart's folder, `~/.tart` (or `$TART_HOME`) | Every sandbox starts as a copy of it. A file there, `potluck-pulls.json`, records which images Potluck pulled, so that `potluck host images --remove` deletes only those. |
 | `potluck host` | A record of the sandboxes the driver made, and a report for each one that failed to start | `~/.potluck-driver-tart` | The driver's own state: it ends a sandbox at its deadline even when the daemon is down. |
 | `potluck host pause` or `potluck host set` | The file `/Users/Shared/Potluck/host-override.json` | outside your home folder | The one switch every part of Potluck reads: open, wind down, closed. The menu bar app writes it too. |
+| `potluck tart install` (only if you run it) | `tart.app`, the Tart release Potluck pins, downloaded from [Tart's releases](https://github.com/openai/tart/releases) | `~/Applications/tart.app` | Tart runs the sandboxes' virtual machines. The download is checked for its exact size and SHA-256 before it is unpacked; on any mismatch nothing is installed. No password is needed. A record that Potluck put it there is kept in `~/Library/Application Support/potluck/tart-install.json`, so a later `potluck tart install` replaces only that copy. Tart is OpenAI's, under its own licence (FSL-1.1-ALv2), not Potluck's Apache-2.0. |
 
 Things Potluck does **not** put on your Mac:
 
-- It does not install Tart or Softnet. You install those yourself (`potluck doctor` says where to get them and
-  prints what is missing). It does not install the Tailscale app either; the node above lives in Potluck.
+- It does not install Tart unless you ask (`potluck tart install`, above), and it does not install Softnet without
+  the password step below. `potluck doctor` says where to get them and prints what is missing. If you would rather
+  get Tart by hand, no Terminal is needed: download `tart.tar.gz` from
+  [Tart's releases](https://github.com/openai/tart/releases/latest), unpack it and drag `tart.app` into
+  Applications (or `~/Applications`). `potluck tart install` leaves a Tart you installed yourself as it is. Potluck looks for Tart in this order and uses the first it finds: a `tart` on
+  your PATH, then `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin`, then `tart.app` in `/Applications`, then in
+  `~/Applications`. A `tart.app` that is there but will not run, or has no program inside, is named in `potluck doctor`
+  as a problem. It does not install the Tailscale app either; the node above lives in Potluck.
 - `install.sh` never asks for your password and never uses `sudo`.
 - No login item or LaunchAgent unless you add one. The two optional ones are below.
 
@@ -247,7 +254,7 @@ run `tart delete <name>` with the name `potluck host images` prints.
 `potluck uninstall` does these, in this order, and stops at the first one that fails (run it again to carry on; every
 step is safe to repeat):
 
-1. stops sharing every size your Mac lends (refused while a sandbox runs, unless `--force`);
+1. stops a setup run (`potluck host`) still going on, then stops sharing every size your Mac lends (refused while a sandbox runs, unless `--force`);
 2. leaves every pool you joined and asks that pool's machine to revoke your token;
 3. on a Mac with the managed Softnet, removes it (this is the step that asks for your password);
 4. stops the daemon;

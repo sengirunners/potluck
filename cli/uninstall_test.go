@@ -3,11 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -56,9 +61,11 @@ func newLender(t *testing.T) *lender {
 	t.Setenv("POTLUCK_DAEMONS_DIR", filepath.Join(l.home, "records"))
 	// No Softnet of this Mac's: a test that wants one makes it (newSoftnetMac).
 	oldStore, oldGOOS := softnetStore, softnetGOOS
+	oldDownloads := softnetDownloadDir
 	softnetStore = func() softnet.Store { return softnet.Store{Dir: filepath.Join(t.TempDir(), "Softnet")} }
+	softnetDownloadDir = func() (string, error) { return filepath.Join(l.home, "Library", "Caches", "potluck", "softnet"), nil }
 	softnetGOOS = "darwin"
-	t.Cleanup(func() { softnetStore, softnetGOOS = oldStore, oldGOOS })
+	t.Cleanup(func() { softnetStore, softnetGOOS, softnetDownloadDir = oldStore, oldGOOS, oldDownloads })
 	oldGone := processGone
 	processGone = func(int) bool { return true } // the daemon under test shares this process
 	t.Cleanup(func() { processGone = oldGone })
@@ -119,6 +126,234 @@ func TestUninstallDryRunChangesNothing(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(l.rc); !strings.Contains(string(b), "put potluck on PATH") {
 		t.Errorf("the startup file changed on a dry run:\n%s", b)
+	}
+}
+
+// --dry-run --json is the plan as data: the steps, the pools this machine
+// runs, what is lost for good, and the arguments that run it.
+func TestUninstallDryRunJSON(t *testing.T) {
+	newLender(t)
+	m := startMachine(t, tailnettest.New(), "mini", "judy@example.com")
+	m.ok(t, "create", "friends")
+	t.Setenv(EnvHome, m.home)
+	run := func(args ...string) uninstallAnswer {
+		t.Helper()
+		answer, words, code := softnetRunJSON(t, append([]string{"uninstall", "--dry-run"}, args...)...)
+		var a uninstallAnswer
+		if err := json.Unmarshal(answer, &a); code != 0 || err != nil {
+			t.Fatalf("exit %d (%v): %s\n%s", code, err, answer, words)
+		}
+		return a
+	}
+	a := run()
+	if len(a.Done) != 0 || len(a.Left) == 0 || !slices.Equal(a.PoolsRun, []string{"friends"}) || !strings.Contains(a.Warning, "friends") ||
+		slices.ContainsFunc(a.NotRemoved, func(s string) bool { return strings.Contains(s, "friends") }) {
+		t.Fatalf("plan: %+v", a)
+	}
+	if a.Remove == nil || a.Remove.Detail != a.Warning ||
+		!slices.Equal(a.Remove.Args, []string{"--json", "uninstall", "--yes", "--no-sudo"}) {
+		t.Fatalf("remove: %+v", a.Remove)
+	}
+	if k := run("--keep-home"); k.Warning != "" || k.Remove == nil || !slices.Contains(k.Remove.Args, "--keep-home") {
+		t.Fatalf("--keep-home: %+v", k)
+	}
+	// A daemon that does not run cannot name the pools: the warning says so.
+	home, err := os.MkdirTemp("", "pl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	if err := os.WriteFile(filepath.Join(home, "registry.db"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvHome, home)
+	if n := run(); len(n.PoolsRun) != 0 || !strings.Contains(n.Warning, "none can be named") {
+		t.Fatalf("no daemon: %+v", n)
+	}
+}
+
+// A setup run going on is stopped first, so it cannot share again or write
+// the home again after.
+func TestUninstallStopsASetupRun(t *testing.T) {
+	l := newLender(t)
+	home, err := os.MkdirTemp("", "pl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	if err := os.WriteFile(filepath.Join(home, "registry.db"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.Create(filepath.Join(home, hostLockName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	// A run and a program it started, in a session of their own; the run
+	// holds the lock as it does in hostSpawn.
+	run := exec.Command("sh", "-c", "sleep 60 & wait")
+	run.ExtraFiles = []*os.File{lock}
+	run.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := run.Start(); err != nil {
+		t.Fatal(err)
+	}
+	lock.Close()
+	ended := make(chan struct{})
+	go func() { _ = run.Wait(); close(ended) }()
+	t.Cleanup(func() { _ = syscall.Kill(-run.Process.Pid, syscall.SIGKILL); <-ended })
+	for _, n := range []string{hostPIDName, hostBgPIDName} {
+		if err := os.WriteFile(filepath.Join(home, n), []byte(strconv.Itoa(run.Process.Pid)+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv(EnvHome, home)
+	answer, words, code := softnetRunJSON(t, "uninstall", "--yes", "--no-sudo")
+	var a uninstallAnswer
+	if err := json.Unmarshal(answer, &a); code != 0 || err != nil || len(a.Done) == 0 || !strings.Contains(a.Done[0], "stop the setup run") {
+		t.Fatalf("exit %d (%v): %s\n%s", code, err, answer, words)
+	}
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run goes on")
+	}
+	if l.exists(home) {
+		t.Error("the home is still there")
+	}
+}
+
+// The host lock is uninstall's while its steps run; a pid a killed run left
+// is gone, so a second uninstall never signals that process.
+func TestUninstallHoldsTheHostLock(t *testing.T) {
+	l := newLender(t)
+	m := startMachine(t, tailnettest.New(), "mini", "judy@example.com")
+	t.Setenv(EnvHome, m.home)
+	if err := os.WriteFile(filepath.Join(m.home, hostPIDName), []byte(strconv.Itoa(os.Getppid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Asked in the step that stops the daemon.
+	asked := false
+	processGone = func(int) bool {
+		asked = true
+		if !hostBusy(m.home) {
+			t.Error("a host run could start during the removal")
+		}
+		if l.exists(filepath.Join(m.home, hostPIDName)) {
+			t.Error("the stale pid is still there")
+		}
+		return true
+	}
+	if out, code := l.uninstall("", "--yes"); code != 0 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	if !asked {
+		t.Fatal("no step looked")
+	}
+}
+
+// A run that holds the lock without naming itself, and a daemon that came
+// up after the plan, stop the removal before it touches the home.
+func TestHoldHostRefuses(t *testing.T) {
+	lockFile := func(home, name string) {
+		t.Helper()
+		f, err := os.Create(filepath.Join(home, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.Close() })
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, want := range map[string]string{hostLockName: "another host run", config.FileHomeLock: "started the daemon"} {
+		home := t.TempDir()
+		lockFile(home, name)
+		release, err := holdHost(context.Background(), uninstallPlan{home: home})
+		release()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// A pool joined after the plan would keep this machine's token.
+	p := uninstallPlan{home: t.TempDir(), running: true, joined: []string{"studio"},
+		joinedNow: func(context.Context) ([]string, error) { return []string{"studio", "friends"}, nil }}
+	release, err := holdHost(context.Background(), p)
+	release()
+	if err == nil || !strings.Contains(err.Error(), "joined friends meanwhile") || hostBusy(p.home) {
+		t.Errorf("a pool joined meanwhile: %v", err)
+	}
+}
+
+// A host run that waited for the lock while uninstall removed the home gets
+// none.
+func TestTakeLockRefusesARemovedHome(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, hostLockName)
+	first, err := takeLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan error, 1)
+	go func() {
+		f, err := takeLock(path)
+		if err == nil {
+			f.Close()
+		}
+		got <- err
+	}()
+	time.Sleep(200 * time.Millisecond)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	if err := <-got; err == nil {
+		// The waiter may have opened the path only after its removal.
+		if _, serr := os.Stat(path); serr != nil {
+			t.Fatal("the lock of a removed file was given")
+		}
+	}
+}
+
+// What a step could not do though it went on goes with it in done: a startup
+// file that cannot be written.
+func TestUninstallSaysWhatAStepCouldNotDo(t *testing.T) {
+	l := newLender(t)
+	t.Setenv(EnvHome, filepath.Join(l.home, "none"))
+	if err := os.Chmod(l.home, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(l.home, 0o700) })
+	if f, err := os.CreateTemp(l.home, "x"); err == nil { // root writes anywhere
+		f.Close()
+		t.Skip("a read-only directory does not stop this user")
+	}
+	answer, words, code := softnetRunJSON(t, "uninstall", "--yes", "--no-sudo")
+	var a uninstallAnswer
+	if err := json.Unmarshal(answer, &a); code != 0 || err != nil || !slices.ContainsFunc(a.Done, func(s string) bool { return strings.Contains(s, "could not edit") }) {
+		t.Fatalf("exit %d (%v): %s\n%s", code, err, answer, words)
+	}
+}
+
+// The answers the Mac app's decoder is checked against (macos/PotluckMenu/test.sh)
+// have this command's fields, and no others.
+func TestUninstallAppFixtures(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "macos", "PotluckMenu", "test", "answers", "uninstall-*.json"))
+	if err != nil || len(files) < 4 {
+		t.Fatalf("fixtures %v (%v)", files, err)
+	}
+	for _, p := range files {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := json.NewDecoder(bytes.NewReader(b))
+		d.DisallowUnknownFields()
+		var a uninstallAnswer
+		if err := d.Decode(&a); err != nil || a.Done == nil || a.Left == nil || a.NotRemoved == nil || a.PoolsRun == nil {
+			t.Errorf("%s: %v %+v", p, err, a)
+		}
 	}
 }
 
@@ -567,5 +802,84 @@ func TestUninstallRefusesWhenTheDaemonDoesNotAnswer(t *testing.T) {
 	}
 	if !l.exists(home) || !l.exists(filepath.Join(l.bin, "potluck")) {
 		t.Error("something was removed")
+	}
+}
+
+// uninstall --yes --no-sudo --json runs the steps before the root step,
+// stops there and answers it as data, running no sudo; after the root step
+// it goes on to the end.
+func TestUninstallNoSudoStopsAtTheRootStepThenFinishes(t *testing.T) {
+	l := newLender(t)
+	m := startMachine(t, tailnettest.New(), "mini", "judy@example.com")
+	m.ok(t, "create", "friends")
+	t.Setenv(EnvHome, m.home)
+	mac := newSoftnetMac(t, "15.6")
+	mac.downloads = filepath.Join(l.home, "Library", "Caches", "potluck", "softnet")
+	if err := os.MkdirAll(mac.downloads, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mac.asRoot = true
+	if out, code := softnetRun(t, "softnet", "install", "--admin-step", "--candidate", "--from", mac.file); code != 0 {
+		t.Fatalf("install: exit %d: %s", code, out)
+	}
+	mac.asRoot = false
+
+	run := func() uninstallAnswer {
+		t.Helper()
+		answer, words, code := softnetRunJSON(t, "uninstall", "--yes", "--no-sudo")
+		var a uninstallAnswer
+		if err := json.Unmarshal(answer, &a); code != 0 || err != nil {
+			t.Fatalf("exit %d (%v): %s\n%s", code, err, answer, words)
+		}
+		return a
+	}
+	first := run()
+	if first.AdminStep == nil || len(first.Done) == 0 || !strings.HasPrefix(first.Done[0], "stop sharing") ||
+		len(first.Left) == 0 || !strings.Contains(first.Left[0], "managed Softnet") || len(first.NotRemoved) == 0 {
+		t.Fatalf("first run: %+v", first)
+	}
+	if !slices.Equal(first.AdminStep.Argv[1:], []string{"softnet", "uninstall", "--admin-step"}) {
+		t.Fatalf("argv %q", first.AdminStep.Argv)
+	}
+	for _, p := range []string{filepath.Join(l.bin, "potluck"), m.home, mac.store.Dir, mac.downloads} {
+		if !l.exists(p) {
+			t.Errorf("%s went before the root step", p)
+		}
+	}
+	mac.rootHalf(t, *first.AdminStep)
+
+	second := run()
+	if second.AdminStep != nil || len(second.Left) != 0 || !slices.ContainsFunc(second.Done, func(s string) bool { return strings.HasPrefix(s, "remove the programs") }) {
+		t.Fatalf("second run: %+v", second)
+	}
+	for _, p := range []string{filepath.Join(l.bin, "potluck"), m.home, mac.downloads} {
+		if l.exists(p) {
+			t.Errorf("%s is still there", p)
+		}
+	}
+	if len(mac.sudo) != 0 {
+		t.Fatalf("sudo ran: %v", mac.sudo)
+	}
+}
+
+// Under --json a step that fails still answers what was done and what is
+// left, with the error, and exits non-zero.
+func TestUninstallJSONAnswersAFailedStep(t *testing.T) {
+	l := newLender(t)
+	mac := newSoftnetMac(t, "15.6")
+	mac.asRoot = true
+	if out, code := softnetRun(t, "softnet", "install", "--admin-step", "--candidate", "--from", mac.file); code != 0 {
+		t.Fatalf("install: exit %d: %s", code, out)
+	}
+	mac.asRoot = false
+	softnetSudo = func(context.Context, string, []string, io.Writer, io.Writer) error { return io.ErrUnexpectedEOF }
+	t.Setenv(EnvHome, filepath.Join(t.TempDir(), "none"))
+	answer, words, code := softnetRunJSON(t, "uninstall", "--yes")
+	var a uninstallAnswer
+	if err := json.Unmarshal(answer, &a); code == 0 || err != nil || a.Error == "" || len(a.Left) == 0 || !strings.Contains(a.Left[0], "managed Softnet") {
+		t.Fatalf("exit %d (%v): %s\n%s", code, err, answer, words)
+	}
+	if !l.exists(filepath.Join(l.bin, "potluck")) {
+		t.Error("a step after the failed one ran")
 	}
 }

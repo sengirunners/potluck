@@ -2,6 +2,7 @@ package hostprobe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -27,9 +28,22 @@ func absoluteExecutable(path string, l *Layer) string {
 	return abs
 }
 
+// unread records on l that its program did not answer in time, as a problem
+// and, with no other problem known, as Unread.
+func (l *Layer) unread(why string) {
+	if len(l.Problems) == 0 {
+		l.Unread = why
+	}
+	l.Problems = append(l.Problems, why)
+}
+
 func executableVersion(ctx context.Context, run Runner, path, label string, l *Layer) string {
 	res, err := runBounded(ctx, run, path, "--version")
 	version := strings.TrimSpace(res.Stdout)
+	if errors.Is(err, errNoAnswer) {
+		l.unread(fmt.Sprintf("%s at %s could not be asked its version: %v", label, path, err))
+		return ""
+	}
 	if err != nil || res.Exit != 0 || version == "" {
 		l.Problems = append(l.Problems, fmt.Sprintf("%s at %s cannot run on this host: %s; use a build compatible with this macOS and architecture", label, path, commandFailure(res, err)))
 		return ""
@@ -37,13 +51,38 @@ func executableVersion(ctx context.Context, run Runner, path, label string, l *L
 	return firstVersion(version)
 }
 
-// detectTartCLI finds Tart on PATH and checks it runs and has the run
-// options Potluck boots a box with.
-func detectTartCLI(ctx context.Context, run Runner, f Facts, l *Layer) {
-	path, ok := f.LookPath("tart")
-	if !ok {
-		l.Problems = append(l.Problems, "tart is not installed: download tart.tar.gz from https://github.com/openai/tart/releases/latest, unpack it and link tart.app/Contents/MacOS/tart onto your PATH (no root needed; guide: https://tart.run/quick-start/)")
-		return
+// resolveTart is the Tart program to run when the report's tart layer names
+// none: vmhost's one lookup (a test gives its own).
+var resolveTart = vmhost.ResolveTart
+
+// tartCLI is the Tart program a command for layer runs: the one the
+// report found, else resolveTart's.
+func tartCLI(layer Layer) string {
+	if layer.CLI != "" {
+		return layer.CLI
+	}
+	return resolveTart()
+}
+
+// tartInstallWords is how a lender gets Tart without a Terminal or root.
+const tartInstallWords = "download tart.tar.gz from " + TartReleases + ", unpack it and drag tart.app into Applications (no Terminal or root needed; guide: https://tart.run/quick-start/)"
+
+// detectTartCLI finds Tart (vmhost.FindTart: PATH, the usual bin
+// directories, then tart.app in Applications) and checks it runs and has
+// the run options Potluck boots a box with. A tart.app with no program in it
+// is a problem of its own, never taken for "not installed"; they are
+// returned.
+func detectTartCLI(ctx context.Context, run Runner, f Facts, l *Layer) []string {
+	found := vmhost.FindTart(vmhost.TartSearch{LookPath: f.LookPath, Executable: executableOn(f), Exists: f.Exists, Home: hostHome(f)})
+	path := found.Path
+	if path == "" {
+		for _, app := range found.Hollow {
+			l.Problems = append(l.Problems, fmt.Sprintf("%s has no Contents/MacOS/tart in it, so it is not a whole Tart download: delete it and %s", app, tartInstallWords))
+		}
+		if len(found.Hollow) == 0 {
+			l.Problems = append(l.Problems, "tart is not installed: "+tartInstallWords)
+		}
+		return found.Hollow
 	}
 	path = absoluteExecutable(path, l)
 	l.CLI = path
@@ -53,6 +92,7 @@ func detectTartCLI(ctx context.Context, run Runner, f Facts, l *Layer) {
 	if l.Version != "" {
 		detectTartArguments(ctx, run, path, l)
 	}
+	return nil
 }
 
 // CheckMac is the Mac preflight's host part alone: this Mac's hardware
@@ -81,6 +121,10 @@ func MacOSMajor(version string) int { return macOSMajor(version) }
 
 func detectTartArguments(ctx context.Context, run Runner, path string, l *Layer) {
 	res, err := runBounded(ctx, run, path, "run", "--help")
+	if errors.Is(err, errNoAnswer) {
+		l.unread(fmt.Sprintf("Tart at %s could not be asked what it can do: %v", path, err))
+		return
+	}
 	if err != nil || res.Exit != 0 {
 		l.Problems = append(l.Problems, "cannot read Tart run capabilities at "+path+": "+commandFailure(res, err))
 		return
@@ -115,17 +159,22 @@ func macOSMajor(version string) int {
 	return n
 }
 
-func detectMacOS(ctx context.Context, run Runner, r *Report, l *Layer) {
+// detectMacOS reads this Mac's hardware architecture and macOS version. A
+// read that did not answer, or answered nothing it knows, is named in
+// archUnread or macOSUnread ("": read), and is a problem too.
+func detectMacOS(ctx context.Context, run Runner, r *Report, l *Layer) (archUnread, macOSUnread string) {
 	// runtime.GOARCH describes the program under Rosetta, not the hardware.
 	arch, archErr := runBounded(ctx, run, "/usr/sbin/sysctl", "-n", "hw.optional.arm64")
 	switch {
 	case archErr == nil && arch.Exit == 0 && strings.TrimSpace(arch.Stdout) == "1":
 		r.Arch = "arm64"
-	case archErr == nil && arch.Exit == 0 && strings.TrimSpace(arch.Stdout) == "0":
+	case archErr == nil && arch.Exit == 0 && strings.TrimSpace(arch.Stdout) == "0",
+		archErr == nil && strings.Contains(arch.Stderr, "unknown oid"): // an Intel Mac's kernel has no such name
 		r.Arch = "amd64"
 	default:
 		r.Arch = "unknown"
-		l.Problems = append(l.Problems, "cannot determine this Mac's hardware architecture: "+commandFailure(arch, archErr))
+		archUnread = "cannot determine this Mac's hardware architecture: " + commandFailure(arch, archErr)
+		l.Problems = append(l.Problems, archUnread)
 	}
 	if r.Arch != "arm64" {
 		l.Problems = append(l.Problems, "tart needs Apple silicon")
@@ -134,10 +183,12 @@ func detectMacOS(ctx context.Context, run Runner, r *Report, l *Layer) {
 	r.MacOS = strings.TrimSpace(res.Stdout)
 	if err != nil || res.Exit != 0 || macOSMajor(r.MacOS) == 0 {
 		r.MacOS = ""
-		l.Problems = append(l.Problems, "cannot determine macOS product version: "+commandFailure(res, err))
+		macOSUnread = "cannot determine macOS product version: " + commandFailure(res, err)
+		l.Problems = append(l.Problems, macOSUnread)
 	} else if macOSMajor(r.MacOS) < 13 {
 		l.Problems = append(l.Problems, "Tart needs macOS 13 or newer; this host runs "+r.MacOS)
 	}
+	return archUnread, macOSUnread
 }
 
 // CheckTartImages refuses missing compatibility metadata as well as known

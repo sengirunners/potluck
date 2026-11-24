@@ -20,6 +20,7 @@ import (
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/authz"
 	"github.com/sengirunners/potluck/kit/config"
+	"github.com/sengirunners/potluck/runtarget/rt"
 )
 
 const (
@@ -141,7 +142,7 @@ func (s *Service) start(r *http.Request) (any, error) {
 	if err := s.budgetAllowed(ctx, pid, b, db); err != nil {
 		return nil, err
 	}
-	if err := s.boxAllowed(ctx, pid, rw.Area, db); err != nil { // ends.go
+	if err := s.boxAllowed(ctx, pid, rw.Area, rt.BoxRequest{Target: b.Name, Size: sizeCopy(d.Size), Start: true}, db); err != nil { // ends.go
 		return nil, err
 	}
 	var args any

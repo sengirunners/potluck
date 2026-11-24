@@ -91,7 +91,7 @@ func TestBuildJobsNone(t *testing.T) {
 		t.Errorf("%+v", v)
 	}
 	m := Build(Facts{Cores: 4}).Menu
-	if len(m.Windows) != 1 || m.Windows[0].ID != "jobs" || strings.Join(m.Windows[0].Args, " ") != "--json host jobs" {
+	if len(m.Windows) != 3 || m.Windows[1].ID != "jobs" || strings.Join(m.Windows[1].Args, " ") != "--json host jobs" {
 		t.Errorf("windows %+v", m.Windows)
 	}
 }

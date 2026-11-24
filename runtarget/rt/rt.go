@@ -41,6 +41,55 @@ type EndFunc func(ctx context.Context, project string, h computeapi.RunTargetHan
 // plain words.
 type BoxAcquireFunc func(ctx context.Context, project, area string, live func() ([]computeapi.RunTargetHandle, error)) error
 
+// BoxRequest is one box acquire, or one start of a stopped box, as an
+// OnBoxRequest subscriber sees it.
+type BoxRequest struct {
+	Target string // the box binding asked
+	// Size is the binding's box size as its driver describes it; nil when
+	// the driver names none.
+	Size  *computeapi.RunTargetSize
+	Start bool // the start of a stopped box (a kept disk), not a new box
+	// Job is the GitHub job the runner broker acquires the box for; nil for
+	// every other acquire. Only code in the daemon sets it (WithRunnerJob),
+	// so no network caller can claim a job.
+	Job *RunnerJob
+}
+
+// RunnerJob is the GitHub job a runner broker box is for.
+type RunnerJob struct {
+	ID           int64
+	Repository   string // owner/name
+	Installation int64
+	Labels       []string
+}
+
+// BoxRequestFunc is BoxAcquireFunc that also gets the request. A non-nil
+// error refuses it; run targets answer it wrapped in a *BoxRefusal.
+type BoxRequestFunc func(ctx context.Context, project, area string, req BoxRequest, live func() ([]computeapi.RunTargetHandle, error)) error
+
+// BoxRefusal is a box acquire an OnBoxAcquire or OnBoxRequest subscriber
+// refused: a rule of the area (a limit, a hold), not of the binding, so
+// another box of the same binding may be had for another area meanwhile.
+// Err is the subscriber's answer, unwrapped as it was.
+type BoxRefusal struct{ Err error }
+
+func (e *BoxRefusal) Error() string { return e.Err.Error() }
+func (e *BoxRefusal) Unwrap() error { return e.Err }
+
+type runnerJobKey struct{}
+
+// WithRunnerJob is ctx carrying j: an acquire made with it shows j to every
+// OnBoxRequest subscriber (BoxRequest.Job). The runner broker sets it.
+func WithRunnerJob(ctx context.Context, j RunnerJob) context.Context {
+	return context.WithValue(ctx, runnerJobKey{}, &j)
+}
+
+// RunnerJobFrom is the job WithRunnerJob put on ctx, or nil.
+func RunnerJobFrom(ctx context.Context) *RunnerJob {
+	j, _ := ctx.Value(runnerJobKey{}).(*RunnerJob)
+	return j
+}
+
 // Service acquires, renews and releases run-target handles as a subject,
 // with exactly the checks of the run-target routes (SPEC 20): the runner
 // broker (runners) acquires a box as a linked area's zm-runners.
@@ -61,6 +110,14 @@ type Service interface {
 	// stopped box (the usage module's per-area minute limit); subscribers
 	// register before Start. A repeat of an acquire already made is not asked.
 	OnBoxAcquire(f BoxAcquireFunc)
+	// OnBoxRequest is OnBoxAcquire with the request (BoxRequest): the
+	// binding, its size and, for the runner broker, the job. Subscribers of
+	// both are asked in the order they registered.
+	OnBoxRequest(f BoxRequestFunc)
+	// BoxAllowed asks every OnBoxAcquire and OnBoxRequest subscriber about
+	// req in area of project now, acquiring nothing: the runner broker asks
+	// before it mints a runner. The acquire itself asks again.
+	BoxAllowed(ctx context.Context, project, area string, req BoxRequest) error
 	// EndedSince answers project's handles matching only that ended at or
 	// after since (inclusive, so a reconcile reading from its last watermark
 	// sees that row again and must be idempotent), oldest end first, at most

@@ -4,8 +4,21 @@
   <url><loc>https://potluck.sh/agent-sandbox</loc><lastmod>2026-11-18</lastmod></url>
   <url><loc>https://potluck.sh/github-actions-runner</loc><lastmod>2026-11-19</lastmod></url>
   <url><loc>https://potluck.sh/tart</loc><lastmod>2026-11-17</lastmod></url>
-  <url><loc>https://potluck.sh/blog</loc><lastmod>2026-11-20</lastmod></url>
-  <url><loc>https://potluck.sh/blog/volunteer-computing-projects</loc><lastmod>2026-11-20</lastmod></url>
+  <url><loc>https://potluck.sh/blog</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/best-self-hosted-ci-runners</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/claude-code-permissions-sandboxing-explained</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/coding-agent-sandboxing-guide-containers-gvisor-vms-compared</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/github-actions-self-hosted-runner-macos-install-official</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/giving-coding-agents-their-own-mac-macos-vms</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/local-open-source-alternatives-cloud-ai-coding-sandboxes</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/open-source-sandboxes-ai-coding-agents</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/run-claude-code-docker-sandbox-devcontainer</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/self-hosted-github-actions-runner-alternatives-blacksmith-cirrus</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/self-hosted-macos-runners-fresh-vm-every-job</loc><lastmod>2026-11-24</lastmod></url>
+  <url><loc>https://potluck.sh/blog/tart-based-github-actions-runners-compared-tartelet-cilicon</loc><lastmod>2026-11-24</lastmod></url>
   <url><loc>https://potluck.sh/blog/give-your-ai-agent-a-sandbox-over-mcp</loc><lastmod>2026-11-18</lastmod></url>
   <url><loc>https://potluck.sh/blog/use-the-e2b-sdk-on-your-own-machines</loc><lastmod>2026-11-17</lastmod></url>
   <url><loc>https://potluck.sh/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents</loc><lastmod>2026-11-19</lastmod></url>

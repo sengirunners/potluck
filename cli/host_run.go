@@ -7,12 +7,15 @@ package cli
 // status.
 
 import (
+	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +29,9 @@ import (
 	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
+	"github.com/sengirunners/potluck/kit/project"
 	"github.com/sengirunners/potluck/menubar"
+	"github.com/sengirunners/potluck/softnet"
 )
 
 // The files of a host run in the program's home: the lock, the pid of the
@@ -51,6 +56,12 @@ const envHostLockFD = "POTLUCK_HOST_LOCK_FD"
 func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string, askFirst bool) error {
 	ctx := cmd.Context()
 	handed := handedLock() // before this run starts any process
+	if s.inviteStdin {
+		var err error
+		if arg, err = a.stdinInvite(cmd); err != nil {
+			return err
+		}
+	}
 	// An invite cut short or damaged is refused before the daemon, the lock
 	// or a pull.
 	if err := a.checkInvite(arg, a.cmd("invite <you> --host")); err != nil {
@@ -134,7 +145,8 @@ func (a *app) afterLend(s *shareFlags, dryRun bool) func() {
 // shared sizes it replaces, the admin step, a dry run of the plan), then
 // starts the same command again without --detach and never asking for a
 // password, its words to the home's host.log, hands it the lock, and
-// returns.
+// returns. Under --json --no-sudo a pending Softnet root step is its answer
+// (admin_step), and nothing is started.
 func (a *app) hostDetach(cmd *cobra.Command, c *client.Client, arg string, o hostprobe.ShareOptions, s *shareFlags, home string, lock *os.File) error {
 	ctx := cmd.Context()
 	if _, err := a.hostScope(ctx, c, arg, &o); err != nil {
@@ -146,6 +158,10 @@ func (a *app) hostDetach(cmd *cobra.Command, c *client.Client, arg string, o hos
 	dry := o
 	dry.DryRun, dry.Progress = true, nil
 	if _, err := hostprobe.Check(ctx, shareRunner, dry); err != nil {
+		left, err := a.softnetStepLeft(ctx, o, s, err)
+		if left != nil {
+			return a.printJSON(map[string]adminStep{"admin_step": left.step})
+		}
 		return err
 	}
 	logPath := filepath.Join(home, hostLogName)
@@ -154,7 +170,7 @@ func (a *app) hostDetach(cmd *cobra.Command, c *client.Client, arg string, o hos
 		return err
 	}
 	defer log.Close()
-	pid, err := hostSpawn(detachArgs(cmd, a.asJSON()), log, lock)
+	pid, err := hostSpawn(detachArgs(cmd, arg, a.asJSON()), arg, log, lock)
 	if err != nil {
 		return err
 	}
@@ -168,16 +184,77 @@ func (a *app) hostDetach(cmd *cobra.Command, c *client.Client, arg string, o hos
 	return nil
 }
 
+// softnetStepLeft is the root step a --json --no-sudo run of the Mac app
+// stopped at (err, from Check's dry run), for the app to run as root before
+// the same command again: the managed Softnet's install, whose root half
+// checks again, as root, what it installs (cli/adminstep.go). With none, the
+// error the run is refused with: what no root step fixes (Precheck), so a
+// password is never asked for a run that would not go on, else err, when
+// Softnet is not what is wrong, something else is as well (Tart, say), or
+// this Mac has no validated managed Softnet.
+func (a *app) softnetStepLeft(ctx context.Context, o hostprobe.ShareOptions, s *shareFlags, err error) (*adminStepLeft, error) {
+	var nr *hostprobe.NotReadyError
+	if !a.asJSON() || !s.noSudo || !errors.As(err, &nr) || nr.Layer != "tart" {
+		return nil, err
+	}
+	l, _ := o.Report.Layer(nr.Layer)
+	adv := softnet.For(hostprobe.MacOSMajor(o.Report.MacOS), o.Report.Arch)
+	if !l.SoftnetAlone || adv.Kind != softnet.Managed || adv.Candidate {
+		return nil, err
+	}
+	if perr := hostprobe.Precheck(ctx, shareRunner, withSoftnetInstall(o)); perr != nil {
+		return nil, perr
+	}
+	ierr := a.wordsAside(func() error { return a.softnetInstall(ctx, "", false, false, true) })
+	var left *adminStepLeft
+	if errors.As(ierr, &left) {
+		return left, nil
+	}
+	if ierr != nil {
+		fmt.Fprintf(a.host.Stderr, "Softnet could not be made ready: %v\n", ierr)
+	}
+	return nil, err
+}
+
+// withSoftnetInstall is o with the managed Softnet's install as its tart
+// layer's root step, when the layer offers none (Softnet is missing, or is
+// one no permission fixes).
+func withSoftnetInstall(o hostprobe.ShareOptions) hostprobe.ShareOptions {
+	o.Report.Layers = slices.Clone(o.Report.Layers)
+	for i := range o.Report.Layers {
+		if l := &o.Report.Layers[i]; l.Name == "tart" && len(l.RootSteps) == 0 {
+			l.RootSteps = []string{"potluck softnet install"}
+		}
+	}
+	return o
+}
+
 // hostSpawn starts the run in the background, in a session of its own, its
-// output to log, the held lock its file descriptor 3; tests stand in for
-// it.
-var hostSpawn = func(args []string, log, lock *os.File) (int, error) {
+// output to log, the held lock its file descriptor 3, and arg (the invite
+// code or pool) one line on its stdin, never in its argv or environment
+// (detachArgs gives it --invite-stdin); tests stand in for it.
+var hostSpawn = func(args []string, arg string, log, lock *os.File) (int, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, err
 	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+	// Written whole and closed before the run starts: a line far below a
+	// pipe's buffer never blocks, and the run reads it, then the end, even
+	// once this one is gone.
+	_, err = io.WriteString(w, arg+"\n")
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return 0, err
+	}
 	c := exec.Command(exe, args...)
-	c.Stdout, c.Stderr = log, log
+	c.Stdin, c.Stdout, c.Stderr = r, log, log
 	c.ExtraFiles = []*os.File{lock}
 	c.Env = append(os.Environ(), envHostLockFD+"=3")
 	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -188,30 +265,64 @@ var hostSpawn = func(args []string, log, lock *os.File) (int, error) {
 }
 
 // detachArgs are the background run's arguments: the command as the
-// program spells it (its path below the program's root), its arguments, and
-// every flag set on it, without --detach (and --json, whose answer the
-// detaching run gave), with --no-sudo (the admin step ran here, or was
-// refused).
-func detachArgs(cmd *cobra.Command, asJSON bool) []string {
+// program spells it (its path below the program's root) and every flag set
+// on it, without --detach (and --json, whose answer the detaching run
+// gave), with --no-sudo (the admin step ran here, or was refused) and
+// --invite-stdin: its argument arg, the invite code or pool, goes on its
+// stdin (hostSpawn), never in its argv, where any user on this machine
+// reads it for the whole run. So an invite given as a pool flag's value
+// (the program's -P, or a host program's own) is left out too.
+func detachArgs(cmd *cobra.Command, arg string, asJSON bool) []string {
 	out := strings.Fields(cmd.CommandPath())[1:]
+	skip := []string{"detach", "no-sudo"}
+	if asJSON {
+		skip = append(skip, "json")
+	}
+	invite := project.LooksLikeJoinCode(arg)
 	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if f.Name == "detach" || f.Name == "no-sudo" || asJSON && f.Name == "json" {
-			return
-		}
-		vals := []string{f.Value.String()}
-		if sv, ok := f.Value.(pflag.SliceValue); ok {
-			vals = sv.GetSlice()
-		}
-		for _, v := range vals {
-			out = append(out, "--"+f.Name+"="+v)
+		if invite && strings.TrimSpace(f.Value.String()) == strings.TrimSpace(arg) {
+			skip = append(skip, f.Name)
 		}
 	})
-	out = append(out, "--no-sudo")
-	args := cmd.Flags().Args()
-	if dash := cmd.ArgsLenAtDash(); dash >= 0 {
-		return append(append(append(out, args[:dash]...), "--"), args[dash:]...)
+	for _, f := range givenFlags(cmd, skip...) {
+		out = append(out, f.Args...)
 	}
-	return append(out, args...)
+	return append(out, "--no-sudo", "--"+flagInviteStdin)
+}
+
+// flagInviteStdin is host's --invite-stdin, by its name: givenFlags and
+// sameShare leave it out (it says where the argument came from, not how to
+// share).
+const flagInviteStdin = "invite-stdin"
+
+// maxStdinInvite is the most --invite-stdin reads: an invite is far
+// shorter.
+const maxStdinInvite = 4096
+
+// stdinInvite is host's argument read from stdin (--invite-stdin): its
+// first line, trimmed. None, or an argument given as well, is refused.
+// Neither the flags given (givenFlags) nor a bare re-run's test
+// (sameShare) count the flag: it says where the argument came from.
+func (a *app) stdinInvite(cmd *cobra.Command) (string, error) {
+	if len(cmd.Flags().Args()) > 0 {
+		return "", exitWith{2, errors.New("--invite-stdin reads the invite code (or pool) from stdin: give it no argument as well")}
+	}
+	// A host program that gives no Stdin still reads the process's own:
+	// the background run's line comes there (hostSpawn), whichever program
+	// mounts host.
+	in := a.host.Stdin
+	if a.noStdin {
+		in = os.Stdin
+	}
+	line, err := bufio.NewReader(io.LimitReader(in, maxStdinInvite)).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("--invite-stdin: reading stdin: %w", err)
+	}
+	arg := strings.TrimSpace(line)
+	if arg == "" {
+		return "", errors.New("--invite-stdin: no invite code (or pool) came on stdin, so there is nothing to join or share with; run host again with the invite")
+	}
+	return arg, nil
 }
 
 // hostLock takes the home's host lock for this run (an flock, so it ends
@@ -295,6 +406,14 @@ func takeLock(path string) (*os.File, error) {
 		f.Close()
 		return nil, err
 	}
+	// Uninstall may have removed the home while this waited: a lock on a
+	// file that is gone keeps no one out.
+	held, herr := f.Stat()
+	there, terr := os.Stat(path)
+	if herr != nil || terr != nil || !os.SameFile(held, there) {
+		f.Close()
+		return nil, fmt.Errorf("%s was removed meanwhile (an uninstall?): run this again if that was not meant", path)
+	}
 	return f, nil
 }
 
@@ -315,6 +434,48 @@ func pidWords(home string) string {
 		return ""
 	}
 	return " (process " + strings.TrimSpace(string(b)) + ")"
+}
+
+// hostStopWait is how long a host run asked to stop has to end.
+var hostStopWait = 20 * time.Second
+
+// stopHostRun ends the host run that holds home's lock, and with a
+// background one (which leads its own process group) the programs it
+// started, and waits until the lock is free. None: nothing to do.
+func stopHostRun(ctx context.Context, home string) error {
+	asked := 0 // the run told to end; a run handing its lock to a background one changes the pid
+	for end := time.Now().Add(hostStopWait); hostBusy(home); {
+		pid := pidIn(home, hostPIDName)
+		if pid > 1 && pid != asked && pid != os.Getpid() {
+			target := pid
+			if g, err := syscall.Getpgid(pid); err == nil && g == pid && pidIn(home, hostBgPIDName) == pid {
+				target = -pid
+			}
+			if err := syscall.Kill(target, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+				return fmt.Errorf("stop the host run (process %d): %w", pid, err)
+			}
+			asked = pid
+		}
+		if time.Now().After(end) {
+			return fmt.Errorf("the host run that holds %s did not stop within %s%s: end it, then run this again", filepath.Join(home, hostLockName), hostStopWait, pidWords(home))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil
+}
+
+// pidIn is the pid in one of home's files (0: none).
+func pidIn(home, name string) int {
+	b, err := os.ReadFile(filepath.Join(home, name))
+	if err != nil {
+		return 0
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return pid
 }
 
 // hostBackground is a background host run going on now, or the last one's

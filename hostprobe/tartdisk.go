@@ -72,14 +72,7 @@ func tartDiskCheck(ctx context.Context, run Runner, r Report, images []string) (
 		return estimate, nil
 	}
 	layer, _ := r.Layer("tart")
-	cached, listErr := tartCachedImages(ctx, run, layer.CLI)
-	var toPull []string
-	for _, im := range images {
-		if !cached[im] {
-			toPull = append(toPull, im)
-		}
-	}
-	need, _ := DiskNeedGB(toPull)
+	toPull, need, listErr := tartPullNeed(ctx, run, layer.CLI, images)
 	if r.TartFreeGB >= float64(need) {
 		return estimate, nil
 	}
@@ -93,6 +86,20 @@ func tartDiskCheck(ctx context.Context, run Runner, r Report, images []string) (
 	}
 	return "", fmt.Errorf("not enough disk to lend %s: only %.0f GB free in %s, where Tart stores images, and the pull, the unpacked image and its boxes need at least %d GB%s. Free some space, or move Tart's images to a bigger disk: set TART_HOME there in the shell that runs this, and in the environment of the potluck daemon too (a daemon started from another shell still looks in ~/.tart: stop it with `potluck daemon stop`, and run this again from the shell with TART_HOME set); nothing was downloaded%s",
 		strings.Join(names, ", "), r.TartFreeGB, r.TartDir, need, why, estimateSuffix(estimate))
+}
+
+// tartPullNeed is which of images Tart (cli) still has to pull, and the free
+// disk in GB they need: an image Tart already has counts for nothing. When
+// its list cannot be read (err), every image counts.
+func tartPullNeed(ctx context.Context, run Runner, cli string, images []string) (toPull []string, need int, err error) {
+	cached, err := tartCachedImages(ctx, run, cli)
+	for _, im := range images {
+		if !cached[im] {
+			toPull = append(toPull, im)
+		}
+	}
+	need, _ = DiskNeedGB(toPull)
+	return toPull, need, err
 }
 
 func estimateSuffix(estimate string) string {

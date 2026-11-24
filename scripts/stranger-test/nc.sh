@@ -46,7 +46,7 @@ on_machine() {
 			/bin/zsh -c '[ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc"; cd "$HOME"; eval "$1"' zsh "$1"
 		;;
 	linux)
-		exec env TART_HOME="$RUN/tart" tart exec "$vm" bash -lc 'cd "$HOME"; eval "$1"' bash "$1"
+		exec env TART_HOME="$RUN/tart" "$(cat "$RUN/tart-cli")" exec "$vm" bash -lc 'cd "$HOME"; eval "$1"' bash "$1"
 		;;
 	*) die "unknown machine kind in $RUN/machine: $kind" ;;
 	esac

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +18,8 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/hostsetup"
+	"github.com/sengirunners/potluck/kit/tailnet/tailnettest"
 	"github.com/sengirunners/potluck/menubar"
 )
 
@@ -28,7 +32,10 @@ func TestHostDetachAndOneRunAtATime(t *testing.T) {
 	old := hostSpawn
 	t.Cleanup(func() { hostSpawn = old })
 	var spawned [][]string
-	hostSpawn = func(args []string, log, lock *os.File) (int, error) {
+	hostSpawn = func(args []string, arg string, log, lock *os.File) (int, error) {
+		if arg != "trial" {
+			t.Errorf("the background run's stdin %q, want the pool", arg)
+		}
 		if lock == nil || syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
 			t.Error("the background run was not handed the lock, held")
 		}
@@ -43,8 +50,8 @@ func TestHostDetachAndOneRunAtATime(t *testing.T) {
 		t.Fatalf("host --detach: spawned %v\n%s", spawned, out)
 	}
 	// The background run is this command, its flags as given, without
-	// --detach, never asking for a password.
-	want := []string{"host", "--image=" + refPin, "--name-prefix=solo", "--reclaim-idle-s=0", "--sizes=c1m2", "--no-sudo"}
+	// --detach, never asking for a password, its pool on stdin.
+	want := []string{"host", "--image=" + refPin, "--name-prefix=solo", "--reclaim-idle-s=0", "--sizes=c1m2", "--no-sudo", "--invite-stdin"}
 	if !slices.Equal(spawned[0], want) {
 		t.Errorf("spawned %q, want %q", spawned[0], want)
 	}
@@ -161,30 +168,62 @@ func TestHandedLock(t *testing.T) {
 }
 
 // The background run is the command as the program spells it below its
-// root (a mounted one's words too), its arguments and the flags given,
-// the host's own included, without --detach and --json.
+// root (a mounted one's words too) and the flags given, the host's own
+// included, without --detach and --json; its argument goes on its stdin
+// (--invite-stdin), never in its argv.
 func TestDetachArgs(t *testing.T) {
-	root := &cobra.Command{Use: "supper"}
-	root.PersistentFlags().Bool("json", false, "")
-	root.PersistentFlags().StringP("project", "P", "", "")
-	group := &cobra.Command{Use: "pool"}
-	var got []string
-	host := &cobra.Command{Use: "host", RunE: func(cmd *cobra.Command, _ []string) error {
-		got = detachArgs(cmd, true)
-		return nil
-	}}
-	host.Flags().Bool("detach", false, "")
-	host.Flags().Bool("no-sudo", false, "")
-	host.Flags().StringArray("image", nil, "")
-	group.AddCommand(host)
-	root.AddCommand(group)
-	root.SetArgs([]string{"--json", "-P", "acme", "pool", "host", "trial", "--detach", "--image", "a@sha256:1", "--image", "b@sha256:2", "--no-sudo"})
-	if err := root.Execute(); err != nil {
+	detached := func(arg string, asJSON bool, args ...string) []string {
+		t.Helper()
+		root := &cobra.Command{Use: "supper"}
+		root.PersistentFlags().Bool("json", false, "")
+		root.PersistentFlags().StringP("project", "P", "", "")
+		group := &cobra.Command{Use: "pool"}
+		var got []string
+		host := &cobra.Command{Use: "host", RunE: func(cmd *cobra.Command, _ []string) error {
+			got = detachArgs(cmd, arg, asJSON)
+			return nil
+		}}
+		host.Flags().Bool("detach", false, "")
+		host.Flags().Bool("no-sudo", false, "")
+		host.Flags().StringArray("image", nil, "")
+		group.AddCommand(host)
+		root.AddCommand(group)
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	got := detached("trial", true, "--json", "-P", "acme", "pool", "host", "trial", "--detach", "--image", "a@sha256:1", "--image", "b@sha256:2", "--no-sudo")
+	if want := []string{"pool", "host", "--image=a@sha256:1", "--image=b@sha256:2", "--project=acme", "--no-sudo", "--invite-stdin"}; !slices.Equal(got, want) {
+		t.Errorf("%q, want %q", got, want)
+	}
+	// An invite given as the pool flag's value goes on stdin alone.
+	const invite = "potluck-mini:abcdefabcdefabcdefabcdefabcdefab:ABCD-EFGH"
+	got = detached(invite, false, "-P", invite, "pool", "host", "--detach", "--image", "a@sha256:1")
+	if want := []string{"pool", "host", "--image=a@sha256:1", "--no-sudo", "--invite-stdin"}; !slices.Equal(got, want) {
+		t.Errorf("an invite as the pool flag: %q, want %q", got, want)
+	}
+}
+
+// A host program that gives no Stdin still reads --invite-stdin's line
+// from the process's own stdin, where the background run gets it.
+func TestStdinInviteWithoutHostStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"pool", "host", "--image=a@sha256:1", "--image=b@sha256:2", "--project=acme", "--no-sudo", "trial"}
-	if !slices.Equal(got, want) {
-		t.Errorf("%q, want %q", got, want)
+	defer r.Close()
+	old := os.Stdin
+	t.Cleanup(func() { os.Stdin = old })
+	os.Stdin = r
+	if _, err := w.WriteString("trial\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	a := newApp(Host{Stdout: new(strings.Builder), Stderr: new(strings.Builder)})
+	if got, err := a.stdinInvite(&cobra.Command{Use: "host"}); err != nil || got != "trial" {
+		t.Fatalf("read %q, %v", got, err)
 	}
 }
 
@@ -237,5 +276,156 @@ func TestHostBeat(t *testing.T) {
 	}
 	if o := (hostprobe.ShareOptions{}); startBeat(&o) == nil || o.Progress != nil {
 		t.Fatal("no Progress (--json): the beat must say nothing")
+	}
+}
+
+// The setup check's button runs: after a host run that stopped before it
+// ended, where this machine already shares sizes with the pool, host
+// status's setup do is that run again, and run as the app runs it, it goes
+// on in the background (not refused as a bare re-run: the press asked).
+func TestHostSetupDoRuns(t *testing.T) {
+	m := onePoolMachine(t, refPin)
+	useSwitch(t)
+	old := hostSpawn
+	t.Cleanup(func() { hostSpawn = old })
+	var spawned [][]string
+	var pools []string
+	hostSpawn = func(args []string, arg string, log, lock *os.File) (int, error) {
+		spawned, pools = append(spawned, args), append(pools, arg)
+		return 4242, nil
+	}
+	// A run of host trial --pull-timeout 5m that stopped in preflight: no
+	// flag that changes the share, so without --yes it is a bare re-run.
+	hostsetup.Start(m.home, hostsetup.Command{Prefix: "potluck host", Path: []string{"host"}, Pool: "trial",
+		Flags: []hostsetup.Flag{{Name: "pull-timeout", Text: " --pull-timeout 5m", Args: []string{"--pull-timeout=5m0s"}}}}).Begin(hostsetup.Preflight, "checking")
+	var st menubar.Status
+	if err := json.Unmarshal([]byte(m.ok(t, "--json", "host", "status")), &st); err != nil {
+		t.Fatal(err)
+	}
+	var do *menubar.Do
+	for _, c := range st.Setup.Checks {
+		if c.ID == "setup" {
+			do = c.Do
+		}
+	}
+	if st.Setup.State != menubar.SetupInterrupted || do == nil || do.Invite || st.Setup.NextID != "setup" {
+		t.Fatalf("setup %s: do %+v, next_id %q\n%+v", st.Setup.State, do, st.Setup.NextID, st.Setup.Checks)
+	}
+	// Without --yes the same run only says what it would do.
+	if _, _, code := m.run(t, slices.DeleteFunc(slices.Clone(do.Args), func(a string) bool { return a == "--yes" })...); code == 0 && len(spawned) > 0 {
+		t.Fatalf("a bare re-run went on without --yes: %q", spawned)
+	}
+	spawned, pools = nil, nil
+	m.ok(t, do.Args...)
+	if len(spawned) != 1 || !slices.Equal(pools, []string{"trial"}) || !slices.Contains(spawned[0], "--pull-timeout=5m0s") {
+		t.Fatalf("the button's run %q, stdin %q (do %q)", spawned, pools, do.Args)
+	}
+}
+
+// host '<invite>' --detach hands the invite to the background run on its
+// stdin, never in its argv (which any user here reads with ps for the whole
+// run); that run joins with it, and one told an invite comes on stdin that
+// gets none refuses, spending nothing. No record, log or status holds it.
+func TestHostDetachInviteOffArgv(t *testing.T) {
+	tn := tailnettest.New()
+	owner := startMachine(t, tn, "owner", "owner@example.com")
+	lender := soloMachineOn(t, tn, "")
+	owner.ok(t, "create", "friends")
+	invite := hostCodeRe.FindStringSubmatch(owner.ok(t, "invite", "judy", "--host"))
+	if invite == nil {
+		t.Fatal("no host invite")
+	}
+	code := invite[1]
+	old := hostSpawn
+	t.Cleanup(func() { hostSpawn = old })
+	var args []string
+	var stdin string
+	hostSpawn = func(a []string, arg string, log, lock *os.File) (int, error) {
+		args, stdin = a, arg
+		return 4242, nil
+	}
+	share := []string{"--image", refPin, "--sizes", "c1m2", "--name-prefix", "lender", "--reclaim-idle-s", "0", "--no-sudo"}
+	out := lender.ok(t, append([]string{"host", code, "--detach"}, share...)...)
+	if args == nil || stdin != code {
+		t.Fatalf("host --detach: spawned %q, stdin %q\n%s", args, stdin, out)
+	}
+	secret := code[strings.LastIndex(code, ":")+1:]
+	for _, a := range args {
+		if strings.Contains(a, code) || strings.Contains(a, secret) {
+			t.Fatalf("the background run's argv holds the invite: %q", args)
+		}
+	}
+	if !slices.Contains(args, "--invite-stdin") {
+		t.Fatalf("the background run is not told its invite comes on stdin: %q", args)
+	}
+
+	// Told an invite comes on stdin, and none came: refused, nothing spent.
+	if o, e, c := lender.runIn(t, "", args...); c == 0 || !strings.Contains(e, "--invite-stdin: no invite code (or pool) came on stdin") {
+		t.Fatalf("no invite on stdin: exit %d\n%s%s", c, o, e)
+	}
+	// An argument as well is a usage error.
+	if _, e, c := lender.runIn(t, code+"\n", append(args, "friends")...); c != 2 || !strings.Contains(e, "give it no argument as well") {
+		t.Fatalf("--invite-stdin with an argument: exit %d\n%s", c, e)
+	}
+
+	// The background run, as hostSpawn starts it, joins with the invite.
+	o, e, c := lender.runIn(t, stdin+"\n", args...)
+	if c != 0 || !strings.Contains(o, "shared lender-c1m2") || !strings.Contains(o, "friends") {
+		t.Fatalf("the background run: exit %d\n%s%s", c, o, e)
+	}
+	if strings.Contains(o+e, code) {
+		t.Fatalf("the background run's words (host.log) hold the invite:\n%s%s", o, e)
+	}
+	raw, err := os.ReadFile(filepath.Join(lender.home, hostsetup.FileName))
+	if err != nil || strings.Contains(string(raw), code) || strings.Contains(string(raw), "invite-stdin") {
+		t.Fatalf("setup record (%v):\n%s", err, raw)
+	}
+	if st := lender.ok(t, "--json", "host", "status"); strings.Contains(st, code) || strings.Contains(st, "invite-stdin") {
+		t.Fatalf("host status:\n%s", st)
+	}
+}
+
+// hostSpawn's own process: the invite comes whole on its stdin, then the
+// end, and is in neither its argv nor its environment.
+func TestHostSpawnHandsTheInviteOnStdin(t *testing.T) {
+	const invite = "potluck-mini:abcdefabcdefabcdefabcdefabcdefab:ABCD-EFGH"
+	if os.Getenv("POTLUCK_TEST_SPAWNED") != "" { // the spawned process
+		in, err := io.ReadAll(os.Stdin)
+		fmt.Printf("stdin=%q err=%v argv-or-env=%v done\n", in, err, strings.Contains(strings.Join(append(os.Environ(), os.Args...), "\n"), "ABCD-EFGH"))
+		return
+	}
+	t.Setenv("POTLUCK_TEST_SPAWNED", "1")
+	dir := t.TempDir()
+	log, err := os.Create(filepath.Join(dir, "host.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	lock, err := os.Create(filepath.Join(dir, "host.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	pid, err := hostSpawn([]string{"-test.run=^TestHostSpawnHandsTheInviteOnStdin$"}, invite, log, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ws syscall.WaitStatus
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		got, err := syscall.Wait4(pid, &ws, syscall.WNOHANG, nil)
+		if got == pid {
+			break
+		}
+		if err != nil && err != syscall.EINTR || time.Now().After(deadline) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("the spawned process did not end: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	b, err := os.ReadFile(log.Name())
+	want := fmt.Sprintf("stdin=%q err=<nil> argv-or-env=false done", invite+"\n")
+	if err != nil || !strings.Contains(string(b), want) {
+		t.Fatalf("the spawned process said (%v):\n%s\nwant %s", err, b, want)
 	}
 }

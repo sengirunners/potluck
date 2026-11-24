@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Hosted Coding Agents and CI, Nov 2026 | Potluck</title>
+<meta name="description" content="Which open-source tools run coding agents and CI jobs on machines you already own, as of November 2026: agents, runners, sandboxes and where Potluck fits.">
+<link rel="canonical" href="https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Self-Hosted Coding Agents and CI, Nov 2026 | Potluck">
+<meta property="og:description" content="Which open-source tools run coding agents and CI jobs on machines you already own, as of November 2026: agents, runners, sandboxes and where Potluck fits.">
+<meta property="og:url" content="https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci">
+<meta property="og:image" content="https://potluck.sh/og/blog/open-source-self-hosted-coding-agents-and-ci.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Open-Source Self-Hosted Coding Agents and CI on Your Own Machines (November 2026)">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Self-Hosted Coding Agents and CI, Nov 2026 | Potluck">
+<meta name="twitter:description" content="Which open-source tools run coding agents and CI jobs on machines you already own, as of November 2026: agents, runners, sandboxes and where Potluck fits.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/open-source-self-hosted-coding-agents-and-ci.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/open-source-self-hosted-coding-agents-and-ci.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci#post","mainEntityOfPage":"https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci","url":"https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci","headline":"Open-Source Self-Hosted Coding Agents and CI on Your Own Machines (November 2026)","description":"Which open-source tools run coding agents and CI jobs on machines you already own, as of November 2026: agents, runners, sandboxes and where Potluck fits.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"open source self-hosted coding agent run locally, open source self-hosted coding agent runner CI own machines 2026, open source self-hosted coding agent runner CI on own machines 2026, what open source tools run coding agents and CI jobs on machines I already own","image":"https://potluck.sh/og/blog/open-source-self-hosted-coding-agents-and-ci.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Open-Source Self-Hosted Coding Agents and CI on Your Own Machines (November 2026)","item":"https://potluck.sh/blog/open-source-self-hosted-coding-agents-and-ci"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Open-Source Self-Hosted Coding Agents and CI on Your Own Machines (November 2026)</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer</strong>: To run coding agents and CI jobs on machines you already own with open-source software, you need two pieces: an agent and a safe place to run it and your builds. For the agent, OpenHands and OpenCode are MIT-licensed according to their repositories, and Cline's CLI, Desktop and VS Code surfaces are Apache-2.0 according to its repository. For the machines, Potluck, free and Apache-2.0, made by Sengi, Inc., pools a team's idle Macs and Linux boxes and runs GitHub Actions jobs and coding agents on them, each in a fresh VM or sandbox, with at most two macOS guests per Mac (Apple's licence). Potluck is early: a real Actions job has gone through it by hand on a Mac and on a Linux box, but it does not yet run daily in its makers' own CI.</p>
+<h2 id="two-jobs-the-agent-and-the-machine-it-runs-on">Two jobs: the agent, and the machine it runs on</h2>
+<p>Most pages about self-hosted coding agents compare agents. That is half the question. The searches behind this post ask for something that runs agents and CI jobs on machines you already own, which splits into:</p>
+<ul>
+<li><strong>The agent or harness.</strong> The program that reads code, calls a model and runs commands. OpenHands, OpenCode, Cline, Coder Agents, or a CLI such as Claude Code or Codex.</li>
+<li><strong>The execution layer.</strong> The machine, VM or sandbox where those commands and your CI jobs actually run, and what that box can reach.</li>
+</ul>
+<p>An agent on your laptop runs with your shell, your files and your network. A CI job on a self-hosted runner runs on whatever host you installed it on. Neither is isolated unless you add isolation. Potluck works on the second job: it turns spare Macs and Linux boxes into a pool that hands out fresh VMs and sandboxes, and it drives existing runtimes (Tart, Kata, gVisor and Incus) instead of shipping its own.</p>
+<h2 id="the-options-at-a-glance-november-2026">The options at a glance (November 2026)</h2>
+<p>Potluck is made by Sengi, which sells hosted GitHub Actions runners. Potluck is a separate free project that runs without Sengi or a Sengi account. Licences below are as stated by each project's own repository or docs.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>What it is</th><th>Runs on your machines</th><th>Licence</th><th>Where it needs more work or costs more</th></tr></thead>
+<tbody>
+<tr><td>Agent CLI on a box you own, in tmux</td><td>Claude Code, Codex or OpenCode on a Linux machine, kept alive with tmux over SSH</td><td>Execution, clone, credentials</td><td>Depends on the CLI; Codex CLI is Apache 2.0</td><td>One shared checkout, sessions lost on reboot, no isolation from the host</td></tr>
+<tr><td>OpenHands</td><td>Agent harness with a web UI; each conversation can get its own Docker container</td><td>Harness, UI, execution</td><td>MIT</td><td>You run Docker, upgrades and access control; its docs say the UI is unauthenticated as installed</td></tr>
+<tr><td>OpenCode</td><td>Agent CLI with a headless server mode and local model support</td><td>CLI and execution</td><td>MIT</td><td>Isolation is whatever machine you start it on</td></tr>
+<tr><td>Cline CLI, Desktop, VS Code</td><td>Agent surfaces using your own provider or a local runtime</td><td>Execution, credentials</td><td>Apache-2.0; the JetBrains plugin is not open source</td><td>Its docs say telemetry is on by default; check the approval defaults</td></tr>
+<tr><td>Coder Agents</td><td>Agent platform for your data center or cloud account</td><td>Platform and execution</td><td>AGPL v3</td><td>A platform to deploy and operate</td></tr>
+<tr><td>GitHub's self-hosted runner</td><td>GitHub's runner program installed on a machine you own</td><td>Actions jobs</td><td>Open source, published by GitHub</td><td>Jobs run on the host itself unless you add your own VM or container wrapping and cleanup</td></tr>
+<tr><td>Potluck</td><td>Pools owned Macs and Linux boxes; Actions jobs and agents in fresh VMs or sandboxes</td><td>Actions jobs, agent sandboxes, vendor agent runners</td><td>Apache-2.0</td><td>Early; Linux hand-back only as a time window; Actions not yet daily in its makers' CI</td></tr>
+<tr><td>Hosted runners (GitHub-hosted, Sengi and others)</td><td>Someone else's machines, paid by use</td><td>Nothing</td><td>Not self-hosted</td><td>Recurring cost; in exchange there is no hardware to maintain</td></tr>
+</tbody>
+</table></div>
+<p>These combine. A team can run OpenCode or OpenHands as the agent and point its command execution at Potluck sandboxes, and keep GitHub's runner for some jobs while moving others to fresh VMs.</p>
+<h2 id="how-potluck-plugs-into-agents-and-ci">How Potluck plugs into agents and CI</h2>
+<p>Potluck exposes the pool in four ways.</p>
+<p><strong>Sandboxes from the command line.</strong> <code>potluck sandbox create</code> prints an id, <code>potluck sandbox exec &lt;id&gt; -- uname -a</code> runs a command inside it, and <code>potluck sandbox rm &lt;id&gt;</code> removes it. Any script or agent that can run a shell command can use these. More in <a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">run coding agents in a sandbox on your own machines</a> and on the <a href="/agent-sandbox">agent sandbox</a> page.</p>
+<p><strong>An MCP server for agents.</strong> <code>potluck --pool friends mcp</code> starts an MCP server that exposes sandbox tools to an agent, so an agent that speaks MCP can create a box, run commands in it and throw it away. See <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a>.</p>
+<p><strong>Vendor agent runners.</strong> <code>potluck agent-runner</code> runs a coding-agent vendor's self-hosted runners in fresh sandboxes, so a hosted agent product that supports self-hosted runners executes on your hardware instead of a long-lived host.</p>
+<p><strong>GitHub Actions.</strong> A runner broker sends Actions jobs to fresh VMs or sandboxes. As of today a real Actions job has been run through it, by hand, on a Mac with Tart and on a Linux box on another machine using OCI with gVisor. It is not yet running daily in our own CI, so treat it as something to try, not something to move your release pipeline onto. Details on the <a href="/github-actions-runner">GitHub Actions runner</a> page and in <a href="/blog/self-hosted-github-actions-runner-on-your-mac">self-hosted GitHub Actions runner on your Mac</a>.</p>
+<h2 id="what-stays-on-your-machines-and-what-still-leaves">What stays on your machines, and what still leaves</h2>
+<p>Self-hosting execution keeps the repository clone, build outputs and the credentials the job uses on hardware you own. It does not, by itself, keep everything local:</p>
+<ul>
+<li><strong>The model request.</strong> Where prompts and the file contents an agent reads are sent is set by the agent's own configuration. With a hosted model they go to that provider. OpenHands, OpenCode and Cline each document local model servers such as Ollama, LM Studio or vLLM if prompts must stay in your network.</li>
+<li><strong>The host can read the guest.</strong> In Potluck, the machine that runs a VM can read everything in it, including secrets. The machine that runs a pool can read the commands and output passing through it. Join only a pool whose owner you trust, and keep production secrets out of pools that include machines you do not control.</li>
+<li><strong>Network reach.</strong> Whatever a box can reach, an agent in it can reach. <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer the default is no network at all, which also means a job that needs to download packages needs network you choose to give it.</li>
+</ul>
+<p>There are no promises here: use it at your own risk, and verify the boundaries you care about on your own setup.</p>
+<h2 id="what-each-machine-needs">What each machine needs</h2>
+<ul>
+<li><strong>Mac:</strong> Tart on an Apple silicon Mac. Apple's licence allows up to two macOS VMs on a Mac you own, and Potluck caps macOS guests at two per Mac. Lending a macOS guest to your team or invited friends is fine; selling Mac time to the public is not, and neither is pooling iOS Simulator time. This is not legal advice. See the <a href="/tart">Tart</a> page.</li>
+<li><strong>Linux:</strong> Docker or Podman with Kata or gVisor.</li>
+<li><strong>Sharing:</strong> <code>--share</code> sets the fraction of cores and RAM shared, and Potluck's default is 0.5, half the machine.</li>
+<li><strong>Taking a machine back:</strong> a Mac sandbox ends when its owner touches the keyboard or pointer. When an owner takes a machine back, running VMs end and new work is refused. On Linux, hand-back works only as a time window today.</li>
+</ul>
+<p>Machines reach each other over Tailscale, or over a tunnel you configure. For a longer walkthrough of a mixed pool, see <a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">pool spare Macs and Linux boxes for builds and agents</a>.</p>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install on macOS or Linux (no Go needed) and start the daemon:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>On the machine that runs the pool:</p>
+<pre><code>potluck create friends
+potluck invite ana
+potluck invite carl --host
+</code></pre>
+<p>The first <code>potluck create</code> prints a Tailscale login URL. <code>potluck invite ana</code> makes a code for a friend who runs sandboxes; <code>potluck invite carl --host</code> makes a code for a friend who shares a machine.</p>
+<p>A friend who wants sandboxes runs <code>potluck join '&lt;code&gt;'</code>. A friend sharing a machine first runs <code>potluck doctor</code> to see what it can share and <code>potluck host --dry-run</code> to print the plan, then <code>potluck host '&lt;code&gt;'</code>. That checks the machine, pulls the image, runs a quick conformance check per size and joins the pool only when a size passes. <code>potluck host stop</code> stops sharing.</p>
+<p>Then try a box:</p>
+<pre><code>potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks: a machine that fails the conformance check, a runner job that hangs, an agent that cannot reach its sandbox. Start a thread at https://github.com/sengirunners/potluck/discussions with what you ran and what happened. If you want to contribute code, the good first issues are at https://github.com/sengirunners/potluck/issues. The source is at https://github.com/sengirunners/potluck.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="what-open-source-tools-run-coding-agents-and-ci-jobs-on-machines-i-already-own">What open-source tools run coding agents and CI jobs on machines I already own?</h3>
+<p>For the agent, OpenHands, OpenCode, Cline's open-source surfaces and Coder Agents all run on your own hardware. For execution, GitHub's self-hosted runner runs Actions jobs on a host you own, and Potluck runs Actions jobs and coding agents in fresh VMs or sandboxes across a pool of your Macs and Linux boxes.</p>
+<h3 id="is-potluck-a-coding-agent">Is Potluck a coding agent?</h3>
+<p>No. Potluck gives agents and CI jobs a place to run: fresh sandboxes from the command line, an MCP server with sandbox tools, and <code>potluck agent-runner</code> for a vendor's self-hosted runners. You bring the agent.</p>
+<h3 id="can-i-run-an-open-source-coding-agent-fully-locally">Can I run an open-source coding agent fully locally?</h3>
+<p>The agent and its commands can run entirely on your machines. The model request leaves unless you point the agent at a local model server, which OpenHands, OpenCode and Cline each document; check the agent's telemetry and update settings too.</p>
+<h3 id="does-potluck-run-github-actions-jobs-today">Does Potluck run GitHub Actions jobs today?</h3>
+<p>A real Actions job has been run through its runner broker by hand, on a Mac with Tart and on a Linux box with OCI and gVisor. It is not yet running daily in its makers' own CI, so it is ready to try, not to depend on.</p>
+<h3 id="what-does-potluck-cost">What does Potluck cost?</h3>
+<p>Potluck is free and open source under Apache-2.0, and it runs without Sengi or a Sengi account. Your cost is the machines you already own.</p>
+<h3 id="can-i-lend-my-mac-to-friends-for-builds">Can I lend my Mac to friends for builds?</h3>
+<p>Yes, to your team or invited friends, with at most two macOS guests per Mac as Apple's licence allows. Selling Mac time to the public or pooling iOS Simulator time is not allowed; this is not legal advice.</p>
+<h3 id="is-my-code-safe-on-someone-elses-machine">Is my code safe on someone else's machine?</h3>
+<p>The machine that runs a VM can read everything in it, including secrets, and the pool's machine can read commands and output. Join only pools whose owner you trust, and keep secrets you cannot afford to expose out of shared pools.</p>
+<h3 id="do-i-need-kubernetes">Do I need Kubernetes?</h3>
+<p>No. Potluck is not a cluster scheduler; it runs on individual Macs and Linux boxes with Tart, or Docker or Podman with Kata or gVisor.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/open-source-self-hosted-coding-agents-and-ci.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

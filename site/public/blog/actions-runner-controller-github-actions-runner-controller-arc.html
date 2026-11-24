@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARC: Actions Runner Controller on Kubernetes 2026 | Potluck</title>
+<meta name="description" content="How to install Actions Runner Controller (ARC) with Helm: controller chart, GitHub auth, runner scale sets, workflows. Plus Potluck for spare Macs.">
+<link rel="canonical" href="https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="ARC: Actions Runner Controller on Kubernetes 2026 | Potluck">
+<meta property="og:description" content="How to install Actions Runner Controller (ARC) with Helm: controller chart, GitHub auth, runner scale sets, workflows. Plus Potluck for spare Macs.">
+<meta property="og:url" content="https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc">
+<meta property="og:image" content="https://potluck.sh/og/blog/actions-runner-controller-github-actions-runner-controller-arc.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Actions Runner Controller (ARC): Self-Hosted GitHub Actions Runners on Kubernetes in 2026">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ARC: Actions Runner Controller on Kubernetes 2026 | Potluck">
+<meta name="twitter:description" content="How to install Actions Runner Controller (ARC) with Helm: controller chart, GitHub auth, runner scale sets, workflows. Plus Potluck for spare Macs.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/actions-runner-controller-github-actions-runner-controller-arc.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/actions-runner-controller-github-actions-runner-controller-arc.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc#post","mainEntityOfPage":"https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc","url":"https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc","headline":"Actions Runner Controller (ARC): Self-Hosted GitHub Actions Runners on Kubernetes in 2026","description":"How to install Actions Runner Controller (ARC) with Helm: controller chart, GitHub auth, runner scale sets, workflows. Plus Potluck for spare Macs.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"Actions Runner Controller GitHub Actions Runner Controller ARC Kubernetes, Actions Runner Controller GitHub Actions Kubernetes 'actions-runner-controller' repo, actions-runner-controller self-hosted GitHub Actions runners on Kubernetes, actions-runner-controller GitHub 'actions-runner-controller' 'Kubernetes controller for GitHub Actions runners'","image":"https://potluck.sh/og/blog/actions-runner-controller-github-actions-runner-controller-arc.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"Actions Runner Controller (ARC): Self-Hosted GitHub Actions Runners on Kubernetes in 2026","item":"https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>Actions Runner Controller (ARC): Self-Hosted GitHub Actions Runners on Kubernetes in 2026</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer</strong>: Actions Runner Controller (ARC) is the Kubernetes operator from the actions/actions-runner-controller repository that runs and autoscales self-hosted GitHub Actions runners as ephemeral pods. The GitHub Docs page &quot;Actions Runner Controller&quot; says ARC ships as 2 Helm charts and 1 controller container image. You run 2 <code>helm install</code> commands: one for the gha-runner-scale-set-controller chart, and one gha-runner-scale-set chart per runner scale set. Then you set <code>runs-on</code> to the installation name, which the same page limits to 45 characters. Per that page, a failed runner pod is retried up to 5 times, and GitHub unassigns a job that no runner accepts within 24 hours. ARC needs a Kubernetes cluster and runs Linux container pods. If your spare capacity is Macs and Linux boxes rather than a cluster, Potluck, an early open-source project, runs jobs in a fresh VM or sandbox on machines you already own.</p>
+<p>The rest of this page is a setup reference. Each fact names the GitHub Docs page or repository it comes from. The last part shows where Potluck fits.</p>
+<h2 id="what-actions-runner-controller-arc-is">What Actions Runner Controller (ARC) is</h2>
+<p>The repository description calls actions-runner-controller a &quot;Kubernetes controller for GitHub Actions self-hosted runners&quot;. The GitHub Docs concept page describes it as an operator that orchestrates and scales those runners.</p>
+<ul>
+<li><strong>Runner scale sets are the supported mode.</strong> The repository README says the older autoscaling modes are legacy and maintained by the community only.</li>
+<li><strong>Charts are OCI only.</strong> The concept page says the charts are published as OCI packages on GitHub Packages. There are no tarballs and no Helm repository on GitHub Pages.</li>
+<li><strong>ARC adds custom resources.</strong> The concept page lists the API groups <code>actions.github.com/v1alpha1</code> (scale sets) and <code>actions.summerwind.net/v1alpha1</code> (legacy). The controller chart installs them.</li>
+</ul>
+<h2 id="arc-compared-with-other-runner-options">ARC compared with other runner options</h2>
+<p>Potluck is made by Sengi, which sells hosted GitHub Actions runners. Potluck is a separate, free project.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>Where jobs run</th><th>What you operate</th><th>macOS jobs</th></tr></thead>
+<tbody>
+<tr><td>ARC runner scale sets</td><td>Pods in your Kubernetes cluster</td><td>The cluster, 2 Helm releases, GitHub auth, logs</td><td>No, Linux container pods</td></tr>
+<tr><td>One self-hosted runner</td><td>A machine you own</td><td>The runner app, cleanup between jobs</td><td>Yes, on a Mac</td></tr>
+<tr><td>Hosted runners (GitHub-hosted, Cirrus Runners, Blacksmith, Sengi)</td><td>The vendor's machines</td><td>Nothing; the vendor bills you</td><td>Where the vendor offers it</td></tr>
+<tr><td>Potluck</td><td>A fresh VM or sandbox on Macs and Linux boxes you own</td><td>A <code>potluck</code> daemon per machine, Tailscale or your own tunnel</td><td>Yes, with Tart on Apple silicon</td></tr>
+</tbody>
+</table></div>
+<p>ARC is GitHub-supported and autoscales with workflow demand. A single runner is the simplest option, but it has no autoscaling and does not give each job a clean environment. Hosted runners need no hardware. Potluck is early: its Actions path has been run by hand, not yet daily.</p>
+<h2 id="prerequisites-for-arc-on-kubernetes">Prerequisites for ARC on Kubernetes</h2>
+<p>The GitHub Docs tutorial &quot;Get started with Actions Runner Controller&quot; lists:</p>
+<ul>
+<li>A Kubernetes cluster. It suggests a managed service such as AKS, or minikube or kind for a local trial.</li>
+<li>Helm 3.</li>
+<li>A way to collect and keep logs from the controller, listeners and ephemeral runners before production. The tutorial recommends this but does not require it.</li>
+</ul>
+<h2 id="step-1-install-the-gha-runner-scale-set-controller-chart">Step 1: install the gha-runner-scale-set-controller chart</h2>
+<p>This step installs the operator and the CRDs. The commands come from the quickstart:</p>
+<pre><code class="language-bash">NAMESPACE=&quot;arc-systems&quot;
+helm install arc \
+  --namespace &quot;${NAMESPACE}&quot; \
+  --create-namespace \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+</code></pre>
+<p>Once you move past a trial, pin a chart version with <code>--version</code>. The namespace must be able to reach the Kubernetes API server.</p>
+<h2 id="step-2-authenticate-arc-to-the-github-api">Step 2: authenticate ARC to the GitHub API</h2>
+<p>The docs page &quot;Authenticating ARC to the GitHub API&quot; covers authentication.</p>
+<ul>
+<li>For repository or organization runners, GitHub recommends a GitHub App.</li>
+<li>Enterprise-level scale sets require a personal access token (classic).</li>
+<li>The quickstart uses a classic token with the <code>repo</code> and <code>admin:org</code> scopes to keep the trial short.</li>
+</ul>
+<p>The quickstart warns against passing secrets in plain text on the command line. Create a Kubernetes secret instead:</p>
+<pre><code class="language-bash">kubectl create namespace arc-runners
+kubectl create secret generic arc-github-secret \
+  --namespace arc-runners \
+  --from-literal=github_token='&lt;PAT&gt;'
+</code></pre>
+<h2 id="step-3-deploy-a-runner-scale-set">Step 3: deploy a runner scale set</h2>
+<p>The installation name becomes your <code>runs-on</code> value. The quickstart recommends keeping runner pods in a different namespace from the controller.</p>
+<pre><code class="language-bash">INSTALLATION_NAME=&quot;arc-runner-set&quot;
+NAMESPACE=&quot;arc-runners&quot;
+GITHUB_CONFIG_URL=&quot;&lt;URL of your repository, organization or enterprise&gt;&quot;
+helm install &quot;${INSTALLATION_NAME}&quot; \
+  --namespace &quot;${NAMESPACE}&quot; \
+  --set githubConfigUrl=&quot;${GITHUB_CONFIG_URL}&quot; \
+  --set githubConfigSecret=arc-github-secret \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+</code></pre>
+<p>The concept page's resource table says that when <code>githubConfigSecret</code> is a string, ARC uses that existing secret instead of creating one.</p>
+<p>Resource names are the installation name plus a fixed suffix, so keep the name short. For example, the listener Role reserves 26 characters for its suffix.</p>
+<p>To route jobs by other names, set <code>runnerScaleSetName</code> or <code>runnerScaleSetLabels</code> in <code>values.yaml</code>.</p>
+<h2 id="step-4-verify-the-install-and-run-a-workflow">Step 4: verify the install and run a workflow</h2>
+<pre><code class="language-bash">helm list -A
+kubectl get pods -n arc-systems
+</code></pre>
+<p>You should see both releases deployed, plus a controller pod and a listener pod in <code>Running</code>. Then add a workflow:</p>
+<pre><code class="language-yaml">name: Actions Runner Controller Demo
+on:
+  workflow_dispatch:
+jobs:
+  Explore-GitHub-Actions:
+    runs-on: arc-runner-set
+    steps:
+      - run: echo &quot;This job uses runner scale set runners&quot;
+</code></pre>
+<p>Trigger it by hand and watch a runner pod come and go with <code>kubectl get pods -n arc-runners -w</code>. If a pod stays pending, see the GitHub Docs page &quot;Troubleshooting Actions Runner Controller errors&quot;.</p>
+<h2 id="how-arc-scales-runners">How ARC scales runners</h2>
+<p>The architecture section of the concept page describes this flow:</p>
+<ol>
+<li>The controller fetches the runner group and creates the scale set in the GitHub Actions service.</li>
+<li>A listener pod holds an HTTPS long poll and waits for a Job Available message.</li>
+<li>When a job's <code>runs-on</code> matches, the listener patches the EphemeralRunnerSet replica count.</li>
+<li>The EphemeralRunner controller gets a just-in-time token and creates runner pods. It retries a failed pod up to 5 times.</li>
+<li>When the job finishes, the runner is deleted.</li>
+</ol>
+<p>Each job gets a new pod.</p>
+<h2 id="custom-runner-images">Custom runner images</h2>
+<p>The concept page lists what GitHub's minimal runner image contains: runner binaries, container hooks, and Docker for Docker-in-Docker mode.</p>
+<p>To add tools, use setup actions such as actions/setup-node, or build your own image. A custom image must:</p>
+<ul>
+<li>place the runner under <code>/home/runner/</code> and start it with <code>/home/runner/run.sh</code>;</li>
+<li>in Kubernetes mode, put the container hooks under <code>/home/runner/k8s</code>.</li>
+</ul>
+<h2 id="where-potluck-fits">Where Potluck fits</h2>
+<p>ARC assumes a Kubernetes cluster and Linux pods. Many teams that ask about running jobs on spare Macs have no cluster. They have a Mac mini on a shelf and a Linux box under a desk.</p>
+<p>Potluck is free, Apache-2.0 software that runs GitHub Actions jobs and coding agents on those machines, each in a fresh VM or sandbox.</p>
+<ul>
+<li><strong>Runtimes:</strong> Tart on Apple silicon, or Docker or Podman with Kata or gVisor on Linux.</li>
+<li><strong>Not a cluster scheduler:</strong> if you already run Kubernetes, ARC is the better fit for Linux jobs.</li>
+<li><strong>Status:</strong> a real Actions job has been run through the runner broker by hand, on a Mac (Tart) and on a Linux box on another machine (OCI with gVisor). It does not run daily in our own CI yet.</li>
+<li><strong>Coding agents:</strong> <code>potluck agent-runner</code> runs a coding-agent vendor's self-hosted runners in fresh sandboxes.</li>
+<li><strong>Owners come first:</strong> a Mac sandbox ends when its owner touches the keyboard or pointer. On Linux, hand-back works only as a time window today.</li>
+<li><strong>macOS limit:</strong> Apple's licence allows 2 macOS VMs on a Mac you own, and Potluck caps macOS guests at 2 per Mac.</li>
+</ul>
+<p>More: <a href="/github-actions-runner">GitHub Actions runners on your own machines</a>, <a href="/blog/self-hosted-github-actions-runner-on-your-mac">a self-hosted runner on your Mac</a>, <a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">pooling spare Macs and Linux boxes</a>.</p>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install and start the daemon on macOS or Linux (no Go needed):</p>
+<pre><code class="language-bash">curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>Set up a pool:</p>
+<ol>
+<li>On the pool machine, run <code>potluck create friends</code>. The first time, it prints a Tailscale login URL.</li>
+<li>Run <code>potluck invite ana</code> to make a code for a friend who runs sandboxes.</li>
+<li>Run <code>potluck invite carl --host</code> to make a code for a friend who shares a machine.</li>
+<li>Friends run <code>potluck join '&lt;code&gt;'</code> or <code>potluck host '&lt;code&gt;'</code>.</li>
+</ol>
+<p>Before you share a machine:</p>
+<ul>
+<li><code>potluck doctor</code> shows what the machine can share.</li>
+<li><code>potluck host --dry-run</code> prints the plan.</li>
+<li><code>--share</code> sets the fraction of cores and RAM shared (default 0.5).</li>
+<li><code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet.</li>
+</ul>
+<p>Try a sandbox with <code>potluck sandbox create</code>, <code>potluck sandbox exec &lt;id&gt; -- uname -a</code> and <code>potluck sandbox rm &lt;id&gt;</code>. To stop sharing, run <code>potluck host stop</code>.</p>
+<p>Trust works like this. The machine that runs a VM can read everything in it, including secrets. The pool machine can read commands and output passing through it. Join only a pool whose owner you trust, and use Potluck at your own risk.</p>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. Contributors can find good first issues at https://github.com/sengirunners/potluck/issues.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="what-is-actions-runner-controller-arc">What is Actions Runner Controller (ARC)?</h3>
+<p>ARC is a Kubernetes operator that runs and autoscales self-hosted GitHub Actions runners as ephemeral pods. It lives in the actions/actions-runner-controller repository, and its documentation is on GitHub Docs.</p>
+<h3 id="is-arc-supported-by-github">Is ARC supported by GitHub?</h3>
+<p>The runner scale set mode is supported by GitHub. The README says the legacy autoscaling modes are maintained by the community only.</p>
+<h3 id="should-arc-use-a-github-app-or-a-personal-access-token">Should ARC use a GitHub App or a personal access token?</h3>
+<p>GitHub Docs recommends a GitHub App for repository and organization runners. Enterprise-level scale sets require a personal access token (classic).</p>
+<h3 id="can-arc-run-macos-jobs">Can ARC run macOS jobs?</h3>
+<p>No. ARC runners are Linux container pods. For macOS jobs you need a Mac, a hosted macOS runner, or a Tart VM through Potluck on Apple silicon.</p>
+<h3 id="does-potluck-replace-arc">Does Potluck replace ARC?</h3>
+<p>No. Potluck is not a cluster scheduler. It puts idle Macs and Linux boxes to work in fresh VMs or sandboxes.</p>
+<h3 id="do-i-need-a-sengi-account-to-use-potluck">Do I need a Sengi account to use Potluck?</h3>
+<p>No. Potluck runs without Sengi and without a Sengi account.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/actions-runner-controller-github-actions-runner-controller-arc.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

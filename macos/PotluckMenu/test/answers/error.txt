@@ -1,0 +1,2 @@
+checking the invite
+{"error":{"code":"bad_request","hint":"copy the whole invite again: potluck invite <you> --host","message":"this is not a whole invite"}}

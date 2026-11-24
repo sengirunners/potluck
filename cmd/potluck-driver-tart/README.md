@@ -19,7 +19,7 @@ from `acquire`.
 ## Setup (once, by the owner)
 
 ```sh
-# Tart from its release (Homebrew's cirruslabs tap is stale); Softnet must be setuid root
+# Tart from its release, github.com/openai/tart (drag tart.app into Applications, or link its program onto PATH; Homebrew's cirruslabs tap is stale); Softnet must be setuid root
 # (macOS 26+: upstream's latest release; macOS 15: `potluck softnet install`, docs/softnet.md):
 sudo install -o root -g wheel -m 4755 softnet /usr/local/bin/softnet
 tart clone ghcr.io/cirruslabs/ubuntu:latest potluck-base-ubuntu     # Linux: ~5 GB, uncapped
@@ -65,7 +65,7 @@ takes inbound connections) as root through `sudo -n`, and ends the VM while port
 | `shelf_fill_delay_s` | 300 | how long a live box's requests wait before the host fetches them (or until the box ends) |
 | `warm` | 0 | a box binding keeps this many boxes booted and idle; an acquire of the default image (no persist, volumes or jit_config) takes one at once. Warm boxes hold the binding's slots (a cold acquire ends one for its slot) but no `admission_url` lease until taken |
 | `persist_keep_s` | 2592000 (30 days) | how long a stopped box's disk is kept before the driver deletes it (at least 60). On `vm=oci` a kept box is the same container, its HOME also on a volume `<vm>-home`; under runsc (Docker) it gets the annotation `dev.gvisor.flag.overlay2=none` so its root's changes survive a stop too (runsc's default overlay drops them; a runsc whose override allowlist lacks overlay2 fails the kept box's boot, and the error names its version). Stopped boxes are live handles: rebinding or removing the binding is refused until they are released (`potluck sandbox ls` lists them, `potluck sandbox rm` deletes each disk) |
-| `tart` | `tart` on PATH | the tart binary |
+| `tart` | found like `potluck doctor` finds it: PATH, then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then `tart.app` in `/Applications` and `~/Applications` | the tart binary |
 | `vm` | `tart` | the VM layer: `tart` (a Mac), `oci` (a Linux box, below), `incus` (below) or `cloudhv` (a Linux VM under cloud-hypervisor that naps when idle; its keys, `ch_*`, are in [docs/cloudhv.md](../../docs/cloudhv.md)). |
 | `oci_runtime` | required with `vm=oci` | a runtime that is a boundary: Kata (`io.containerd.kata.v2`, `kata-fc`, ...) or gVisor (`runsc`, or `runsc-root` for `root`/`docker`). `runc`, `crun` and `youki` are refused. |
 | `oci_cli` | `docker` | the container CLI: verified local Docker; Podman and nerdctl are unavailable for isolated boxes |

@@ -208,7 +208,8 @@ type Menu struct {
 	Dials []Dial `json:"dials,omitempty"`
 	// Windows are items below the switch that each open a window: the
 	// app runs Args and draws the JSON answer as the window named by ID
-	// ("jobs": a JobsView).
+	// ("jobs": a JobsView; "setup": the Setup of the same status, which
+	// the window asks for again every few seconds while it is open).
 	Windows []Item `json:"windows,omitempty"`
 }
 
@@ -380,8 +381,14 @@ func Build(f Facts) Status {
 	if f.Daemon == "" && f.LendErr == "" {
 		m.Dials = dials(f, l)
 	}
-	m.Windows = []Item{{ID: "jobs", Label: "Jobs this Mac ran…", Sub: "when, how long, counts and electricity",
-		Args: []string{"--json", "host", "jobs"}}}
+	m.Windows = []Item{
+		{ID: "setup", Label: "Set up and check…", Sub: "what this Mac has, what it lacks, and the next step",
+			Args: []string{"--json", "host", "status", "--probe"}},
+		{ID: "jobs", Label: "Jobs this Mac ran…", Sub: "when, how long, counts and electricity",
+			Args: []string{"--json", "host", "jobs"}},
+		{ID: "uninstall", Label: "Uninstall Potluck…", Sub: "shows what it would remove first, and asks",
+			Args: []string{"--json", "uninstall", "--dry-run"}},
+	}
 	st.Setup = buildSetup(f, st)
 	return st
 }

@@ -41,21 +41,46 @@ func (s *Service) OnEnd(f rt.EndFunc) {
 
 // OnBoxAcquire subscribes f to every new box acquire (rt.Service).
 func (s *Service) OnBoxAcquire(f rt.BoxAcquireFunc) {
+	s.OnBoxRequest(func(ctx context.Context, project, area string, _ rt.BoxRequest, live func() ([]computeapi.RunTargetHandle, error)) error {
+		return f(ctx, project, area, live)
+	})
+}
+
+// OnBoxRequest subscribes f to every new box acquire with its request (rt.Service).
+func (s *Service) OnBoxRequest(f rt.BoxRequestFunc) {
 	s.endMu.Lock()
 	defer s.endMu.Unlock()
 	s.boxChecks = append(s.boxChecks, f)
 }
 
-// boxAllowed asks every OnBoxAcquire subscriber about a new box in area (an
-// acquire, or the start of a stopped box); a subscriber that asks for the
-// area's live boxes gets every binding's. The first refusal answers; live
-// boxes that cannot be read refuse too. Only acquires on one binding are
-// serialised (starts take no lock), and a box still being acquired counts
-// nothing yet, so two at one moment may both pass: a limit is a fair-share
-// ceiling, not an exact one.
-func (s *Service) boxAllowed(ctx context.Context, project, area string, db *sql.DB) error {
+// BoxAllowed asks the subscribers about req in area, acquiring nothing (rt.Service).
+func (s *Service) BoxAllowed(ctx context.Context, projectID, area string, req rt.BoxRequest) error {
+	db, err := s.d.Store.Project(s.d.System().Scope, authz.Read, projectID)
+	if err != nil {
+		return err
+	}
+	return s.boxAllowed(ctx, projectID, area, req, db)
+}
+
+// sizeCopy is a describe's size for a subscriber to keep: its own copy.
+func sizeCopy(sz *computeapi.RunTargetSize) *computeapi.RunTargetSize {
+	if sz == nil {
+		return nil
+	}
+	c := *sz
+	return &c
+}
+
+// boxAllowed asks every OnBoxAcquire and OnBoxRequest subscriber about a new
+// box in area (an acquire, or the start of a stopped box); a subscriber that
+// asks for the area's live boxes gets every binding's. The first refusal
+// answers, as a *rt.BoxRefusal; live boxes that cannot be read refuse too.
+// Only acquires on one binding are serialised (starts take no lock), and a
+// box still being acquired counts nothing yet, so two at one moment may both
+// pass: a limit is a fair-share ceiling, not an exact one.
+func (s *Service) boxAllowed(ctx context.Context, project, area string, req rt.BoxRequest, db *sql.DB) error {
 	s.endMu.Lock()
-	fs := append([]rt.BoxAcquireFunc(nil), s.boxChecks...)
+	fs := append([]rt.BoxRequestFunc(nil), s.boxChecks...)
 	s.endMu.Unlock()
 	live := func() ([]computeapi.RunTargetHandle, error) {
 		rows, err := liveBoxes(ctx, db, area)
@@ -69,8 +94,8 @@ func (s *Service) boxAllowed(ctx context.Context, project, area string, db *sql.
 		return out, nil
 	}
 	for _, f := range fs {
-		if err := f(ctx, project, area, live); err != nil {
-			return err
+		if err := f(ctx, project, area, req, live); err != nil {
+			return &rt.BoxRefusal{Err: err}
 		}
 	}
 	return nil

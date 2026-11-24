@@ -27,7 +27,8 @@ import (
 // as potluck-driver-tart host set). Neither starts the daemon.
 
 func (a *app) hostStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var probe bool
+	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "How many of this machine's cores are lent and in use, and whether it takes new work (the menu bar item's facts)",
 		Long: `Status reads the sizes this machine shares (with pools it joined, and in
@@ -40,13 +41,30 @@ host run's stages (preflight, images, validation, join, usable capacity),
 when this machine may lend, and on a Mac the menu bar item and the daily
 update, with the one thing to do next. With --json it prints the menu
 the macOS menu bar item draws, and the checklist (docs/menubar.md). It never
-starts the daemon.`,
+starts the daemon.
+
+--probe adds, on a Mac, what a Mac needs before a host run can work: Apple
+silicon, macOS 13 or newer and virtualization; Tart; Softnet; and the free
+disk where Tart keeps images. Reading them runs Tart and Softnet, so plain
+status leaves them out.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if cfg, err := a.loadClient(); err == nil {
 				noteMenuSeen(cfg.Home)
 			}
-			st := menubar.Build(a.hostFacts(cmd.Context()))
+			// Read beside the daemon's answers: each has its own deadline, and
+			// the menu bar app's ask has one for both.
+			var mac chan hostprobe.MacParts
+			if probe && setupGOOS == "darwin" {
+				mac = make(chan hostprobe.MacParts, 1)
+				go func() { mac <- probeMac(cmd.Context()) }()
+			}
+			f := a.hostFacts(cmd.Context())
+			if mac != nil {
+				m := <-mac
+				f.Setup.Mac = &m
+			}
+			st := menubar.Build(f)
 			if a.asJSON() {
 				return a.printJSON(st)
 			}
@@ -71,6 +89,8 @@ starts the daemon.`,
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&probe, "probe", false, "on a Mac, also check Apple silicon, macOS, virtualization, Tart, Softnet and disk (runs Tart and Softnet)")
+	return cmd
 }
 
 func (a *app) hostSetCmd() *cobra.Command {

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Hosted E2B Alternatives, November 2026 | Potluck</title>
+<meta name="description" content="Self-hosted E2B alternatives for coding agent sandboxes in November 2026: E2B Embed, OpenSandbox, Microsandbox, Docker Sandboxes, DIY and Potluck compared.">
+<link rel="canonical" href="https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes">
+<meta property="og:site_name" content="Potluck">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Self-Hosted E2B Alternatives, November 2026 | Potluck">
+<meta property="og:description" content="Self-hosted E2B alternatives for coding agent sandboxes in November 2026: E2B Embed, OpenSandbox, Microsandbox, Docker Sandboxes, DIY and Potluck compared.">
+<meta property="og:url" content="https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes">
+<meta property="og:image" content="https://potluck.sh/og/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="E2B Alternatives in November 2026: Self-Hosted Sandboxes for Coding Agents">
+<meta property="article:published_time" content="2026-11-24">
+<meta property="article:modified_time" content="2026-11-24">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Self-Hosted E2B Alternatives, November 2026 | Potluck">
+<meta name="twitter:description" content="Self-hosted E2B alternatives for coding agent sandboxes in November 2026: E2B Embed, OpenSandbox, Microsandbox, Docker Sandboxes, DIY and Potluck compared.">
+<meta name="twitter:image" content="https://potluck.sh/og/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes.png">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<link rel="alternate" type="application/atom+xml" title="Potluck blog" href="/feed.xml">
+<link rel="alternate" type="text/markdown" href="/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes.md">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"BlogPosting","@id":"https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes#post","mainEntityOfPage":"https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes","url":"https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes","headline":"E2B Alternatives in November 2026: Self-Hosted Sandboxes for Coding Agents","description":"Self-hosted E2B alternatives for coding agent sandboxes in November 2026: E2B Embed, OpenSandbox, Microsandbox, Docker Sandboxes, DIY and Potluck compared.","datePublished":"2026-11-24","dateModified":"2026-11-24","inLanguage":"en","keywords":"E2B alternatives 2026 self-hosted, is there a self-hosted alternative to E2B for coding agent sandboxes","image":"https://potluck.sh/og/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes.png","author":{"@id":"https://sengi.run/#organization"},"publisher":{"@type":"Organization","@id":"https://sengi.run/#organization","name":"Sengi","url":"https://sengi.run"},"isPartOf":{"@type":"Blog","@id":"https://potluck.sh/blog#blog","name":"Potluck blog","url":"https://potluck.sh/blog"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Potluck","item":"https://potluck.sh/"},{"@type":"ListItem","position":2,"name":"Blog","item":"https://potluck.sh/blog"},{"@type":"ListItem","position":3,"name":"E2B Alternatives in November 2026: Self-Hosted Sandboxes for Coding Agents","item":"https://potluck.sh/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes"}]}]}</script>
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M4 14h24a12 10 0 0 1-24 0z' fill='%23C8402F'/><rect x='13' y='9' width='6' height='3' rx='1.5' fill='%232F6B34'/></svg>">
+<link rel="preload" href="/fonts/newsreader-roman.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/blog.css">
+</head>
+<body class="blog">
+<header class="masthead wrap">
+  <a class="logo" href="/" aria-label="Potluck home">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 14h24a12 10 0 0 1-24 0z" fill="#C8402F"/><rect x="13" y="9" width="6" height="3" rx="1.5" fill="#2F6B34"/></svg>
+    Potluck
+  </a>
+  <nav aria-label="Main">
+    <a href="/blog">Blog</a>
+    <a class="sec mezze" href="https://mezze.sh/">Mezze for agents</a>
+    <a class="sec" href="https://sengi.run">Sengi runners</a>
+    <a class="sec" href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a class="btn line" href="/#install">Install</a>
+  </nav>
+</header>
+<main class="wrap">
+<article class="post">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Potluck</a><span aria-hidden="true"> / </span><a href="/blog">Blog</a></nav>
+  <h1>E2B Alternatives in November 2026: Self-Hosted Sandboxes for Coding Agents</h1>
+  <p class="meta"><time datetime="2026-11-24">November 24, 2026</time> · by <a href="https://sengi.run">Sengi</a></p>
+  <div class="prose">
+<p><strong>Short answer</strong>: Yes, you can self-host coding agent sandboxes instead of using E2B's cloud. As of November 2026 the main self-hosted routes are:</p>
+<ul>
+<li>E2B's own open-source runtime, either the single-machine Embed package or the full infra on a cluster</li>
+<li>OpenSandbox</li>
+<li>Microsandbox</li>
+<li>Docker Sandboxes, for an agent on one laptop</li>
+<li>Building directly on Firecracker or gVisor</li>
+<li>Potluck, which pools the Macs and Linux boxes your team already owns</li>
+</ul>
+<p>Potluck is free and open source (Apache-2.0). It gives each agent a fresh VM or sandbox through Tart on Apple silicon or Kata and gVisor on Linux. It is early. Among the options in this post, it is the only one that lends idle machines across a team and offers macOS sandboxes, capped at two per Mac to match Apple's licence.</p>
+<p>Disclosure: Potluck is made by Sengi, Inc., which sells hosted GitHub Actions runners. Potluck is a separate free project and runs without a Sengi account.</p>
+<h2 id="self-hosted-e2b-alternatives-compared">Self-hosted E2B alternatives compared</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Option</th><th>Where it runs</th><th>Isolation</th><th>More than one machine</th><th>macOS sandboxes</th><th>Who operates it</th></tr></thead>
+<tbody>
+<tr><td>E2B cloud (baseline)</td><td>E2B's cloud</td><td>Firecracker microVM</td><td>Yes, managed</td><td>No, Linux only</td><td>E2B</td></tr>
+<tr><td>E2B Embed</td><td>One Linux machine with KVM</td><td>Firecracker microVM</td><td>No, single machine</td><td>No</td><td>You</td></tr>
+<tr><td>E2B infra</td><td>Your cloud account</td><td>Firecracker microVM</td><td>Yes, via Terraform and Nomad</td><td>No</td><td>You</td></tr>
+<tr><td>OpenSandbox</td><td>Your servers</td><td>Docker, Kubernetes or Firecracker</td><td>Yes, via Kubernetes</td><td>No</td><td>You</td></tr>
+<tr><td>Microsandbox</td><td>A library on your machine</td><td>microVM</td><td>Scaling past one machine is your job</td><td>No, Linux guests</td><td>You</td></tr>
+<tr><td>Docker Sandboxes (local)</td><td>Your laptop</td><td>microVM with its own Docker Engine</td><td>No</td><td>No, Linux guests</td><td>You</td></tr>
+<tr><td>Firecracker or gVisor, DIY</td><td>Your hosts</td><td>What you build</td><td>What you build</td><td>No</td><td>You</td></tr>
+<tr><td>Potluck</td><td>Macs and Linux boxes your team owns, pooled</td><td>Tart VMs on Mac; Kata or gVisor on Linux</td><td>Yes, a pool over Tailscale or your own tunnel</td><td>Yes, up to two per Mac</td><td>You and your teammates</td></tr>
+</tbody>
+</table></div>
+<h2 id="what-e2b-does-and-why-teams-self-host">What E2B does, and why teams self-host</h2>
+<p>E2B runs Linux sandboxes for AI agents on Firecracker microVMs in its own cloud. It has Python and JavaScript SDKs and per-second billing. It does stateful work well: sandboxes can pause with memory intact and be forked. If you want zero operations and a mature SDK, it is a strong default.</p>
+<p>The searches that lead here ask for something else: sandboxes on hardware you control. The usual reasons are:</p>
+<ul>
+<li>Code, files and secrets should stay on your own machines.</li>
+<li>Teams want to stop paying per second for CPU they already own.</li>
+<li>Plan session limits get in the way of long agent runs.</li>
+<li>E2B sandboxes are Linux only, and some agents need macOS.</li>
+</ul>
+<p>E2B's own self-host story has three levels:</p>
+<ul>
+<li>Embed packages the open-source runtime for a single machine.</li>
+<li>The full infra runs across machines with Packer, Terraform and Nomad.</li>
+<li>Running E2B inside your own cloud account is an enterprise option that E2B operates.</li>
+</ul>
+<p>Daytona, often listed as an alternative, moved core development to a private codebase earlier this year. Its public repository says it is no longer maintained, so it is a weak choice if self-hosting is the point.</p>
+<h2 id="the-options-one-by-one">The options, one by one</h2>
+<h3 id="e2b-embed-and-e2b-infra">E2B Embed and E2B infra</h3>
+<p>Use these if your code already talks to the E2B SDK and you want the same API on your hardware. Embed is the quick path, but it is one node. The cluster path is a real infrastructure project that you patch and scale yourself. If you want to keep E2B-style code and run it elsewhere, see <a href="/blog/use-the-e2b-sdk-on-your-own-machines">use the E2B SDK on your own machines</a>.</p>
+<h3 id="opensandbox">OpenSandbox</h3>
+<p>OpenSandbox is an Apache-2.0 project from Alibaba. It runs agent sandboxes on Docker, Kubernetes or Firecracker, has SDKs in several languages, and supports MCP. It fits a platform team that already runs Kubernetes and wants a sandbox service of its own. You operate it as a platform, not a tool.</p>
+<h3 id="microsandbox">Microsandbox</h3>
+<p>Microsandbox is an Apache-2.0 library that boots microVMs on your own machine, with no server or daemon. It runs on Linux with KVM or on an Apple silicon Mac, and it runs OCI images, which means Linux guests. Its maintainers still warn users to expect breaking changes. Spreading work across more than one machine is left to you.</p>
+<h3 id="docker-sandboxes">Docker Sandboxes</h3>
+<p>Docker Sandboxes run a coding agent such as Claude Code or Codex in a microVM with its own Docker Engine, on your laptop, with no charge for local use. This is a good answer for one developer and one machine. It does not pool machines across a team.</p>
+<h3 id="firecracker-or-gvisor-directly">Firecracker or gVisor directly</h3>
+<p>Building on Firecracker or gVisor gives you full control and no vendor. The cost is engineering time. You build networking, image handling, lifecycle management and an API before an agent can use it.</p>
+<h3 id="potluck">Potluck</h3>
+<p>Potluck takes a different approach from the rest of this list. It does not ask you to stand up sandbox servers. Instead it puts the idle Macs and Linux boxes your team already has into a pool. Each coding agent or GitHub Actions job gets a fresh VM or sandbox on one of them.</p>
+<p>Potluck is not a sandbox runtime of its own. It drives Tart, Kata, gVisor and Incus. It is also not a hosted cloud or a cluster scheduler.</p>
+<p>An agent can use the pool in two ways:</p>
+<ul>
+<li>From the command line, to create a sandbox, run commands in it and remove it.</li>
+<li>Through an MCP server that exposes sandbox tools.</li>
+</ul>
+<p>What Potluck does not give you matters if you came from E2B:</p>
+<ul>
+<li>It hands out fresh sandboxes that you create and remove. It is not a drop-in for E2B's pause-with-memory or fork.</li>
+<li>It is early.</li>
+<li>On Linux, handing a machine back to its owner works only as a time window today. On a Mac it happens when the owner returns.</li>
+</ul>
+<p>More detail is on the <a href="/agent-sandbox">agent sandbox page</a> and in <a href="/blog/run-coding-agents-in-a-sandbox-on-your-own-machines">run coding agents in a sandbox on your own machines</a>.</p>
+<h2 id="how-to-choose">How to choose</h2>
+<ul>
+<li><strong>You use the E2B SDK and have one spare Linux server:</strong> E2B Embed.</li>
+<li><strong>You run Kubernetes and want a sandbox platform:</strong> OpenSandbox.</li>
+<li><strong>One developer, one laptop:</strong> Docker Sandboxes or Microsandbox.</li>
+<li><strong>Unusual isolation needs and engineering time to spend:</strong> Firecracker or gVisor directly.</li>
+<li><strong>Your team has Macs and Linux boxes that sit idle, and agents need Linux or macOS:</strong> Potluck.</li>
+<li><strong>You want no operations at all, or you rely on memory-preserving pause and fork:</strong> stay on E2B's cloud.</li>
+</ul>
+<h2 id="what-self-hosting-costs-you-trust-and-operations">What self-hosting costs you: trust and operations</h2>
+<p>Every self-hosted option moves responsibility to you. With Potluck that responsibility is spread across the people in the pool, so be clear about who can see what:</p>
+<ul>
+<li>The machine that runs a VM can read everything in it, including secrets.</li>
+<li>The machine that runs a pool can read the commands and output that pass through it.</li>
+<li>Join only a pool whose owner you trust. Potluck is used at your own risk, with no promises.</li>
+</ul>
+<p>You can check isolation yourself. <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet. On the OCI layer the default is no network at all.</p>
+<h2 id="how-to-start-with-potluck">How to start with Potluck</h2>
+<p>Install on macOS or Linux (no Go needed) and start the daemon:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
+potluck daemon --detach
+</code></pre>
+<p>On the machine that runs the pool, create it. The first time, it prints a Tailscale login URL. Then make an invite code for a friend who will share a machine:</p>
+<pre><code>potluck create friends
+potluck invite carl --host
+</code></pre>
+<p>On a spare Mac or Linux box, check what it can share, preview the plan, then join with the code:</p>
+<pre><code>potluck doctor
+potluck host --dry-run
+potluck host '&lt;code&gt;'
+</code></pre>
+<p>Here is what <code>potluck host</code> does:</p>
+<ul>
+<li>It checks the machine, pulls the image and runs a quick conformance check per size.</li>
+<li>It joins the pool only when a size passes.</li>
+<li>By default it shares half the machine's cores and RAM (<code>--share</code> defaults to 0.5).</li>
+<li><code>potluck host stop</code> stops sharing.</li>
+</ul>
+<p>Sharing needs Tart on an Apple silicon Mac, or Docker or Podman with Kata or gVisor on Linux.</p>
+<p>Run a sandbox:</p>
+<pre><code>potluck sandbox create
+potluck sandbox exec &lt;id&gt; -- uname -a
+potluck sandbox rm &lt;id&gt;
+</code></pre>
+<p>Give an agent sandbox tools over MCP with <code>potluck --pool friends mcp</code>. See <a href="/blog/give-your-ai-agent-a-sandbox-over-mcp">give your AI agent a sandbox over MCP</a> for a walkthrough.</p>
+<h2 id="what-makes-potluck-different">What makes Potluck different</h2>
+<ul>
+<li><strong>It uses the Macs and Linux boxes your team already owns instead of rented machines.</strong> For a team leaving per-second sandbox bills, the compute is hardware already on desks.</li>
+<li><strong>A Mac goes back to its owner the moment they touch the keyboard or pointer.</strong> The sandbox ends, so lending a laptop does not cost its owner their workday.</li>
+<li><strong>One pool serves both coding-agent sandboxes and GitHub Actions jobs, each in a fresh VM or sandbox.</strong> A real Actions job has been run through the runner broker by hand, on a Mac and on a Linux box, though not yet daily in our own CI. See <a href="/blog/pool-spare-macs-and-linux-boxes-for-builds-and-agents">pool spare Macs and Linux boxes for builds and agents</a>.</li>
+<li><strong>Teammates and invited friends can lend machines to the same pool, and agents get sandbox tools over MCP.</strong> No single server has to carry the load.</li>
+<li><strong>It is free and open source (Apache-2.0) and runs without a Sengi account.</strong></li>
+</ul>
+<h2 id="try-it-early">Try it early</h2>
+<p>Potluck is early. Its makers want people with a spare Mac or Linux box to try it and say what breaks. Start a thread at https://github.com/sengirunners/potluck/discussions. If you want to contribute, the good first issues are at https://github.com/sengirunners/potluck/issues.</p>
+<h2 id="questions-people-ask">Questions people ask</h2>
+<h3 id="is-there-a-self-hosted-alternative-to-e2b-for-coding-agent-sandboxes">Is there a self-hosted alternative to E2B for coding agent sandboxes?</h3>
+<p>Yes. E2B Embed, E2B's infra, OpenSandbox, Microsandbox, Docker Sandboxes and Potluck all run sandboxes on hardware you control. Potluck is the one built around pooling a team's existing Macs and Linux boxes.</p>
+<h3 id="can-i-self-host-e2b-itself">Can I self-host E2B itself?</h3>
+<p>Yes. Embed runs E2B's open-source runtime on one Linux machine, and the full infra runs across machines with Terraform and Nomad. Running it in your own cloud account as a setup E2B operates is an enterprise option.</p>
+<h3 id="can-a-coding-agent-get-a-macos-sandbox-without-a-hosted-service">Can a coding agent get a macOS sandbox without a hosted service?</h3>
+<p>With Potluck, yes, on an Apple silicon Mac running Tart. Apple's licence allows up to two macOS VMs on a Mac you own, so Potluck caps macOS guests at two per Mac. Lending them to your team or invited friends is fine; selling Mac time to the public is not, and this is not legal advice.</p>
+<h3 id="how-does-an-agent-use-a-potluck-sandbox">How does an agent use a Potluck sandbox?</h3>
+<p>Run <code>potluck --pool friends mcp</code> to expose sandbox tools to an MCP-capable agent. You can also script <code>potluck sandbox create</code>, then <code>potluck sandbox exec &lt;id&gt; -- uname -a</code> and <code>potluck sandbox rm &lt;id&gt;</code> directly.</p>
+<h3 id="is-it-safe-to-run-agent-code-on-a-teammates-machine">Is it safe to run agent code on a teammate's machine?</h3>
+<p>Each job runs in a fresh VM or sandbox, and <code>potluck isolation test &lt;size&gt;</code> checks that a box cannot reach the host, its LAN or its tailnet. The host machine can still read everything inside the VM, including secrets, so pool only with people you trust.</p>
+<h3 id="what-does-potluck-cost">What does Potluck cost?</h3>
+<p>Nothing. It is free, open-source software under Apache-2.0 and runs without a Sengi account.</p>
+<h3 id="does-potluck-replace-e2bs-pause-and-fork">Does Potluck replace E2B's pause and fork?</h3>
+<p>No. Potluck hands out fresh sandboxes that you create and remove. If memory-preserving pause or fork is central to your agent, E2B's cloud covers that.</p>
+  </div>
+<aside class="cta" aria-labelledby="cta-h">
+  <h2 id="cta-h">Try Potluck on your own machines</h2>
+  <p>Potluck is free and open source (Apache-2.0). Install it on macOS or Linux:</p>
+  <pre><code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh</code></pre>
+  <p class="actions"><a class="btn solid" href="https://github.com/sengirunners/potluck">Code on GitHub</a> <a class="btn line" href="/">What Potluck does</a></p>
+</aside>
+<nav class="related" aria-labelledby="related-h">
+  <h2 id="related-h">More from Potluck</h2>
+  <ul>
+    <li><a href="/agent-sandbox">A sandbox for AI coding agents on machines you own</a></li>
+    <li><a href="/github-actions-runner">Self-hosted GitHub Actions runner with a fresh VM for every job</a></li>
+    <li><a href="/tart">Tart VMs for CI and agents: what Tart does, its licence, and what Potluck adds</a></li>
+  </ul>
+</nav>
+  <p class="alt"><a href="/blog/e2b-alternatives-self-hosted-ai-agent-sandboxes.md">This post as Markdown</a></p>
+</article>
+</main>
+<footer class="wrap">
+  <span>Potluck is open source under Apache-2.0, made by <a href="https://sengi.run">Sengi</a>. This site has no tracking.</span>
+  <nav aria-label="Footer">
+    <a href="https://github.com/sengirunners/potluck">GitHub</a>
+    <a href="https://github.com/sengirunners/potluck/releases">Releases</a>
+    <a href="/blog">Blog</a>
+    <a href="/#founders">Contact</a>
+    <a href="https://mezze.sh/">Mezze: mail and work items for coding agents</a>
+    <a href="https://sengi.run">Sengi</a>
+  </nav>
+</footer>
+</body>
+</html>

@@ -68,6 +68,8 @@ func DiskGB(dir string) (free, total float64, err error) {
 
 func (SystemFacts) Exists(path string) bool { _, err := os.Stat(path); return err == nil }
 
+func (SystemFacts) Executable(path string) bool { return vmhost.IsExecutableFile(path) }
+
 func (SystemFacts) LookPath(name string) (string, bool) {
 	p, err := exec.LookPath(name)
 	return p, err == nil
