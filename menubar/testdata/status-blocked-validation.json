@@ -147,7 +147,7 @@
         "detail": "setup blocked at validation (3 of 5): conformance failed at boot",
         "action": "fix what the validation stage says, then run again: potluck host",
         "do": {
-          "label": "Run setup again",
+          "label": "Try again",
           "args": [
             "--json",
             "host",
@@ -180,7 +180,7 @@
         "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
         "action": "potluck upgrade enable",
         "do": {
-          "label": "Turn on the daily update",
+          "label": "Turn on daily updates",
           "args": [
             "--json",
             "upgrade",
@@ -195,6 +195,89 @@
       }
     ],
     "next": "fix what the validation stage says, then run again: potluck host",
-    "next_id": "setup"
+    "next_id": "setup",
+    "view": {
+      "heading": "Setup stopped",
+      "lead": "Setup stopped while testing that jobs run safely. Paste your invite again first; if it no longer works, ask for a new one. If it stops again, press Copy details and send what it copies to the person who invited you.",
+      "do": {
+        "label": "Try again",
+        "args": [
+          "--json",
+          "host",
+          "--yes",
+          "--no-sudo",
+          "--detach",
+          "--"
+        ],
+        "invite": true
+      },
+      "sections": [
+        {
+          "title": "This Mac",
+          "rows": [
+            {
+              "state": "done",
+              "text": "Potluck is installed"
+            },
+            {
+              "state": "done",
+              "text": "Potluck is running"
+            },
+            {
+              "state": "blocked",
+              "text": "The last setup stopped before it finished"
+            }
+          ]
+        },
+        {
+          "title": "Optional",
+          "rows": [
+            {
+              "state": "info",
+              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+            },
+            {
+              "state": "info",
+              "text": "Potluck doesn't update itself",
+              "do": {
+                "label": "Turn on daily updates",
+                "args": [
+                  "--json",
+                  "upgrade",
+                  "enable"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "progress": {
+        "title": "The last setup",
+        "rows": [
+          {
+            "state": "done",
+            "text": "Check this Mac"
+          },
+          {
+            "state": "done",
+            "text": "Download what jobs need"
+          },
+          {
+            "state": "blocked",
+            "text": "Test that jobs run safely"
+          },
+          {
+            "state": "",
+            "text": "Join the group that uses it"
+          },
+          {
+            "state": "",
+            "text": "Start lending"
+          }
+        ]
+      },
+      "details": "Potluck v1.2.3 setup\nsetup: blocked: setup blocked at validation (3 of 5): conformance failed at boot\n  fix what the validation stage says, then run again: potluck host",
+      "key": "blocked daemon=true shares=false listed=true limits=true mode=auto state=accepting refused=false early=true next=setup --json host --yes --no-sudo --detach --"
+    }
   }
 }

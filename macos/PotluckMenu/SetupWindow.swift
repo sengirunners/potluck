@@ -1,20 +1,21 @@
-// The "Set up and check…" window: the setup checklist and the last host
-// run's stages, as `potluck --json host status` answers them, and one
-// button: the `do` of the check the next step is from (`next_id`). It asks
-// again every few seconds while it is open. Every word is the command's; the
-// window runs only that status and the do's arguments (runAction, with
-// potluck's admin step rule), or opens the do's page.
+// The "Set up and check…" window, drawn from the `view` of `potluck --json
+// host status`: a heading, what to do, its one button, and the lines under
+// them. Every word is the command's. It asks every few seconds while it is
+// open, with --probe only when ProbeClock says. It runs only that status
+// and a do's arguments (runAction, with potluck's admin step rule), or
+// opens the do's page.
 
 import AppKit
 
 final class SetupWindow: NSObject {
     let args: [String]
     let window: NSWindow
-    let summary = NSTextField(wrappingLabelWithString: "reading…")
-    let next = NSTextField(wrappingLabelWithString: "")
-    let checks = NSStackView()
-    let stages = NSStackView()
-    let last = NSTextField(wrappingLabelWithString: "")
+    let heading = NSTextField(wrappingLabelWithString: "Checking this Mac…")
+    let lead = NSTextField(wrappingLabelWithString: "")
+    let lines = NSStackView() // the view's sections
+    let progress = NSStackView()
+    let check = NSButton(title: "Check again", target: nil, action: nil)
+    let copy = NSButton(title: "Copy details", target: nil, action: nil)
     let note = NSTextField(wrappingLabelWithString: "")
     let invite = NSTextField()
     let button = NSButton(title: "", target: nil, action: nil)
@@ -22,7 +23,14 @@ final class SetupWindow: NSObject {
     let again = NSButton(title: "Ask again", target: nil, action: nil)
     var timer: Timer?
     var asking = false
-    var current: SetupDo? // the next check's do, as last drawn
+    var clock = ProbeClock()
+    var current: SetupDo? // the button's do, as last drawn
+    var rowButtons: [RowButton] = []
+    var details = ""
+    var problem = "" // why the last ask failed, for Copy details ("": it did not)
+    var drawn = false // an answer has been drawn
+    var shownSections: [SetupSection] = []
+    var shownProgress: SetupSection?
     var acting = false // an action is running
     var settling = false // an action ended, or the window opened, and no status asked since has been drawn
     var asks = 0 // counts those moments: a status asked before the last one is not current
@@ -32,7 +40,9 @@ final class SetupWindow: NSObject {
     /// A failure is shown: unseen until the first status asked after it is
     /// drawn, then the next do at that time. Another do by then is the
     /// failed action's own doing; one after that makes the failure old.
-    enum Failure { case none, unseen, seen(SetupDo?) }
+    /// A line's own button (row) is not the next step: its failure is old
+    /// once that button is gone.
+    enum Failure { case none, unseen, seen(SetupDo?), row(SetupDo) }
     var failure = Failure.none
 
     init(args: [String]) {
@@ -42,10 +52,9 @@ final class SetupWindow: NSObject {
         window.title = "Set up and check"
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 480, height: 320)
-        summary.font = .boldSystemFont(ofSize: 13)
-        next.font = .systemFont(ofSize: 12)
-        last.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        last.textColor = .secondaryLabelColor
+        heading.font = .boldSystemFont(ofSize: 20)
+        lead.font = .systemFont(ofSize: 13)
+        lead.isHidden = true
         note.font = .systemFont(ofSize: 11)
         note.textColor = .secondaryLabelColor
         invite.placeholderString = "Paste your invite link here"
@@ -63,18 +72,22 @@ final class SetupWindow: NSObject {
         again.action = #selector(askAgain)
         again.bezelStyle = .rounded
         again.isHidden = true
-        for s in [checks, stages] {
+        check.target = self
+        check.action = #selector(checkAgain)
+        check.bezelStyle = .rounded
+        copy.target = self
+        copy.action = #selector(copyDetails)
+        copy.bezelStyle = .rounded
+        copy.isHidden = true
+        for s in [lines, progress] {
             s.orientation = .vertical
             s.alignment = .leading
             s.spacing = 6
         }
-        let heading = { (t: String) -> NSTextField in
-            let f = NSTextField(labelWithString: t)
-            f.font = .boldSystemFont(ofSize: 11)
-            f.textColor = .secondaryLabelColor
-            return f
-        }
-        let column = NSStackView(views: [summary, next, invite, button, result, again, heading("THIS MAC"), checks, heading("THE LAST SETUP RUN"), stages, last, note])
+        let buttons = NSStackView(views: [button, check, copy])
+        buttons.orientation = .horizontal
+        buttons.spacing = 8
+        let column = NSStackView(views: [heading, lead, invite, buttons, result, again, progress, lines, note])
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = 10
@@ -95,18 +108,19 @@ final class SetupWindow: NSObject {
             flipped.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             column.leadingAnchor.constraint(equalTo: flipped.leadingAnchor), column.trailingAnchor.constraint(equalTo: flipped.trailingAnchor),
             column.topAnchor.constraint(equalTo: flipped.topAnchor), column.bottomAnchor.constraint(equalTo: flipped.bottomAnchor),
-            checks.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -32), stages.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -32),
+            lines.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -32), progress.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -32),
+            lead.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -32),
             invite.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -32), result.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -32),
         ])
         NotificationCenter.default.addObserver(self, selector: #selector(closed), name: NSWindow.willCloseNotification, object: window)
     }
 
     func show() {
-        if timer == nil { // reopened: the last picture may be old
-            asks += 1
-            settling = true
-            drawButton()
-        }
+        // The last picture may be old.
+        asks += 1
+        settling = true
+        clock.needed = true
+        drawButton()
         window.center()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
@@ -129,7 +143,8 @@ final class SetupWindow: NSObject {
     func load() {
         if asking { return }
         asking = true
-        let args = self.args
+        let probe = clock.probes(at: Date())
+        let args = probe ? self.args : self.args.filter { $0 != "--probe" }
         let asked = asks
         DispatchQueue.global(qos: .userInitiated).async {
             let (code, out, err) = runPotluck(args)
@@ -142,53 +157,86 @@ final class SetupWindow: NSObject {
             }
             DispatchQueue.main.async {
                 self.asking = false
-                if st != nil && asked == self.asks { self.settling = false }
-                self.draw(st, why)
-                if st != nil && asked == self.asks { self.ageFailure() }
-                if asked != self.asks && self.timer != nil { self.load() } // a failed ask waits for the timer
+                let current = asked == self.asks
+                if st != nil && current {
+                    self.clock.answered(st?.setup?.view?.key, probed: probe)
+                    // A step that may have changed is not pressed before the probe that follows.
+                    self.settling = probe ? false : self.settling || self.clock.needed
+                } else if probe {
+                    self.clock.missed()
+                }
+                self.draw(st, why, whole: probe)
+                if probe { self.check.title = "Check again" }
+                if st != nil && current && probe { self.ageFailure() } // only a probe draws the next step
+                if st != nil && (!current || self.clock.needed) && self.timer != nil { self.load() } // a failed ask waits for the timer
             }
         }
     }
 
-    func draw(_ st: Status?, _ why: String?) {
+    /// Draws an answer: whole when it was a probe, else only the progress of
+    /// the window the last probe drew.
+    func draw(_ st: Status?, _ why: String?, whole: Bool) {
         guard let st = st else {
             // Keep the last good picture; say why it is not current.
-            note.stringValue = "not current: " + (why ?? "no answer")
+            problem = "potluck host status: " + (why ?? "no answer")
+            note.stringValue = "Potluck didn't answer just now, so this may be out of date. Trying again… If this stays, press Copy details and send what it copies to the person who invited you."
             note.textColor = .systemRed
+            if !drawn {
+                heading.stringValue = "Potluck isn't answering"
+                note.stringValue = "Trying again… If this stays, press Copy details and send what it copies to the person who invited you."
+            }
             drawButton()
             return
         }
-        note.stringValue = why.map { "not current: " + $0 } ?? ""
-        note.textColor = .systemRed
-        summary.stringValue = st.menu.title
-        guard let setup = st.setup else {
+        problem = ""
+        note.stringValue = ""
+        guard let v = st.setup?.view else {
+            guard whole else { return }
+            heading.stringValue = "Potluck needs updating"
+            lead.stringValue = "This window needs a newer Potluck than the one on this Mac. Press Copy details and send what it copies to the person who invited you."
+            lead.isHidden = false
+            details = "The Potluck on this Mac is older than its menu bar item (host status has no setup.view): update potluck."
+            drawSections([])
+            drawProgress(nil)
             current = nil
+            drawn = true
             dropStaleCancel()
             drawButton()
-            next.stringValue = "This potluck does not report a setup checklist; update it."
-            next.isHidden = false
             return
         }
-        next.stringValue = setup.next.map { "Next: " + $0 } ?? ""
-        next.isHidden = next.stringValue.isEmpty
-        current = setup.next_id.flatMap { id in setup.checks.first { $0.id == id }?.do }
+        // Another key: the probe that follows at once draws all of it together.
+        if whole || v.key == clock.key { drawProgress(v.progress) }
+        guard whole else { return drawButton() }
+        heading.stringValue = v.heading
+        lead.stringValue = v.lead ?? ""
+        lead.isHidden = lead.stringValue.isEmpty
+        details = v.details ?? ""
+        current = v.do
+        drawSections(v.sections)
+        drawn = true
         dropStaleCancel()
         drawButton()
-        fill(checks, setup.checks.map { row(mark: SetupWindow.mark($0.state), color: SetupWindow.color($0.state), text: $0.detail, sub: $0.action) })
-        let reached = Dictionary((setup.stages ?? []).map { ($0.name, $0) }, uniquingKeysWith: { _, b in b })
-        fill(stages, setup.stageList.map { s in
-            guard let r = reached[s.name] else { return row(mark: "·", color: .tertiaryLabelColor, text: s.label, sub: nil) }
-            let line = r.detail.map { $0.isEmpty ? s.label : s.label + ": " + $0 } ?? s.label
-            return row(mark: SetupWindow.stageMark(r.result), color: SetupWindow.stageColor(r.result), text: line, sub: nil)
-        })
-        last.stringValue = st.background?.last ?? ""
-        last.isHidden = last.stringValue.isEmpty
+    }
+
+    /// Draws the view's sections, and progress, only when they changed: a
+    /// redraw takes the keyboard's and VoiceOver's place in them away.
+    func drawSections(_ s: [SetupSection]) {
+        if s == shownSections { return }
+        shownSections = s
+        rowButtons = []
+        fill(lines, s.flatMap { section($0) })
+    }
+
+    func drawProgress(_ s: SetupSection?) {
+        if s == shownProgress { return }
+        shownProgress = s
+        fill(progress, s.map { section($0) } ?? [])
     }
 
     /// Forgets a cancelled action, with its message, once its do is no
-    /// longer the next one.
+    /// longer offered.
     func dropStaleCancel() {
-        guard let c = cancelled, c.from != current else { return }
+        guard let c = cancelled, c.from != current, !rowButtons.contains(where: { $0.does == c.from }) else { return }
         cancelled = nil
         say("", error: false)
     }
@@ -203,6 +251,10 @@ final class SetupWindow: NSObject {
             guard d != current, !acting else { return }
             failure = .none
             say("", error: false)
+        case .row(let d):
+            guard !acting, !rowButtons.contains(where: { $0.does == d }) else { return }
+            failure = .none
+            say("", error: false)
         }
     }
 
@@ -215,23 +267,46 @@ final class SetupWindow: NSObject {
         button.isHidden = !runnable
         button.isEnabled = !acting && !settling
         again.isEnabled = button.isEnabled
-        invite.isEnabled = button.isEnabled
+        for b in rowButtons { b.isEnabled = button.isEnabled }
+        invite.isEnabled = !acting
+        check.isEnabled = !acting
+        copy.isHidden = details.isEmpty && problem.isEmpty
         invite.isHidden = !(runnable && d?.args != nil && d?.invite == true)
-        if invite.isHidden { invite.stringValue = "" }
         again.isHidden = acting || cancelled == nil
     }
 
-    /// The button (or Ask again): open the do's page, or run its arguments
-    /// with the pasted invite as the last one when it takes one.
+    /// Check again: ask with --probe now.
+    @objc func checkAgain() {
+        clock.needed = true
+        check.title = "Checking…"
+        load()
+    }
+
+    @objc func copyDetails() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString([details, problem].filter { !$0.isEmpty }.joined(separator: "\n"), forType: .string)
+        copy.title = "Copied"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.copy.title = "Copy details" }
+    }
+
+    /// The button: its do, with the pasted invite when it takes one.
     @objc func press() {
-        guard !acting, !settling, let d = current else { return }
+        if let d = current { perform(d) }
+    }
+
+    @objc func pressRow(_ b: RowButton) { perform(b.does) }
+
+    /// Opens the do's page, or runs its arguments with the pasted invite as
+    /// the last one when it takes one.
+    func perform(_ d: SetupDo) {
+        guard !acting, !settling else { return }
         if let u = d.url {
             cancelled = nil
             failure = .none
             say("", error: false)
             drawButton()
             guard let url = SetupWindow.openable(u) else {
-                failure = .unseen
+                failure = d == current ? .unseen : .row(d)
                 return say("potluck named a page this app does not open: " + u, error: true)
             }
             NSWorkspace.shared.open(url)
@@ -254,6 +329,7 @@ final class SetupWindow: NSObject {
 
     func act(_ d: SetupDo, _ args: [String]) {
         let label = d.label
+        let row = d != current
         acting = true
         cancelled = nil
         failure = .none
@@ -267,13 +343,14 @@ final class SetupWindow: NSObject {
             self.acting = false
             self.asks += 1
             self.settling = true
-            self.invite.stringValue = "" // the invite is not kept past its run
+            self.clock.needed = true
+            if d.invite == true { self.invite.stringValue = "" } // the invite is not kept past its run
             switch r {
             case .done:
                 self.say("", error: false)
             case .failed(let why, let p):
                 self.say(failText(label, why, p), error: true)
-                self.failure = .unseen
+                self.failure = row ? .row(d) : .unseen
             case .cancelled(let why, let p):
                 self.say(cancelText(why, p), error: false)
                 if self.timer != nil { self.cancelled = (d, args) } // closed meanwhile: nothing to ask again from
@@ -306,33 +383,54 @@ final class SetupWindow: NSObject {
         }
     }
 
-    /// A mark, the potluck words, and under them the command it names.
-    func row(mark: String, color: NSColor, text: String, sub: String?) -> NSView {
-        let m = NSTextField(labelWithString: mark)
+    /// A section's title and lines; none when it has no title.
+    func section(_ s: SetupSection) -> [NSView] {
+        if s.title.isEmpty { return [] }
+        let t = NSTextField(labelWithString: s.title)
+        t.font = .boldSystemFont(ofSize: 12)
+        t.textColor = .secondaryLabelColor
+        let title = NSStackView(views: [t])
+        title.alignment = .bottom
+        title.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        return [title] + (s.rows ?? []).map { row($0) }
+    }
+
+    /// A line: its mark, its words, and its own button.
+    func row(_ r: SetupRow) -> NSView {
+        let m = NSTextField(labelWithString: SetupWindow.mark(r.state))
         m.font = .boldSystemFont(ofSize: 13)
-        m.textColor = color
+        m.textColor = SetupWindow.color(r.state)
         m.alignment = .center
         m.widthAnchor.constraint(equalToConstant: 16).isActive = true
-        let t = NSTextField(wrappingLabelWithString: text)
-        t.font = .systemFont(ofSize: 12)
-        var views: [NSView] = [t]
-        if let s = sub, !s.isEmpty {
-            let c = NSTextField(wrappingLabelWithString: s)
-            c.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            c.textColor = .secondaryLabelColor
-            c.isSelectable = true
-            views.append(c)
+        m.cell?.setAccessibilityElement(false) // the words say it
+        let t = NSTextField(wrappingLabelWithString: r.text)
+        t.font = .systemFont(ofSize: 13)
+        t.cell?.setAccessibilityValue("\(r.text), \(SetupWindow.spoken(r.state))")
+        if r.state.isEmpty { t.textColor = .secondaryLabelColor }
+        t.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        var views: [NSView] = [m, t]
+        if let d = r.do, d.args != nil || d.url != nil {
+            let b = RowButton(d, target: self, action: #selector(pressRow))
+            b.isEnabled = !acting && !settling
+            rowButtons.append(b)
+            views.append(b)
         }
-        let words = NSStackView(views: views)
-        words.orientation = .vertical
-        words.alignment = .leading
-        words.spacing = 2
-        let r = NSStackView(views: [m, words])
-        r.orientation = .horizontal
-        r.alignment = .top
-        r.spacing = 8
-        words.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return r
+        let line = NSStackView(views: views)
+        line.orientation = .horizontal
+        line.alignment = .firstBaseline
+        line.spacing = 8
+        return line
+    }
+
+    static func spoken(_ state: String) -> String {
+        switch state {
+        case "done": return "done"
+        case "blocked": return "needs attention"
+        case "running": return "going on"
+        case "todo", "": return "not done yet"
+        case "info": return "for your information"
+        default: return "not known"
+        }
     }
 
     static func mark(_ state: String) -> String {
@@ -341,7 +439,8 @@ final class SetupWindow: NSObject {
         case "blocked": return "✕"
         case "running": return "…"
         case "todo": return "○"
-        case "info": return "i"
+        case "info": return "–"
+        case "": return "·"
         default: return "?"
         }
     }
@@ -355,24 +454,23 @@ final class SetupWindow: NSObject {
         default: return .secondaryLabelColor
         }
     }
+}
 
-    static func stageMark(_ result: String) -> String {
-        switch result {
-        case "succeeded": return "✓"
-        case "blocked": return "✕"
-        case "running": return "…"
-        default: return "?"
-        }
+/// A line's own button, with the do it is for.
+final class RowButton: NSButton {
+    let does: SetupDo
+
+    init(_ d: SetupDo, target: AnyObject, action: Selector) {
+        does = d
+        super.init(frame: .zero)
+        title = d.label
+        bezelStyle = .rounded
+        controlSize = .small
+        self.target = target
+        self.action = action
     }
 
-    static func stageColor(_ result: String) -> NSColor {
-        switch result {
-        case "succeeded": return .systemGreen
-        case "blocked": return .systemRed
-        case "running": return .systemBlue
-        default: return .secondaryLabelColor
-        }
-    }
+    required init?(coder: NSCoder) { nil }
 }
 
 /// A view whose origin is at the top, so a scroll view starts at the top.

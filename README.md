@@ -17,6 +17,7 @@
   <a href="https://github.com/sengirunners/potluck/releases/latest"><img src="https://img.shields.io/github/release-date/sengirunners/potluck?label=latest%20release&color=2F6B34" alt="Latest release"></a>
   <a href="https://pkg.go.dev/github.com/sengirunners/potluck"><img src="https://pkg.go.dev/badge/github.com/sengirunners/potluck.svg" alt="Go reference"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2F6B34" alt="Licence: Apache-2.0"></a>
+  <a href="https://glama.ai/mcp/servers/sengirunners/potluck"><img src="https://glama.ai/mcp/servers/sengirunners/potluck/badges/score.svg" alt="Potluck MCP server on Glama"></a>
 </p>
 
 Potluck aims to put your team's idle machines to work. It will run your GitHub Actions jobs and your coding

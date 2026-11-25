@@ -157,7 +157,7 @@
         "detail": "setting up now: [4/5] join: waiting for a tailnet login",
         "action": "open this page and sign in for the setup to go on: https://login.example/a/1",
         "do": {
-          "label": "Sign in to continue",
+          "label": "Sign in",
           "url": "https://login.example/a/1"
         }
       },
@@ -182,7 +182,7 @@
         "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
         "action": "potluck upgrade enable",
         "do": {
-          "label": "Turn on the daily update",
+          "label": "Turn on daily updates",
           "args": [
             "--json",
             "upgrade",
@@ -197,6 +197,80 @@
       }
     ],
     "next": "open this page and sign in for the setup to go on: https://login.example/a/1",
-    "next_id": "setup"
+    "next_id": "setup",
+    "view": {
+      "heading": "Sign in to finish setting up",
+      "lead": "Press the button and sign in on the page that opens in your browser. Setup goes on by itself after that.",
+      "do": {
+        "label": "Sign in",
+        "url": "https://login.example/a/1"
+      },
+      "sections": [
+        {
+          "title": "This Mac",
+          "rows": [
+            {
+              "state": "done",
+              "text": "Potluck is installed"
+            },
+            {
+              "state": "done",
+              "text": "Potluck is running"
+            },
+            {
+              "state": "running",
+              "text": "Waiting for you to sign in"
+            }
+          ]
+        },
+        {
+          "title": "Optional",
+          "rows": [
+            {
+              "state": "info",
+              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+            },
+            {
+              "state": "info",
+              "text": "Potluck doesn't update itself",
+              "do": {
+                "label": "Turn on daily updates",
+                "args": [
+                  "--json",
+                  "upgrade",
+                  "enable"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "progress": {
+        "title": "Setup so far",
+        "rows": [
+          {
+            "state": "done",
+            "text": "Check this Mac"
+          },
+          {
+            "state": "done",
+            "text": "Download what jobs need"
+          },
+          {
+            "state": "done",
+            "text": "Test that jobs run safely"
+          },
+          {
+            "state": "running",
+            "text": "Join the group that uses it (last news at 11:58)"
+          },
+          {
+            "state": "",
+            "text": "Start lending"
+          }
+        ]
+      },
+      "key": "running daemon=true shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=setup https://login.example/a/1"
+    }
   }
 }

@@ -134,10 +134,14 @@
         "id": "tart",
         "state": "todo",
         "detail": "Tart is not installed: Potluck runs each job in a Tart virtual machine",
-        "action": "download tart.tar.gz from https://github.com/openai/tart/releases/latest, unpack it and drag tart.app into Applications",
+        "action": "potluck tart install",
         "do": {
-          "label": "Download Tart",
-          "url": "https://github.com/openai/tart/releases/latest"
+          "label": "Install Tart",
+          "args": [
+            "--json",
+            "tart",
+            "install"
+          ]
         }
       },
       {
@@ -197,7 +201,7 @@
         "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
         "action": "potluck upgrade enable",
         "do": {
-          "label": "Turn on the daily update",
+          "label": "Turn on daily updates",
           "args": [
             "--json",
             "upgrade",
@@ -212,6 +216,71 @@
       }
     ],
     "next": "potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin",
-    "next_id": "potluck"
+    "next_id": "potluck",
+    "view": {
+      "heading": "This Mac isn't set up yet",
+      "lead": "Potluck needs a network helper to keep jobs away from your own network, and can't install one on macOS 15. If this Mac can be updated to macOS 26 or newer, do that in System Settings \u003e General \u003e Software Update, then come back here. If it can't, it can't lend yet.",
+      "sections": [
+        {
+          "title": "This Mac",
+          "rows": [
+            {
+              "state": "done",
+              "text": "This Mac is the right kind"
+            },
+            {
+              "state": "todo",
+              "text": "Potluck isn't installed yet"
+            },
+            {
+              "state": "todo",
+              "text": "Tart isn't installed yet"
+            },
+            {
+              "state": "blocked",
+              "text": "There is no network helper for this Mac's macOS yet"
+            },
+            {
+              "state": "done",
+              "text": "Enough disk space"
+            },
+            {
+              "state": "todo",
+              "text": "Potluck isn't running"
+            },
+            {
+              "state": "todo",
+              "text": "Setup can be checked once Potluck is running"
+            }
+          ]
+        },
+        {
+          "title": "Optional",
+          "rows": [
+            {
+              "state": "info",
+              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+            },
+            {
+              "state": "info",
+              "text": "Potluck doesn't update itself",
+              "do": {
+                "label": "Turn on daily updates",
+                "args": [
+                  "--json",
+                  "upgrade",
+                  "enable"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "progress": {
+        "title": ""
+      },
+      "details": "Potluck v1.2.3 setup\npotluck: todo: this copy of Potluck (v1.2.3) runs from /Applications/Potluck.app/Contents/Resources/bin, not from /Users/b/.local/bin, where it installs itself\n  potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin\ntart: todo: Tart is not installed: Potluck runs each job in a Tart virtual machine\n  potluck tart install\nsoftnet: blocked: Softnet is not installed: isolated Tart boxes need a helper that enforces Potluck's protocol and port rules; upstream Softnet 0.25.0 and newer need macOS 26, and Potluck's macOS 15 build is a candidate not yet validated on a real macOS 15 Mac\ndaemon: todo: the Potluck daemon is not running: no daemon record\n  potluck daemon --detach\nsetup: todo: this machine has not been set up to lend yet\n  potluck host",
+      "key": "none daemon=false shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"
+    }
   }
 }

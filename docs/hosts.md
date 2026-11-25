@@ -292,7 +292,7 @@ can do; no check gives one yet); `auto` means it may be done without a click (no
 check's `args` are the record's `again_args` with `--json` before them and `--yes --no-sudo --detach` after (a press asks for
 the run, so one where this machine already shares sizes goes on, and a root step is handed back, below), or
 `--json host --yes --no-sudo --detach --` with the invite when there is no record. One check has an `action` but no `do`: a setup blocked on a refused setting an
-earlier share kept and no flag turns off, where running it again fails the same way. `next_id` is the `id` of the check `next` is the action of, or, with no `next`, of a blocked check nothing Potluck runs fixes (an Intel Mac, a full disk): the walk stops there, and `next:` points at that line. The checklist covers:
+earlier share kept and no flag turns off, where running it again fails the same way. `next_id` is the `id` of the check `next` is the action of, or, with no `next`, of a blocked check nothing Potluck runs fixes (an Intel Mac, a full disk): the walk stops there, and `next:` points at that line. `view` is the menu bar app's setup window, in words for someone who has never used a terminal ([menubar.md](menubar.md#set-up-and-check)). The checklist covers:
 
 - with `--probe`, on a Mac, what the Mac needs before a host run can work (below);
 - Potluck's version and whether its daemon runs;
@@ -317,7 +317,8 @@ state comes from a fact and never from a problem's words (the words are the deta
   `--probe` too.
 - `tart`: found where `vmhost.FindTart` looks (PATH, the usual bin directories, then `tart.app` in Applications or
   `~/Applications`), and it runs with Potluck's run options. Missing, a `tart.app` with no program in it, or a
-  dragged `tart.app` too old: todo, and `do` opens Tart's releases page. A Tart installed another way (Homebrew, a
+  dragged `tart.app` too old: todo, and `do` runs `--json tart install` where that would put a Tart here or update the
+  one it installed; else (a `tart.app` Potluck did not install, which it leaves alone) `do` opens Tart's releases page. A Tart installed another way (Homebrew, a
   link on PATH) that is too old: blocked, with how to update it, since a download would not replace it.
 - `softnet`: usable, else what `softnet.For` says this Mac's macOS can have. A Potluck build validated for it: todo,
   `do` runs `--json softnet install --no-sudo`, whose answer names the one admin step ([softnet.md](softnet.md)).

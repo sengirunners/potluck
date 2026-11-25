@@ -47,6 +47,40 @@ for n in names {
     }
 }
 
+// The window's words and steps.
+func view(_ n: String) -> SetupView? { all[n]?.setup?.view }
+for n in names {
+    expect(view(n)?.heading.isEmpty == false && view(n)?.sections.first?.rows?.isEmpty == false, "\(n): the window has a heading and lines")
+}
+expect(view("status-probe-ready.json")?.do?.invite == true, "ready: the button takes the invite")
+expect(view("status-probe-no-helper.json")?.do == nil && view("status-probe-no-helper.json")?.details?.isEmpty == false, "no network helper: nothing to press, details to copy")
+expect(view("status-join-sign-in.json")?.do?.url == "https://login.example/a/1", "sign in: the button opens the page")
+expect(view("status-lending.json")?.do == nil, "lending: nothing to press")
+expect(view("status-setup-running.json")?.progress.rows?.map { $0.state } == ["done", "running", "", "", ""], "running: the stages' lines")
+
+// The probe's clock: on open, after an action, about every 30 s, and on
+// another key; the 3-second asks between are plain.
+var clock = ProbeClock()
+let t0 = Date(timeIntervalSince1970: 1_000_000)
+var probes = 0
+for i in 0..<100 { // 5 minutes
+    if clock.probes(at: t0.addingTimeInterval(Double(i) * 3)) { probes += 1; clock.answered("a", probed: true) } else { clock.answered("a", probed: false) }
+}
+expect(probes == 10, "\(probes) probes in 5 minutes")
+clock.needed = true
+expect(clock.probes(at: t0.addingTimeInterval(298)) && !clock.probes(at: t0.addingTimeInterval(299)), "an action's end probes once")
+clock.answered("a", probed: true)
+clock.answered("b", probed: false)
+expect(clock.probes(at: t0.addingTimeInterval(300)), "another key probes")
+clock.answered("b", probed: true)
+expect(!clock.probes(at: t0.addingTimeInterval(303)), "and only once")
+clock.needed = true
+expect(clock.probes(at: t0.addingTimeInterval(306)), "needed: a probe")
+clock.missed()
+expect(clock.probes(at: t0.addingTimeInterval(309)), "a probe that failed is asked again at the next ask")
+clock.answered("b", probed: true)
+expect(!clock.probes(at: t0.addingTimeInterval(312)), "and only until one answers")
+
 func stages(_ n: String) -> [String] { (all[n]?.setup?.stages ?? []).map { $0.name + ":" + $0.result } }
 
 if let s = all["status-never-set-up.json"]?.setup {
@@ -72,7 +106,7 @@ if let s = all["status-probe-fresh-mac.json"]?.setup {
     expect(Array(s.checks.map { $0.id }.prefix(5)) == ["mac", "potluck", "tart", "softnet", "disk"], "fresh Mac: the probe's checks come first: \(s.checks.map { $0.id })")
     let p = s.checks.first { $0.id == "potluck" }?.do
     expect(s.next_id == "potluck" && p?.args?.prefix(2) == ["upgrade", "--release"], "fresh Mac: installing Potluck is the next button")
-    expect(s.checks.first { $0.id == "tart" }?.do?.url != nil, "fresh Mac: Tart's button opens its download")
+    expect(s.checks.first { $0.id == "tart" }?.do?.args == ["--json", "tart", "install"], "fresh Mac: Tart's button installs it")
     expect(s.checks.first { $0.id == "softnet" }?.state == "blocked", "fresh Mac: macOS 15 has no Softnet to install")
 }
 if let s = all["status-lending.json"] {

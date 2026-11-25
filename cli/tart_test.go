@@ -212,3 +212,50 @@ func TestTartInstallReportsTheTartFoundFirst(t *testing.T) {
 		}
 	}
 }
+
+// The setup window offers tart install only where it would change something.
+func TestTartInstallWorksOnlyWhereItChangesSomething(t *testing.T) {
+	m := newTartMac(t, "26.1")
+	parts := func(cli string) hostprobe.MacParts {
+		return hostprobe.MacParts{Report: hostprobe.Report{Arch: "arm64", MacOS: "26.1"}, Tart: hostprobe.Layer{CLI: cli, Problems: []string{"x"}}}
+	}
+	if !tartInstallWorks(parts("")) {
+		t.Error("no Tart: not offered")
+	}
+	if tartInstallWorks(parts("/Applications/tart.app/Contents/MacOS/tart")) {
+		t.Error("offered over a Tart it leaves alone")
+	}
+	old := parts("")
+	old.Report.MacOS = "10.15"
+	if tartInstallWorks(old) {
+		t.Error("offered on a macOS the release does not run on")
+	}
+	unread := parts("")
+	unread.Tart.Unread = "no answer in time"
+	if tartInstallWorks(unread) {
+		t.Error("offered for an unread Tart")
+	}
+	if _, out, code := tartRunJSON(t, "tart", "install"); code != 0 {
+		t.Fatal(out)
+	}
+	ours := parts(m.place.Program())
+	if tartInstallWorks(ours) {
+		t.Error("offered for the release that is installed")
+	}
+	newer := m.build
+	newer.Version = "1.1.0"
+	tartpin.Builds = []tartpin.Build{newer, m.build}
+	if !tartInstallWorks(ours) {
+		t.Error("Potluck's older Tart: not offered")
+	}
+	// A tart.app Potluck did not install, with no program in it.
+	if err := os.RemoveAll(m.place.App()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(m.place.App(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if tartInstallWorks(parts("")) {
+		t.Error("offered over a hollow tart.app it leaves alone")
+	}
+}

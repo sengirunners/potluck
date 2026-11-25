@@ -89,6 +89,7 @@ func statusFixtures() map[string]Facts {
 	fresh := never
 	fresh.Setup.Menu = &MenuApp{Path: "/Applications/Potluck.app", Seen: at.Add(-2 * time.Second)}
 	fresh.Setup.SoftnetInstall = "potluck softnet install"
+	fresh.Setup.TartInstall = "potluck tart install"
 	fresh.Setup.Exe, fresh.Setup.InstallDir = "/Applications/Potluck.app/Contents/Resources/bin/potluck", "/Users/b/.local/bin"
 	fresh.Setup.BundledRelease = "/Applications/Potluck.app/Contents/Resources/release"
 	fresh.Setup.InstallBundled = "potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"
@@ -101,7 +102,27 @@ func statusFixtures() map[string]Facts {
 		NeedGB: 60,
 	}
 
+	// The same on macOS 26, which has a Softnet to install.
+	fresh26 := fresh
+	mac26 := *fresh.Setup.Mac
+	mac26.Report.MacOS, mac26.Softnet = "26.1", hostprobe.Layer{Name: "tart", Problems: []string{"Softnet is not installed"}}
+	fresh26.Setup.Mac = &mac26
+
+	// Potluck and Tart are there and macOS 15 has no network helper.
+	noHelper := base
+	noHelper.Setup.SoftnetInstall = "potluck softnet install"
+	noHelper.Setup.Mac = &hostprobe.MacParts{Report: fresh.Setup.Mac.Report, HV: true, NeedGB: 60, Softnet: fresh.Setup.Mac.Softnet,
+		Tart: hostprobe.Layer{Name: "tart", CLI: "/Applications/tart.app/Contents/MacOS/tart", Version: "2.30.0"}}
+
+	// Everything is there: the invite is next.
+	ready := base
+	fine := fineMac()
+	ready.Setup.Mac = &fine
+
 	return map[string]Facts{
+		"status-probe-fresh-mac-26.json": fresh26,
+		"status-probe-no-helper.json":    noHelper,
+		"status-probe-ready.json":        ready,
 		"status-probe-fresh-mac.json":    fresh,
 		"status-never-set-up.json":       never,
 		"status-setup-running.json":      running,

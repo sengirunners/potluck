@@ -56,7 +56,7 @@ func TestHostStatusProbeOnAnEmptyHome(t *testing.T) {
 	if got := strings.Join(ids(s), " "); !strings.HasPrefix(got, "mac potluck tart softnet disk daemon setup menu updates") {
 		t.Errorf("checks: %s", got)
 	}
-	if s.NextID != "tart" || s.Checks[2].Do == nil || s.Checks[2].Do.URL != hostprobe.TartReleases {
+	if s.NextID != "tart" || s.Checks[2].Do == nil || strings.Join(s.Checks[2].Do.Args, " ") != "--json tart install" {
 		t.Errorf("next %q (%s), tart %+v", s.Next, s.NextID, s.Checks[2])
 	}
 	if probed != 1 {

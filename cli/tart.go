@@ -204,6 +204,28 @@ func (a *app) tartInstall(ctx context.Context, dryRun bool) error {
 	return a.tartAnswer(ans, words+"; next: "+a.cmd("host")+" checks and lends this Mac")
 }
 
+// tartInstallWorks is whether tart install would put a Tart on this Mac, or
+// replace Potluck's own with a newer one: p is the Mac as its preflight reads
+// it.
+func tartInstallWorks(p hostprobe.MacParts) bool {
+	b, ok := tartpin.Latest()
+	if !ok || p.Tart.Unread != "" || !b.Runs(hostprobe.MacOSMajor(p.Report.MacOS), p.Report.Arch) {
+		return false
+	}
+	place, err := tartPlace()
+	if err != nil {
+		return false
+	}
+	plan, err := place.Plan(b)
+	if err != nil {
+		return false
+	}
+	if p.Tart.CLI == "" {
+		return plan.Action == tartpin.Fresh
+	}
+	return plan.Action == tartpin.Replace && samePath(p.Tart.CLI, place.Program())
+}
+
 // samePath is true when both paths name one file, through any links.
 func samePath(x, y string) bool {
 	rx, errx := filepath.EvalSymlinks(x)

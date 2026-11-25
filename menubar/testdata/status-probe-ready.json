@@ -1,0 +1,287 @@
+{
+  "mode": "auto",
+  "state": "accepting",
+  "cores": 8,
+  "lending": {
+    "shared": 0,
+    "lent": 0,
+    "in_use": 0,
+    "jobs": 0,
+    "memory_shared_mb": 0,
+    "memory_lent_mb": 0,
+    "memory_in_use_mb": 0,
+    "groups": 0,
+    "sizes": 0
+  },
+  "menu": {
+    "title": "Not lending",
+    "detail": "nothing running",
+    "note": "share this Mac: potluck host",
+    "cores": "········",
+    "items": [
+      {
+        "id": "keep",
+        "label": "Keep lending",
+        "checked": true
+      },
+      {
+        "id": "wind",
+        "label": "Wind down",
+        "sub": "finish jobs, take no new ones",
+        "checked": false,
+        "args": [
+          "host",
+          "set",
+          "drain"
+        ]
+      },
+      {
+        "id": "stop",
+        "label": "Stop now",
+        "sub": "end jobs now",
+        "checked": false,
+        "args": [
+          "host",
+          "set",
+          "closed"
+        ]
+      }
+    ],
+    "windows": [
+      {
+        "id": "setup",
+        "label": "Set up and check…",
+        "sub": "what this Mac has, what it lacks, and the next step",
+        "checked": false,
+        "args": [
+          "--json",
+          "host",
+          "status",
+          "--probe"
+        ]
+      },
+      {
+        "id": "jobs",
+        "label": "Jobs this Mac ran…",
+        "sub": "when, how long, counts and electricity",
+        "checked": false,
+        "args": [
+          "--json",
+          "host",
+          "jobs"
+        ]
+      },
+      {
+        "id": "uninstall",
+        "label": "Uninstall Potluck…",
+        "sub": "shows what it would remove first, and asks",
+        "checked": false,
+        "args": [
+          "--json",
+          "uninstall",
+          "--dry-run"
+        ]
+      }
+    ]
+  },
+  "setup": {
+    "state": "none",
+    "stage_order": [
+      {
+        "name": "preflight",
+        "label": "preflight"
+      },
+      {
+        "name": "images",
+        "label": "images"
+      },
+      {
+        "name": "validation",
+        "label": "validation"
+      },
+      {
+        "name": "join",
+        "label": "join"
+      },
+      {
+        "name": "capacity",
+        "label": "usable capacity"
+      }
+    ],
+    "checks": [
+      {
+        "id": "mac",
+        "state": "done",
+        "detail": "Apple silicon, macOS 26.1, virtualization available"
+      },
+      {
+        "id": "potluck",
+        "state": "done",
+        "detail": "Potluck v1.2.3 is installed"
+      },
+      {
+        "id": "tart",
+        "state": "done",
+        "detail": "Tart 2.30.0 at /opt/homebrew/bin/tart"
+      },
+      {
+        "id": "softnet",
+        "state": "done",
+        "detail": "Softnet 0.25.0 at /opt/homebrew/bin/softnet"
+      },
+      {
+        "id": "disk",
+        "state": "done",
+        "detail": "200 GB free in /Users/b/.tart, where Tart keeps images (Potluck's image for this Mac needs about 60 GB)"
+      },
+      {
+        "id": "daemon",
+        "state": "done",
+        "detail": "the Potluck daemon is running"
+      },
+      {
+        "id": "setup",
+        "state": "todo",
+        "detail": "this machine has not been set up to lend yet",
+        "action": "potluck host",
+        "do": {
+          "label": "Set up this Mac",
+          "args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--"
+          ],
+          "invite": true
+        }
+      },
+      {
+        "id": "lending",
+        "state": "todo",
+        "detail": "this machine shares no size with a pool yet",
+        "action": "potluck host",
+        "do": {
+          "label": "Lend this Mac",
+          "args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--"
+          ],
+          "invite": true
+        }
+      },
+      {
+        "id": "menu",
+        "state": "done",
+        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck Menu.app)"
+      },
+      {
+        "id": "login",
+        "state": "unknown",
+        "detail": "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+      },
+      {
+        "id": "updates",
+        "state": "todo",
+        "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
+        "action": "potluck upgrade enable",
+        "do": {
+          "label": "Turn on daily updates",
+          "args": [
+            "--json",
+            "upgrade",
+            "enable"
+          ]
+        }
+      },
+      {
+        "id": "coverage",
+        "state": "info",
+        "detail": "the daily update covers Potluck itself only: to update the menu bar item, run its installer again (install-menu); Tart and Softnet are updated the way you installed them, and potluck doctor says which versions this Mac needs"
+      }
+    ],
+    "next": "potluck host",
+    "next_id": "setup",
+    "view": {
+      "heading": "This Mac isn't set up yet",
+      "lead": "Paste the invite you were sent, then press the button. Setting up downloads what jobs need and tests it, which can take an hour or more. You can keep using this Mac meanwhile.",
+      "do": {
+        "label": "Set up this Mac",
+        "args": [
+          "--json",
+          "host",
+          "--yes",
+          "--no-sudo",
+          "--detach",
+          "--"
+        ],
+        "invite": true
+      },
+      "sections": [
+        {
+          "title": "This Mac",
+          "rows": [
+            {
+              "state": "done",
+              "text": "This Mac is the right kind"
+            },
+            {
+              "state": "done",
+              "text": "Potluck is installed"
+            },
+            {
+              "state": "done",
+              "text": "Tart is installed"
+            },
+            {
+              "state": "done",
+              "text": "The network helper is installed"
+            },
+            {
+              "state": "done",
+              "text": "Enough disk space"
+            },
+            {
+              "state": "done",
+              "text": "Potluck is running"
+            },
+            {
+              "state": "todo",
+              "text": "Not set up yet"
+            }
+          ]
+        },
+        {
+          "title": "Optional",
+          "rows": [
+            {
+              "state": "info",
+              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+            },
+            {
+              "state": "info",
+              "text": "Potluck doesn't update itself",
+              "do": {
+                "label": "Turn on daily updates",
+                "args": [
+                  "--json",
+                  "upgrade",
+                  "enable"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "progress": {
+        "title": ""
+      },
+      "key": "none daemon=true shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=setup --json host --yes --no-sudo --detach --"
+    }
+  }
+}

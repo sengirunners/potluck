@@ -89,6 +89,17 @@ func TestProbeChecks(t *testing.T) {
 		{"Tart in ~/Applications", func(m *hostprobe.MacParts, _ *SetupFacts) {
 			m.Tart.CLI = "/Users/b/Applications/tart.app/Contents/MacOS/tart"
 		}, want{checks: map[string]string{"tart": Done}, nextID: "setup"}},
+		{"no Tart, and Potluck can install it", func(m *hostprobe.MacParts, s *SetupFacts) {
+			m.Tart, s.TartInstall = hostprobe.Layer{Name: "tart", Problems: []string{"tart is not installed"}}, "potluck tart install"
+		}, want{checks: map[string]string{"tart": Todo}, nextID: "tart", next: "potluck tart install", doArgs: "--json tart install"}},
+		{"a tart.app with no program, and Potluck can install Tart", func(m *hostprobe.MacParts, s *SetupFacts) {
+			m.Tart, m.Hollow = hostprobe.Layer{Name: "tart", Problems: []string{"/Applications/tart.app has no Contents/MacOS/tart in it"}}, []string{"/Applications/tart.app"}
+			s.TartInstall = "potluck tart install"
+		}, want{checks: map[string]string{"tart": Todo}, nextID: "tart", doArgs: "--json tart install", detail: "has no Contents/MacOS/tart"}},
+		{"Potluck's own older Tart", func(m *hostprobe.MacParts, s *SetupFacts) {
+			m.Tart.CLI, m.Tart.Problems = "/Users/b/Applications/tart.app/Contents/MacOS/tart", []string{"lacks required run option"}
+			s.TartInstall = "potluck tart install"
+		}, want{checks: map[string]string{"tart": Todo}, nextID: "tart", doArgs: "--json tart install", detail: "lacks required run option"}},
 		{"an old tart.app", func(m *hostprobe.MacParts, _ *SetupFacts) {
 			m.Tart.CLI, m.Tart.Problems = "/Applications/tart.app/Contents/MacOS/tart", []string{"Tart at /Applications/tart.app/Contents/MacOS/tart lacks required run option --net-softnet-block"}
 		}, want{checks: map[string]string{"tart": Todo}, nextID: "tart", doURL: hostprobe.TartReleases, detail: "lacks required run option"}},

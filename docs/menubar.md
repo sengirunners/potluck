@@ -93,23 +93,30 @@ the daemon runs a driver that lists `host-lend`.
 
 ## Set up and check
 
-"Set up and check…" opens a window of what `potluck --json host status --probe` says about setting up:
-the title, the one next step, the setup checklist (each check's mark, its words and the command it names), the five
-stages of the last host run (preflight, images, validation, join, usable capacity: a mark and the stage's last words,
-a dot for one not reached) and, when a `host --detach` run has gone on, the last line it wrote (`background.last`, also for one that ended). The window runs that status
-when it opens and again every 3 seconds while it is open, and keeps the last good picture, with a red "not current"
-line, when an ask fails. The commands under each check are for a terminal. Each check that has a command also
-carries `do`, what the app may run (potluck's arguments, a page to open, or an act of the app's own), and `next_id`
-names the check the next step is from, or a blocked check with nothing to run
-([hosts.md](hosts.md#stages-and-the-setup-checklist)); the app reads those, never the words. `--probe` puts this
-Mac's own checks first: Apple silicon, macOS and virtualization (`mac`), Tart, Softnet and the free disk where Tart
-keeps images. The menu's own 15-second ask leaves them out, since reading them runs Tart and Softnet.
+"Set up and check…" opens a window drawn from `setup.view` of `potluck --json host status --probe`, written for
+someone who has never used a terminal (`menubar.SetupView`): a heading that says how this Mac stands, what to do or
+expect, the button that does it, a line per thing lending needs, what is optional under its own title (its buttons
+are small ones on its lines), and while a setup goes on, or after one stopped, its stages. Every word comes from
+potluck; the app only draws. No command, path or inside name is in it. "Check again" asks at once, and "Copy details",
+there only when something needs help, copies the terminal's words (`view.details`, never shown) to send to someone.
 
-The window has one button: the `do` of the `next_id` check, with its label. A `do` with `url` opens that page in the
+The window asks with `--probe` when it opens, after an action, on "Check again" and about every 30 seconds, since
+`--probe` runs Tart and Softnet. Every 3 seconds it asks plain `host status`, which redraws only the stages; when
+that answer's `view.key` is not the last probe's (a setup ended, the daemon stopped), it probes then. It keeps the
+last good picture, with a red line saying so, when an ask fails, and asks again; "Copy details" then copies the
+error too. `--probe` adds this Mac's own checks first: Apple
+silicon, macOS and virtualization (`mac`), Tart, Softnet and the free disk where Tart keeps images. The menu's own
+15-second ask leaves them out.
+
+The window's button is `view.do`: the running setup's, else the first required check's that has something to do, unless something
+on this Mac stops it that nothing here fixes, which comes first, with no button
+(never an optional one's, as the terminal's `next_id` may be,
+[hosts.md](hosts.md#stages-and-the-setup-checklist)). A blocked check with nothing to run shows its words and no
+button of its own. A `do` with `url` opens that page in the
 browser (only an `https` page, or the `file://` URL of an installed app). A `do` with `args` runs potluck with them;
 when it has `invite`, an invite field shows above the button and what is pasted there is added as the last argument,
 after the `--` potluck puts in those arguments, so it is never read as a flag. The app runs potluck directly, never
-through a shell, writes nothing of the run to a log, and empties the field when the run ends (while it runs, the invite is among potluck's process arguments, as it is when
+through a shell, writes nothing of the run to a log, and empties the field when that run ends (while it runs, the invite is among potluck's process arguments, as it is when
 typed in a terminal). With the field empty
 it runs the arguments as they are (`potluck host` then shares with the one pool this machine is already in). A
 `do` with only `app` (an act only the app can do) has no button yet, and `auto` is read but not acted on yet.
@@ -125,8 +132,8 @@ says was already done, and "Nothing was changed" only when that list is there an
 say what it did gets "The admin step did not run". Then potluck's reason again, and
 Ask again, which runs that action again with the same arguments (the invite too, held in memory only while that
 action is still the next step and the window is open), as often as the person likes. A
-failed root step shows its error text. A failure stays until the next action, closing the window, or the next step
-changing after the failure was shown.
+failed root step shows its error text. A failure stays until the next action, closing the window, or a full check
+after it was shown that has another next step (for a line's own button: that no longer has that button).
 
 The code is `Run.swift` (finding and running potluck, and that action rule), `Admin.swift` (the admin step: its
 answer, the quoting, the AppleScript) and `SetupWindow.swift`.

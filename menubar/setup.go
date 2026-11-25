@@ -39,6 +39,9 @@ type SetupFacts struct {
 	Doctor           string // says which Tart and Softnet this Mac needs
 	SoftnetInstall   string // installs this Mac's Softnet build
 	SoftnetUninstall string // removes the managed Softnet
+	// TartInstall installs the Tart Potluck pins, set only with Mac and only
+	// when running it would put a Tart on this Mac or update Potluck's own.
+	TartInstall string
 	// Exe is this program (symlinks resolved), InstallDir where Potluck is
 	// installed, and BundledRelease a signed release the app carries
 	// (POTLUCK_BUNDLED_RELEASE; "" for none); InstallBundled is the
@@ -97,6 +100,21 @@ type Check struct {
 	Detail string `json:"detail"`
 	Action string `json:"action,omitempty"`
 	Do     *Do    `json:"do,omitempty"`
+
+	// For the setup window (SetupView), whose reader may never have used a
+	// terminal: words is the check's line there ("": it has none), help
+	// what to do about it when it is the next step, and optional that
+	// lending works without it.
+	words, help string
+	optional    bool
+	// other is another way to do it, a small button on its own line.
+	other *Do
+}
+
+// say is c with its setup window words.
+func (c Check) say(words, help string) Check {
+	c.words, c.help = words, help
+	return c
 }
 
 // Do is a check's action for a program. Exactly one of Args, URL and App
@@ -173,6 +191,9 @@ type Setup struct {
 	// do).
 	Next   string `json:"next,omitempty"`
 	NextID string `json:"next_id,omitempty"`
+	// View is the setup window, in words for someone who has never used a
+	// terminal.
+	View SetupView `json:"view"`
 }
 
 // The last host run's states.
@@ -223,9 +244,7 @@ func buildSetup(f Facts, st Status) Setup {
 		}
 		out.AgainArgs, out.NeedsInvite = s.Run.AgainArgs, s.Run.NeedsInvite
 	}
-	add := func(id, state, detail, action string, do *Do) {
-		out.Checks = append(out.Checks, Check{ID: id, State: state, Detail: detail, Action: action, Do: do})
-	}
+	add := func(c Check) { out.Checks = append(out.Checks, c) }
 	if s.Mac != nil {
 		mac := macCheck(s.Mac)
 		out.Checks = append(out.Checks, mac, potluckCheck(s))
@@ -236,43 +255,58 @@ func buildSetup(f Facts, st Status) Setup {
 		out.Checks = append(out.Checks, potluckCheck(s))
 	}
 	if f.Daemon != "" {
-		add("daemon", Todo, "the Potluck daemon is not running: "+f.Daemon, f.Start, &Do{Label: "Start Potluck", Args: startArgs})
+		add(Check{ID: "daemon", State: Todo, Detail: "the Potluck daemon is not running: " + f.Daemon, Action: f.Start, Do: &Do{Label: "Start Potluck", Args: startArgs}}.
+			say("Potluck isn't running", "Potluck runs quietly in the background. Start it to go on."))
 	} else {
-		add("daemon", Done, "the Potluck daemon is running", "", nil)
+		add(Check{ID: "daemon", State: Done, Detail: "the Potluck daemon is running"}.say("Potluck is running", ""))
 	}
 	out.Checks = append(out.Checks, setupCheck(f, out.State, st.Lending.Sizes > 0))
 	lendingCheck(&out, f, st)
 	if m := s.Menu; m != nil {
+		menu := Check{ID: "menu", State: Todo, Action: m.Open, optional: true} // no words: the window is the menu bar item's own
 		switch {
 		case m.Path == "":
-			add("menu", Todo, "the menu bar item is not installed (optional: it shows what this Mac lends and pauses it without a terminal)", s.InstallMenu,
-				&Do{Label: "How to install it", URL: menuInstallDoc})
+			menu.Detail, menu.Action = "the menu bar item is not installed (optional: it shows what this Mac lends and pauses it without a terminal)", s.InstallMenu
+			menu.Do = &Do{Label: "How to install it", URL: menuInstallDoc}
 		case !m.Seen.IsZero() && now().Sub(m.Seen) <= MenuSeenWithin:
-			add("menu", Done, fmt.Sprintf("the menu bar item is running: it read this status at %s (%s)", m.Seen.In(locOf(f)).Format("15:04:05"), m.Path), "", nil)
+			menu.State, menu.Action = Done, ""
+			menu.Detail = fmt.Sprintf("the menu bar item is running: it read this status at %s (%s)", m.Seen.In(locOf(f)).Format("15:04:05"), m.Path)
 		case m.Seen.IsZero():
-			add("menu", Todo, "the menu bar item is installed at "+m.Path+" but has never read this status, so it is not running", m.Open, openApp(m.Path))
+			menu.Detail, menu.Do = "the menu bar item is installed at "+m.Path+" but has never read this status, so it is not running", openApp(m.Path)
 		default:
-			add("menu", Todo, fmt.Sprintf("the menu bar item is installed at %s but has not read this status since %s, so it is not running now", m.Path, m.Seen.In(locOf(f)).Format("Jan 2 15:04")), m.Open, openApp(m.Path))
+			menu.Detail = fmt.Sprintf("the menu bar item is installed at %s but has not read this status since %s, so it is not running now", m.Path, m.Seen.In(locOf(f)).Format("Jan 2 15:04"))
+			menu.Do = openApp(m.Path)
 		}
+		add(menu)
 		if m.Path != "" {
-			add("login", Unknown, "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings > General > Login Items", "", nil)
+			add(Check{ID: "login", State: Unknown, optional: true, Detail: "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings > General > Login Items"}.
+				say("To have this menu appear every time you log in, add Potluck Menu in System Settings > General > Login Items", ""))
 		}
 	}
 	if u := s.Updates; u != nil {
+		c := Check{ID: "updates", State: Done, optional: true}
+		turnOn := &Do{Label: "Turn on daily updates", Args: upgradeArgs}
 		switch {
 		case u.Err != "":
-			add("updates", Unknown, "the daily update's state cannot be read: "+u.Err, "", nil)
+			c.State, c.Detail = Unknown, "the daily update's state cannot be read: "+u.Err
+			c = c.say("Couldn't check whether Potluck updates itself", "")
 		case u.Foreign != "":
-			add("updates", Done, "another updater runs this program's upgrade ("+u.Foreign+"); Potluck leaves it as it is", "", nil)
+			c.Detail = "another updater runs this program's upgrade (" + u.Foreign + "); Potluck leaves it as it is"
+			c = c.say("Something else on this Mac keeps Potluck up to date", "")
 		case u.Enabled && u.Loaded:
-			add("updates", Done, "the daily update is on: it installs Potluck's newest signed release", "", nil)
+			c.Detail = "the daily update is on: it installs Potluck's newest signed release"
+			c = c.say("Potluck updates itself every day", "")
 		case u.Enabled:
-			add("updates", Todo, "the daily update is installed but not loaded, so it does not run", s.Upgrade, &Do{Label: "Load the daily update", Args: upgradeArgs})
+			c.State, c.Detail, c.Action = Todo, "the daily update is installed but not loaded, so it does not run", s.Upgrade
+			c.Do = &Do{Label: "Turn daily updates back on", Args: upgradeArgs}
+			c = c.say("Daily updates have stopped", "")
 		default:
-			add("updates", Todo, "the daily update is off (optional: your choice; Potluck never turns it on by itself)", s.Upgrade, &Do{Label: "Turn on the daily update", Args: upgradeArgs})
+			c.State, c.Detail, c.Action, c.Do = Todo, "the daily update is off (optional: your choice; Potluck never turns it on by itself)", s.Upgrade, turnOn
+			c = c.say("Potluck doesn't update itself", "")
 		}
+		add(c)
 		if s.Menu != nil {
-			add("coverage", Info, "the daily update covers Potluck itself only: to update the menu bar item, run its installer again ("+s.InstallMenu+"); Tart and Softnet are updated the way you installed them, and "+s.Doctor+" says which versions this Mac needs", "", nil)
+			add(Check{ID: "coverage", State: Info, optional: true, Detail: "the daily update covers Potluck itself only: to update the menu bar item, run its installer again (" + s.InstallMenu + "); Tart and Softnet are updated the way you installed them, and " + s.Doctor + " says which versions this Mac needs"})
 		}
 	}
 	// The first step left that has an action is next. A blocked check with
@@ -289,6 +323,7 @@ func buildSetup(f Facts, st Status) Setup {
 			break
 		}
 	}
+	out.View = setupView(f, st, out)
 	return out
 }
 
@@ -348,24 +383,38 @@ func setupCheck(f Facts, state string, shares bool) Check {
 	c := func(st, detail, action string, do *Do) Check {
 		return Check{ID: "setup", State: st, Detail: detail, Action: action, Do: do}
 	}
+	const tellSomeone = "If it stops again, press Copy details and send what it copies to the person who invited you."
 	switch state {
 	case SetupUnreadable:
-		return c(Unknown, "the last setup's record cannot be read: "+f.Setup.RunErr, "", nil)
+		return c(Unknown, "the last setup's record cannot be read: "+f.Setup.RunErr, "", nil).say("Couldn't tell how the last setup went", "")
 	case SetupNone:
-		return c(Todo, "this machine has not been set up to lend yet", f.Share, againDo(nil, "Set up this Mac"))
+		if shares { // set up before a run kept a record, or the record is gone
+			return c(Done, "this machine lends; it has no record of how it was set up", "", nil).say("Set up to lend", "")
+		}
+		if f.ListErr != "" {
+			return c(Unknown, "this machine has no record of a setup, and what it shares cannot be read", "", nil).say("Couldn't tell whether this Mac is set up", "")
+		}
+		words, help := "Not set up yet", ""
+		if f.Daemon != "" { // a Mac that lends and lost its record looks the same
+			words = "Setup can be checked once Potluck is running"
+		}
+		if endedEarly(f) {
+			help = "The last try stopped early; if it happens again, press Copy details and send what it copies to the person who invited you. "
+		}
+		return c(Todo, "this machine has not been set up to lend yet", f.Share, againDo(nil, "Set up this Mac")).say(words, help+"Paste the invite you were sent, then press the button. Setting up downloads what jobs need and tests it, which can take an hour or more. You can keep using this Mac meanwhile.")
 	case SetupRunning:
 		cur := r.Current()
 		switch {
 		case cur == nil && len(r.Stages) == 0: // just started
-			return c(Running, "setting up now: starting", "", nil)
+			return c(Running, "setting up now: starting", "", nil).say("Setting up now", "")
 		case cur == nil: // between two stages
 			cur = &r.Stages[len(r.Stages)-1]
 		}
 		detail := "setting up now: " + hostsetup.Line(cur.Name, cur.Result, cur.Detail)
 		if u := cur.OpenURL; cur.Result == hostsetup.Running && strings.HasPrefix(u, "https://") { // the run waits on this page
-			return c(Running, detail, "open this page and sign in for the setup to go on: "+u, &Do{Label: "Sign in to continue", URL: u})
+			return c(Running, detail, "open this page and sign in for the setup to go on: "+u, &Do{Label: "Sign in", URL: u}).say("Waiting for you to sign in", "Press the button and sign in on the page that opens in your browser. Setup goes on by itself after that.")
 		}
-		return c(Running, detail, "", nil)
+		return c(Running, detail, "", nil).say("Setting up now", "")
 	case SetupBlocked:
 		b := r.Blocked()
 		detail := fmt.Sprintf("setup blocked at %s (%d of %d): %s", hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail)
@@ -373,21 +422,23 @@ func setupCheck(f Facts, state string, shares bool) Check {
 			detail = fmt.Sprintf("the last setup run was blocked at %s (%d of %d): %s; what was shared before still lends",
 				hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail)
 		}
+		words, try := "The last setup stopped before it finished", againDo(r, "Try again")
 		switch {
 		case b.Flag != "" && b.Fix == "": // an earlier share kept the refused setting and no flag turns it off: running again fails the same way
-			return c(Blocked, detail, RunAgain(r, f.Share), nil)
+			return c(Blocked, detail, RunAgain(r, f.Share), nil).say(words, stopped[b.Name]+" Trying again won't fix it. Press Copy details and send what it copies to the person who invited you.")
 		case b.Flag != "":
-			return c(Blocked, detail, RunAgain(r, f.Share), againDo(r, "Run setup again"))
+			return c(Blocked, detail, RunAgain(r, f.Share), try).say(words, stopped[b.Name]+" One of its settings doesn't work on this Mac; trying again leaves that setting out."+inviteAgain(r)+" "+tellSomeone)
 		}
-		return c(Blocked, detail, "fix what the "+hostsetup.Label(b.Name)+" stage says, then "+RunAgain(r, f.Share), againDo(r, "Run setup again"))
+		return c(Blocked, detail, "fix what the "+hostsetup.Label(b.Name)+" stage says, then "+RunAgain(r, f.Share), try).say(words, stopped[b.Name]+inviteAgain(r)+" "+tellSomeone)
 	case SetupInterrupted:
 		at := "before its first stage"
 		if n := len(r.Stages); n > 0 {
 			at = "at " + hostsetup.Label(r.Stages[n-1].Name)
 		}
-		return c(Blocked, "the last setup stopped "+at+" before it finished (a pull that stopped resumes)", again, againDo(r, "Go on with setup"))
+		return c(Blocked, "the last setup stopped "+at+" before it finished (a pull that stopped resumes)", again, againDo(r, "Continue setup")).
+			say("The last setup was cut off", "Setup was cut off before it finished. Press the button to go on from where it stopped."+inviteAgain(r))
 	}
-	return c(Done, fmt.Sprintf("set up: all %d stages succeeded (%s)", len(hostsetup.Order), strings.Join(stageNames(), ", ")), "", nil)
+	return c(Done, fmt.Sprintf("set up: all %d stages succeeded (%s)", len(hostsetup.Order), strings.Join(stageNames(), ", ")), "", nil).say("Set up to lend", "")
 }
 
 // lendingCheck adds what this machine lends now and when it may lend:
@@ -398,17 +449,18 @@ func lendingCheck(out *Setup, f Facts, st Status) {
 	case f.Daemon != "":
 		return
 	case l.Sizes == 0 && f.ListErr != "":
-		out.Checks = append(out.Checks, Check{ID: "lending", State: Unknown, Detail: "what this machine shares cannot be read: " + f.ListErr})
+		out.Checks = append(out.Checks, Check{ID: "lending", State: Unknown, Detail: "what this machine shares cannot be read: " + f.ListErr}.say("Couldn't tell what this Mac lends just now", ""))
 		return
 	case l.Sizes == 0:
-		c := Check{ID: "lending", State: Todo, Detail: "this machine shares no size with a pool yet"}
+		c := Check{ID: "lending", State: Todo, Detail: "this machine shares no size with a pool yet"}.say("Not lending anything yet", "This Mac was set up but lends nothing now."+inviteAgain(f.Setup.Run)+" Press the button to lend it again.")
 		if out.State == SetupNone || out.State == SetupSucceeded {
-			c.Action, c.Do = f.Share, againDo(f.Setup.Run, "Share this Mac")
+			c.Action, c.Do = f.Share, againDo(f.Setup.Run, "Lend this Mac")
 		}
 		out.Checks = append(out.Checks, c)
 		return
 	}
-	out.Checks = append(out.Checks, Check{ID: "lending", State: Done, Detail: fmt.Sprintf("shares %s with its pools, up to %s at once", plural(l.Sizes, "size"), plural(l.Lent, "core"))})
+	out.Checks = append(out.Checks, Check{ID: "lending", State: Done, Detail: fmt.Sprintf("shares %s with its pools, up to %s at once", plural(l.Sizes, "size"), plural(l.Lent, "core"))}.
+		say(fmt.Sprintf("Lends up to %s at once", plural(l.Lent, "processor core")), ""))
 	idle := 0
 	for _, t := range f.Targets {
 		if t.Kind == "box" && t.RunTarget.Host == "" {
@@ -419,8 +471,10 @@ func lendingCheck(out *Setup, f Facts, st Status) {
 		}
 	}
 	when := "it may lend any time, whether or not you are using it (" + f.Share + " --when away: only while you are away)"
+	words := "Lends at any time, even while you use it"
 	if idle > 0 {
 		when = fmt.Sprintf("it lends only while you are away: a job starts after %d s with no keyboard or pointer use and ends when you come back (%s --when any: any time)", idle, f.Share)
+		words = "Lends only while you are away from this Mac"
 	}
 	now := "now it takes work"
 	switch {
@@ -431,7 +485,7 @@ func lendingCheck(out *Setup, f Facts, st Status) {
 	case st.State != protocol.HostAccepting:
 		now = "now it waits: someone is using this machine, or your lending rules say not now"
 	}
-	out.Checks = append(out.Checks, Check{ID: "when", State: Info, Detail: when + "; " + now})
+	out.Checks = append(out.Checks, Check{ID: "when", State: Info, Detail: when + "; " + now}.say(words, ""))
 }
 
 func stageNames() []string {

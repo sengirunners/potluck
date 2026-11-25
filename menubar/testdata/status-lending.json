@@ -201,7 +201,7 @@
         "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
         "action": "potluck upgrade enable",
         "do": {
-          "label": "Turn on the daily update",
+          "label": "Turn on daily updates",
           "args": [
             "--json",
             "upgrade",
@@ -216,6 +216,62 @@
       }
     ],
     "next": "potluck upgrade enable",
-    "next_id": "updates"
+    "next_id": "updates",
+    "view": {
+      "heading": "This Mac is lending",
+      "lead": "It is set up; there is nothing else to do.",
+      "sections": [
+        {
+          "title": "This Mac",
+          "rows": [
+            {
+              "state": "done",
+              "text": "Potluck is installed"
+            },
+            {
+              "state": "done",
+              "text": "Potluck is running"
+            },
+            {
+              "state": "done",
+              "text": "Set up to lend"
+            },
+            {
+              "state": "done",
+              "text": "Lends up to 4 processor cores at once"
+            },
+            {
+              "state": "info",
+              "text": "Lends at any time, even while you use it"
+            }
+          ]
+        },
+        {
+          "title": "Optional",
+          "rows": [
+            {
+              "state": "info",
+              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+            },
+            {
+              "state": "info",
+              "text": "Potluck doesn't update itself",
+              "do": {
+                "label": "Turn on daily updates",
+                "args": [
+                  "--json",
+                  "upgrade",
+                  "enable"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "progress": {
+        "title": ""
+      },
+      "key": "succeeded daemon=true shares=true listed=true limits=true mode=auto state=accepting refused=false early=false"
+    }
   }
 }

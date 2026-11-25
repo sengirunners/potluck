@@ -63,6 +63,9 @@ status leaves them out.`,
 			if mac != nil {
 				m := <-mac
 				f.Setup.Mac = &m
+				if len(m.Tart.Problems) > 0 && tartInstallWorks(m) {
+					f.Setup.TartInstall = a.cmd("tart install")
+				}
 			}
 			st := menubar.Build(f)
 			if a.asJSON() {
