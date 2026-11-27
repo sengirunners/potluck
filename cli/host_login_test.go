@@ -147,9 +147,9 @@ func TestHostJoinLoginURLInHostStatus(t *testing.T) {
 		t.Fatalf("after the join: state %s, join %+v\n%s", st.Setup.State, s, raw)
 	}
 	// Blocked: the button runs the same setup in the background, the invite
-	// pasted again and appended by the app.
-	want := []string{"--json", "host", "--no-sudo=true", "--reclaim-idle-s=0", "--sizes=c1m2", "--yes", "--detach", "--"}
-	if c := setupByID(st.Setup, "setup"); c.Do == nil || !slices.Equal(c.Do.Args, want) || !c.Do.Invite || c.Do.URL != "" || st.Setup.NextID != "setup" {
+	// pasted again and given on stdin.
+	want := []string{"--json", "host", "--no-sudo=true", "--reclaim-idle-s=0", "--sizes=c1m2", "--yes", "--detach"}
+	if c := setupByID(st.Setup, "setup"); c.Do == nil || !slices.Equal(c.Do.Args, append(slices.Clone(want), "--instead-of-invite=", "--")) || !slices.Equal(c.Do.InviteArgs, append(want, "--invite-stdin")) || c.Do.URL != "" || st.Setup.NextID != "setup" {
 		t.Fatalf("blocked: setup check %+v do %+v, next_id %q", c, c.Do, st.Setup.NextID)
 	}
 	if b, _ := os.ReadFile(filepath.Join(lender.home, hostsetup.FileName)); strings.Contains(string(b), invite[1]) || strings.Contains(string(b), url) {

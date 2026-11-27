@@ -147,6 +147,12 @@ type File struct {
 	// --release` trusts (ed25519:<base64>; SPEC 2 "Release channel"). More
 	// than one during a key rotation.
 	UpdateKeys []string `json:"update_keys,omitempty"`
+	// UpdateRepos is the order of release repositories this machine's
+	// updater reads, as the file has it. It stays raw and is never checked
+	// here: a typed list written wrong would fail every config load, hooks
+	// included. The program that reads it validates it and fails loudly
+	// there; unset (or null) is the default order.
+	UpdateRepos json.RawMessage `json:"update_repos,omitempty"`
 	// RemoteTasks lets the owner of a team project this machine joined (or
 	// hosts) start one-shot tasks here from another machine, through the
 	// authority (SPEC 8 "Machine choice"). Default off: the machine owner opts in.

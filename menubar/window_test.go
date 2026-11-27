@@ -46,7 +46,7 @@ func statusFixtures() map[string]Facts {
 	base := Facts{Cores: 8, Loc: time.UTC, Host: &protocol.HostStatus{Mode: "auto", State: "accepting"},
 		Start: "potluck daemon --detach", Share: "potluck host"}
 	base.Setup = SetupFacts{Version: "v1.2.3", InstallMenu: "install-menu", Upgrade: "potluck upgrade enable", Doctor: "potluck doctor",
-		Menu: &MenuApp{Path: "/Users/b/Applications/Potluck Menu.app", Seen: at.Add(-5 * time.Second)}, Updates: &Updates{}}
+		Menu: &MenuApp{Path: "/Users/b/Applications/Potluck.app", Seen: at.Add(-5 * time.Second), Login: LoginOff}, Updates: &Updates{}}
 	stage := func(name, result, detail string) hostsetup.Stage {
 		return hostsetup.Stage{Name: name, Result: result, Detail: detail, At: "2026-11-19T11:58:00Z"}
 	}
@@ -119,7 +119,17 @@ func statusFixtures() map[string]Facts {
 	fine := fineMac()
 	ready.Setup.Mac = &fine
 
+	// Lending once, and the daemon is down now.
+	down := lending
+	down.Targets, down.Daemon = nil, "connection refused"
+
+	// Lending, and a later run was blocked.
+	again := lending
+	again.Setup.Run = blocked.Setup.Run
+
 	return map[string]Facts{
+		"status-daemon-down.json":        down,
+		"status-lending-run-again.json":  again,
 		"status-probe-fresh-mac-26.json": fresh26,
 		"status-probe-no-helper.json":    noHelper,
 		"status-probe-ready.json":        ready,

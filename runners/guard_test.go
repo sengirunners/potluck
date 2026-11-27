@@ -243,7 +243,7 @@ func TestOpenRunnerIsDecidedAgainAtJobStart(t *testing.T) {
 					t.Fatalf("a fork's run's runner is not guarded by the repository alone: %s", b)
 				}
 				f.gh.mu.Lock()
-				f.gh.busy["potluck-7101"] = true // GitHub gave it the job: the retire leaves it
+				f.gh.busy["potluck-7101"] = true // GitHub gave it the job: the retire leaves it, and GitHub refuses to delete it
 				f.gh.mu.Unlock()
 				f.change(t, change)
 				switch who {
@@ -254,7 +254,7 @@ func TestOpenRunnerIsDecidedAgainAtJobStart(t *testing.T) {
 					eventually(t, "refused, its box released", func() bool {
 						_, del := f.gh.snapshot()
 						j := f.jobs(t)
-						return slices.Equal(del, []string{"potluck-7101"}) && f.ready(t) == 0 &&
+						return len(del) == 0 && f.ready(t) == 0 &&
 							j[7101].State == "ignored" && strings.Contains(j[7101].Why, why) &&
 							j[7102].State == "ignored" && strings.Contains(j[7102].Why, "refused when it started on runner potluck-7101 ("+why+")")
 					})
@@ -263,7 +263,7 @@ func TestOpenRunnerIsDecidedAgainAtJobStart(t *testing.T) {
 					eventually(t, "refused, its box released", func() bool {
 						_, del := f.gh.snapshot()
 						j := f.jobs(t)[7101]
-						return slices.Equal(del, []string{"potluck-7101"}) && f.ready(t) == 0 && j.State == "ignored" &&
+						return len(del) == 0 && f.ready(t) == 0 && j.State == "ignored" &&
 							strings.Contains(j.Why, "refused when it started on its runner potluck-7101 ("+why+")")
 					})
 				case "an own branch's job":

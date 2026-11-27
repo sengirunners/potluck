@@ -205,7 +205,8 @@ func plistArgs(b []byte) []string {
 
 // unitCommands are the commands of a unit's ExecStart lines, each split into
 // its arguments as systemd splits them: a line ending in a backslash goes on
-// the next, quotes and backslash escapes are undone, a lone ; separates two
+// the next, leading space and space around the = are ignored, quotes and
+// backslash escapes are undone, a lone ; separates two
 // commands, and %% and $$ are made single (other % specifiers and $VAR are
 // left as written). An empty ExecStart= clears the lines before it. A
 // command's prefixes (-, @, :, +, !) are dropped; after @ the second word is
@@ -217,10 +218,10 @@ func unitCommands(b []byte) ([][]string, error) {
 		cmds [][]string
 		errs []error
 	)
-	text := strings.ReplaceAll(string(b), "\\\n", " ")
-	for _, line := range strings.Split(text, "\n") {
-		rest, ok := strings.CutPrefix(line, "ExecStart=")
-		if !ok {
+	for _, line := range unitLines(string(b)) {
+		// systemd strips leading space and allows space around the =.
+		key, rest, ok := strings.Cut(strings.TrimLeft(line, " \t"), "=")
+		if !ok || strings.TrimRight(key, " \t") != "ExecStart" {
 			continue
 		}
 		if strings.TrimLeft(rest, " \t") == "" {
@@ -229,7 +230,7 @@ func unitCommands(b []byte) ([][]string, error) {
 		}
 		parsed, err := unitSplit(rest)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("ExecStart=%s: %w", rest, err))
+			errs = append(errs, fmt.Errorf("ExecStart=%s: %w", strings.TrimLeft(rest, " \t"), err))
 		}
 		for _, args := range parsed {
 			if cmd := unitCommand(args); len(cmd) > 0 {
@@ -238,6 +239,33 @@ func unitCommands(b []byte) ([][]string, error) {
 		}
 	}
 	return cmds, errors.Join(errs...)
+}
+
+// unitLines are a unit's logical lines: a line ending in a backslash goes on
+// with the next, and a comment line (# or ;) is skipped before that, as
+// systemd does, so a comment inside a continued line is not part of it and a
+// comment ending in a backslash continues nothing.
+func unitLines(text string) []string {
+	var out []string
+	var cur string
+	continued := false
+	for _, line := range strings.Split(text, "\n") {
+		if t := strings.TrimLeft(line, " \t"); strings.HasPrefix(t, "#") || strings.HasPrefix(t, ";") {
+			continue
+		}
+		if continued {
+			line = cur + " " + line
+		}
+		if rest, ok := strings.CutSuffix(line, "\\"); ok {
+			cur, continued = rest, true
+			continue
+		}
+		out, continued = append(out, line), false
+	}
+	if continued {
+		out = append(out, cur+"\\") // a backslash at the end of the file: unitSplit reports it
+	}
+	return out
 }
 
 // unitCommand drops a command's prefixes from its first word.

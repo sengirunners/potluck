@@ -16,6 +16,7 @@ import (
 	"hash/fnv"
 	"io"
 	"io/fs"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -395,6 +396,11 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 			m := delRe.FindStringSubmatch(p)
 			for n, x := range g.runners {
 				if fmt.Sprint(x.id) == m[2] && x.scope == m[1] {
+					if g.busy[n] { // as GitHub: a runner it gave a job is not deleted
+						w.WriteHeader(422)
+						fmt.Fprintf(w, `{"message":"Runner %s is currently running a job and cannot be deleted."}`, n)
+						return
+					}
 					delete(g.runners, n)
 					g.deleted = append(g.deleted, n)
 				}
@@ -530,6 +536,28 @@ type fixture struct {
 	project string
 	remote  string // the pool project's repo remote (a box binding's config)
 	clock   *clock // the broker's time
+	logs    *logs  // what the daemon logged, across restarts
+}
+
+// logs is what a fixture's daemon logged (also written to stderr, as the
+// default logger would).
+type logs struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (l *logs) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.buf.Write(p)
+	return os.Stderr.Write(p)
+}
+
+// logged reports whether the daemon logged a line containing s.
+func (f *fixture) logged(s string) bool {
+	f.logs.mu.Lock()
+	defer f.logs.mu.Unlock()
+	return strings.Contains(f.logs.buf.String(), s)
 }
 
 // clock is the broker's time in a fixture: the real time, plus what a test
@@ -654,7 +682,7 @@ tee -a %[1]q | exec %[2]q
 `, seen, ref, gate)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{gh: gh, home: home, seen: seen, gate: gate, state: state, cfg: cfg, tap: tap, before: before, wire: wire}
+	f := &fixture{gh: gh, home: home, seen: seen, gate: gate, state: state, cfg: cfg, tap: tap, before: before, wire: wire, logs: &logs{}}
 	t.Cleanup(func() {
 		if f.stop != nil {
 			f.stop()
@@ -685,7 +713,7 @@ tee -a %[1]q | exec %[2]q
 // started (startBroker).
 func (f *fixture) startDaemon(t *testing.T) {
 	t.Helper()
-	dm, err := server.New(context.Background(), f.cfg, nil, f.wire)
+	dm, err := server.New(context.Background(), f.cfg, slog.New(slog.NewTextHandler(f.logs, nil)), f.wire)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,13 +751,23 @@ func (f *fixture) startBroker(t *testing.T) {
 	}
 	dm, svc, gh := f.dm, f.svc, f.gh
 	f.stop = func() {
-		gh.mu.Lock()
-		gh.stopped = true
-		gh.mu.Unlock()
 		cancel()
-		svc.Close()
+		closeBroker(gh, svc)
 		dm.Close()
 	}
+}
+
+// closeBroker stops the broker alone, the daemon left running. A test that
+// closes the broker itself calls this, never svc.Close: the fake is told
+// first (stopped), so a request Close abandoned that reaches it after Close
+// revoked its token is answered 401, not counted as misuse.
+func (f *fixture) closeBroker() { closeBroker(f.gh, f.svc) }
+
+func closeBroker(gh *fakeGitHub, svc *runners.Service) {
+	gh.mu.Lock()
+	gh.stopped = true
+	gh.mu.Unlock()
+	svc.Close()
 }
 
 // restart stops the machine's daemon and starts it again from the same home
@@ -1167,27 +1205,54 @@ func TestRefusedJobsAndBrokerRunners(t *testing.T) {
 	if got := f.gh.eligible("acme/app", labels); len(got) != 2 {
 		t.Fatalf("eligible in acme/app %v", got)
 	}
+	// Job 3005, whose runner is taken, is served again, and that serve asks
+	// GitHub for the job first. Held here, the ask is still on its way when
+	// the broker stops.
+	gate := make(chan struct{})
+	f.gh.mu.Lock()
+	f.gh.gate, f.gh.gateOn = gate, "/actions/jobs/3005"
+	f.gh.mu.Unlock()
 	deliver(startEvent(3002, 81, "acme/app", "potluck-3005"))
 	eventually(t, "the taken runner's box released and the runner deleted", func() bool {
 		_, del := f.gh.snapshot()
 		return ready(1)() && slices.Equal(del, []string{"potluck-3005"})
 	})
+	eventually(t, "job 3005's serve asking GitHub", func() bool {
+		f.gh.mu.Lock()
+		defer f.gh.mu.Unlock()
+		return f.gh.waiting > 0
+	})
 	// The broker stops: its cached installation tokens are revoked, not left
 	// to lapse within the hour.
-	f.svc.Close()
+	f.closeBroker()
 	f.gh.mu.Lock()
-	left, revoked := len(f.gh.tokens), len(f.gh.revoked)
+	left, revoked, held := len(f.gh.tokens), len(f.gh.revoked), f.gh.waiting
+	f.gh.gate = nil
 	f.gh.mu.Unlock()
 	if left != 0 || revoked == 0 {
 		t.Errorf("after Close %d installation tokens live at GitHub, %d revoked", left, revoked)
 	}
+	// The ask Close abandoned reaches GitHub now, with its token revoked: a
+	// 401, as GitHub answers, never a misuse.
+	close(gate)
+	eventually(t, "the abandoned asks answered", func() bool {
+		f.gh.mu.Lock()
+		defer f.gh.mu.Unlock()
+		n := 0
+		for _, c := range f.gh.calls {
+			if strings.HasSuffix(c, "/actions/jobs/3005") {
+				n++
+			}
+		}
+		return n >= held
+	})
 }
 
 // A refused job of the served job's repository that takes its runner: the
 // box is guarded by the broker's rules (jit_guard, which the box's
 // job-started hook checks before any step; vmhost tests the hook), the box is released,
 // and the job the runner was minted for is served again while GitHub still
-// has it waiting, at most three runners in all.
+// has it waiting, at most three runners at once, the next only later (serveLater).
 func TestTakenRunnerIsServedAgain(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -1243,13 +1308,16 @@ func TestTakenRunnerIsServedAgain(t *testing.T) {
 		return slices.Equal(names(), []string{"potluck-4001", "potluck-4001-2", "potluck-4001-3"}) && ready(1)()
 	})
 	f.deliver(t, "workflow_job", startEvent(4004, 93, "acme/app", "potluck-4001-3"))
-	eventuallyBox(t, "the last box released", func() bool { _, del := f.gh.snapshot(); return len(del) == 3 && ready(0)() && f.svc.Undone(ctx) == 0 })
+	eventuallyBox(t, "the last box released", func() bool {
+		_, del := f.gh.snapshot()
+		return len(del) == 3 && ready(0)() && strings.Contains(f.jobs(t)[4001].Why, "3 times: served again at")
+	})
 	if got := names(); len(got) != 3 {
-		t.Errorf("minted %v, want three runners at most", got)
+		t.Errorf("minted %v, want three runners at once", got)
 	}
 	// A late in_progress for a runner already replaced does nothing.
 	f.deliver(t, "workflow_job", startEvent(4002, 91, "acme/app", "potluck-4001"))
-	eventually(t, "applied", func() bool { return f.svc.Undone(ctx) == 0 })
+	eventually(t, "applied", func() bool { return f.svc.Undone(ctx) == 1 }) // 4001's next serve, which waits
 	if got := names(); len(got) != 3 {
 		t.Errorf("a late in_progress minted %v", got)
 	}

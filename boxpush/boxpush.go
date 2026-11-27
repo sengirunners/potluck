@@ -339,6 +339,25 @@ func isID(s string) bool {
 	return (len(s) == 40 || len(s) == 64) && strings.Trim(s, "0123456789abcdef") == ""
 }
 
+// copyIndex copies a git index with its modification time. Its stat data
+// means only changed files are hashed again; git tells a file edited in
+// the same clock tick as it was added, at the same size, only by the index
+// being no newer than the file, so a copy dated now would hide that edit.
+func copyIndex(from, to string) error {
+	st, err := os.Stat(from) // before the read: an index written between is dated too old, which only hashes more
+	if err != nil {
+		return err
+	}
+	b, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(to, b, 0o600); err != nil {
+		return err
+	}
+	return os.Chtimes(to, st.ModTime(), st.ModTime())
+}
+
 // dirtyCommit writes the working tree's changes to tracked files (and
 // with untracked the files git neither tracks nor ignores, listed in the
 // answer) as a commit on parent, through a copy of the index, and answers
@@ -353,8 +372,8 @@ func dirtyCommit(ctx context.Context, repo, parent string, untracked bool) (stri
 	idx := filepath.Join(tmp, "index")
 	env := []string{"GIT_INDEX_FILE=" + idx}
 	if p, err := git(ctx, repo, nil, nil, "rev-parse", "--path-format=absolute", "--git-path", "index"); err == nil {
-		if b, err := os.ReadFile(line(p)); err == nil {
-			_ = os.WriteFile(idx, b, 0o600) // keeps stat data: only changed files are hashed again
+		if err := copyIndex(line(p), idx); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", nil, err
 		}
 	}
 	if _, err := os.Stat(idx); err != nil {

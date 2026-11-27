@@ -56,7 +56,7 @@ func TestTartDiskBudgetsAPinnedRepositoryByTagOrName(t *testing.T) {
 	repo, _, _ := strings.Cut(pin.Image, "@")
 	for _, image := range []string{repo, repo + ":latest"} {
 		r := macReportWithDisk(t, 5)
-		_, err := tartDiskCheck(context.Background(), tartListing(t), r, []string{image})
+		_, err := tartDiskCheck(context.Background(), tartListing(t), r, "", []string{image})
 		if err == nil || !strings.Contains(err.Error(), "at least 60 GB") {
 			t.Errorf("%s: err %v", image, err)
 		}

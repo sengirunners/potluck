@@ -111,8 +111,12 @@ func SoftnetAdvice(macOS, arch string) string {
 // before sudo, bootpd or vmnet: no VM or network is created.
 // One that did not answer in time is errNoAnswer.
 func CheckSoftnetRules(ctx context.Context, run Runner, path string) error {
+	block, err := vmhost.SoftnetBlockRules()
+	if err != nil {
+		return err
+	}
 	res, err := runBounded(ctx, run, path, "--vm-fd", "0", "--vm-mac-address", "02:00:00:00:00:01",
-		"--allow="+vmhost.SoftnetAllowRules(), "--block="+vmhost.SoftnetBlockRules(), "--sudo-escalation-probing")
+		"--allow="+vmhost.SoftnetAllowRules(), "--block="+block, "--sudo-escalation-probing")
 	switch {
 	case err != nil:
 		return err
@@ -214,7 +218,7 @@ func detectSoftnet(ctx context.Context, run Runner, f Facts, r Report, l *Layer)
 	}
 	l.Problems = append(l.Problems, "Softnet is installed at "+path+" but is not setuid root (or another user can write to it), so Tart cannot start a VM's isolated network without asking for a password each time")
 	if managed {
-		l.Problems = append(l.Problems, "install it again with `"+softnet.Command+" install`")
+		l.Problems = append(l.Problems, "install it again with `"+softnet.For(macOSMajor(r.MacOS), r.Arch).Install(softnet.Command)+"`")
 		return
 	}
 	if len(l.Problems) == 1 { // permissions alone: root cannot repair other blockers
@@ -246,18 +250,20 @@ func detectManagedSoftnet(st softnet.Status, r Report, l *Layer) {
 	if st.Current == nil {
 		return
 	}
+	major := macOSMajor(r.MacOS)
+	a := softnet.For(major, r.Arch)
+	install := a.Install(softnet.Command)
 	if st.Current.Problem != "" {
-		l.Problems = append(l.Problems, "the managed Softnet cannot be used: "+st.Current.Problem+"; install it again with `"+softnet.Command+" install`")
+		l.Problems = append(l.Problems, "the managed Softnet cannot be used: "+st.Current.Problem+"; install it again with `"+install+"`")
 		return
 	}
 	l.SoftnetBuild = st.Current.ID
-	major := macOSMajor(r.MacOS)
 	if b, ok := softnet.ByID(st.Current.ID); ok && !b.Covers(major, r.Arch) {
-		l.Problems = append(l.Problems, fmt.Sprintf("the managed Softnet %s is not built for macOS %d; install this Mac's build with `%s install`", st.Current.ID, major, softnet.Command))
+		l.Problems = append(l.Problems, fmt.Sprintf("the managed Softnet %s is not built for macOS %d; install this Mac's build with `%s`", st.Current.ID, major, install))
 		return
 	}
-	if a := softnet.For(major, r.Arch); a.Kind == softnet.Managed && a.Build.ID != st.Current.ID {
-		l.Warnings = append(l.Warnings, fmt.Sprintf("the managed Softnet is %s; this potluck's build for macOS %d is %s: update it with `%s install`", st.Current.ID, major, a.Build.ID, softnet.Command))
+	if a.Kind == softnet.Managed && a.Build.ID != st.Current.ID {
+		l.Warnings = append(l.Warnings, fmt.Sprintf("the managed Softnet is %s; this potluck's build for macOS %d is %s: update it with `%s`", st.Current.ID, major, a.Build.ID, install))
 	}
 }
 

@@ -297,7 +297,7 @@ func TestHostRecordsItsTartPulls(t *testing.T) {
 		switch {
 		case name == "/fake/tart" && strings.Join(args, " ") == "list --format json":
 			return hostprobe.Result{Stdout: "[]"}, nil
-		case name == "/fake/tart" && len(args) > 0 && args[0] == "pull":
+		case slices.Contains(args, "/fake/tart") && slices.Contains(args, "pull"):
 			pulled = append(pulled, args[len(args)-1])
 			return hostprobe.Result{}, nil
 		}

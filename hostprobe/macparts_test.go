@@ -25,7 +25,7 @@ func TestMacPartsHoldTheirOwnProblems(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			run, f := macRunner("-rwsr-xr-x root", ""), mac(true)
 			tc.edit(run, f)
-			p := CheckMacSetup(context.Background(), run, f)
+			p := CheckMacSetup(context.Background(), run, f, "")
 			all := slices.Concat(p.Mac.Problems, p.Tart.Problems, p.Softnet.Problems, p.Rest.Problems)
 			if tc.part == nil {
 				if len(all) != 0 {
@@ -45,7 +45,7 @@ func TestMacPartsHollowTartApp(t *testing.T) {
 	run, f := macRunner("-rwsr-xr-x root", ""), mac(true)
 	f.bins["tart"] = false
 	f.paths = map[string]bool{"/Applications/tart.app": true}
-	p := CheckMacSetup(context.Background(), run, f)
+	p := CheckMacSetup(context.Background(), run, f, "")
 	if p.Tart.CLI != "" || !slices.Equal(p.Hollow, []string{"/Applications/tart.app"}) || len(p.Tart.Problems) != 1 {
 		t.Errorf("tart %+v hollow %v", p.Tart, p.Hollow)
 	}
@@ -84,7 +84,7 @@ func TestTartLayerAcrossParts(t *testing.T) {
 func TestMacPartsDiskNeed(t *testing.T) {
 	run, f := macRunner("-rwsr-xr-x root", ""), mac(true)
 	f.disk["/Users/o/.tart"] = 5
-	if p := CheckMacSetup(context.Background(), run, f); p.NeedGB == 0 {
+	if p := CheckMacSetup(context.Background(), run, f, ""); p.NeedGB == 0 {
 		t.Error("Tart's list unread: the image counts")
 	}
 	img, err := HostDefaultImage(Report{OS: "darwin", Arch: "arm64", MacOS: "26.0"}, "tart")
@@ -92,7 +92,7 @@ func TestMacPartsDiskNeed(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.out["/fake/tart list --format json"] = ok(`[{"Source":"oci","Name":"` + img.Image + `"}]`)
-	if p := CheckMacSetup(context.Background(), run, f); p.NeedGB != 0 {
+	if p := CheckMacSetup(context.Background(), run, f, ""); p.NeedGB != 0 {
 		t.Errorf("needs %d GB with the image here (%v)", p.NeedGB, run.calls)
 	}
 }
@@ -104,7 +104,7 @@ func TestSoftnetFoundOffPATH(t *testing.T) {
 	run.out["/opt/homebrew/bin/softnet --version"] = ok("0.25.0\n")
 	run.out[softnetProbeLine("/opt/homebrew/bin/softnet")] = ok("")
 	run.out["stat -L -f %Sp %Su /opt/homebrew/bin/softnet"] = ok("-rwsr-xr-x root\n")
-	if p := CheckMacSetup(context.Background(), run, f); p.Softnet.SoftnetPath != "/opt/homebrew/bin/softnet" || len(p.Softnet.Problems) > 0 {
+	if p := CheckMacSetup(context.Background(), run, f, ""); p.Softnet.SoftnetPath != "/opt/homebrew/bin/softnet" || len(p.Softnet.Problems) > 0 {
 		t.Errorf("%+v", p.Softnet)
 	}
 }
@@ -145,7 +145,7 @@ func TestMacSetupUnread(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			run := macRunner("-rwsr-xr-x root", "")
 			f := mac(true)
-			p := CheckMacSetup(context.Background(), wedgedRunner{run, func(l string) bool { return l == tc.wedged }}, f)
+			p := CheckMacSetup(context.Background(), wedgedRunner{run, func(l string) bool { return l == tc.wedged }}, f, "")
 			if why := tc.unread(p); !strings.Contains(why, "no answer in time") {
 				t.Errorf("unread %q in %+v", why, p)
 			}
@@ -171,7 +171,7 @@ func TestMacSetupImagesUnread(t *testing.T) {
 	run, f := macRunner("-rwsr-xr-x root", ""), mac(true)
 	f.disk["/Users/o/.tart"] = 5
 	run.out["/fake/tart list --format json"] = Result{Exit: 1, Stderr: "locked"}
-	if p := CheckMacSetup(context.Background(), run, f); p.ImagesUnread == "" || p.NeedGB == 0 {
+	if p := CheckMacSetup(context.Background(), run, f, ""); p.ImagesUnread == "" || p.NeedGB == 0 {
 		t.Errorf("images unread %q, need %d", p.ImagesUnread, p.NeedGB)
 	}
 }
@@ -180,23 +180,23 @@ func TestMacSetupImagesUnread(t *testing.T) {
 func TestMacSetupIntelHasNoArm64Name(t *testing.T) {
 	run := macRunner("-rwsr-xr-x root", "")
 	run.out["/usr/sbin/sysctl -n hw.optional.arm64"] = Result{Exit: 1, Stderr: "sysctl: unknown oid 'hw.optional.arm64'\n"}
-	if p := CheckMacSetup(context.Background(), run, mac(true)); p.Report.Arch != "amd64" || p.ArchUnread != "" {
+	if p := CheckMacSetup(context.Background(), run, mac(true), ""); p.Report.Arch != "amd64" || p.ArchUnread != "" {
 		t.Errorf("arch %q, unread %q", p.Report.Arch, p.ArchUnread)
 	}
 }
 
-// Everything wedged, the whole probe still ends at its one deadline, well
-// under the menu bar app's 25 s.
+// Everything wedged, the Mac part still ends at its one deadline, well
+// under what the setup window waits.
 func TestMacSetupHasOneDeadline(t *testing.T) {
 	if macSetupTimeout > 15*time.Second {
-		t.Errorf("the probe may take %v of the app's 25 s", macSetupTimeout)
+		t.Errorf("the probe may take %v", macSetupTimeout)
 	}
 	defer func(d time.Duration) { macSetupTimeout = d }(macSetupTimeout)
 	macSetupTimeout = 200 * time.Millisecond
 	f := mac(true)
 	f.disk["/Users/o/.tart"] = 5 // so Tart's images are listed too
 	start := time.Now()
-	p := CheckMacSetup(context.Background(), wedgedRunner{&fakeRunner{}, func(string) bool { return true }}, f)
+	p := CheckMacSetup(context.Background(), wedgedRunner{&fakeRunner{}, func(string) bool { return true }}, f, "")
 	if took := time.Since(start); took > 3*time.Second {
 		t.Errorf("took %v", took)
 	}
@@ -231,7 +231,7 @@ func TestMacSetupShortDiskWithTheMacUnread(t *testing.T) {
 		run, f := macRunner("-rwsr-xr-x root", ""), mac(true)
 		run.out[line] = Result{Exit: 1}
 		f.disk["/Users/o/.tart"] = 5
-		if p := CheckMacSetup(context.Background(), run, f); p.ImagesUnread == "" {
+		if p := CheckMacSetup(context.Background(), run, f, ""); p.ImagesUnread == "" {
 			t.Errorf("%s: need %d, images unread %q", line, p.NeedGB, p.ImagesUnread)
 		}
 	}
@@ -255,7 +255,7 @@ func TestMacSetupStuckFileRead(t *testing.T) {
 	defer func(d, g time.Duration) { macSetupTimeout, macSetupGrace = d, g }(macSetupTimeout, macSetupGrace)
 	macSetupTimeout, macSetupGrace = 50*time.Millisecond, 50*time.Millisecond
 	start := time.Now()
-	p := CheckMacSetup(context.Background(), macRunner("-rwsr-xr-x root", ""), stuckFacts{mac(true)})
+	p := CheckMacSetup(context.Background(), macRunner("-rwsr-xr-x root", ""), stuckFacts{mac(true)}, "")
 	if time.Since(start) > 5*time.Second || p.MacOSUnread == "" || p.Report.TartDiskUnread == "" || p.Softnet.Unread == "" {
 		t.Errorf("%+v", p)
 	}
@@ -279,6 +279,31 @@ func TestSoftnetAlone(t *testing.T) {
 		tc.edit(run, f)
 		if l, _ := Detect(context.Background(), run, f, "/state").Layer("tart"); l.SoftnetAlone != tc.want {
 			t.Errorf("%s: %v", name, l.SoftnetAlone)
+		}
+	}
+}
+
+// macOS inside a virtual machine has no kern.hv_support: when it says it is
+// a guest that is a definite no, and anything else leaves it unread.
+func TestMacPartsVirtualMachine(t *testing.T) {
+	noOID := Result{Exit: 1, Stderr: "sysctl: unknown oid 'kern.hv_support'"}
+	for _, tc := range []struct {
+		name         string
+		vmm          *Result
+		unread, inVM bool
+	}{
+		{"a guest", &Result{Stdout: "1\n"}, false, true},
+		{"not a guest", &Result{Stdout: "0\n"}, true, false},
+		{"guest unread", nil, true, false},
+	} {
+		run, f := macRunner("-rwsr-xr-x root", ""), mac(true)
+		run.out["sysctl -n kern.hv_support"] = noOID
+		if tc.vmm != nil {
+			run.out["sysctl -n kern.hv_vmm_present"] = *tc.vmm
+		}
+		p := CheckMacSetup(context.Background(), run, f, "")
+		if p.HV || (p.HVUnread != "") != tc.unread || p.InVM != tc.inVM || len(p.Mac.Problems) != 1 {
+			t.Errorf("%s: hv %t unread %q in vm %t problems %v", tc.name, p.HV, p.HVUnread, p.InVM, p.Mac.Problems)
 		}
 	}
 }

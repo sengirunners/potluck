@@ -59,7 +59,7 @@ func TestHostCompatibilityRefusalLeavesInviteUnspent(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := lender.ok(t, "host", "status")
-	if st.Menu.Title != "Setup blocked at preflight (1 of 5)" || !strings.HasPrefix(text, st.Menu.Title+"\n") ||
+	if st.Menu.Title != "Setup stopped while checking this Mac" || !strings.HasPrefix(text, st.Menu.Title+"\n") ||
 		st.Setup.Next != "fix what the preflight stage says, then run again: potluck host '<invite code>' --no-sudo=true" || !strings.Contains(text, "\nnext: "+st.Setup.Next) {
 		t.Fatalf("host status: %+v\n%s", st.Menu, text)
 	}

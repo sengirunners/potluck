@@ -37,6 +37,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sengirunners/potluck/attach"
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
@@ -51,15 +52,33 @@ func Main(argv []string) int {
 	return serve(argv)
 }
 
+// stateDir is the gateway's state directory and the client config of the
+// daemon it serves from, chosen by the one-daemon rule (package attach): on
+// a machine whose Potluck daemon is another program's, and where this
+// program has no home, that daemon (also one that is restarting: attach.
+// Starting). The gateway makes no home of its own then, and writes nothing
+// under another program's home: its state goes where --state says, and
+// without it the gateway refuses.
 func stateDir(flagged string) (string, *config.Config, error) {
-	cfg, err := config.LoadClient()
+	v := attach.Vars{Home: config.HomeEnv()}
+	ctx := context.Background()
+	h, err := attach.Resolve(ctx, v)
 	if err != nil {
 		return "", nil, err
 	}
 	if flagged != "" {
-		return flagged, cfg, nil
+		return flagged, h.Cfg, nil
 	}
-	return cfg.Path("e2b"), cfg, nil
+	if h.Owner == "" {
+		if o := attach.Starting(ctx, v, h); o != nil {
+			h.Owner, h.Cfg = o.Program, &config.Config{Home: o.Home}
+		}
+	}
+	if h.Owner != "" {
+		return "", nil, fmt.Errorf("%s's home is %s, where this machine's Potluck daemon runs or starts, and the gateway writes nothing under another program's home: "+
+			"say where its CA, token secret and keys go with --state <dir>", h.Owner, attach.Tilde(h.Cfg.Home))
+	}
+	return h.Cfg.Path("e2b"), h.Cfg, nil
 }
 
 func serve(args []string) int {
@@ -67,7 +86,7 @@ func serve(args []string) int {
 	addr := fs.String("addr", "localhost:49982", "listen address (localhost listens on 127.0.0.1 and ::1)")
 	domain := fs.String("domain", "e2b.localhost", "the E2B domain's host part; clients use api.<domain> and <port>-<id>.<domain>")
 	advertise := fs.String("advertise", "", "E2B_DOMAIN as clients set it (default <domain>:<port of --addr>)")
-	state := fs.String("state", "", "state directory: CA, token secret, keys (default $"+config.HomeEnv()+"/e2b)")
+	state := fs.String("state", "", "state directory: CA, token secret, keys (default $"+config.HomeEnv()+"/e2b; with another program's daemon, required)")
 	keys := fs.String("keys", "", "API keys file, mode 0600 (default <state>/keys; potluck-e2b keygen writes it)")
 	tlsCert := fs.String("tls-cert", "", "serve this certificate instead of the gateway's own CA (with --tls-key)")
 	tlsKey := fs.String("tls-key", "", "the key for --tls-cert")
@@ -165,7 +184,7 @@ func serve(args []string) int {
 // as the gateway's own (its socket caller).
 func keygen(args []string) int {
 	fs := flag.NewFlagSet("potluck-e2b keygen", flag.ContinueOnError)
-	state := fs.String("state", "", "state directory (default $"+config.HomeEnv()+"/e2b)")
+	state := fs.String("state", "", "state directory (default $"+config.HomeEnv()+"/e2b; with another program's daemon, required)")
 	keys := fs.String("keys", "", "API keys file (default <state>/keys)")
 	tokenFile := fs.String("token-file", "", "a 0600 file holding the token this key acts as")
 	if err := fs.Parse(args); err != nil {

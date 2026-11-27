@@ -20,6 +20,7 @@ import (
 // an entry unless fail names it (then it exits 1 with that stderr); gone
 // names entries another process removes while a delete of it runs.
 type fakeTart struct {
+	ps       string // what ps prints
 	mu       sync.Mutex
 	entries  map[string]map[string]any
 	fail     map[string]string
@@ -43,6 +44,9 @@ func (f *fakeTart) vm(name string, size int, running bool) {
 func (f *fakeTart) Run(_ context.Context, name string, args ...string) (Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if name == "/bin/ps" {
+		return Result{Stdout: f.ps}, nil
+	}
 	if name != "/fake/tart" {
 		return Result{}, errors.New("fake tart: ran " + name)
 	}
@@ -97,10 +101,24 @@ func recordShare(t *testing.T, r Report, home string, start time.Time, images []
 		t.Fatal(err)
 	}
 	for _, im := range pulled {
+		if err := os.MkdirAll(cachedAt(r, im), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cachedAt(r, im), "config.json"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(filepath.Join(cachedAt(r, im), "config.json"), start, start); err != nil {
+			t.Fatal(err)
+		}
 		if err := RecordTartPull(r.TartDir, im, home, start, start); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+// cachedAt is image's folder in Tart's cache.
+func cachedAt(r Report, image string) string {
+	return filepath.Join(r.TartDir, "cache", "OCIs", strings.Replace(image, "@", "/", 1))
 }
 
 // recordPulls writes Potluck's record that an earlier share on testHome

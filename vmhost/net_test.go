@@ -35,7 +35,9 @@ func TestNatDescribesIsolationNone(t *testing.T) {
 }
 
 // The Tart call site: an isolated boot runs tart with Softnet blocking the
-// host but DNS and outbound mail (zm-eakh.12.5.13), in Softnet's rule syntax.
+// host but DNS, multicast, every IPv4 address this Mac holds with its
+// network's own and broadcast addresses (a public one too), and outbound mail
+// (zm-eakh.12.5.13), in Softnet's rule syntax.
 func TestTartBootBlocksMail(t *testing.T) {
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "args")
@@ -43,6 +45,7 @@ func TestTartBootBlocksMail(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n[ \"$1\" = run ] && printf '%s\\n' \"$@\" > "+strconv.Quote(argsFile)+"\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	fakeHostAddrs(t, nil, "192.168.1.20/24", "203.0.113.7/24", "203.0.113.9/24", "127.0.0.1/8", "100.101.5.5/32", "fe80::1/64", "2001:db8::5/64")
 	cmd, held, err := tartCLI{bin: bin}.Boot("zmrt-x-r1", true, io.Discard)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +58,8 @@ func TestTartBootBlocksMail(t *testing.T) {
 	}
 	args := strings.Split(strings.TrimSpace(string(b)), "\n")
 	for _, want := range []string{"--net-softnet",
-		"--net-softnet-block=@host,out proto tcp port 25,out proto tcp port 465,out proto tcp port 587",
+		"--net-softnet-block=@host,224.0.0.0/4,100.101.5.5/32,192.168.1.0/32,192.168.1.20/32,192.168.1.255/32," +
+			"203.0.113.0/32,203.0.113.7/32,203.0.113.9/32,203.0.113.255/32,out proto tcp port 25,out proto tcp port 465,out proto tcp port 587",
 		"--net-softnet-allow=out proto udp @host port 53,out proto tcp @host port 53"} {
 		if !slices.Contains(args, want) {
 			t.Errorf("tart run %q lacks %q", args, want)

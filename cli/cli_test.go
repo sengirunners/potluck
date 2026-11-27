@@ -374,7 +374,7 @@ func TestQuickStartAcrossTwoMachines(t *testing.T) {
 	answer, words, code := softnetRunJSON(t, "uninstall", "--yes", "--no-sudo")
 	var un uninstallAnswer
 	if err := json.Unmarshal(answer, &un); code == 0 || err != nil || len(un.Done) != 0 || !strings.Contains(un.Error, "1 sandbox is still running") || un.Force == nil ||
-		!slices.Contains(un.Force.Args, "--force") || !strings.Contains(un.Force.Confirm, "sandboxes run") {
+		!slices.Contains(un.Force.Args, "--force") || un.Force.Confirm != forceQuestion(true) || un.View == nil || un.View.Heading != "Jobs are still running on this Mac" {
 		t.Fatalf("uninstall with a live sandbox: exit %d (%v): %s\n%s", code, err, answer, words)
 	}
 	if o := a.ok(t, "sandbox", "exec", id, "--", "cat", "note"); o != "hi\n" {

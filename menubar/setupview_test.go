@@ -28,6 +28,7 @@ func viewCases(t *testing.T) map[string]Facts {
 	add("intel", never, mac(func(m *hostprobe.MacParts) { m.Report.Arch = "amd64" }))
 	add("old macOS", never, mac(func(m *hostprobe.MacParts) { m.Report.MacOS = "12.1" }))
 	add("no virtualization", never, mac(func(m *hostprobe.MacParts) { m.HV = false }))
+	add("a virtual machine", never, mac(func(m *hostprobe.MacParts) { m.HV, m.InVM = false, true }))
 	add("unread", never, mac(func(m *hostprobe.MacParts) {
 		m.HVUnread, m.Tart.Unread, m.Softnet.Unread, m.Report.TartDiskUnread = "x /y", "x /y", "x /y", "x /y"
 		m.Tart.Problems, m.Softnet.Problems = []string{"x"}, []string{"x"}
@@ -124,7 +125,7 @@ func TestSetupViewIsInPlainWords(t *testing.T) {
 		if regexp.MustCompile(`(?i)press the button`).MatchString(v.Lead) && v.Do == nil {
 			t.Errorf("%s: no button: %q", name, v.Lead)
 		}
-		if v.Do != nil && v.Do.Invite && !regexp.MustCompile(`(?i)paste (your|the) invite`).MatchString(v.Lead) {
+		if v.Do != nil && v.Do.InviteArgs != nil && !regexp.MustCompile(`(?i)paste (your|the) invite`).MatchString(v.Lead) {
 			t.Errorf("%s: an invite field the lead does not name: %q", name, v.Lead)
 		}
 	}
@@ -134,7 +135,7 @@ func TestSetupViewIsInPlainWords(t *testing.T) {
 func TestSetupViewHeadings(t *testing.T) {
 	cases := viewCases(t)
 	for name, want := range map[string]struct{ heading, button string }{
-		"status-probe-fresh-mac.json":    {"This Mac isn't set up yet", ""},
+		"status-probe-fresh-mac.json":    {"This Mac isn't set up yet", "Install Potluck"}, // the helper it waits on is not needed to install Potluck
 		"status-probe-fresh-mac-26.json": {"This Mac isn't set up yet", "Install Potluck"},
 		"status-probe-no-helper.json":    {"This Mac isn't set up yet", ""},
 		"status-probe-ready.json":        {"This Mac isn't set up yet", "Set up this Mac"},
@@ -143,6 +144,7 @@ func TestSetupViewHeadings(t *testing.T) {
 		"status-blocked-validation.json": {"Setup stopped", "Try again"},
 		"status-lending.json":            {"This Mac is lending", ""},
 		"intel":                          {"This Mac can't lend", ""},
+		"a virtual machine":              {"This Mac can't lend", ""},
 		"low disk":                       {"This Mac isn't set up yet", ""},
 		"no Softnet":                     {"This Mac isn't set up yet", "Install the network helper"},
 		"stopped daemon":                 {"Potluck isn't running", "Start Potluck"},
@@ -159,7 +161,7 @@ func TestSetupViewHeadings(t *testing.T) {
 		"stopped, no record":             {"Potluck isn't running", "Start Potluck"},
 		"set up, stopped, Tart gone":     {"This Mac needs attention", "Open the download page"},
 		"helper without permission":      {"This Mac isn't set up yet", ""},
-		"unreadable record":              {"Potluck can't tell how setup went", ""},
+		"unreadable record":              {"Potluck can't tell how setup went", "Set up again"},
 		"nothing shared":                 {"This Mac isn't lending", "Lend this Mac"},
 		"lending, Tart gone":             {"This Mac needs attention", "Open the download page"},
 		"cut off at images":              {"Setup stopped", "Continue setup"},
@@ -250,4 +252,39 @@ func TestSetupViewOtherWay(t *testing.T) {
 		}
 	}
 	t.Error("no Tart line")
+}
+
+// A Mac that is itself a virtual machine is told so, not that the check did
+// not answer.
+func TestSetupViewVirtualMachine(t *testing.T) {
+	v := Build(viewCases(t)["a virtual machine"]).Setup.View
+	if !strings.Contains(v.Lead, "virtual machine") || strings.Contains(v.Lead, "answer") || v.Do != nil {
+		t.Errorf("lead %q, button %v", v.Lead, v.Do)
+	}
+}
+
+// An invite from a link is kept for the step that takes it while one is to
+// come, even when the step in front waits on Potluck's network helper; a Mac
+// that lends, or cannot lend at all, takes none.
+func TestSetupViewInviteLater(t *testing.T) {
+	cases := viewCases(t)
+	for name, want := range map[string]bool{
+		"status-probe-fresh-mac.json": true,
+		"status-probe-no-helper.json": true,
+		"status-probe-ready.json":     true,
+		"status-never-set-up.json":    true,
+		"intel":                       false,
+		"a virtual machine":           false,
+		"status-lending.json":         false,
+		"lending":                     false,
+		"status-daemon-down.json":     false, // its button starts Potluck, which takes no invite
+	} {
+		f, ok := cases[name]
+		if !ok {
+			t.Fatalf("no case %s", name)
+		}
+		if got := Build(f).Setup.View.InviteLater; got != want {
+			t.Errorf("%s: invite_later %t, want %t", name, got, want)
+		}
+	}
 }

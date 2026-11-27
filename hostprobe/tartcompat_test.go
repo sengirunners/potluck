@@ -3,17 +3,25 @@ package hostprobe
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/sengirunners/potluck/computeapi"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/vmhost"
 )
 
 const tartHelp = `--no-graphics --no-audio --no-clipboard --no-usb-accessories --net-softnet --net-softnet-block --net-softnet-allow`
 
+// softnetProbeLine is the rule probe's command line on this machine, whose
+// own addresses are in the block rules.
 func softnetProbeLine(path string) string {
-	return path + " --vm-fd 0 --vm-mac-address 02:00:00:00:00:01 --allow=" + vmhost.SoftnetAllowRules() + " --block=" + vmhost.SoftnetBlockRules() + " --sudo-escalation-probing"
+	block, err := vmhost.SoftnetBlockRules()
+	if err != nil {
+		panic(err)
+	}
+	return path + " --vm-fd 0 --vm-mac-address 02:00:00:00:00:01 --allow=" + vmhost.SoftnetAllowRules() + " --block=" + block + " --sudo-escalation-probing"
 }
 
 func TestTartCompatibilityBeforeDownloads(t *testing.T) {
@@ -202,7 +210,7 @@ func TestTartPreflightNormalizesRelativeExecutablePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Pulls[0].Command[0] != tart || res.Sizes[0].Config["tart"] != tart || res.Sizes[0].Config["softnet_path"] != softnet {
+	if !slices.Contains(res.Pulls[0].Command, tart) || res.Sizes[0].Config["tart"] != tart || res.Sizes[0].Config["softnet_path"] != softnet {
 		t.Fatalf("paths not propagated: %+v", res)
 	}
 }
@@ -237,6 +245,18 @@ func TestHostPreflightImageResourceRefusalsBeforePull(t *testing.T) {
 		}
 		if len(run.calls) != 0 {
 			t.Fatalf("resource refusal ran %v", run.calls)
+		}
+	}
+}
+
+// The way to get Tart is named as the running program's person types it.
+func TestTartWordsNameTheHostsCommand(t *testing.T) {
+	was := config.Prefix
+	config.Prefix = "zm potluck"
+	defer func() { config.Prefix = was }()
+	for _, s := range []string{tartInstallWords(), vmhost.TartUpdateHint()} {
+		if !strings.Contains(s, "`zm potluck tart install`") {
+			t.Error(s)
 		}
 	}
 }

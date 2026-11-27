@@ -190,11 +190,19 @@ func FirewallCI(t TB, dir string, addrs ...string) string {
 // a failure under CI, a skip elsewhere.
 func NoNC(t TB, why string) {
 	t.Helper()
+	NotHere(t, "no nc here: "+why)
+}
+
+// NotHere ends a test whose check this machine cannot prove (why says what
+// is missing): a failure under CI, which must not silently stop proving it,
+// a skip elsewhere.
+func NotHere(t TB, why string) {
+	t.Helper()
 	if inCI() {
-		t.Fatal("no nc; CI must have one, a skip would hide that: " + why)
+		t.Fatal(why + "; CI must prove it, a skip would hide that")
 		return
 	}
-	t.Skip("no nc here: " + why)
+	t.Skip(why)
 }
 
 // LANAddrCI answers this machine's LAN address. With none it fails the test under CI

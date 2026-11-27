@@ -22,13 +22,14 @@ import (
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/project"
+	"github.com/sengirunners/potluck/menubar"
 )
 
 // sameShare are host's flags that change how a run goes (or, for
 // --invite-stdin, where its argument comes from), not what it shares: a
 // run with only these (and the host program's AfterLend skip) is a bare
 // re-run.
-var sameShare = []string{"yes", "no-sudo", "pull-timeout", "show-commands", "detach", "wait", flagInviteStdin}
+var sameShare = []string{"yes", "no-sudo", "pull-timeout", "show-commands", "detach", "wait", flagInviteStdin, menubar.InsteadFlag}
 
 // shapesShare says whether cmd was given one of its own flags that shapes
 // the share (the program's --json and pool flags are not its own).
@@ -117,6 +118,7 @@ func (a *app) hostManyPools(err error) error {
 	if !errors.As(err, &mp) {
 		return err
 	}
-	return fmt.Errorf("this machine is in more than one pool (%s): %s shares it with one; %s shows what it lends now",
-		strings.Join(mp.Pools, ", "), a.cmd("host <pool>"), a.cmd("host status"))
+	return api.Plainly(fmt.Errorf("this machine is in more than one pool (%s): %s shares it with one; %s shows what it lends now",
+		strings.Join(mp.Pools, ", "), a.cmd("host <pool>"), a.cmd("host status")),
+		"This Mac is in more than one group ("+strings.Join(mp.Pools, ", ")+"), so Potluck can't tell which one to lend to. Type the name of the one you mean where the invite goes, then press the button again.")
 }

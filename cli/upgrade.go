@@ -14,10 +14,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/attach"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -34,6 +37,7 @@ import (
 	"github.com/sengirunners/potluck/kit/swap"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/runtarget"
+	"github.com/sengirunners/potluck/softnet"
 )
 
 // upgradeStartWait bounds the new daemon's start.
@@ -72,7 +76,7 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	}
 	filesOnly := filesOnlyWhy(dh, herr)
 	var updateKeys []string // only potluck's own home's config adds keys to trust
-	cfg := dh.cfg
+	cfg := dh.Cfg
 	if filesOnly == "" {
 		updateKeys = cfg.File.UpdateKeys
 	}
@@ -89,6 +93,9 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	if dir, err = filepath.Abs(dir); err != nil {
 		return err
 	}
+	if err := notOverInstalled(ctx, self, dir, cfg); err != nil {
+		return api.Plainly(err, "There is already a Potluck on this Mac, so the copy in this app wasn't installed. Quit the app and open it again; if that doesn't help, restart this Mac first."+plainGetHelp)
+	}
 	var src upgrade.Source = upgrade.NewGitHub(os.Getenv)
 	if from != "" {
 		src = upgrade.Dir(from)
@@ -104,7 +111,11 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	}
 	st, err := upgrade.Stage(src, keys, runtime.GOOS, runtime.GOARCH, stage)
 	if err != nil {
-		return err
+		words := "Potluck couldn't download and check its newest version, so nothing was changed. If this Mac is offline, connect it, then try again." + plainGetHelp
+		if from != "" {
+			words = "The copy of Potluck to install couldn't be unpacked and checked, so it wasn't installed. If this Mac is low on disk space, see to that, then try again." + plainGetHelp
+		}
+		return api.Plainly(err, words)
 	}
 	m := st.Manifest
 	// A GitHub source is named, and a --release directory outside the temporary directory; install.sh's release
@@ -115,26 +126,30 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	}
 	a.say("verified potluck %s (%s)%s: its manifest is signed by a key this potluck trusts, and its %s/%s tarball matches", m.Version, short(m.Commit), where, runtime.GOOS, runtime.GOARCH)
 
-	// This build, installed where it runs: nothing to do.
-	if filepath.Dir(self) == dir && m.RunBy(api.Version, api.Commit) {
-		a.say("potluck %s is already installed in %s", api.Version, tildePath(dir))
+	// This build, installed where it runs: nothing to do, unless the upgrade to
+	// it was cut off.
+	if filepath.Dir(self) == dir && m.RunBy(api.Version, api.Commit) && !a.upgradeCutOff(ctx, cfg, dir, st, filesOnly != "") {
+		a.say("potluck %s is already installed in %s", api.Version, attach.Tilde(dir))
+		if filesOnly == "" && !dryRun {
+			return endedRestart(ctx, cfg)
+		}
 		return nil
 	}
 	if filesOnly != "" {
-		return a.upgradeFilesOnly(dir, stage, st, filesOnly, dryRun)
+		return a.upgradeFilesOnly(ctx, dir, stage, st, filesOnly, dryRun)
 	}
 	state, installed, err := release.LoadState(cfg.Home)
 	if err != nil {
 		return err
 	}
 	if why := upgrade.Older(m, state, installed); why != "" {
-		return errors.New(why)
+		return api.Plainly(errors.New(why), "A newer Potluck is already on this Mac, so this one wasn't installed. Nothing was changed."+plainGetHelp)
 	}
 	c := client.NewUnix(cfg.SocketPath())
 	h, running := health(ctx, c)
 	restart := running && !m.RunBy(h.Version, h.Commit)
 	if dryRun {
-		a.say("would install %s into %s (each old one kept as <name>%s)", strings.Join(st.Names, ", "), tildePath(dir), swap.PrevSuffix)
+		a.say("would install %s into %s (each old one kept as <name>%s)", strings.Join(st.Names, ", "), attach.Tilde(dir), swap.PrevSuffix)
 		switch {
 		case restart:
 			a.say("would restart the daemon (pid %d, %s) on %s", h.PID, h.Version, m.Version)
@@ -150,21 +165,45 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	}
 	lock, err := swap.Acquire(cfg.Home, api.SwapHolder{By: cfg.HumanAddress(), What: "upgrade"})
 	if err != nil {
-		return err
+		words := "Potluck couldn't write in its own folder on this Mac, so nothing was changed." + plainGetHelp
+		if busy := (*swap.BusyError)(nil); errors.As(err, &busy) {
+			words = "Potluck is being updated or restarted right now, so nothing was changed. Try again in a few minutes." + plainGetHelp
+		}
+		return api.Plainly(err, words)
 	}
 	defer lock.Release()
 	if running { // it may have stopped or changed while the release was fetched
 		h, running = health(ctx, c)
 		restart = running && !m.RunBy(h.Version, h.Commit)
 	}
+	if !running && restartCutOff(cfg.Home) {
+		// What the one cut off was doing: the old daemon may still be ending, or
+		// the new one starting.
+		if h, running = settledDaemon(ctx, c, cfg.Home); !running && ctx.Err() == nil {
+			was, _, _ := swap.ReadPending(cfg.Home)
+			if pid, gone := endUnanswering(cfg.Home, filepath.Join(dir, "potluck"), was.Bin); !gone {
+				who, end := "", ""
+				if pid > 0 {
+					who, end = fmt.Sprintf(" (pid %d)", pid), fmt.Sprintf(" (kill %d if it never does)", pid)
+				}
+				return api.Plainly(fmt.Errorf("a daemon%s holds %s's lock and did not answer in %s, so nothing was changed: run this again once it answers or is gone%s", who, attach.Tilde(cfg.Home), stopWait, end),
+					"Potluck is still starting or stopping on this Mac, so nothing was changed. Try again in a few minutes; if it says this again, restart this Mac first."+plainGetHelp)
+			}
+		}
+		restart = running && !m.RunBy(h.Version, h.Commit)
+	}
+	resume := !running && restartCutOff(cfg.Home)
 
 	// The new build's own preflight against this home and its daemon: data
 	// it cannot read, or routes the running daemon serves that it lacks,
 	// refuse the upgrade before anything moves.
 	pf := preflightBinary(ctx, cfg, filepath.Join(stage, "potluck"))
 	if !pf.OK {
-		return fmt.Errorf("the new build's preflight refused this upgrade: %s", strings.Join(pf.Problems, "; "))
+		return api.Plainly(fmt.Errorf("the new build's preflight refused this upgrade: %s", strings.Join(pf.Problems, "; ")),
+			"The new version can't go on from what this Mac's Potluck has, so nothing was changed. Press Copy details and send what it copies to the person who invited you.")
 	}
+	was, _, wasErr := swap.ReadPending(cfg.Home)
+	wasOneWay := was.OneWay || wasErr != nil
 	oneWay := oneWaySwap(pf)
 
 	// What the running daemon is, to bring it back as it was: its own
@@ -172,12 +211,39 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 	var old daemonRun
 	if restart {
 		old = a.runningDaemon(ctx, cfg, c, h, filepath.Join(dir, "potluck"))
+	} else if resume {
+		// The daemon the cut-off one stopped, and what that one knew of its data.
+		if !lexists(was.Bin) {
+			was.Bin = ""
+		}
+		old, restart = daemonRun{bin: oldDaemonBin(was.Bin, wasErr, filepath.Join(dir, "potluck")), tailnet: was.Tailnet}, true
+		oneWay = oneWay || wasOneWay
+	}
+	if running && swap.Placing(dir) {
+		// What an earlier install was cut off placing runs: it, not what it
+		// replaced, is what this one goes back to.
+		if now := preflightBinary(ctx, cfg, filepath.Join(dir, "potluck")); now.Running != "" && now.Build == now.Running {
+			if err := swap.Settle(dir, "potluck"); err != nil {
+				return err
+			}
+		}
+		oneWay = oneWay || wasOneWay && swap.Placing(dir) // what it replaced may not read the data
 	}
 	if err := ownDir(dir); err != nil {
 		return err
 	}
-	placed, err := swap.Place(stage, dir, st.Names)
+	if restart {
+		if err := swap.WritePending(cfg.Home, swap.Unfinished{What: "upgrade", From: pf.Running, To: pf.Build, PID: os.Getpid(), At: time.Now(),
+			Bin: old.bin, Tailnet: old.tailnet, OneWay: oneWay}); err != nil {
+			return err
+		}
+	}
+	// The word stays until a daemon runs again or none is to.
+	placed, err := swap.Begin(ctx, stage, dir, programLast(st.Names), a.waitingToPlace(dir))
 	if err != nil {
+		if !resume {
+			err = errors.Join(err, swap.ClearPending(cfg.Home))
+		}
 		return fmt.Errorf("install into %s: %w", dir, err)
 	}
 	if restart {
@@ -185,28 +251,32 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 		if err := a.restartOn(ctx, cfg, c, h.PID, lock, newRun, m.Commit); err != nil {
 			if oneWay {
 				a.repin(cfg, dir, placed)
-				if serr := release.WriteState(cfg.Home, state.Installing(m, time.Now())); serr != nil {
+				if serr := errors.Join(release.WriteState(cfg.Home, state.Installing(m, time.Now())), placed.Finish()); serr != nil {
 					err = errors.Join(err, serr)
 				}
 				return fmt.Errorf("the new daemon did not come up (%v). Its migrations are one-way (the previous build cannot read the data), "+
 					"so potluck %s stays installed in %s, the old programs are kept beside it as <name>%s, and no daemon is running now; see %s",
-					err, m.Version, tildePath(dir), swap.PrevSuffix, cfg.Path(config.FileLog))
+					err, m.Version, attach.Tilde(dir), swap.PrevSuffix, cfg.Path(config.FileLog))
+			}
+			back := "the old programs are back"
+			if len(placed.Names) == 0 {
+				back = "its programs were there before this"
 			}
 			rerr := placed.Restore()
-			if rerr == nil {
-				rerr = a.startOldAgain(ctx, cfg, c, h.PID, old)
+			if rerr == nil { // also when this one is being ended
+				rerr = a.startOldAgain(context.WithoutCancel(ctx), cfg, c, h.PID, old)
 			}
 			if rerr != nil {
 				return fmt.Errorf("the new daemon did not come up (%v), and putting the old one back failed: %w", err, rerr)
 			}
-			return fmt.Errorf("the new daemon did not come up, so the old programs are back and the old daemon (%s) runs again: %w", old.bin, err)
+			return fmt.Errorf("the new daemon did not come up, so %s and the old daemon (%s) runs again: %w", back, old.bin, errors.Join(err, swap.ClearPending(cfg.Home)))
 		}
 	}
 	repinned := a.repin(cfg, dir, placed)
-	if err := release.WriteState(cfg.Home, state.Installing(m, time.Now())); err != nil {
+	if err := errors.Join(release.WriteState(cfg.Home, state.Installing(m, time.Now())), placed.Finish(), swap.ClearPending(cfg.Home)); err != nil {
 		return err
 	}
-	a.say("installed potluck %s (%s) into %s: %s", m.Version, short(m.Commit), tildePath(dir), strings.Join(st.Names, ", "))
+	a.say("installed potluck %s (%s) into %s: %s", m.Version, short(m.Commit), attach.Tilde(dir), strings.Join(st.Names, ", "))
 	if len(repinned) > 0 {
 		a.say("re-pinned drivers: %s", strings.Join(repinned, ", "))
 	}
@@ -214,6 +284,88 @@ func (a *app) upgrade(ctx context.Context, from, dir string, dryRun bool) error 
 		a.say("restarted the daemon on %s", m.Version)
 	}
 	return nil
+}
+
+// waitingToPlace says that another install has dir, the first time it is asked.
+func (a *app) waitingToPlace(dir string) func() {
+	return func() { a.say("waiting for another install into %s to end", attach.Tilde(dir)) }
+}
+
+// settledDaemon waits for a daemon that holds home's lock to answer, or to be
+// gone.
+func settledDaemon(ctx context.Context, c *client.Client, home string) (api.Health, bool) {
+	for deadline := time.Now().Add(stopWait); homeLockHeld(home) && time.Now().Before(deadline) && ctx.Err() == nil; time.Sleep(50 * time.Millisecond) {
+		if h, up := health(ctx, c); up {
+			return h, true
+		}
+	}
+	return health(ctx, c)
+}
+
+// endUnanswering ends the daemon that holds home's lock, which has not answered
+// in all the time a new one is given: a later release could never be installed
+// past it. Only one that runs one of programs, the new or the old potluck of
+// the upgrade that was cut off, and never one that took the lock meanwhile.
+// gone is that nothing holds the lock now.
+func endUnanswering(home string, programs ...string) (pid int, gone bool) {
+	for _, sig := range []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL} {
+		if !homeLockHeld(home) {
+			return pid, true
+		}
+		b, err := os.ReadFile(filepath.Join(home, config.FileHomeLock))
+		asked := pid
+		if pid, _ = strconv.Atoi(strings.TrimSpace(string(b))); err != nil || pid <= 0 {
+			return 0, false
+		}
+		if asked != 0 && pid != asked {
+			return pid, false
+		}
+		exe, err := processExe(pid)
+		if err != nil || !slices.ContainsFunc(programs, func(p string) bool { return p != "" && samePath(strings.TrimSuffix(exe, " (deleted)"), p) }) {
+			return pid, false
+		}
+		_ = syscall.Kill(pid, sig)
+		for deadline := time.Now().Add(upgradeStopWait); homeLockHeld(home) && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		}
+	}
+	return pid, !homeLockHeld(home)
+}
+
+// endedRestart ends the word of a restart cut off when no upgrade goes on and
+// a daemon runs: nothing is left to start.
+func endedRestart(ctx context.Context, cfg *config.Config) error {
+	if _, cut, err := swap.ReadPending(cfg.Home); !cut && err == nil {
+		return nil
+	}
+	lock, err := swap.Acquire(cfg.Home, api.SwapHolder{By: cfg.HumanAddress(), What: "upgrade"})
+	if err != nil {
+		return nil // another's
+	}
+	defer lock.Release()
+	if _, running := health(ctx, client.NewUnix(cfg.SocketPath())); !running {
+		return nil
+	}
+	return swap.ClearPending(cfg.Home)
+}
+
+// notOverInstalled refuses to put the release the Mac app carries (it runs
+// this program from its cache, with EnvBundledRelease) over a potluck
+// installed in dir meanwhile, or beside one that runs from elsewhere: either
+// may be newer, and the home may hold no record to tell.
+func notOverInstalled(ctx context.Context, self, dir string, cfg *config.Config) error {
+	if os.Getenv(EnvBundledRelease) == "" || filepath.Dir(self) == dir {
+		return nil
+	}
+	if cfg != nil {
+		if _, err := client.NewUnix(cfg.SocketPath()).Health(ctx); err == nil || !client.NotRunning(err) {
+			return errors.New("Potluck is already running on this Mac, so the copy in this app was not installed. Restart this Mac, then open the app again")
+		}
+	}
+	// What the app would run counts as installed; anything else there is replaced.
+	if fi, err := os.Stat(filepath.Join(dir, "potluck")); err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm()&0o111 == 0 {
+		return nil
+	}
+	return errors.New("Potluck is already installed in " + attach.Tilde(dir) + ", so the copy in this app was not put over it. Quit the app and open it again")
 }
 
 // filesOnlyWhy says why potluck upgrade installs the programs alone ("" when
@@ -224,10 +376,10 @@ func filesOnlyWhy(dh daemonHome, herr error) string {
 	switch {
 	case herr != nil:
 		return programName + " could not tell which daemon to use (" + herr.Error() + "), so " + programName + " upgrade restarted none"
-	case dh.owner != "":
-		return dh.othersHome() + "; " + programName + " upgrade leaves that daemon and its home as they are: " + dh.owner + " keeps them, so update " + dh.owner + " its own way"
-	case !dh.existed:
-		return "potluck has no home yet (" + tildePath(dh.cfg.Home) + "): its first command makes one"
+	case dh.Owner != "":
+		return othersHome(dh) + "; " + programName + " upgrade leaves that daemon and its home as they are: " + dh.Owner + " keeps them, so update " + dh.Owner + " its own way"
+	case !dh.Existed:
+		return "potluck has no home yet (" + attach.Tilde(dh.Cfg.Home) + "): its first command makes one"
 	}
 	return ""
 }
@@ -247,11 +399,11 @@ func ownHomeExists() bool {
 // (note says why): no home is locked or written (no release state, so a
 // downgrade is not checked against one), no driver re-pinned and no daemon
 // restarted.
-func (a *app) upgradeFilesOnly(dir, stage string, st upgrade.Staged, note string, dryRun bool) error {
+func (a *app) upgradeFilesOnly(ctx context.Context, dir, stage string, st upgrade.Staged, note string, dryRun bool) error {
 	m := st.Manifest
 	names, held := withoutAttachedDrivers(st.Names, dir, a.attachedTo())
 	if dryRun {
-		a.say("would install %s into %s (each old one kept as <name>%s)", strings.Join(names, ", "), tildePath(dir), swap.PrevSuffix)
+		a.say("would install %s into %s (each old one kept as <name>%s)", strings.Join(names, ", "), attach.Tilde(dir), swap.PrevSuffix)
 		a.say("%s", note)
 		a.sayHeldDrivers(held)
 		return nil
@@ -259,13 +411,84 @@ func (a *app) upgradeFilesOnly(dir, stage string, st upgrade.Staged, note string
 	if err := ownDir(dir); err != nil {
 		return err
 	}
-	if _, err := swap.Place(stage, dir, names); err != nil {
+	placed, err := swap.Begin(ctx, stage, dir, programLast(names), a.waitingToPlace(dir))
+	if err == nil {
+		err = placed.Finish()
+	}
+	if err != nil {
 		return fmt.Errorf("install into %s: %w", dir, err)
 	}
-	a.say("installed potluck %s (%s) into %s: %s", m.Version, short(m.Commit), tildePath(dir), strings.Join(names, ", "))
+	a.say("installed potluck %s (%s) into %s: %s", m.Version, short(m.Commit), attach.Tilde(dir), strings.Join(names, ", "))
 	a.say("%s", note)
 	a.sayHeldDrivers(held)
 	return nil
+}
+
+// programLast is names with potluck itself last: one that is there finds its
+// drivers beside it, so an install cut off before its end is one to do again
+// (the Mac app installs the release it carries when there is no potluck).
+func programLast(names []string) []string {
+	out := slices.DeleteFunc(slices.Clone(names), func(n string) bool { return n == "potluck" })
+	if len(out) < len(names) {
+		out = append(out, "potluck")
+	}
+	return out
+}
+
+// upgradeCutOff reports that what put st's potluck in dir was cut off, or that
+// the removal of it was: dir says so or lacks one of its programs, the daemon
+// still runs the potluck it replaced there or was not started again, or a
+// driver it placed was not re-pinned (with filesOnly neither is potluck's own to tell).
+func (a *app) upgradeCutOff(ctx context.Context, cfg *config.Config, dir string, st upgrade.Staged, filesOnly bool) bool {
+	names, _ := withoutAttachedDrivers(st.Names, dir, a.attachedTo())
+	if swap.Placing(dir) || slices.ContainsFunc(names, func(n string) bool { return !lexists(filepath.Join(dir, n)) }) {
+		return true
+	}
+	if filesOnly {
+		return false
+	}
+	h, running := health(ctx, client.NewUnix(cfg.SocketPath()))
+	if !running && restartCutOff(cfg.Home) {
+		return true
+	}
+	if running && !st.Manifest.RunBy(h.Version, h.Commit) {
+		if exe, err := processExe(h.PID); err == nil && samePath(strings.TrimSuffix(exe, " (deleted)"), filepath.Join(dir, "potluck")) {
+			return true
+		}
+	}
+	return unpinnedDrivers(cfg.Home, dir, st)
+}
+
+// restartCutOff reports that an upgrade on home was cut off while it restarted
+// the daemon, and no person has stopped that since.
+func restartCutOff(home string) bool {
+	_, cut, err := swap.ReadPending(home)
+	return (cut || err != nil) && !lexists(filepath.Join(home, stoppedName))
+}
+
+// unpinnedDrivers reports that a driver installed in dir is, byte for byte,
+// the verified release's in st, but home pins another file there, so the
+// daemon refuses it.
+func unpinnedDrivers(home, dir string, st upgrade.Staged) bool {
+	for _, n := range st.Names {
+		driver := protocol.DriverProgram(n)
+		if driver == "" {
+			continue
+		}
+		at := filepath.Join(dir, n)
+		pin, ok, err := runtarget.PinOf(home, driver)
+		if err != nil || !ok || !samePath(pin.Path, at) {
+			continue
+		}
+		now, _, err := softnet.FileSHA256(at)
+		if err != nil || now == pin.SHA256 {
+			continue
+		}
+		if want, _, err := softnet.FileSHA256(filepath.Join(st.Dir, n)); err == nil && now == want {
+			return true
+		}
+	}
+	return false
 }
 
 // withoutAttachedDrivers drops the driver binaries from names when dir is a

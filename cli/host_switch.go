@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/sengirunners/potluck/computeclient"
 	"github.com/sengirunners/potluck/hostmem"
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/menubar"
 	"github.com/sengirunners/potluck/protocol"
@@ -49,15 +51,17 @@ disk where Tart keeps images. Reading them runs Tart and Softnet, so plain
 status leaves them out.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			home := ""
 			if cfg, err := a.loadClient(); err == nil {
-				noteMenuSeen(cfg.Home)
+				home = cfg.Home
+				noteMenuSeen(home)
 			}
 			// Read beside the daemon's answers: each has its own deadline, and
 			// the menu bar app's ask has one for both.
 			var mac chan hostprobe.MacParts
 			if probe && setupGOOS == "darwin" {
 				mac = make(chan hostprobe.MacParts, 1)
-				go func() { mac <- probeMac(cmd.Context()) }()
+				go func() { mac <- probeMac(cmd.Context(), home) }()
 			}
 			f := a.hostFacts(cmd.Context())
 			if mac != nil {
@@ -189,7 +193,41 @@ func (a *app) hostFacts(ctx context.Context) menubar.Facts {
 		f.Background = hostBackground(cfg.Home)
 	}
 	f.Setup = a.setupFacts()
+	if running {
+		if pools, err := a.poolsNow(ctx); err == nil {
+			f.Setup.Pools, f.Setup.PoolsRead = pools, true
+		}
+	}
 	return f
+}
+
+// poolsNow is the pools this machine is in: those it runs, and those it
+// joined that have not turned it away.
+func (a *app) poolsNow(ctx context.Context) (pools []menubar.Pool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second) // after all else this status read: whoever asked waits
+	defer cancel()
+	c, err := a.readClient()
+	if err != nil {
+		return nil, err
+	}
+	local, err := c.LocalProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range local {
+		pools = append(pools, menubar.Pool{Slug: p.Slug, ID: p.ID})
+	}
+	rems, err := c.Remotes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rems {
+		if r.State == api.RemoteOK {
+			pools = append(pools, menubar.Pool{Slug: r.Project.Slug, ID: r.Project.ID, Joined: r.Joined, Fingerprint: r.Fingerprint, Machine: r.Authority,
+				Lends: slices.Contains(r.Areas, HostsArea)})
+		}
+	}
+	return pools, nil
 }
 
 // liveBindings is this machine's own bindings (servedViews), described,

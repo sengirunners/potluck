@@ -14,6 +14,10 @@ type LabelAsk struct {
 	// is empty, the setup's default size and linux are filled in as placement
 	// does; with a Why they are only what the labels named.
 	Size, OS, Image string
+	// OSNamed: when Ours and Why is empty, the labels themselves named the
+	// OS (an OS label, or a mapped label whose entry names one) and OS is
+	// not the linux default.
+	OSNamed bool
 }
 
 // ParseLabels reads a job's runs-on labels the way the broker does for a
@@ -22,11 +26,12 @@ type LabelAsk struct {
 // targets the pool, independent of which hosts are up, asks here instead of
 // keeping its own copy. Only Setup's Label, DefaultSize and Labels are read.
 func ParseLabels(labels []string, setup Setup) LabelAsk {
-	w, ours, why := parseLabels(labels, setup.rule())
+	rule := setup.rule()
+	w, ours, why := parseLabels(labels, rule)
 	if !ours {
 		return LabelAsk{}
 	}
-	return LabelAsk{Ours: true, Why: why, Size: w.size, OS: w.os, Image: w.image}
+	return LabelAsk{Ours: true, Why: why, Size: w.size, OS: w.os, Image: w.image, OSNamed: why == "" && rule.namesOS(labels)}
 }
 
 // rule is how setup reads a job's labels, as the broker's own conf does.

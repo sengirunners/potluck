@@ -886,7 +886,7 @@ capability, and the write checks skip when the shelf holds no file.
   held the same way, for a `POTLUCK_READY` of `<run id> <workflow ref, lower case> <ref>` naming that job's own
   `GITHUB_RUN_ID`, `GITHUB_WORKFLOW_REF` (case-folded) and `GITHUB_REF`; anything else, or nothing within the hold,
   refuses it (killed: none of its steps run). The daemon writes that marker only after admitting that job itself and
-  issuing its own credentials alone (`docs/daemon.md`, "Job grants").
+  issuing its own credentials alone, if any grant names it (`docs/daemon.md`, "Job grants").
 - Registering and deregistering the runner, and sweeping orphans, are the daemon's, never the driver's.
 - A driver that replaces a runner GitHub would refuse (`potluck-driver-tart` does, before the runner starts) says
   what its newest box of each image found in `describe.runners`: a list with one entry per image of the binding, in

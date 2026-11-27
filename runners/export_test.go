@@ -419,6 +419,26 @@ func (s *Service) BounceReruns(ctx context.Context, repo string, run int64) map[
 	return out
 }
 
+// SeedLost records a lost job of a run's attempt, ended by GitHub or running.
+func (s *Service) SeedLost(ctx context.Context, repo string, job, run int64, attempt int, ended bool) error {
+	state := lostRunning
+	if ended {
+		state = lostEnded
+	}
+	_, err := s.db().ExecContext(ctx, `INSERT INTO runners_lost (job, installation, repo, run, attempt, state, why, updated)
+		VALUES (?, 1, ?, ?, ?, ?, 'test', ?)`, job, repo, run, attempt, state, s.now().Unix())
+	return err
+}
+
+// LostOf is lostOf's answer: the ended jobs, and how many still run.
+func (s *Service) LostOf(ctx context.Context, repo string, run int64, attempt int) (ended []int64, running int, err error) {
+	jobs, running, err := s.lostOf(ctx, repo, run, attempt)
+	for _, j := range jobs {
+		ended = append(ended, j.job)
+	}
+	return ended, running, err
+}
+
 // LostWhy is job's runners_lost record: why, and whether it is a bounce
 // ("" when it has none).
 func (s *Service) LostWhy(ctx context.Context, job int64) (why string, bounced bool) {
@@ -430,4 +450,11 @@ func (s *Service) LostWhy(ctx context.Context, job int64) (why string, bounced b
 func (s *Service) StopCause(ctx context.Context, id int64) (cause string) {
 	_ = s.db().QueryRowContext(ctx, `SELECT stop_cause FROM runners_jobs WHERE job = ?`, id).Scan(&cause)
 	return cause
+}
+
+// EndJobSecrets is the job-grant part of GitHub's completed for job alone
+// (endJobSecrets), as when it is applied while another job's in_progress on
+// job's runner is being decided.
+func (s *Service) EndJobSecrets(ctx context.Context, job int64) error {
+	return s.endJobSecrets(ctx, job)
 }

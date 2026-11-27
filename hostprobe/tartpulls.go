@@ -46,6 +46,9 @@ import (
 // TartPullsFile is the record's file name in Tart's directory.
 const TartPullsFile = "potluck-pulls.json"
 
+// tartPullsLock is its lock file.
+const tartPullsLock = "." + TartPullsFile + ".lock"
+
 // TartUse is what the record says of one image.
 type TartUse struct {
 	// Pulled is when a share of Potluck's pulled it, Tart having read its
@@ -280,7 +283,7 @@ func lockTartPulls(tartDir string) (unlock func(), err error) {
 	} else if !st.IsDir() {
 		return nil, fmt.Errorf("%s is not a directory", tartDir)
 	}
-	lock, err := os.OpenFile(filepath.Join(tartDir, "."+TartPullsFile+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(filepath.Join(tartDir, tartPullsLock), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}

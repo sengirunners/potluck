@@ -124,7 +124,7 @@ potluck run -- make test
 potluck host set closed
 potluck host set auto
 </code></pre>
-<p><code>auto</code> returns to the machine's own rules. <code>--for 2h</code> and <code>--until 23:00</code> return the machine to <code>auto</code> at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with <code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar</code>, which installs the app but does not start it, then open it with <code>open ~/Applications/&quot;Potluck Menu.app&quot;</code>. It is not yet signed with an Apple Developer ID.</p>
+<p><code>auto</code> returns to the machine's own rules. <code>--for 2h</code> and <code>--until 23:00</code> return the machine to <code>auto</code> at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with <code>curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar</code>, which installs the app but does not start it, then open it from your <code>~/Applications</code> folder. It is not yet signed with an Apple Developer ID.</p>
 <p>To stop sharing for good, <code>potluck host stop</code> removes every size the machine shared, and <code>potluck leave</code> leaves the pool.</p>
 <h2 id="can-you-lend-a-mac">Can you lend a Mac?</h2>
 <p>Apple's macOS software license agreement (read November 2026) allows up to two macOS VMs per Mac you own or control, and Potluck caps macOS guests at two. The README's rule is that lending a macOS VM to your team or invited friends is fine and selling Mac time to the public is not. Read the licence yourself; this is not legal advice.</p>

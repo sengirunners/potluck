@@ -535,7 +535,7 @@ func (doctorOffline) RoundTrip(*http.Request) (*http.Response, error) {
 func TestDoctorCountsPendingWebhook(t *testing.T) {
 	f := doctorFixture(t, &doctorTransport{covered: true})
 	f.svc.DoctorRead = doctorReader(goodDoctorWorkflow, true)
-	f.svc.Close() // the signed delivery stays in the inbox
+	f.closeBroker() // the signed delivery stays in the inbox
 	if code := f.deliver(t, "workflow_job", jobEvent("queued", 902, 901, "acme/app", true, "self-hosted", "sengi", "macos")); code != http.StatusAccepted {
 		t.Fatalf("hook: %d", code)
 	}
@@ -777,7 +777,7 @@ func TestDoctorNothingConnected(t *testing.T) {
 // repository counts as told.
 func TestDoctorInboxArrivingDuringLaterRepo(t *testing.T) {
 	f := doctorFixture(t, &doctorTransport{covered: true})
-	f.svc.Close()
+	f.closeBroker()
 	if code := f.deliver(t, "workflow_job", jobEvent("queued", 902, 901, "acme/app", true, "sengi", "linux")); code != http.StatusAccepted {
 		t.Fatal(code)
 	}

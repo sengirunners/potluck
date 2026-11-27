@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"maps"
 	"math"
+	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -19,6 +20,7 @@ import (
 	"github.com/sengirunners/potluck/conformance"
 	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/imagepins"
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/roomwait"
@@ -503,7 +505,8 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	}
 	if o.With == "" && len(o.Images) == 0 {
 		if o.EarlierUnread != "" {
-			return res, fmt.Errorf("cannot safely choose the default image: earlier bindings could not be read: %s; start the daemon and retry, or pass --image explicitly", o.EarlierUnread)
+			return res, api.Plainly(fmt.Errorf("cannot safely choose the default image: earlier bindings could not be read: %s; start the daemon and retry, or pass --image explicitly", o.EarlierUnread),
+				"Potluck couldn't read what this Mac lends now, so nothing was changed. Press Check again; if Potluck isn't running, start it, then try again.")
 		}
 		// An image this version cannot name (the owner's own, or one from a
 		// repository Potluck no longer publishes) is replaced by the default,
@@ -517,7 +520,8 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			}
 			name, known := earlierImage(old)
 			if name != "" {
-				return res, fmt.Errorf("%s previously lent --with %s: repeat --with %s to keep it, or pass --image explicitly to replace it", old.Name, name, name)
+				return res, api.Plainly(fmt.Errorf("%s previously lent --with %s: repeat --with %s to keep it, or pass --image explicitly to replace it", old.Name, name, name),
+					"This Mac lends with "+name+" added, which this button can't keep, so nothing was changed. Press Copy details and send what it copies to the person who invited you.")
 			}
 			if !known {
 				k := keepFlags(old)
@@ -537,7 +541,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		if err := CheckTartImages(o.Report, res.Images); err != nil {
 			return res, err
 		}
-		note, err := tartDiskCheck(ctx, run, o.Report, res.Images)
+		note, err := tartDiskCheck(ctx, run, o.Report, o.Home, res.Images)
 		if err != nil {
 			return res, err
 		}
@@ -684,7 +688,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		// Softnet gives every Tart box egress, so every Tart box's checks
 		// forbid the forward path: the LAN's router and the tailnet.
 		o.NetForbid = forbidForward(o, &res)
-		pull = func(im string) []string { return []string{tartCLI(layer), "pull", "--", im} }
+		pull = func(im string) []string { return []string{tartCLI(layer), "pull", "--", im} } // run in the pull home (readyTartPull)
 	}
 	res.RunnerDir = runner
 
@@ -841,16 +845,20 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	}
 
 	start := time.Now()
-	if res.Layer == "tart" && o.Report.TartDir != "" && o.Home != "" {
+	recordShare := func() {
 		// From now these are the images this home's latest share uses
 		// (tartpulls.go): host images --remove keeps them.
 		if err := StartTartShare(o.Report.TartDir, o.Home, res.Images, start); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			res.Notes = append(res.Notes, fmt.Sprintf("could not record the images this share uses (%v): host images --remove may take them for unused", err))
 		}
 	}
+	recorded := res.Layer == "tart" && o.Report.TartDir != "" && o.Home != ""
+	if recorded {
+		recordShare()
+	}
 	say(o.Stages.Succeed(hostsetup.Preflight, preflightWords(res)))
 	pulled, reused := res.Images[:0:0], 0
-	forgot := false
+	forgot, swept := false, false
 	for i, p := range res.Pulls {
 		of := fmt.Sprintf("image %d of %d: ", i+1, len(res.Pulls))
 		listed := false // Tart's list was read, and lacked the image
@@ -861,6 +869,16 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 				// owner's later pull of that digest is not taken for ours.
 				forgetGone(o.Report.TartDir, cached)
 				forgot = true
+			}
+			if recorded && !swept {
+				// What an earlier share began and this one will not go on with,
+				// whether or not this one pulls anything. With the list unread
+				// every image counts as still to pull, so a later one tells more.
+				swept = err == nil
+				toPull := slices.DeleteFunc(slices.Clone(res.Images), func(im string) bool { return cached[im] })
+				if err := dropDeadPartials(o.Report.TartDir, o.Home, toPull); err != nil {
+					res.Notes = append(res.Notes, fmt.Sprintf("could not delete old unfinished downloads in %s: %v", tartPartials(o.Report.TartDir), err))
+				}
 			}
 			if err == nil && cached[res.Images[i]] {
 				say(o.Stages.Begin(hostsetup.Images, of+"reuse "+res.Images[i]+" (already here)"))
@@ -875,6 +893,17 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 			continue
 		}
 		say(o.Stages.Begin(hostsetup.Images, of+p.What))
+		if res.Layer == "tart" {
+			_, statErr := os.Stat(o.Report.TartDir)
+			var err error
+			if p.Command, err = readyTartPull(o.Report.TartDir, p.Command); err != nil {
+				res.Notes = append(res.Notes, fmt.Sprintf("a download that stops partway will start over: %v", err))
+			}
+			res.Pulls[i] = p
+			if recorded && statErr != nil { // Tart's directory is new: the record can be made now
+				recordShare()
+			}
+		}
 		pullOptions := o
 		if pullOptions.PullTimeout <= 0 {
 			pin, _ := PinForImage(res.Images[i])

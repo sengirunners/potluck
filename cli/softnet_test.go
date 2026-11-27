@@ -206,11 +206,14 @@ func TestSoftnetAdminStepInstallsUpgradesAndRollsBack(t *testing.T) {
 	// Potluck's boxes now run the managed copy, not Homebrew's first on PATH.
 	out, code = softnetRun(t, "softnet", "status")
 	if code != 0 || !strings.Contains(out, "Potluck's boxes run: Softnet 0.23.0-test.1-abc at "+m.store.Current()) ||
-		!strings.Contains(out, "the other softnet (/opt/homebrew/bin/softnet) is not the one they run") {
+		!strings.Contains(out, "the other softnet (/opt/homebrew/bin/softnet) is not the one they run") || strings.Contains(out, "to get a Softnet") {
 		t.Fatalf("status after install: exit %d: %s", code, out)
 	}
 	if out, code := softnetRun(t, "softnet", "install", "--candidate"); code != 0 || !strings.Contains(out, "nothing to do") || len(m.sudo) != 0 {
 		t.Fatalf("second install: exit %d, %v: %s", code, m.sudo, out)
+	}
+	if out, code := softnetRun(t, "softnet", "install", "--candidate", "--from", m.file); code != 0 || !strings.Contains(out, "nothing to do") || len(m.sudo) != 0 {
+		t.Fatalf("second install from the file: exit %d, %v: %s", code, m.sudo, out)
 	}
 	if out, code := softnetRun(t, "softnet", "rollback"); code == 0 || !strings.Contains(out, "no earlier managed Softnet") {
 		t.Fatalf("rollback with one build: exit %d: %s", code, out)
@@ -406,7 +409,7 @@ func TestSoftnetInstallNoSudoAnswersTheAdminStep(t *testing.T) {
 	if want := []string{"softnet", "install", "--admin-step", "--from", kept, "--candidate"}; !slices.Equal(step.Argv[1:], want) {
 		t.Fatalf("argv %q, want %q after the program", step.Argv, want)
 	}
-	if !strings.Contains(step.Why, "owned by root and setuid") || !strings.Contains(words, "downloading Softnet") {
+	if step.Why != "macOS will ask for this Mac's password to install the network helper." || !strings.Contains(words, "downloading Softnet") {
 		t.Fatalf("why %q, words %s", step.Why, words)
 	}
 	if fi, err := os.Stat(filepath.Dir(kept)); err != nil || fi.Mode().Perm() != 0o700 {

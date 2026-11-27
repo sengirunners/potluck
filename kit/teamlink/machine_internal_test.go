@@ -291,3 +291,38 @@ func TestSendNumbersLeavesJobOutWithinBackoff(t *testing.T) {
 		}
 	}
 }
+
+// An authority from before the build's release sources: a strict one refuses
+// "sources", and the report goes again without them, so the machine's other
+// numbers (its build and update job included) still arrive; the sources stay
+// out for the back-off, then go again.
+func TestMachineReportDropsSourcesForOlderAuthority(t *testing.T) {
+	kept := &api.MachineZm{Version: "v9", Sources: []string{"a/b", "c/d"}}
+	fresh := func() api.MachineStats {
+		return api.MachineStats{MemoryTotalMB: 8, Potluck: kept}
+	}
+	m := &machineState{noZm: map[string]time.Time{}, noJob: map[string]time.Time{}, noSources: map[string]time.Time{}, noRuns: map[string]time.Time{}}
+	requests := 0
+	var last map[string]olderBuild
+	send := func(st api.MachineStats) error {
+		requests++
+		var err error
+		last, err = olderAuthority(st, true, true)
+		return err
+	}
+	now := time.Now()
+	if err := m.sendNumbers(fresh(), "p1", now, send); err != nil || requests != 2 || last["potluck"].Version != "v9" {
+		t.Fatalf("first send: %d requests, %+v, %v", requests, last, err)
+	}
+	requests = 0
+	if err := m.sendNumbers(fresh(), "p1", now.Add(time.Minute), send); err != nil || requests != 1 {
+		t.Fatalf("within the back-off: %d requests: %v", requests, err)
+	}
+	requests = 0
+	if err := m.sendNumbers(fresh(), "p1", now.Add(machineBackoff+time.Minute), send); err != nil || requests != 2 {
+		t.Fatalf("after the back-off: %d requests: %v", requests, err)
+	}
+	if len(kept.Sources) != 2 {
+		t.Fatal("the dropped sources were cut from the store's value")
+	}
+}

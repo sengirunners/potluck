@@ -122,6 +122,7 @@
         "do": {
           "label": "Install Potluck",
           "args": [
+            "--json",
             "upgrade",
             "--release",
             "/Applications/Potluck.app/Contents/Resources/release",
@@ -162,6 +163,7 @@
         "do": {
           "label": "Start Potluck",
           "args": [
+            "--json",
             "daemon",
             "--detach"
           ]
@@ -180,7 +182,16 @@
             "--yes",
             "--no-sudo",
             "--detach",
+            "--instead-of-invite=",
             "--"
+          ],
+          "invite_args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--invite-stdin"
           ],
           "invite": true
         }
@@ -193,40 +204,33 @@
       {
         "id": "login",
         "state": "unknown",
-        "detail": "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings \u003e General \u003e Login Items"
-      },
-      {
-        "id": "updates",
-        "state": "todo",
-        "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
-        "action": "potluck upgrade enable",
-        "do": {
-          "label": "Turn on daily updates",
-          "args": [
-            "--json",
-            "upgrade",
-            "enable"
-          ]
-        }
-      },
-      {
-        "id": "coverage",
-        "state": "info",
-        "detail": "the daily update covers Potluck itself only: to update the menu bar item, run its installer again (install-menu); Tart and Softnet are updated the way you installed them, and potluck doctor says which versions this Mac needs"
+        "detail": "starting the menu bar item at login: the app has not said whether it does; to have it start at every login, add Potluck in System Settings \u003e General \u003e Login Items"
       }
     ],
     "next": "potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin",
     "next_id": "potluck",
     "view": {
       "heading": "This Mac isn't set up yet",
-      "lead": "Potluck needs a network helper to keep jobs away from your own network, and can't install one on macOS 15. If this Mac can be updated to macOS 26 or newer, do that in System Settings \u003e General \u003e Software Update, then come back here. If it can't, it can't lend yet.",
+      "lead": "Install Potluck to get started. It takes a few seconds.",
+      "do": {
+        "label": "Install Potluck",
+        "args": [
+          "--json",
+          "upgrade",
+          "--release",
+          "/Applications/Potluck.app/Contents/Resources/release",
+          "--dir",
+          "/Users/b/.local/bin"
+        ]
+      },
+      "invite_later": true,
       "sections": [
         {
           "title": "This Mac",
           "rows": [
             {
               "state": "done",
-              "text": "This Mac is the right kind"
+              "text": "This Mac meets the requirements"
             },
             {
               "state": "todo",
@@ -238,7 +242,7 @@
             },
             {
               "state": "blocked",
-              "text": "There is no network helper for this Mac's macOS yet"
+              "text": "The network helper for this Mac's macOS isn't ready yet"
             },
             {
               "state": "done",
@@ -259,19 +263,7 @@
           "rows": [
             {
               "state": "info",
-              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
-            },
-            {
-              "state": "info",
-              "text": "Potluck doesn't update itself",
-              "do": {
-                "label": "Turn on daily updates",
-                "args": [
-                  "--json",
-                  "upgrade",
-                  "enable"
-                ]
-              }
+              "text": "To have this menu appear every time you log in, add Potluck in System Settings \u003e General \u003e Login Items"
             }
           ]
         }
@@ -280,7 +272,7 @@
         "title": ""
       },
       "details": "Potluck v1.2.3 setup\npotluck: todo: this copy of Potluck (v1.2.3) runs from /Applications/Potluck.app/Contents/Resources/bin, not from /Users/b/.local/bin, where it installs itself\n  potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin\ntart: todo: Tart is not installed: Potluck runs each job in a Tart virtual machine\n  potluck tart install\nsoftnet: blocked: Softnet is not installed: isolated Tart boxes need a helper that enforces Potluck's protocol and port rules; upstream Softnet 0.25.0 and newer need macOS 26, and Potluck's macOS 15 build is a candidate not yet validated on a real macOS 15 Mac\ndaemon: todo: the Potluck daemon is not running: no daemon record\n  potluck daemon --detach\nsetup: todo: this machine has not been set up to lend yet\n  potluck host",
-      "key": "none daemon=false shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"
+      "key": "none daemon=false shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=potluck --json upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"
     }
   }
 }

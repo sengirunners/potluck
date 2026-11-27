@@ -9,10 +9,14 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/attach"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,9 +58,9 @@ var (
 		return append(dirs, "/Applications")
 	}
 	// probeMac reads this Mac's preflight part by part (host status
-	// --probe).
-	probeMac = func(ctx context.Context) hostprobe.MacParts {
-		return hostprobe.CheckMacSetup(ctx, hostprobe.ExecRunner{WaitDelay: time.Second}, hostprobe.SystemFacts{})
+	// --probe); home is the Potluck home a setup shares from.
+	probeMac = func(ctx context.Context, home string) hostprobe.MacParts {
+		return hostprobe.CheckMacSetup(ctx, hostprobe.ExecRunner{WaitDelay: time.Second}, hostprobe.SystemFacts{}, home)
 	}
 )
 
@@ -65,6 +69,11 @@ var (
 // does not run from the install directory, the setup checklist's first
 // step installs it from there.
 const EnvBundledRelease = "POTLUCK_BUNDLED_RELEASE"
+
+// EnvLoginItem is what the menu bar app, when it starts this program, says
+// of its own login item (menubar.LoginOn and the rest): only the app can
+// read it, so it counts only from the app.
+const EnvLoginItem = "POTLUCK_LOGIN_ITEM"
 
 // installDir is where the installer puts Potluck: $POTLUCK_INSTALL_DIR,
 // else ~/.local/bin (install.sh), symlinks resolved ("" when no home).
@@ -229,6 +238,10 @@ func (a *app) setupFacts() menubar.SetupFacts {
 	if setupGOOS == "darwin" {
 		s.Menu = menuApp(home)
 	}
+	if home != "" && a.attachedTo() == nil {
+		_, err := os.Lstat(filepath.Join(home, stoppedName))
+		s.AutoStart, s.Stopped = errors.Is(err, fs.ErrNotExist), err == nil
+	}
 	s.Updates = updateFacts()
 	return s
 }
@@ -237,6 +250,28 @@ func (a *app) setupFacts() menubar.SetupFacts {
 type menuSeen struct {
 	App string `json:"app"`
 	At  string `json:"at"`
+	// Login is App's login item, as App said ("": an app that does not).
+	Login string `json:"login,omitempty"`
+	// Others are the other places the app asked from before, still there.
+	Others []string `json:"others,omitempty"`
+}
+
+// readMenuSeen is home's note; its zero value when there is none.
+func readMenuSeen(home string) (s menuSeen) {
+	if b, err := os.ReadFile(filepath.Join(home, menuSeenName)); err != nil || json.Unmarshal(b, &s) != nil {
+		return menuSeen{}
+	}
+	return s
+}
+
+// askingLogin is the login item as the app that started this program says
+// it: one of the states, else "".
+func askingLogin() string {
+	switch v := os.Getenv(EnvLoginItem); v {
+	case menubar.LoginOn, menubar.LoginOff, menubar.LoginRefused:
+		return v
+	}
+	return ""
 }
 
 // noteMenuSeen notes in home that the menu bar item asked for this status
@@ -248,14 +283,24 @@ func noteMenuSeen(home string) {
 	if app == "" || home == "" || !isDir(home) {
 		return
 	}
-	b, _ := json.Marshal(menuSeen{App: app, At: time.Now().UTC().Format(time.RFC3339)})
+	was := readMenuSeen(home)
+	s := menuSeen{App: app, At: time.Now().UTC().Format(time.RFC3339), Login: askingLogin()}
+	for _, p := range append(was.Others, was.App) {
+		if p != app && isDir(p) && slices.Contains(menubar.AppNames, filepath.Base(p)) && !slices.Contains(s.Others, p) && len(s.Others) < maxOtherApps {
+			s.Others = append(s.Others, p)
+		}
+	}
+	b, _ := json.Marshal(s)
 	tmp := filepath.Join(home, "."+menuSeenName+".new")
 	if os.WriteFile(tmp, b, 0o600) == nil {
 		_ = os.Rename(tmp, filepath.Join(home, menuSeenName))
 	}
 }
 
-// menuAppOf is the app an executable inside Potluck Menu.app belongs to
+// maxOtherApps is the most other places a note keeps.
+const maxOtherApps = 8
+
+// menuAppOf is the app an executable inside the Mac app belongs to
 // ("" for any other program).
 func menuAppOf(exe string) string {
 	macos := filepath.Dir(exe)
@@ -268,28 +313,40 @@ func menuAppOf(exe string) string {
 }
 
 // menuApp is the menu bar item: where it is installed (the one that asks
-// now or last asked, else the first of menuAppDirs), and when it last asked.
+// now or last asked, else the first of menuAppDirs, its name of now before its old one), and when it last asked.
 func menuApp(home string) *menubar.MenuApp {
 	m := &menubar.MenuApp{}
-	if b, err := os.ReadFile(filepath.Join(home, menuSeenName)); err == nil {
-		var s menuSeen
-		if json.Unmarshal(b, &s) == nil && isDir(s.App) {
-			m.Path = s.App
-			m.Seen, _ = time.Parse(time.RFC3339, s.At)
-		}
+	s := readMenuSeen(home)
+	if s.App != "" && isDir(s.App) {
+		m.Path, m.Login = s.App, s.Login
+		m.Seen, _ = time.Parse(time.RFC3339, s.At)
 	}
 	if app := menuAppOf(menuParent()); app != "" { // no home may be there to have noted it in
-		m.Path, m.Seen = app, time.Now().UTC()
+		m.Path, m.Seen, m.Login = app, time.Now().UTC(), askingLogin()
 	}
-	for _, d := range menuAppDirs() {
-		if p := filepath.Join(d, "Potluck Menu.app"); m.Path == "" && isDir(p) {
-			m.Path = p
+	for _, p := range s.Others {
+		if p != m.Path && filepath.Base(p) != menubar.AppName && isDir(p) {
+			m.Old = append(m.Old, p)
+		}
+	}
+	for _, name := range menubar.AppNames {
+		for _, d := range menuAppDirs() {
+			if p := filepath.Join(d, name); m.Path == "" && isMenuApp(p) {
+				m.Path = p
+			}
 		}
 	}
 	if m.Path != "" {
 		m.Open = "open " + shellQuote(m.Path)
 	}
 	return m
+}
+
+// isMenuApp is whether the app at p holds the Mac app's program: another
+// program may have an app of the same name.
+func isMenuApp(p string) bool {
+	fi, err := os.Stat(filepath.Join(p, "Contents", "MacOS", "PotluckMenu"))
+	return err == nil && fi.Mode().IsRegular()
 }
 
 func isDir(p string) bool {
@@ -309,7 +366,7 @@ func updateFacts() *menubar.Updates {
 	}
 	u := &menubar.Updates{Enabled: s.Installed(), Foreign: s.Foreign()}
 	if u.Foreign != "" {
-		u.Foreign = tildePath(u.Foreign)
+		u.Foreign = attach.Tilde(u.Foreign)
 	}
 	if u.Enabled {
 		u.Loaded = s.Loaded()

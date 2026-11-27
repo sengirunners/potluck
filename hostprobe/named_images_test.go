@@ -112,7 +112,7 @@ func TestShareReusesOnlyExactTartCachePin(t *testing.T) {
 			}
 			pulled := false
 			for _, call := range run.calls {
-				if call == "tart pull -- "+pinA {
+				if strings.HasSuffix(call, "tart pull -- "+pinA) {
 					pulled = true
 				}
 			}
@@ -137,10 +137,10 @@ func TestShareReusesOnlyExactTartCachePin(t *testing.T) {
 func TestShareRecordsNoFailedPull(t *testing.T) {
 	withTartImages(t, pinA)
 	run := &fakeRunner{on: func(line string) (Result, bool) {
-		switch line {
-		case "tart list --format json":
+		switch {
+		case line == "tart list --format json":
 			return ok("[]"), true
-		case "tart pull -- " + pinA:
+		case strings.HasSuffix(line, "tart pull -- "+pinA):
 			return Result{Exit: 1, Stderr: "network down"}, true
 		}
 		return ok(""), true

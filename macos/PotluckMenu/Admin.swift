@@ -35,6 +35,50 @@ struct ActionAnswer: Decodable {
     let warning: String?
     let remove: OfferedAction?
     let force: OfferedAction?
+    let view: UninstallView?
+}
+
+/// The uninstall window (cli/uninstall_view.go): its every word.
+struct UninstallView: Decodable {
+    let heading: String
+    var lead: String?
+    var failed: String?
+    let warning: String?
+    let choice: Choice?
+    var done: [Step]
+    var left: [Step]
+    let stays: [String]
+    let details: String?
+
+    struct Step: Decodable {
+        let id: String
+        let will: String
+        let did: String
+    }
+
+    /// A box to tick: args ask for the plan with it the other way.
+    struct Choice: Decodable {
+        let label: String
+        let on: Bool
+        let args: [String]
+    }
+
+    /// This run's answer as the window shows it after an earlier run's: what
+    /// either did, each step once, in its latest words.
+    func after(_ before: UninstallView?) -> UninstallView {
+        var v = self
+        let known = before?.done ?? []
+        v.done = known.map { s in done.first { $0.id == s.id } ?? s } + done.filter { s in !known.contains { $0.id == s.id } }
+        return v
+    }
+
+    /// The admin step ran: it is the first of what was left, and the words
+    /// that say it did not no longer hold.
+    mutating func adminRan() {
+        lead = nil
+        failed = nil
+        if !left.isEmpty { done.append(left.removeFirst()) }
+    }
 }
 
 /// A command's --json answer. One that is not a JSON object is none.

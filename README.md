@@ -232,8 +232,8 @@ potluck uninstall             # does it, after you type yes
 `potluck uninstall` stops sharing, leaves the pools this machine joined, removes the managed Softnet (the one step that
 asks for your password), stops the daemon, and removes the daily update job, the host override file, the line
 `install.sh` added to your shell's startup file, the home (`~/.potluck`, unless `--keep-home`) and the programs. It
-names what it leaves for you: Tart and its images (the current macOS image stays until you run `tart delete` on it), a
-Softnet you installed yourself, the Tailscale node and the menu bar app. `potluck leave <pool>` leaves one pool you
+names what it leaves for you: Tart and its images (`--with-tart` also removes the images Potluck pulled and the Tart it installed, and nothing of
+yours), a Softnet you installed yourself, the Tailscale node and the menu bar app. `potluck leave <pool>` leaves one pool you
 joined, and `potluck disband <pool>` removes one you created (its members are cut off and told) while keeping the rest
 of Potluck.
 

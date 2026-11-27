@@ -11,7 +11,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -83,7 +85,7 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		if err := os.MkdirAll(r.dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := run(r.version, r.commit, r.dir, []string{target}, ""); err != nil {
+		if err := run(r.version, r.commit, r.dir, []string{target}, "", ""); err != nil {
 			t.Fatalf("build %s: %v", r.version, err)
 		}
 		if _, err := release.Potluck.SignDir(r.dir, r.version, r.commit, r.created, key); err != nil {
@@ -168,6 +170,98 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 		return cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home5, "POTLUCK_INSTALL_DIR="+installDir,
 			"POTLUCK_UPDATE_KEY="+pub, "PATH="+path)
 	}
+
+	// The Mac app's first run: install.sh puts the release the app carries in
+	// a directory of the app's, and the potluck there, told of the release,
+	// says to install it, and its own arguments do; but not over a potluck
+	// installed meanwhile.
+	t.Run("first run from the app", func(t *testing.T) {
+		cache, dir := filepath.Join(t.TempDir(), "cache"), filepath.Join(t.TempDir(), "bin")
+		if o, err := install(sideEnv(cache, sysPath), "--from", relA, "--no-modify-path"); err != nil {
+			t.Fatalf("%v\n%s", err, o)
+		}
+		run := func(home string, args ...string) ([]byte, error) {
+			c := exec.Command(filepath.Join(cache, "potluck"), args...)
+			c.Env = cleanEnv(t, "HOME="+filepath.Join(tmp, "home"), "POTLUCK_HOME="+home, "POTLUCK_INSTALL_DIR="+dir,
+				"PATH="+sysPath, "POTLUCK_BUNDLED_RELEASE="+relA)
+			return c.Output()
+		}
+		out, err := run(filepath.Join(tmp, "nohome"), "--json", "host", "status")
+		var st struct {
+			Setup struct {
+				Checks []struct {
+					ID, State string
+					Do        *struct{ Args []string }
+				}
+			}
+		}
+		if err != nil || json.Unmarshal(out, &st) != nil || len(st.Setup.Checks) == 0 {
+			t.Fatalf("host status: %v\n%s", err, out)
+		}
+		p := st.Setup.Checks[0]
+		if p.ID != "potluck" || p.State != "todo" || p.Do == nil {
+			t.Fatalf("the first check: %+v", p)
+		}
+		for _, c := range st.Setup.Checks {
+			if c.ID == "updates" {
+				t.Error("the app's own copy offers daily updates")
+			}
+		}
+		if _, err := os.Stat(filepath.Join(tmp, "nohome")); err == nil {
+			t.Error("host status made a home")
+		}
+		if o, err := run(home5, p.Do.Args...); err != nil { // home5 trusts the test's key
+			t.Fatalf("%v: %v\n%s", p.Do.Args, err, o)
+		}
+		b, err := os.ReadFile(filepath.Join(dir, "potluck"))
+		if err != nil || len(b) < 1<<20 {
+			t.Fatalf("not installed: %v", err)
+		}
+		placedLast(t, dir)
+		// Cut off before potluck itself was placed: what is there of it is not
+		// an install, so the app's release goes in.
+		if err := os.Remove(filepath.Join(dir, "potluck")); err != nil {
+			t.Fatal(err)
+		}
+		if o, err := run(home5, p.Do.Args...); err != nil {
+			t.Fatalf("after a first install cut off: %v\n%s", err, o)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "potluck"), []byte("newer"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run(home5, p.Do.Args...); err == nil {
+			t.Error("put over an installed potluck")
+		}
+		if b, _ := os.ReadFile(filepath.Join(dir, "potluck")); string(b) != "newer" {
+			t.Error("the installed potluck was replaced")
+		}
+		// Not a program: no potluck the app could run, so it is replaced.
+		if err := os.Chmod(filepath.Join(dir, "potluck"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if o, err := run(home5, p.Do.Args...); err != nil {
+			t.Errorf("over a file that is no program: %v\n%s", err, o)
+		}
+		// A daemon that runs from elsewhere is neither replaced nor restarted.
+		if err := os.Remove(filepath.Join(dir, "potluck")); err != nil {
+			t.Fatal(err)
+		}
+		sock := filepath.Join(home5, "potluck.sock")
+		l, err := net.Listen("unix", sock)
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := &http.Server{Handler: http.NotFoundHandler()}
+		go func() { _ = srv.Serve(l) }()
+		_, err = run(home5, p.Do.Args...)
+		_ = srv.Close()
+		if err == nil {
+			t.Error("installed beside a running daemon")
+		}
+		if _, err := os.Lstat(filepath.Join(dir, "potluck")); err == nil {
+			t.Error("a potluck was put there")
+		}
+	})
 
 	// --from reads each file from the directory once: a directory that
 	// serves the release on the first read of each file and a forgery on
@@ -372,6 +466,7 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(bin, "potluck"+".prev")); err != nil {
 		t.Fatalf("the old potluck was not kept: %v", err)
 	}
+	placedLast(t, bin)
 	hB, err := c.Health(context.Background())
 	if err != nil || hB.Version != verB || hB.PID == h0.PID {
 		t.Fatalf("daemon after the upgrade: %+v %v", hB, err)
@@ -394,6 +489,102 @@ func TestInstallAndUpgradeEndToEnd(t *testing.T) {
 	}
 	if out, err := potluck("upgrade", "--release", relB); err != nil || !strings.Contains(out, "already installed") {
 		t.Fatalf("upgrade to the running release (%v):\n%s", err, out)
+	}
+
+	// The same upgrade cut off part way (its programs are B's; the daemon
+	// started from what they replaced still runs, and the driver's pin still
+	// names the old file): the next one finishes it.
+	stopDaemon()
+	inBin := filepath.Join(bin, "potluck")
+	copyFile2(t, inBin, filepath.Join(bin, ".b"))
+	if err := os.Remove(inBin); err != nil {
+		t.Fatal(err)
+	}
+	copyFile2(t, otherA, inBin)
+	stopOld := startDaemon(t, inBin, env, home)
+	defer stopOld()
+	if err := os.Rename(filepath.Join(bin, ".b"), inBin); err != nil {
+		t.Fatal(err)
+	}
+	oldPin := strings.Repeat("0", 64)
+	b = []byte(strings.ReplaceAll(string(b), pins.Drivers["local"].SHA256, oldPin))
+	if err := os.WriteFile(filepath.Join(home, "driver_pins.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := potluck("upgrade", "--release", relB); err != nil || !strings.Contains(out, "restarted the daemon on "+verB) || !strings.Contains(out, "re-pinned drivers: local") {
+		t.Fatalf("after an upgrade cut off before the restart (%v):\n%s", err, out)
+	}
+	if hB, err = c.Health(context.Background()); err != nil || hB.Version != verB {
+		t.Fatalf("daemon after the upgrade finished: %+v %v", hB, err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "driver_pins.json"), b, 0o600); err != nil { // cut off after the restart
+		t.Fatal(err)
+	}
+	if out, err := potluck("upgrade", "--release", relB); err != nil || !strings.Contains(out, "re-pinned drivers: local") {
+		t.Fatalf("after an upgrade cut off before the re-pin (%v):\n%s", err, out)
+	}
+	if out, err := potluck("upgrade", "--release", relB); err != nil || !strings.Contains(out, "already installed") {
+		t.Fatalf("after it finished (%v):\n%s", err, out)
+	}
+	for what, cut := range map[string]func() error{
+		"a removal cut off":    func() error { return os.Remove(filepath.Join(bin, "potluck-driver-local")) },
+		"a placing that began": func() error { return os.WriteFile(filepath.Join(bin, ".placing"), []byte("+potluck\n"), 0o644) },
+	} {
+		if err := cut(); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{"installed potluck " + verB, "already installed"} {
+			if out, err := potluck("upgrade", "--release", relB); err != nil || !strings.Contains(out, want) {
+				t.Fatalf("after %s, want %q (%v):\n%s", what, want, err, out)
+			}
+		}
+	}
+
+	// Cut off after the daemon stopped and before the new one started: the next
+	// upgrade starts it, unless a person stopped it since.
+	pendingFile := filepath.Join(home, "swap-pending.json")
+	stopHere := func() {
+		t.Helper()
+		if out, err := potluck("daemon", "stop"); err != nil {
+			t.Fatalf("daemon stop: %v\n%s", err, out)
+		}
+		if err := os.WriteFile(pendingFile, []byte(`{"what":"upgrade","to":"x"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stopHere()
+	if out, err := potluck("upgrade", "--release", relB); err != nil || !strings.Contains(out, "already installed") {
+		t.Fatalf("with the daemon stopped by a person (%v):\n%s", err, out)
+	}
+	if _, err := c.Health(context.Background()); err == nil {
+		t.Fatal("the upgrade started a daemon a person stopped")
+	}
+	if err := os.Remove(filepath.Join(home, "daemon-stopped")); err != nil { // as an upgrade stops it
+		t.Fatal(err)
+	}
+	if out, err := potluck("upgrade", "--release", relB); err != nil || !strings.Contains(out, "restarted the daemon on "+verB) {
+		t.Fatalf("after an upgrade cut off in the restart (%v):\n%s", err, out)
+	}
+	if hB, err = c.Health(context.Background()); err != nil || hB.Version != verB {
+		t.Fatalf("daemon after that: %+v %v", hB, err)
+	}
+	if _, err := os.Lstat(pendingFile); err == nil {
+		t.Fatal("the upgrade still says it is unfinished")
+	}
+	// The install before was cut off at its very end and its potluck runs: a
+	// rollback below goes back to that, not to the nothing it replaced.
+	if err := os.WriteFile(filepath.Join(bin, ".placing"), []byte("-potluck "+fileSum(t, inBin)+"\n-potluck-driver-local "+fileSum(t, filepath.Join(bin, "potluck-driver-local"))+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The word of a restart whose daemon runs after all has nothing left to say.
+	if err := os.WriteFile(pendingFile, []byte(`{"what":"upgrade","to":"x","one_way":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := potluck("upgrade", "--release", relB); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if _, err := os.Lstat(pendingFile); err == nil {
+		t.Fatal("a daemon runs, and the upgrade still says it is unfinished")
 	}
 
 	// Rollbacks. Release C's potluck is a script: its preflight is B's (a
@@ -464,6 +655,116 @@ exec %s "$@"
 	}
 	if h, err := c.Health(context.Background()); err != nil || h.Version != verA || h.PID == hA.PID {
 		t.Fatalf("the old daemon did not come back from its own program (want %s): %+v %v", verA, h, err)
+	}
+	if _, err := os.Lstat(pendingFile); err == nil {
+		t.Fatal("rolled back, and the upgrade still says it is unfinished")
+	}
+
+	// waits starts an upgrade to C2 and answers once it waits for the new daemon.
+	var said bytes.Buffer
+	waits := func() *exec.Cmd {
+		t.Helper()
+		up := exec.Command(filepath.Join(bin, "potluck"), "upgrade", "--release", relC2)
+		up.Env = env
+		said.Reset()
+		up.Stdout, up.Stderr = &said, &said
+		if err := up.Start(); err != nil {
+			t.Fatal(err)
+		}
+		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+			if b, _ := os.ReadFile(pidFile); len(b) > 0 {
+				return up
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the new daemon never started")
+			}
+		}
+	}
+
+	// Ended (Ctrl-C, a logout) while it waits for the new daemon: the old one
+	// runs again all the same.
+	c2 = waits()
+	if err := c2.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := c2.Wait(); err == nil || !strings.Contains(said.String(), "old programs are back") {
+		t.Fatalf("an upgrade ended in the restart (%v):\n%s", err, said.String())
+	}
+	gone("ended")
+	if h, err := c.Health(context.Background()); err != nil || h.Version != verA {
+		t.Fatalf("after an upgrade was ended, the old daemon does not run: %+v %v", h, err)
+	}
+
+	// Killed there: what it knew is recorded, and the next one, pressed while
+	// the daemon before is still ending, places the rest and starts a daemon.
+	c2 = waits()
+	if err := c2.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = c2.Wait()
+	if b, _ := os.ReadFile(pidFile); len(b) > 0 {
+		pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+		if pid <= 0 || syscall.Kill(pid, syscall.SIGKILL) != nil {
+			t.Fatalf("the new daemon of the killed upgrade: %s", b)
+		}
+	}
+	gone("killed")
+	var cut struct {
+		Bin    string `json:"bin"`
+		OneWay bool   `json:"one_way"`
+	}
+	if b, err := os.ReadFile(pendingFile); err != nil || json.Unmarshal(b, &cut) != nil || filepath.Base(filepath.Dir(cut.Bin)) != filepath.Base(filepath.Dir(otherA)) || cut.OneWay {
+		t.Fatalf("a killed upgrade recorded %s (%v), want the daemon's %s", b, err, otherA)
+	}
+	if b, err := os.ReadFile(filepath.Join(bin, ".placing")); err != nil || !strings.Contains(string(b), "+potluck "+fileSum(t, inBin)) {
+		t.Fatalf("a killed upgrade says of the programs: %s (%v)", b, err)
+	}
+	held, err := os.OpenFile(filepath.Join(home, "daemon.lock"), os.O_RDWR, 0)
+	if err == nil {
+		err = syscall.Flock(int(held.Fd()), syscall.LOCK_EX)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(1500*time.Millisecond, func() { held.Close() })
+	up := exec.Command(realB, "upgrade", "--release", relB, "--dir", bin) // the potluck there is C2's script
+	up.Env = env
+	if o, err := up.CombinedOutput(); err != nil || !strings.Contains(string(o), "restarted the daemon on "+verB) {
+		t.Fatalf("after an upgrade killed in the restart (%v):\n%s", err, o)
+	}
+	if h, err := c.Health(context.Background()); err != nil || h.Version != verB {
+		t.Fatalf("after that: %+v %v", h, err)
+	}
+	for _, f := range []string{pendingFile, filepath.Join(bin, ".placing")} {
+		if _, err := os.Lstat(f); err == nil {
+			t.Fatalf("%s is still there", f)
+		}
+	}
+	if fileSum(t, inBin) != fileSum(t, realB) {
+		t.Fatal("the programs are not B's")
+	}
+
+	// Cut off after its daemon may have changed the data for good: the one that
+	// ends it never goes back to the old programs, and what does not come up is
+	// still to be started.
+	stopDaemon()
+	if err := os.Remove(filepath.Join(home, "daemon-stopped")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pendingFile, []byte(`{"what":"upgrade","to":"x","one_way":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c2 = exec.Command(filepath.Join(bin, "potluck"), "upgrade", "--release", relC2)
+	c2.Env = append(append([]string(nil), env...), "POTLUCK_UPGRADE_START_WAIT=2s")
+	if o, err := c2.CombinedOutput(); err == nil || !strings.Contains(string(o), "one-way") {
+		t.Fatalf("ending an upgrade whose migrations are one-way (%v):\n%s", err, o)
+	}
+	gone("one-way")
+	if _, err := os.Lstat(pendingFile); err != nil {
+		t.Fatal("no daemon runs, and nothing says one is to be started")
+	}
+	if b, err := os.ReadFile(filepath.Join(bin, "potluck")); err != nil || !strings.HasPrefix(string(b), "#!/bin/sh") {
+		t.Fatalf("the old program is back (%v)", err)
 	}
 
 	t.Run("install.sh from GitHub", func(t *testing.T) {
@@ -801,4 +1102,40 @@ func fakeGitHub(t *testing.T, dir, tag, token string, public bool) (*httptest.Se
 		t.Fatal(err)
 	}
 	return srv, ca
+}
+
+// placedLast checks that an install into dir wrote potluck after its other
+// programs (each is placed in the order it is written).
+func placedLast(t *testing.T, dir string) {
+	t.Helper()
+	last, err := os.Stat(filepath.Join(dir, "potluck"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	others, _ := filepath.Glob(filepath.Join(dir, "potluck-*"))
+	n := 0
+	for _, p := range others {
+		fi, err := os.Lstat(p)
+		if err != nil || strings.HasSuffix(p, ".prev") {
+			continue
+		}
+		n++
+		if !fi.ModTime().Before(last.ModTime()) {
+			t.Errorf("potluck was placed before %s", p)
+		}
+	}
+	if n == 0 {
+		t.Errorf("no program but potluck in %s", dir)
+	}
+}
+
+// fileSum is the file's sha256 (hex).
+func fileSum(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

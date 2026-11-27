@@ -256,3 +256,32 @@ func TestUpdateJobInMachineNumbers(t *testing.T) {
 		t.Fatalf("the hook knows no job, yet one is reported: %+v", z.Job)
 	}
 }
+
+// Machine numbers carry the release sources the program reports through
+// Deps.UpdateSources, read each time they are built; no hook, or an empty
+// answer, reports none.
+func TestUpdateSourcesInMachineNumbers(t *testing.T) {
+	ctx := context.Background()
+	dm := swapDaemon(t, shortHome(t))
+	c := client.WithHandler(dm.SocketHandler())
+	build := func() *api.MachineZm {
+		t.Helper()
+		l, err := c.Machines(ctx)
+		if err != nil || len(l.Machines) != 1 || l.Machines[0].Stats.Build() == nil {
+			t.Fatalf("machines %+v %v", l, err)
+		}
+		return l.Machines[0].Stats.Build()
+	}
+	if z := build(); z.Sources != nil {
+		t.Fatalf("no hook, yet sources: %v", z.Sources)
+	}
+	sources := []string{"sengirunners/potluck", "acme/zm"}
+	dm.Deps.UpdateSources = func() []string { return sources }
+	if z := build(); !slices.Equal(z.Sources, sources) {
+		t.Fatalf("sources: %v", z.Sources)
+	}
+	sources = nil // a config the program could not read
+	if z := build(); z.Sources != nil {
+		t.Fatalf("an unreadable config reports sources: %v", z.Sources)
+	}
+}

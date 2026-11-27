@@ -239,23 +239,29 @@ func (s *Service) closeLost(ctx context.Context, jobs []lostJob, state, what str
 }
 
 // lostOf lists the lost jobs GitHub has failed of one attempt of a run (a
-// row left from an earlier attempt is not this re-run's).
-func (s *Service) lostOf(ctx context.Context, repo string, run int64, attempt int) ([]lostJob, error) {
-	rows, err := s.db().QueryContext(ctx, `SELECT job, installation, attempt, why, bounced FROM runners_lost WHERE run = ? AND repo = ? COLLATE NOCASE AND state = ?
-		AND attempt = ? ORDER BY job`, run, repo, lostEnded, attempt)
+// row left from an earlier attempt is not this re-run's), and counts the
+// run's lost jobs GitHub still has running, in one read: a job GitHub ends
+// between two reads would be in neither, and its run re-run without it.
+func (s *Service) lostOf(ctx context.Context, repo string, run int64, attempt int) (ended []lostJob, running int, err error) {
+	rows, err := s.db().QueryContext(ctx, `SELECT job, installation, attempt, why, bounced, state FROM runners_lost WHERE run = ? AND repo = ? COLLATE NOCASE
+		AND (state = ? OR state = ? AND attempt = ?) ORDER BY job`, run, repo, lostRunning, lostEnded, attempt)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
-	var out []lostJob
 	for rows.Next() {
 		lo := lostJob{run: run, repo: repo}
-		if err := rows.Scan(&lo.job, &lo.installation, &lo.attempt, &lo.why, &lo.bounced); err != nil {
-			return nil, err
+		var state string
+		if err := rows.Scan(&lo.job, &lo.installation, &lo.attempt, &lo.why, &lo.bounced, &state); err != nil {
+			return nil, 0, err
 		}
-		out = append(out, lo)
+		if state == lostRunning {
+			running++
+			continue
+		}
+		ended = append(ended, lo)
 	}
-	return out, rows.Err()
+	return ended, running, rows.Err()
 }
 
 // rerun asks GitHub to run a run's lost jobs again (eventRerun), once the run
@@ -276,7 +282,10 @@ func (s *Service) rerun(ctx context.Context, body []byte) error {
 	if err := s.bounceRerunUnasked(ctx, q.Repo, q.Run, q.Attempt); err != nil {
 		return err
 	}
-	jobs, err := s.lostOf(ctx, q.Repo, q.Run, q.Attempt)
+	// Read once, before GitHub is asked: a lost job recorded by now that GitHub
+	// ends after this read is counted running here, so this try waits and the
+	// next re-runs it too.
+	jobs, running, err := s.lostOf(ctx, q.Repo, q.Run, q.Attempt)
 	if err != nil || len(jobs) == 0 {
 		return err
 	}
@@ -291,11 +300,7 @@ func (s *Service) rerun(ctx context.Context, body []byte) error {
 	if err != nil {
 		return err
 	}
-	var running, bounceReruns int
-	if err := s.db().QueryRowContext(ctx, `SELECT count(*) FROM runners_lost WHERE run = ? AND repo = ? COLLATE NOCASE AND state = ?`,
-		q.Run, q.Repo, lostRunning).Scan(&running); err != nil {
-		return err
-	}
+	var bounceReruns int
 	if err := s.db().QueryRowContext(ctx, `SELECT count(*) FROM runners_bounce_reruns WHERE run = ? AND repo = ? AND attempt < ? AND asked = 1`,
 		q.Run, q.Repo, q.Attempt).Scan(&bounceReruns); err != nil {
 		return err
@@ -438,7 +443,7 @@ func (s *Service) rerunDropped(ctx context.Context, it item, what string) {
 	if err := s.bounceRerunUnasked(ctx, q.Repo, q.Run, q.Attempt); err != nil {
 		s.logf("runners: run %d of %s: %v", q.Run, q.Repo, err)
 	}
-	if jobs, err := s.lostOf(ctx, q.Repo, q.Run, q.Attempt); err == nil {
+	if jobs, _, err := s.lostOf(ctx, q.Repo, q.Run, q.Attempt); err == nil {
 		_ = s.closeLost(ctx, jobs, jobLost, "; not re-run: "+strings.TrimSpace(what))
 	}
 }

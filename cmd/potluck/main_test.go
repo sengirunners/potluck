@@ -126,3 +126,29 @@ func TestHome(t *testing.T) {
 		t.Fatalf("~/.zm exists: %v", err)
 	}
 }
+
+// `potluck daemon stop` marks the home, so the Mac app starts no daemon by
+// itself; a daemon that starts takes the mark away.
+func TestDaemonStopMark(t *testing.T) {
+	user, err := os.MkdirTemp("", "plh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(user)
+	user, _ = filepath.EvalSymlinks(user)
+	home := filepath.Join(user, ".potluck")
+	marked := func() bool {
+		_, err := os.Stat(filepath.Join(home, "daemon-stopped"))
+		return err == nil
+	}
+	for range 2 {
+		stop := daemonAt(t, []string{"HOME=" + user}, home)
+		if marked() {
+			t.Fatal("marked stopped while the daemon runs")
+		}
+		stop()
+		if !marked() {
+			t.Fatal("daemon stop left no mark")
+		}
+	}
+}

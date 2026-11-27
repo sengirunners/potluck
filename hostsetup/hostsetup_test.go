@@ -110,7 +110,7 @@ func TestTrackerAgainArgsNeverHoldTheInvite(t *testing.T) {
 		t.Fatalf("before the join: %q %v %q", r.AgainArgs, r.NeedsInvite, r.Again)
 	}
 	st.Begin(hostsetup.Join, "joining")
-	st.Joined("friends")
+	st.Joined("friends", "01FRIENDS")
 	r, _ = hostsetup.Read(home)
 	if want := []string{"host", "friends", "--no-sudo=true", "--linux-slots=8", "--note=<invite code>"}; !slices.Equal(r.AgainArgs, want) || r.NeedsInvite ||
 		r.Again != "potluck host friends --no-sudo=true --linux-slots 8 --note <invite code>" {

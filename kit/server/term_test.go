@@ -781,3 +781,30 @@ func sameKey(a, b *api.HomeKey) bool {
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestParkedTermIncludesProvidedStandbyCopy(t *testing.T) {
+	ctx := context.Background()
+	old := hometerm.Peer{Via: core.ViaTunnel, URL: "https://old.example", Fingerprint: "old"}
+	cfg := termHome(t, &hometerm.Term{State: hometerm.Standby, Epoch: 3, Predecessor: &old})
+	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	listeners := func(d *core.Deps) ([]core.Module, error) {
+		d.Provide("standby-copy", func(context.Context, uint64) *api.StandbyCopy {
+			return &api.StandbyCopy{Set: &api.StandbySet{Stamp: stamp}}
+		})
+		return nil, nil
+	}
+	dm, err := New(ctx, cfg, DiscardLog(), wiring.Kit, ParkedListeners(listeners))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(dm.Close)
+	w := httptest.NewRecorder()
+	dm.Handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, api.TermPath, nil))
+	var got api.AuthorityTerm
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Standby == nil || got.Standby.Set == nil || !got.Standby.Set.Stamp.Equal(stamp) {
+		t.Fatalf("term did not expose the provided copy: %s", w.Body.String())
+	}
+}

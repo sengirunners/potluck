@@ -6,11 +6,17 @@
 # The private key lives only in the potluck-release environment (secret POTLUCK_RELEASE_KEY), which deploys from
 # main alone.
 #
-# Four jobs: pick (the newest green main), report (an issue while ci fails on main), menubar (builds Potluck
-# Menu.app on a GitHub-hosted Mac: swiftc is not Go) and release (builds the tarballs, with the app's zip inside
-# each darwin one, signs and publishes). The app is ad hoc signed, not Developer ID signed or notarized, until the
-# owners provide an Apple Developer ID (docs/menubar.md). A failed app build never blocks a release: the tarballs
-# ship without the zip, with a warning.
+# The jobs: pick (the newest green main); report (an issue while ci fails on main); menubar (builds Potluck.app on a
+# GitHub-hosted Mac: swiftc is not Go) and programs (the Mac programs); sign (signs both with the Developer ID) and try
+# (runs them); release (builds the tarballs, with the app's zip inside each darwin one, signs and publishes); startapp
+# (starts app.yml, which makes Potluck.zip, so that Apple's notary never holds this workflow's lock) and signreport (an
+# issue while signing fails).
+#
+# programs, sign, try and startapp run only with the repository variable POTLUCK_APPLE_SIGNING "on", and only on a push.
+# Off, pick says so, the app ships ad hoc signed, the programs as built, and there is no Potluck.zip. A failure in any
+# of them never blocks a release: it ships the same way, or without the app. Apple's keys are only in the potluck-apple
+# environment (main alone); here only sign names it, on a GitHub-hosted Mac, and it runs no code of the picked commit,
+# only sign.sh and signing-keychain.sh of this workflow's own commit. Setup and what can read what: docs/release-keys.md.
 #
 # Why this polls ci instead of running after it: a workflow_run trigger, or a release job inside ci.yml (needs: on
 # its jobs, or a workflow_call), puts a write-scoped job in a workflow a fork's pull request can start, which
@@ -42,6 +48,7 @@ jobs:
       tag: ${{ steps.pick.outputs.tag }}
       ci: ${{ steps.pick.outputs.ci }}
       ci_url: ${{ steps.pick.outputs.ci_url }}
+      apple: ${{ steps.decide.outputs.apple }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,7 +105,15 @@ jobs:
         run: |
           if [[ "${{ steps.pick.outputs.skip }}" != true ]]; then
             echo "go=true" >> "$GITHUB_OUTPUT"
+            if [[ "$APPLE" != on ]]; then
+              echo "::notice::Apple signing is not set up (POTLUCK_APPLE_SIGNING): the app ships ad hoc signed and there is no Potluck.zip (docs/release-keys.md)"
+            elif [[ "$EVENT" == push ]]; then
+              echo "apple=on" >> "$GITHUB_OUTPUT"
+            fi
           fi
+        env:
+          APPLE: ${{ vars.POTLUCK_APPLE_SIGNING }}
+          EVENT: ${{ github.event_name }}
         shell: bash
 
   # A main whose ci failed is never released, and that skip is a green run nobody sees: so a failed ci on the pushed
@@ -127,10 +142,10 @@ jobs:
         shell: bash
         run: bash scripts/ci/failing-issue.sh "ci failing on main" "$RESULT" "$URL" "ci on main (a commit whose ci failed is not released)"
 
-  # Potluck Menu.app, built on a GitHub-hosted Mac (never a self-hosted runner, whose owner a release must not
+  # Potluck.app, built on a GitHub-hosted Mac (never a self-hosted runner, whose owner a release must not
   # depend on) from the picked commit: arm64 and x86_64 joined, ad hoc signed, zipped with ditto.
   menubar:
-    name: build Potluck Menu.app
+    name: build Potluck.app
     needs: pick
     if: needs.pick.outputs.go == 'true'
     runs-on: macos-latest
@@ -149,8 +164,8 @@ jobs:
           set -euo pipefail
           # An older picked commit may predate the universal build: fail (the release then ships without the app).
           grep -q POTLUCK_MENU_UNIVERSAL macos/PotluckMenu/build.sh
-          app="$RUNNER_TEMP/app/Potluck Menu.app"
-          POTLUCK_MENU_UNIVERSAL=1 macos/PotluckMenu/build.sh "$RUNNER_TEMP/app"
+          # build.sh's last line is the app's path: the picked commit may have named it otherwise.
+          app=$(POTLUCK_MENU_UNIVERSAL=1 macos/PotluckMenu/build.sh "$RUNNER_TEMP/app" | tail -n 1)
           archs=$(lipo -archs "$app/Contents/MacOS/PotluckMenu")
           echo "archs: $archs"
           [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]]
@@ -164,9 +179,173 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The Mac programs as the release builds them, for sign.
+  programs:
+    name: build the Mac programs
+    needs: pick
+    if: needs.pick.outputs.apple == 'on'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.pick.outputs.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: build
+        env:
+          VERSION: ${{ needs.pick.outputs.version }}
+          COMMIT: ${{ needs.pick.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./scripts/release -version "$VERSION" -commit "$COMMIT" -programs "$RUNNER_TEMP/programs"
+          tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/programs.tar" programs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: potluck-programs
+          path: ${{ runner.temp }}/programs.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  # Signs the app that goes into the tarballs and the Mac programs. Before the release, so its manifest's SHA-256 sums
+  # cover the signed files. Not notarized here: the release would wait for Apple.
+  sign:
+    name: sign the app and the Mac programs
+    needs: [pick, menubar, programs]
+    if: ${{ !cancelled() && needs.pick.outputs.apple == 'on' }}
+    runs-on: macos-latest
+    environment: potluck-apple
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    outputs:
+      signed: ${{ steps.signed.outputs.signed }}
+    steps:
+      # Whether each is set, not what it is: no secret is in this step.
+      - name: is the potluck-apple environment whole?
+        env:
+          CERT: ${{ vars.POTLUCK_SIGN_CERT != '' }}
+          KEY: ${{ secrets.POTLUCK_SIGN_KEY != '' }}
+          NOTARY_KEY: ${{ secrets.POTLUCK_NOTARY_KEY != '' }}
+          NOTARY_KEY_ID: ${{ vars.POTLUCK_NOTARY_KEY_ID != '' }}
+          NOTARY_ISSUER: ${{ vars.POTLUCK_NOTARY_ISSUER != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "POTLUCK_SIGN_CERT $CERT, POTLUCK_SIGN_KEY $KEY, POTLUCK_NOTARY_KEY $NOTARY_KEY, POTLUCK_NOTARY_KEY_ID $NOTARY_KEY_ID, POTLUCK_NOTARY_ISSUER $NOTARY_ISSUER"
+          [[ "$CERT $KEY $NOTARY_KEY $NOTARY_KEY_ID $NOTARY_ISSUER" == "true true true true true" ]] ||
+            { echo "::error::POTLUCK_APPLE_SIGNING is on and the potluck-apple environment is not whole: docs/release-keys.md"; exit 1; }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: potluck-menu
+          path: ${{ runner.temp }}/in
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: potluck-programs
+          path: ${{ runner.temp }}/in
+      # Each in a directory of its own, and no links: an archive can place files nowhere else.
+      - name: unpack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/out" "$RUNNER_TEMP/app" "$RUNNER_TEMP/prog"
+          ditto -x -k "$RUNNER_TEMP/in/Potluck-Menu.zip" "$RUNNER_TEMP/app"
+          tar -C "$RUNNER_TEMP/prog" -xf "$RUNNER_TEMP/in/programs.tar"
+          links=$(find "$RUNNER_TEMP/app" "$RUNNER_TEMP/prog" -type l)
+          [[ -z "$links" ]] || { echo "::error::links in what is to be signed: $links"; exit 1; }
+      # After unpacking: nothing an artifact holds can replace these. This workflow's own commit, not the picked one:
+      # the same trust as this file.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            macos/PotluckMenu/sign.sh
+            macos/PotluckMenu/signing-keychain.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: put the signing key in a temporary keychain
+        id: keychain
+        env:
+          POTLUCK_SIGN_CERT: ${{ vars.POTLUCK_SIGN_CERT }}
+          POTLUCK_SIGN_KEY: ${{ secrets.POTLUCK_SIGN_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity=$(macos/PotluckMenu/signing-keychain.sh open "$RUNNER_TEMP/signing")
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+      - name: sign
+        env:
+          POTLUCK_SIGN_IDENTITY: ${{ steps.keychain.outputs.identity }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          macos/PotluckMenu/sign.sh "$RUNNER_TEMP/app/Potluck.app"
+          macos/PotluckMenu/sign.sh --programs "$RUNNER_TEMP/prog/programs"
+      - name: remove the keychain
+        if: ${{ always() && steps.keychain.outcome != 'skipped' }}
+        shell: bash
+        run: macos/PotluckMenu/signing-keychain.sh close "$RUNNER_TEMP/signing"
+      - name: pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent "$RUNNER_TEMP/app/Potluck.app" "$RUNNER_TEMP/out/Potluck-Menu.zip"
+          tar -C "$RUNNER_TEMP/prog" -cf "$RUNNER_TEMP/out/programs.tar" programs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: potluck-signed
+          path: ${{ runner.temp }}/out
+          if-no-files-found: error
+          retention-days: 1
+      - name: signed
+        id: signed
+        run: echo "signed=true" >> "$GITHUB_OUTPUT"
+
+  # Every Mac gets the signed programs, so they run once, on a Mac without the key, before the release takes them.
+  try:
+    name: run the signed programs
+    needs: [pick, sign]
+    if: ${{ !cancelled() && needs.sign.outputs.signed == 'true' }}
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: potluck-signed
+          path: ${{ runner.temp }}/signed
+      - name: check and run
+        env:
+          VERSION: ${{ needs.pick.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          tar -xf signed/programs.tar
+          ditto -x -k signed/Potluck-Menu.zip app
+          codesign --verify --deep --strict app/Potluck.app
+          codesign -dvv app/Potluck.app 2>&1 | grep '^Authority=Developer ID Application'
+          for f in programs/*/*; do
+            codesign --verify --strict "$f"
+            codesign -dvv "$f" 2>&1 | grep '^Authority=Developer ID Application'
+          done
+          export HOME="$RUNNER_TEMP/home" POTLUCK_HOME="$RUNNER_TEMP/potluck" POTLUCK_NO_AUTOSTART=1
+          programs/darwin_arm64/potluck --version | tee version
+          grep -qF "$VERSION" version
+          # The Intel ones run where Rosetta is.
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then programs/darwin_amd64/potluck --version; else echo "::notice::no Rosetta here: the Intel potluck was not run"; fi
+
   release:
     name: build, sign, publish
-    needs: [pick, menubar]
+    needs: [pick, menubar, sign, try]
     if: ${{ !cancelled() && needs.pick.outputs.go == 'true' }}
     runs-on: ${{ vars.RELEASE_RUNNER || 'sengi-standard-4-ubuntu-2404' }}
     environment: potluck-release
@@ -174,6 +353,8 @@ jobs:
       contents: write
       actions: read
     timeout-minutes: 45
+    outputs:
+      signed: ${{ steps.build.outputs.signed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -194,17 +375,41 @@ jobs:
         with:
           name: potluck-menu
           path: ${{ runner.temp }}/menubar
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        id: signed
+        if: needs.try.result == 'success'
+        continue-on-error: true
+        with:
+          name: potluck-signed
+          path: ${{ runner.temp }}/signed
       - name: build
+        id: build
+        env:
+          VERSION: ${{ needs.pick.outputs.version }}
+          COMMIT: ${{ needs.pick.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
+          signed=$RUNNER_TEMP/signed
+          if [[ "${{ steps.signed.outcome }}" == success ]]; then
+            # The signed app and programs, both or neither: the release builds the programs too, and refuses a signed
+            # one that is not its own build.
+            if tar -C "$signed" -xf "$signed/programs.tar" &&
+              go run ./scripts/release -version "$VERSION" -commit "$COMMIT" -out dist -menubar "$signed/Potluck-Menu.zip" -signed "$signed/programs"; then
+              echo "signed=true" >> "$GITHUB_OUTPUT"
+              echo "app=signed" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::warning::the signed app and Mac programs could not be packed: this release ships the unsigned ones"
+          fi
           app=()
           if [[ "${{ needs.menubar.result }}" == success && "${{ steps.app.outcome }}" == success && -f "$RUNNER_TEMP/menubar/Potluck-Menu.zip" ]]; then
             app=(-menubar "$RUNNER_TEMP/menubar/Potluck-Menu.zip")
+            echo "app=adhoc" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::no Potluck Menu.app this release (the menubar job ${{ needs.menubar.result }}): the darwin tarballs ship without it"
+            echo "::warning::no Potluck.app this release (the menubar job ${{ needs.menubar.result }}): the darwin tarballs ship without it"
           fi
-          go run ./scripts/release -version "${{ needs.pick.outputs.version }}" -commit "${{ needs.pick.outputs.sha }}" -out dist "${app[@]}"
+          go run ./scripts/release -version "$VERSION" -commit "$COMMIT" -out dist "${app[@]}"
       - name: sign
         env:
           POTLUCK_RELEASE_KEY: ${{ secrets.POTLUCK_RELEASE_KEY }}
@@ -240,9 +445,10 @@ jobs:
         run: |
           set -euo pipefail
           notes="Signed potluck release of green main ${{ needs.pick.outputs.sha }}. Install: install.sh (README). Upgrade: potluck upgrade. Yank it (nothing installs it): gh release edit ${{ needs.pick.outputs.tag }} --prerelease"
-          if [[ "${{ needs.menubar.result }}" == success && "${{ steps.app.outcome }}" == success && -f "$RUNNER_TEMP/menubar/Potluck-Menu.zip" ]]; then
-            notes="$notes. The darwin tarballs also carry Potluck Menu.app (the menu bar item), NOT Developer ID signed or notarized: install it with install.sh --menubar (docs/menubar.md)."
-          fi
+          case "${{ steps.build.outputs.app }}" in
+            signed) notes="$notes. The darwin tarballs also carry Potluck.app (the menu bar item), Developer ID signed: install it with install.sh --menubar (docs/menubar.md)." ;;
+            adhoc) notes="$notes. The darwin tarballs also carry Potluck.app (the menu bar item), NOT Developer ID signed or notarized: install it with install.sh --menubar (docs/menubar.md)." ;;
+          esac
           gh release create "${{ needs.pick.outputs.tag }}" dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/manifest.json.sig dist/manifest.json.sshsig \
             --target "${{ needs.pick.outputs.sha }}" --title "potluck ${{ needs.pick.outputs.version }}" --latest --notes "$notes"
       # Keep the newest 30 releases and any younger than 14 days; a failure here never fails the release.
@@ -262,3 +468,45 @@ jobs:
                 gh release delete "$tag" --yes --cleanup-tag && echo "pruned $tag (published $at)"
               fi
             done
+
+  # Potluck.zip is made by app.yml, in its own time: a release never waits for the notary of the one before it.
+  startapp:
+    name: start Potluck.zip
+    needs: [pick, release]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.signed == 'true' }}
+    runs-on: ubuntu-slim
+    permissions:
+      actions: write
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ needs.pick.outputs.sha }}
+        run: gh workflow run app.yml --ref main -f "sha=$SHA"
+        shell: bash
+
+  # A release whose signing failed still ships and looks green: one issue while that is so, closed by the next that is
+  # signed. Nothing to say when only the release failed.
+  signreport:
+    name: report a failed signing
+    needs: [pick, sign, release, startapp]
+    if: ${{ !cancelled() && needs.pick.outputs.apple == 'on' && (needs.sign.result != 'success' || needs.release.result == 'success') }}
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+      issues: write
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/failing-issue.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.startapp.result == 'success' && 'success' || 'failure' }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: bash scripts/ci/failing-issue.sh "Signing the Mac app and programs failing" "$RESULT" "$URL" "Building and signing Potluck.app and the Mac programs, or starting the app workflow (the release is out, and its notes say whether it is signed)"

@@ -70,15 +70,7 @@ func soloMachineOn(t *testing.T, tn *tailnettest.Net, bug string) *machine {
 	t.Cleanup(func() {
 		teamlink.BeatEvery, shareRunner, detectHost, shareDriver = oldBeat, oldRunner, oldDetect, oldDriver
 	})
-	teamlink.BeatEvery = time.Hour // beaten by hand, below
-	shareRunner = runnerFunc(func(context.Context, string, ...string) (hostprobe.Result, error) {
-		return hostprobe.Result{Stdout: "PASS"}, nil
-	})
-	detectHost = func(context.Context, string) hostprobe.Report {
-		return hostprobe.Report{OS: "linux", Arch: "amd64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 100, KVM: true,
-			Layers: []hostprobe.Layer{{Name: "oci", Available: true, Supported: true, CLI: "docker", Runtime: "runsc", Runtimes: []string{"runsc"}}}}
-	}
-	shareDriver = "ref"
+	fakeHost()
 
 	m := startMachine(t, tn, "solo", "judy@example.com")
 	fix, _ := filepath.EvalSymlinks(t.TempDir())
@@ -98,4 +90,18 @@ func soloMachineOn(t *testing.T, tn *tailnettest.Net, bug string) *machine {
 	}
 	t.Cleanup(beat(module[*teamlink.Service](t, m)))
 	return m
+}
+
+// fakeHost makes host runs in this process see a Linux machine that can
+// share and whose every command passes.
+func fakeHost() {
+	teamlink.BeatEvery = time.Hour // beaten by hand
+	shareRunner = runnerFunc(func(context.Context, string, ...string) (hostprobe.Result, error) {
+		return hostprobe.Result{Stdout: "PASS"}, nil
+	})
+	detectHost = func(context.Context, string) hostprobe.Report {
+		return hostprobe.Report{OS: "linux", Arch: "amd64", Cores: 8, RAMMB: 16 << 10, FreeDiskGB: 100, KVM: true,
+			Layers: []hostprobe.Layer{{Name: "oci", Available: true, Supported: true, CLI: "docker", Runtime: "runsc", Runtimes: []string{"runsc"}}}}
+	}
+	shareDriver = "ref"
 }

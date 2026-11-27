@@ -22,7 +22,7 @@ func TestHostStatusProbeOnAnEmptyHome(t *testing.T) {
 	t.Cleanup(func() { setupGOOS, menuParent, probeMac = oldGOOS, oldParent, oldProbe })
 	setupGOOS, menuParent = "darwin", func() string { return "" }
 	probed := 0
-	probeMac = func(context.Context) hostprobe.MacParts {
+	probeMac = func(context.Context, string) hostprobe.MacParts {
 		probed++
 		return hostprobe.MacParts{
 			Report:  hostprobe.Report{OS: "darwin", Arch: "arm64", MacOS: "26.1", TartDir: filepath.Join(e.home, ".tart"), TartFreeGB: 200},
@@ -75,7 +75,7 @@ func TestHostStatusProbeOnAnEmptyHome(t *testing.T) {
 	s = status("--probe")
 	p := s.Checks[1]
 	if p.ID != "potluck" || p.State != menubar.Todo || s.NextID != "potluck" || p.Do == nil ||
-		strings.Join(p.Do.Args, " ") != "upgrade --release "+rel+" --dir "+install || !strings.HasPrefix(s.Next, "potluck upgrade --release ") {
+		strings.Join(p.Do.Args, " ") != "--json upgrade --release "+rel+" --dir "+install || !strings.HasPrefix(s.Next, "potluck upgrade --release ") {
 		t.Errorf("bundled: next %q (%s), %+v %+v", s.Next, s.NextID, p, p.Do)
 	}
 

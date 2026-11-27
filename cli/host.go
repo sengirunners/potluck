@@ -30,6 +30,7 @@ import (
 	"github.com/sengirunners/potluck/hostswap"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/project"
+	"github.com/sengirunners/potluck/menubar"
 	"github.com/sengirunners/potluck/roomwait"
 )
 
@@ -356,6 +357,7 @@ type shareFlags struct {
 	// inviteStdin is --invite-stdin: host's argument (the invite code, or
 	// a pool) is read from stdin, so it is in no process's argv.
 	inviteStdin bool
+	instead     string // --instead-of-invite (menubar.InsteadFlag)
 	linuxSlots  int
 	wait        time.Duration // --wait: a size's check waits this long for a free slot (roomwait)
 }
@@ -393,6 +395,8 @@ func (s *shareFlags) add(cmd *cobra.Command, a *app) {
 	fl.StringVar(&s.when, "when", "", fmt.Sprintf("when sandboxes may run: any (any time; --reclaim-idle-s 0) or away (macOS: only while you are away from the keyboard and pointer; --reclaim-idle-s %d) (default: what an earlier host run chose, else away on macOS, any elsewhere)", hostprobe.DefaultReclaimIdleS))
 	fl.BoolVar(&s.detach, "detach", false, "after the checks and the admin step, go on in the background, its words in the home's host.log ("+a.cmd("host status")+" says how it goes)")
 	fl.BoolVar(&s.inviteStdin, flagInviteStdin, false, "read the invite code (or pool) as one line from stdin instead of an argument, so no other user sees it in the process list")
+	fl.StringVar(&s.instead, menubar.InsteadFlag, "", "with no invite code or pool given, the pool to share with (empty: refuse)")
+	_ = fl.MarkHidden(menubar.InsteadFlag) // the setup window's
 	if al := a.host.AfterLend; al != nil && al.Skip != "" {
 		fl.BoolVar(&s.skipAfter, al.Skip, false, al.SkipUsage)
 	}
@@ -569,7 +573,7 @@ func printShare(w io.Writer, res hostprobe.ShareResult, p prefix) {
 	for _, p := range res.Pulls {
 		switch {
 		case res.ShowCommands:
-			fmt.Fprintf(w, "%s: %s\n", verb, strings.Join(p.Command, " "))
+			fmt.Fprintf(w, "%s: %s\n", verb, shellLine(p.Command))
 		case res.DryRun:
 			fmt.Fprintf(w, "would %s\n", p.What)
 		}

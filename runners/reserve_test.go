@@ -205,7 +205,7 @@ func TestLostBoxGitHubDoesNotAnswerForIsGivenUp(t *testing.T) {
 
 // A box that fails on its own before its job started (it ended by itself or
 // was lost: its VM stopped, its supervisor died) points at its host: those
-// count against the job's serves, and the job is given up after the third.
+// count against the job's serves, and the job is served again only later after the third.
 func TestBoxThatFailsOnItsOwnUsesUpTheServes(t *testing.T) {
 	for i, state := range []string{"ended", "lost"} {
 		t.Run(state, func(t *testing.T) {
@@ -222,11 +222,11 @@ func TestBoxThatFailsOnItsOwnUsesUpTheServes(t *testing.T) {
 				}
 				return h, err
 			})
-			eventuallyBox(t, fmt.Sprintf("%d given up", id), func() bool {
+			eventuallyBox(t, fmt.Sprintf("%d out of serves", id), func() bool {
 				f.svc.Watch(ctx)
-				return f.jobs(t)[id].State == "failed"
+				return strings.Contains(f.jobs(t)[id].Why, "failed 3 times: served again at")
 			})
-			if j := f.jobs(t)[id]; !strings.Contains(j.Why, "3 times: not served again") || j.Runner != fmt.Sprintf("potluck-%d-3", id) {
+			if j := f.jobs(t)[id]; j.State != "taken" || j.Runner != fmt.Sprintf("potluck-%d-3", id) {
 				t.Errorf("job %d: %+v", id, j)
 			}
 		})

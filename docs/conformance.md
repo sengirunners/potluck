@@ -84,7 +84,7 @@ behind, no url or secret leaked, verb timing, spend) always run. Groups run in t
 
 Network flags: `--net-allow host:port` (must open; proves a network), `--net-forbid host:port` (must not open: a
 LAN host, this host's LAN address, a tailnet or metadata address; see below for which addresses it can prove),
-`--net-mail host[:port]` (a bare host means ports 25, 465 and 587), `--net-resolve name[:port]`, `--net-peers` and `--net-peer-port`. Other tuning: `--target`, `--config k=v`,
+`--net-mail host[:port]` (a bare host means ports 25, 465 and 587), `--net-resolve name[:port]`, `--net-peers`, `--net-multicast` and `--net-peer-port`. Other tuning: `--target`, `--config k=v`,
 `--ttl-short` (default 5), `--grace` (default 30s), `--run-wait` (default 5m), `--reclaim-in` (default 1m).
 
 A `--net-forbid` host is resolved on the suite's machine and each address it resolves to is checked as a literal,
@@ -124,6 +124,13 @@ Flags that set up what it can see:
 - `--net-peers` runs two at once and checks neither reaches the other over IPv4 or IPv6 link-local neighbours (the
   probe's `net` subcommand). A guest without `nc`, `ip` or `ping` is a SKIP; a probe committed before that subcommand
   existed fails with "re-commit `--print-probe`".
+- `--net-multicast` checks that a datagram a box sends to a multicast group reaches no program on this
+  machine. The suite joins the group on every up IPv4 interface that takes multicast (a VM's bridge among them) and first
+  shows a datagram sent from here arrives; if none does (a machine whose multicast is blocked for this process, as
+  macOS's local network privacy can do to an app) the check is a SKIP. A guest without `nc` is a SKIP; a committed
+  probe from before it fails with "commit --print-probe again". A failed interface join is not proof of isolation,
+  and a failed guest send cannot pass. Run targets skip this check because their VM bridge may be created after
+  the suite starts listening; only an already acquired box has the required listening setup.
 
 For every kind it checks:
 
@@ -238,8 +245,8 @@ lines go to stderr, so stdout stays one JSON array; there each skipped result ha
 
 Skips that happen without being asked for:
 
-- `net` skips as a whole when none of `--net-allow`, `--net-forbid`, `--net-mail`, `--net-resolve`, `--net-peers`
-  is given (`conformance/net.go`). A report with that skip says nothing about isolation.
+- `net` skips as a whole when none of `--net-allow`, `--net-forbid`, `--net-mail`, `--net-resolve`, `--net-peers`,
+  `--net-multicast` is given (`conformance/net.go`). A report with that skip says nothing about isolation.
 - For a box, the reclaim check "a reclaim ends the resource with no call to the driver" is always a SKIP. Only
   runs (with a heartbeat file, so not under `--remote`) and databases (with a database probe) can be seen from
   outside. For a box, expiry's "ends with no call" check is a SKIP too, unless `--strict`, which runs a weaker box

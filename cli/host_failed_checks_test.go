@@ -85,7 +85,7 @@ func TestHostNoSizePassedSaysWhatNext(t *testing.T) {
 			t.Errorf("host's stages lack %q:\n%s", want, errOut)
 		}
 	}
-	if st := m.ok(t, "host", "status"); !strings.Contains(st, "Setup blocked at validation (3 of 5)") ||
+	if st := m.ok(t, "host", "status"); !strings.Contains(st, "Setup stopped while testing that jobs run safely") ||
 		!strings.Contains(st, "next: fix what the validation stage says, then run again: potluck host trial --name-prefix solo --no-sudo=true --reclaim-idle-s 0 --sizes c1m2\n") {
 		t.Errorf("host status after the blocked run:\n%s", st)
 	}

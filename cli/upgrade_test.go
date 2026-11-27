@@ -95,3 +95,16 @@ func TestOldDaemonBin(t *testing.T) {
 		}
 	}
 }
+
+func TestProgramLast(t *testing.T) {
+	names := []string{"potluck", "potluck-driver-local", "potluck-e2b"}
+	if got := strings.Join(programLast(names), " "); got != "potluck-driver-local potluck-e2b potluck" {
+		t.Error(got)
+	}
+	if names[0] != "potluck" {
+		t.Error("the caller's names were changed")
+	}
+	if got := strings.Join(programLast(names[1:]), " "); got != "potluck-driver-local potluck-e2b" {
+		t.Error(got)
+	}
+}

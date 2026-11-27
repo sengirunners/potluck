@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/sengirunners/potluck/attach"
 	"io"
 	"log/slog"
 	"net"
@@ -34,66 +35,6 @@ import (
 	"github.com/sengirunners/potluck/runtarget"
 	"github.com/sengirunners/potluck/wiring"
 )
-
-// The one rule for which daemon potluck's commands use (chooseDaemon).
-func TestChooseDaemon(t *testing.T) {
-	compute := append([]string{"core", "teamlink"}, wiring.ComputeModules...)
-	supper := daemonrecord.Record{Program: "supper", Home: "/u/.supper", Socket: "/u/.supper/supper.sock", Modules: compute}
-	other := daemonrecord.Record{Program: "other", Home: "/u/.other", Socket: "/u/.other/o.sock", Modules: compute}
-	kitOnly := daemonrecord.Record{Program: "kitonly", Home: "/u/.kit", Socket: "/u/.kit/k.sock", Modules: []string{"core", "teamlink"}}
-	own := daemonrecord.Record{Program: "potluck", Home: "/tmp/pl", Socket: "/tmp/pl/potluck.sock", Modules: compute}
-	for _, tc := range []struct {
-		name   string
-		facts  daemonFacts
-		live   []daemonrecord.Record
-		liveEr error
-		want   string // the program attached to; "" potluck's own
-		err    string
-		noRead bool // the records are never read
-	}{
-		{name: "box credential", facts: daemonFacts{BoxCredential: true, HomeEnv: "/u/.supper"}, live: []daemonrecord.Record{supper}, noRead: true},
-		{name: "own home exists", facts: daemonFacts{OwnHome: true}, live: []daemonrecord.Record{supper}, noRead: true},
-		{name: "POTLUCK_HOME: a new home", facts: daemonFacts{HomeEnv: "/u/new"}, live: []daemonrecord.Record{supper}},
-		{name: "POTLUCK_HOME: another program's running home", facts: daemonFacts{HomeEnv: "/u/.supper"}, live: []daemonrecord.Record{other, supper}, want: "supper"},
-		{name: "POTLUCK_HOME: a home whose daemon serves no compute", facts: daemonFacts{HomeEnv: "/u/.kit"}, live: []daemonrecord.Record{kitOnly}},
-		{name: "one other compute daemon", live: []daemonrecord.Record{supper, kitOnly, own}, want: "supper"},
-		{name: "none", live: []daemonrecord.Record{kitOnly, own}},
-		{name: "no records", live: nil},
-		{name: "two others", live: []daemonrecord.Record{supper, other}, err: "more than one Potluck daemon (supper's at /u/.supper, other's at /u/.other)"},
-		{name: "records unreadable", liveEr: errors.New("permission denied"), err: "permission denied"},
-		{name: "records unreadable, POTLUCK_HOME set", facts: daemonFacts{HomeEnv: "/u/.supper"}, liveEr: errors.New("permission denied")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			read := false
-			got, err := chooseDaemon(tc.facts, func(keep func(daemonrecord.Record) bool) ([]daemonrecord.Record, error) {
-				read = true
-				var out []daemonrecord.Record
-				for _, r := range tc.live {
-					if keep(r) {
-						out = append(out, r)
-					}
-				}
-				return out, tc.liveEr
-			})
-			switch {
-			case tc.err != "":
-				if err == nil || !strings.Contains(err.Error(), tc.err) || (strings.Contains(tc.err, "more than") && !strings.Contains(err.Error(), "POTLUCK_HOME=")) {
-					t.Fatalf("err %v, want %q", err, tc.err)
-				}
-				return
-			case err != nil:
-				t.Fatal(err)
-			}
-			name := ""
-			if got != nil {
-				name = got.Program
-			}
-			if name != tc.want || (tc.noRead && read) {
-				t.Fatalf("attached to %q (records read: %v), want %q", name, read, tc.want)
-			}
-		})
-	}
-}
 
 // noop is a module that serves nothing: a program built on Potluck adds
 // modules of its own on top of wiring.Compute.
@@ -304,7 +245,7 @@ func TestPotluckUsesAnotherProgramsDaemon(t *testing.T) {
 	}
 	// Potluck's own daemon serves compute, so supper's commands' rule would
 	// find it; potluck's never attaches to its own program's.
-	if got, err := chooseDaemon(daemonFacts{}, func(keep func(daemonrecord.Record) bool) ([]daemonrecord.Record, error) {
+	if got, err := attach.Choose(attach.Facts{}, func(keep func(daemonrecord.Record) bool) ([]daemonrecord.Record, error) {
 		if keep(live[1]) {
 			return live[1:], nil
 		}
@@ -334,9 +275,9 @@ func TestClientStartsOnlyPotlucksDaemon(t *testing.T) {
 		home  daemonHome
 		start bool
 	}{
-		{"potluck's own home", daemonHome{cfg: cfg, existed: true}, true},
-		{"another program's daemon", daemonHome{cfg: cfg, other: supper, owner: "supper", existed: true}, false},
-		{"another program's home, its daemon not running", daemonHome{cfg: cfg, owner: "supper", existed: true}, false},
+		{"potluck's own home", daemonHome{Cfg: cfg, Existed: true}, true},
+		{"another program's daemon", daemonHome{Cfg: cfg, Other: supper, Owner: "supper", Existed: true}, false},
+		{"another program's home, its daemon not running", daemonHome{Cfg: cfg, Owner: "supper", Existed: true}, false},
 	} {
 		a := programApp(Program{}, nil, io.Discard, io.Discard)
 		a.running, a.homeDone, a.homeV = create, true, tc.home
@@ -384,11 +325,11 @@ func TestUpgradeFilesOnly(t *testing.T) {
 		err  error
 		want string // in the reason; "" upgrades the home and daemon too
 	}{
-		{"potluck's own home", daemonHome{cfg: cfg, existed: true}, nil, ""},
-		{"no home yet", daemonHome{cfg: cfg}, nil, "no home yet"},
-		{"another program's daemon", daemonHome{cfg: cfg, other: supper, owner: "supper", existed: true}, nil,
+		{"potluck's own home", daemonHome{Cfg: cfg, Existed: true}, nil, ""},
+		{"no home yet", daemonHome{Cfg: cfg}, nil, "no home yet"},
+		{"another program's daemon", daemonHome{Cfg: cfg, Other: supper, Owner: "supper", Existed: true}, nil,
 			"this machine's Potluck daemon is supper's (home /u/.supper, pid 7), and potluck's commands use it; potluck upgrade leaves that daemon and its home as they are: supper keeps them, so update supper its own way"},
-		{"another program's home", daemonHome{cfg: cfg, owner: "supper", existed: true}, nil, "supper's home"},
+		{"another program's home", daemonHome{Cfg: cfg, Owner: "supper", Existed: true}, nil, "supper's home"},
 		{"the rule refuses", daemonHome{}, errors.New("more than one Potluck daemon"), "more than one"},
 	} {
 		got := filesOnlyWhy(tc.home, tc.err)
@@ -403,7 +344,7 @@ func TestUpgradeFilesOnly(t *testing.T) {
 	}
 	var o bytes.Buffer
 	a := programApp(Program{}, nil, &o, io.Discard)
-	if err := a.upgradeFilesOnly(dir, stage, upgrade.Staged{Names: []string{"potluck"}}, "the reason", false); err != nil {
+	if err := a.upgradeFilesOnly(t.Context(), dir, stage, upgrade.Staged{Names: []string{"potluck"}}, "the reason", false); err != nil {
 		t.Fatal(err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dir, "potluck")); err != nil || string(b) != "new" || !strings.Contains(o.String(), "the reason") {
@@ -424,18 +365,18 @@ func TestAutostartWaitsForARestartingDaemon(t *testing.T) {
 	t.Setenv(EnvHome, "")
 	records := filepath.Join(user, "records")
 	t.Setenv(daemonrecord.EnvDir, records)
-	old := otherWait
-	t.Cleanup(func() { otherWait = old })
+	old := attach.StartWait
+	t.Cleanup(func() { attach.StartWait = old })
 
 	// No records directory: nothing built on Potluck ran here; no wait.
-	otherWait = time.Hour
+	attach.StartWait = time.Hour
 	if o := programApp(Program{}, nil, io.Discard, io.Discard).otherStarting(context.Background()); o != nil {
 		t.Fatalf("no records: %+v", o)
 	}
 	if err := os.MkdirAll(records, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	otherWait = 200 * time.Millisecond
+	attach.StartWait = 200 * time.Millisecond
 	if o := programApp(Program{}, nil, io.Discard, io.Discard).otherStarting(context.Background()); o != nil {
 		t.Fatalf("no daemon came back: %+v", o)
 	}
@@ -457,7 +398,7 @@ func TestAutostartWaitsForARestartingDaemon(t *testing.T) {
 		_, _ = daemonrecord.Write(context.Background(), records, daemonrecord.Record{Program: "supper", Home: filepath.Join(user, ".supper"),
 			Socket: sock, PID: os.Getpid(), Modules: wiring.ComputeModules})
 	}()
-	otherWait = 10 * time.Second
+	attach.StartWait = 10 * time.Second
 	if o := programApp(Program{}, nil, io.Discard, io.Discard).otherStarting(context.Background()); o == nil || o.Program != "supper" {
 		t.Fatalf("supper's daemon came back: %+v", o)
 	}

@@ -37,27 +37,6 @@ struct JobsView: Decodable {
     let note: String?
 }
 
-/// The logo: a red pot with a green handle (the site's header SVG, 32x32).
-func potImage() -> NSImage {
-    let img = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { r in
-        let s = r.width / 32
-        // M4 14 h24 a12 10 0 0 1 -24 0 z: the lower half of an ellipse
-        // centred at (16, 14), 12 wide and 10 deep (y grows down here).
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: NSRect(x: 0, y: 14 * s, width: 32 * s, height: 18 * s)).addClip()
-        let bowl = NSBezierPath(ovalIn: NSRect(x: 4 * s, y: 4 * s, width: 24 * s, height: 20 * s))
-        NSColor(red: 0xC8 / 255.0, green: 0x40 / 255.0, blue: 0x2F / 255.0, alpha: 1).setFill()
-        bowl.fill()
-        NSGraphicsContext.restoreGraphicsState()
-        let lid = NSBezierPath(roundedRect: NSRect(x: 13 * s, y: 9 * s, width: 6 * s, height: 3 * s), xRadius: 1.5 * s, yRadius: 1.5 * s)
-        NSColor(red: 0x2F / 255.0, green: 0x6B / 255.0, blue: 0x34 / 255.0, alpha: 1).setFill()
-        lid.fill()
-        return true
-    }
-    img.isTemplate = false
-    return img
-}
-
 /// What a click on an item runs, fixed when the item is drawn.
 final class Action: NSObject {
     let label: String
@@ -77,6 +56,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// and the menu offers nothing.
     var held = false
     var clicks = 0 // menu choices running
+    var login = LoginItem.system
+    var launch = Launch()
 
     /// A removal is not left without the app it answers to.
     func applicationShouldTerminate(_ a: NSApplication) -> NSApplication.TerminateReply {
@@ -86,13 +67,42 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        item.button?.image = potImage()
-        item.button?.toolTip = "Potluck"
+        appEnvironment = { [login] in ["POTLUCK_LOGIN_ITEM": login.state()] }
         menu.delegate = self
         menu.autoenablesItems = false
         item.menu = menu
         draw()
+        Dock.follow()
+        launch.places.record(Bundle.main.bundlePath)
+        // After a link this start came with is in.
+        DispatchQueue.main.async { self.start() }
+    }
+
+    /// Begins asking potluck, and settles where the app is (Launch.swift).
+    func start() {
+        if offerMove(asked: false) { return } // another copy goes on
+        guard noPotluckHere(), Bundled.app.carried else {
+            Bundled.app.clear()
+            return begin()
+        }
+        busy = true // nothing is asked of potluck before there is one
+        Bundled.app.preparing = true
+        UserDefaults.standard.set(true, forKey: "setupShown")
+        setupWindow(setupArgs).show()
+        DispatchQueue.global(qos: .userInitiated).async {
+            Bundled.app.prepare()
+            DispatchQueue.main.async {
+                self.busy = false
+                self.begin()
+                self.setup?.load()
+            }
+        }
+    }
+
+    func begin() {
+        launch.settled = true
         refresh()
+        takeInvite()
         // Each ask has the daemon ask every shared size's driver, so not often.
         Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.refresh() }
     }
@@ -118,8 +128,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 self.busy = false
                 if let st = st { self.status = st }
+                if Bundled.app.potluck != nil, installedPotluck() != nil, self.clicks == 0, self.setup?.acting != true { Bundled.app.clear() }
                 self.problem = why
                 self.draw()
+                // From the run loop, not this block: a question it asks would
+                // hold up every answer still to come.
+                if let st = st { RunLoop.main.perform { self.settle(st) } }
             }
         }
     }
@@ -133,10 +147,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func draw() {
+        let glyph = menuBarGlyph(attention: !held && needsAttention(status, problem: problem))
+        item.button?.image = glyph
+        item.button?.toolTip = glyph.accessibilityDescription
         menu.removeAllItems()
         if held {
             menu.addItem(line(uninstall?.removed == true ? "Potluck is removed from this Mac" : "Removing Potluck…", size: 13, bold: true))
-            let mi = NSMenuItem(title: "Show the uninstall window", action: #selector(showUninstall), keyEquivalent: "")
+            let mi = NSMenuItem(title: "Show Uninstall Window", action: #selector(showUninstall), keyEquivalent: "")
             mi.target = self
             menu.addItem(mi)
         } else if let m = status?.menu {
@@ -145,7 +162,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let n = m.note, !n.isEmpty { menu.addItem(line(n, size: 11, color: .secondaryLabelColor)) }
             if !m.cores.isEmpty { menu.addItem(line(m.cores, size: 11, color: .secondaryLabelColor, mono: true)) }
             if let mem = m.memory, !mem.isEmpty { menu.addItem(line(mem, size: 11, color: .secondaryLabelColor)) }
-            if let p = problem { menu.addItem(line("not current: " + p, size: 11, color: .systemRed)) }
+            if problem != nil { menu.addItem(line("Couldn’t refresh. Showing the last status.", size: 11, color: .systemRed)) }
             menu.addItem(.separator())
             for it in m.items { menu.addItem(choice(it)) }
             if let ds = m.dials, !ds.isEmpty {
@@ -171,10 +188,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } else {
             menu.addItem(line("Potluck", size: 13, bold: true))
-            menu.addItem(line(problem ?? "reading…", size: 11, color: .secondaryLabelColor))
+            menu.addItem(line(problem == nil ? "Checking this Mac…" : "Couldn’t check this Mac.", size: 11, color: .secondaryLabelColor))
         }
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Potluck Menu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Potluck", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
@@ -198,6 +215,19 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func showUninstall() { uninstall?.show() }
 
+    /// The setup window, once the app has settled where it runs; during and
+    /// after a removal, the uninstall window.
+    @objc func showSetup() {
+        if held { return showUninstall() }
+        if launch.settled || setup != nil { setupWindow(setupArgs).show() } // the first one opens while the app unpacks
+    }
+
+    /// The app was opened again (Finder, Launchpad, its Dock icon).
+    func applicationShouldHandleReopen(_ a: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !Dock.bringUp() { showSetup() }
+        return false
+    }
+
     /// The uninstall window's word that a removal runs (or stopped short).
     func hold(_ on: Bool) {
         held = on
@@ -210,6 +240,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         draw()
     }
 
+    func setupWindow(_ args: [String]) -> SetupWindow {
+        if let w = setup { return w }
+        let w = SetupWindow(args: args)
+        w.appAct = { [weak self] what, done in self?.loginAct(what, done) }
+        setup = w
+        return w
+    }
+
     @objc func openWindow(_ mi: NSMenuItem) {
         guard !held, let id = mi.representedObject as? String,
               let w = status?.menu.windows?.first(where: { $0.id == id }), let args = w.args else { return }
@@ -218,8 +256,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if jobs == nil { jobs = JobsWindow(args: args) }
             jobs?.show()
         case "setup":
-            if setup == nil { setup = SetupWindow(args: args) }
-            setup?.show()
+            setupWindow(args).show()
         case "uninstall":
             if uninstall == nil {
                 uninstall = UninstallWindow(args: args, blocked: { [weak self] in
@@ -228,6 +265,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }, holding: { [weak self] on in self?.hold(on) },
                    quiet: { [weak self] in self?.busy != true && self?.setup?.asking != true && self?.jobs?.loading != true })
             }
+            uninstall?.loginOff = { [login] in if login.state() != "off" { try? login.turnOff() } }
             uninstall?.show()
         default:
             return // a window this build cannot draw
@@ -241,8 +279,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             a.messageText = q
             a.addButton(withTitle: act.label)
             a.addButton(withTitle: "Cancel")
-            NSApp.activate(ignoringOtherApps: true)
-            if a.runModal() != .alertFirstButtonReturn { return }
+            if Dock.ask(a) != .alertFirstButtonReturn { return }
         }
         clicks += 1
         DispatchQueue.global(qos: .userInitiated).async {
@@ -253,8 +290,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let a = NSAlert()
                     a.messageText = "\(act.label) did not work"
                     a.informativeText = err
-                    NSApp.activate(ignoringOtherApps: true)
-                    a.runModal()
+                    _ = Dock.ask(a)
                 }
                 self.refresh()
             }
@@ -322,8 +358,7 @@ final class JobsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     func show() {
         window.center()
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        Dock.show(window)
         load()
     }
 
@@ -348,10 +383,12 @@ final class JobsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate {
 
     func draw(_ v: JobsView?, _ why: String?) {
         guard let v = v else {
-            note.stringValue = "not current: " + (why ?? "no answer")
+            note.stringValue = "Couldn’t refresh jobs. Try again in a moment."
+            note.toolTip = why
             note.textColor = .systemRed
             return
         }
+        note.toolTip = nil
         summary.stringValue = v.summary
         energy.stringValue = v.energy.line
         how.stringValue = v.energy.how
@@ -394,5 +431,5 @@ let app = NSApplication.shared
 let delegate = App()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
-app.mainMenu = editMenu()
+app.mainMenu = mainMenu()
 app.run()

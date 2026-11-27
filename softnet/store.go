@@ -521,7 +521,33 @@ func (s Store) remove(path string) {
 	os.RemoveAll(path)
 }
 
-// Uninstall disarms every build and removes the store. A box already
+// parent is the folder Dir is in when the store made it ("": Top, or above).
+func (s Store) parent() string {
+	p := filepath.Dir(s.Dir)
+	if rel, err := filepath.Rel(s.Top, p); s.Top == "" || err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return p
+}
+
+// EmptyParent is the folder the store was in, when it is there with nothing in
+// it ("": not so). Only root can remove it.
+func (s Store) EmptyParent() string {
+	p := s.parent()
+	if p == "" {
+		return ""
+	}
+	if fi, err := os.Lstat(p); err != nil || !fi.IsDir() || uidOf(fi) != s.Owner {
+		return ""
+	}
+	if es, err := os.ReadDir(p); err != nil || len(es) > 0 {
+		return ""
+	}
+	return p
+}
+
+// Uninstall disarms every build and removes the store, and the folder it was
+// in when nothing else is there. A box already
 // running keeps its Softnet process; the next one uses the softnet on
 // PATH, if any.
 func (s Store) Uninstall() error {
@@ -544,6 +570,9 @@ func (s Store) Uninstall() error {
 	}
 	if err := os.RemoveAll(s.Dir); err != nil {
 		return fmt.Errorf("cannot remove %s: %w", s.Dir, err)
+	}
+	if p := s.parent(); p != "" {
+		_ = syscall.Rmdir(p) // not empty: it stays
 	}
 	return nil
 }

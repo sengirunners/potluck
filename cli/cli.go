@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/attach"
 	"io"
 	"os"
 	"os/signal"
@@ -185,15 +186,25 @@ func (a *app) report(err error) int {
 	var e *api.Error
 	if client.NotRunning(err) { // Potluck's hint, with the host's prefix
 		e = &api.Error{Code: api.CodeUnavailable, Message: "the " + a.name() + " daemon is not running",
-			Hint: "start it with: " + a.cmd("daemon --detach") + " (most commands start it on their own)"}
+			Hint:  "start it with: " + a.cmd("daemon --detach") + " (most commands start it on their own)",
+			Plain: "Potluck isn't running. Start it, then try again." + plainGetHelp}
 		if a.own { // a mounted run's daemon is the host's: attach.go is not consulted
 			if o := a.attachedTo(); o != nil {
-				e = &api.Error{Code: api.CodeUnavailable, Message: fmt.Sprintf("%s's daemon (home %s), which potluck's commands use, stopped answering", o.Program, tildePath(o.Home)),
-					Hint: "start it again with that program's command"}
+				e = &api.Error{Code: api.CodeUnavailable, Message: fmt.Sprintf("%s's daemon (home %s), which potluck's commands use, stopped answering", o.Program, attach.Tilde(o.Home)),
+					Hint: "start it again with that program's command", Plain: o.Program + ", which Potluck on this Mac is part of, stopped answering. Start it, then try again." + plainGetHelp}
 			}
 		}
 	}
-	if e != nil || errors.As(err, &e) {
+	words := api.PlainForm(err)
+	if e == nil && !errors.As(err, &e) && words != "" && a.asJSON() {
+		e = &api.Error{Code: api.CodeInternal, Message: err.Error()}
+	}
+	if e != nil {
+		if e.Plain == "" && words != "" {
+			c := *e
+			c.Plain = words
+			e = &c
+		}
 		if e.Code == api.CodeConflict && strings.Contains(e.Message, "is taken on this tailnet") {
 			e.Hint = a.nameTaken()
 		}
@@ -266,7 +277,7 @@ func (a *app) ownClient() (*client.Client, *config.Config, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	cfg := h.cfg
+	cfg := h.Cfg
 	var c *client.Client
 	if path := os.Getenv(EnvBoxCredential); path != "" {
 		cred, err := tunnel.ReadBoxCredential(path)
@@ -280,7 +291,7 @@ func (a *app) ownClient() (*client.Client, *config.Config, error) {
 		c = client.NewUnix(cfg.SocketPath())
 		c.Cwd, _ = os.Getwd()
 		// Another program's daemon, or one on its home, is never started from here.
-		if h.owner == "" && autostartAllowed(a.running, os.Getenv) {
+		if h.Owner == "" && autostartAllowed(a.running, os.Getenv) {
 			c.Autostart = func(ctx context.Context) error { return a.autostart(ctx, cfg) }
 		}
 	}
@@ -328,9 +339,25 @@ func (a *app) inPool(ctx context.Context) (*client.Client, error) {
 
 // onlyPool is the one pool this machine runs or joined.
 func (a *app) onlyPool(ctx context.Context, c *client.Client) (string, error) {
-	l, err := c.ProjectList(ctx)
+	slugs, err := poolSlugs(ctx, c)
 	if err != nil {
 		return "", err
+	}
+	switch len(slugs) {
+	case 1:
+		return slugs[0], nil
+	case 0:
+		return "", api.Plainly(errors.New("this machine is in no pool yet: "+a.cmd("create <pool>")+", or "+a.cmd("join '<invite code>'")),
+			"Paste the invite you were sent first, then press the button again.")
+	}
+	return "", &manyPoolsError{Pools: slugs}
+}
+
+// poolSlugs is the pools this machine runs or joined.
+func poolSlugs(ctx context.Context, c *client.Client) ([]string, error) {
+	l, err := c.ProjectList(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var slugs []string
 	for _, p := range l.Projects {
@@ -338,13 +365,7 @@ func (a *app) onlyPool(ctx context.Context, c *client.Client) (string, error) {
 			slugs = append(slugs, p.Slug)
 		}
 	}
-	switch len(slugs) {
-	case 1:
-		return slugs[0], nil
-	case 0:
-		return "", errors.New("this machine is in no pool yet: " + a.cmd("create <pool>") + ", or " + a.cmd("join '<invite code>'"))
-	}
-	return "", &manyPoolsError{Pools: slugs}
+	return slugs, nil
 }
 
 // manyPoolsError is onlyPool's answer on a machine in several pools. A

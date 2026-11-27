@@ -284,8 +284,11 @@ func (c cleaner) name(s *string, field string) { c.check(s, validName, true, fie
 
 func (c cleaner) machine(s *string, field string) { c.check(s, validMachine, true, field) }
 
-func (c cleaner) reason(r *api.Reason, field string) {
-	c.code(&r.Code, api.Reasons, field+".code")
+func (c cleaner) reason(r *api.Reason, field string) { c.reasonIn(r, api.Reasons, field) }
+
+// reasonIn is a reason whose code is one of vocab.
+func (c cleaner) reasonIn(r *api.Reason, vocab []string, field string) {
+	c.code(&r.Code, vocab, field+".code")
 	c.phrase(&r.Text, field+".text")
 }
 
@@ -305,7 +308,7 @@ func cleanStatus(st *api.AuthorityStatus, log *slog.Logger) {
 		c.machine(&s.Machine, "setup.machine")
 		c.code(&s.Step, api.SetupSteps, "setup.step")
 		if s.Failure != nil {
-			c.reason(s.Failure, "setup.failure")
+			c.reasonIn(s.Failure, api.SetupFailures, "setup.failure")
 		}
 	}
 	for _, m := range []*api.HomeMove{st.Move, st.LastMove} {

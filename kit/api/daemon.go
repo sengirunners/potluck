@@ -130,6 +130,11 @@ type MachineZm struct {
 	// the authority reading it is (a lenient one drops the field, a strict
 	// one refuses it and the daemon leaves it out for an hour).
 	Job *UpdateJob `json:"job,omitempty"`
+	// Sources are the release repositories this machine's updater reads, in
+	// order (the program reports them through core.Deps.UpdateSources). Empty
+	// means none reported: an older build, or a config the program could not
+	// read, where the last check shows the failure.
+	Sources []string `json:"sources,omitempty"`
 }
 
 // UpdateJob is a machine's update job as its daemon reads it each time it

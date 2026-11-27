@@ -1,6 +1,6 @@
 # The macOS menu bar item
 
-A small red pot in the menu bar for a person lending their Mac. It shows how much of the Mac is lent and in use,
+An item in the menu bar for a person lending their Mac. It shows how much of the Mac is lent and in use,
 and lets them take it back without a terminal:
 
 ```
@@ -31,11 +31,12 @@ Memory pressure normal; Potluck's jobs may use up to 12 GB of 48 GB (25%); swap 
 Keep lending is checked in `auto` and in `open`. The modes are the host switch's
 ([cmd/potluck-driver-tart/README.md](../cmd/potluck-driver-tart/README.md#the-host-switch-open-drain-closed-auto)).
 
-While a host run sets this Mac up and nothing is shared yet, the title says the stage, "Setting up: images (2 of
-5)", and the note its last words; a run that stopped says "Setup blocked at validation (3 of 5)" with why and the
-command that runs it again. Once sizes are shared, a later run that is blocked is a note, "the last setup run was blocked at
-preflight (1 of 5); what was shared before still lends", since what was shared still lends. After a flag this Mac's layer does not take, the command it gives leaves that flag out ([hosts.md](hosts.md#stages-and-the-setup-checklist)). These are the stages `potluck host` prints and `potluck host status` lists
-([hosts.md](hosts.md#stages-and-the-setup-checklist)).
+While a host run sets this Mac up and nothing is shared yet, the title says the stage in the setup window's words,
+"Setting up: download what jobs need", and the note its last words; a run that stopped says where, "Setup stopped
+while testing that jobs run safely", with no note: Set up and check… says why and what to do, and in a terminal
+`potluck host status`'s setup lines give the stage, the reason and the command that runs it again
+([hosts.md](hosts.md#stages-and-the-setup-checklist)). Once sizes are shared, a later run that stopped is a note, "the
+last setup stopped while checking this Mac; what was shared before still lends". The menu names no command.
 
 A closed switch is a paused Mac (`potluck host pause`, or Stop now): the menu says "Paused: lending nothing" and
 Keep lending reads "Resume lending" (it runs the same `host set auto`, as `potluck host resume` does). While a
@@ -46,6 +47,25 @@ A size that lends other images than the daemon's build pins (the daemon moves it
 [hosts.md](hosts.md#after-an-update-the-daemon-moves-a-host-to-the-new-pins)) adds a note, "1 size lends other images
 than this version pins"; `host status` prints a line per size with why, and `--json` carries them as
 `images_behind`.
+
+## Its icon, and the Dock
+
+The menu bar shows the mark in one colour, which macOS draws dark or light as the menu bar needs. A dot in its corner
+says something is wrong, and the menu says what: the last status ask failed, or the menu has `attention` (package
+`menubar`): the switch, the limits or what is lent cannot be read, no driver answers, the daemon is down on a Mac where
+setup ran, a setup stopped before anything was lent, or the group this Mac lent to is gone. A Mac a person paused,
+winds down or stopped (`potluck daemon stop`) has no dot.
+
+The app is in the Dock, with a menu bar of its own, while one of its windows (a minimized one too) or a question is
+open; with none it is in the menu bar only. Opening it again (Finder, Launchpad, its Dock icon) brings up what is
+open, or the setup window when nothing is (during and after a removal, the uninstall window). ⌘W closes a window and
+⌘Q quits the app, the menu bar item with it (a setup step that did not finish is offered again next time). The code is `Dock.swift` and `MainMenu.swift`.
+
+The drawings are `macos/PotluckMenu/icon/AppIcon.svg` (its `@media (max-width: 40px)` and `(max-width: 20px)` rules pick
+what the 32 and 16 pixel sizes show) and `MenuBar.svg`; both say `width="1024" height="1024"`. `icon/make.sh` makes `AppIcon.icns` and the two `MenuBar` pictures from them, and
+all of these are kept in the repository, so the app ships the pictures that were looked at. To change the mark, change
+a drawing, run `make.sh` and commit what it made: `build.sh` and `go test ./menubar` refuse pictures that do not match
+their drawings.
 
 ## Memory, and the dials
 
@@ -93,7 +113,8 @@ the daemon runs a driver that lists `host-lend`.
 
 ## Set up and check
 
-"Set up and check…" opens a window drawn from `setup.view` of `potluck --json host status --probe`, written for
+"Set up and check…" opens the welcome and setup window. The app shows the next step under its welcome.
+The checklist comes from `setup.view` of `potluck --json host status --probe`, written for
 someone who has never used a terminal (`menubar.SetupView`): a heading that says how this Mac stands, what to do or
 expect, the button that does it, a line per thing lending needs, what is optional under its own title (its buttons
 are small ones on its lines), and while a setup goes on, or after one stopped, its stages. Every word comes from
@@ -111,63 +132,104 @@ silicon, macOS and virtualization (`mac`), Tart, Softnet and the free disk where
 The window's button is `view.do`: the running setup's, else the first required check's that has something to do, unless something
 on this Mac stops it that nothing here fixes, which comes first, with no button
 (never an optional one's, as the terminal's `next_id` may be,
-[hosts.md](hosts.md#stages-and-the-setup-checklist)). A blocked check with nothing to run shows its words and no
-button of its own. A `do` with `url` opens that page in the
+[hosts.md](hosts.md#stages-and-the-setup-checklist)). A network helper that waits only on Potluck finishing its own
+testing for this Mac's macOS does not come first: the steps before it that do not need it (installing Potluck and
+Tart) are offered, and it stops only the steps after it. `view.invite_later` is that a step still to come takes an
+invite: an invite from a `potluck://` link is kept for it while the field is hidden. A blocked check with nothing to
+run shows its words and no button of its own. A `do` with `url` opens that page in the
 browser (only an `https` page, or the `file://` URL of an installed app). A `do` with `args` runs potluck with them;
-when it has `invite`, an invite field shows above the button and what is pasted there is added as the last argument,
-after the `--` potluck puts in those arguments, so it is never read as a flag. The app runs potluck directly, never
-through a shell, writes nothing of the run to a log, and empties the field when that run ends (while it runs, the invite is among potluck's process arguments, as it is when
-typed in a terminal). With the field empty
-it runs the arguments as they are (`potluck host` then shares with the one pool this machine is already in). A
-`do` with only `app` (an act only the app can do) has no button yet, and `auto` is read but not acted on yet.
+when it has `invite_args`, an invite field shows above the button, and with something pasted there the app runs those
+arguments instead (they end in `--invite-stdin`, [hosts.md](hosts.md#stages-and-the-setup-checklist)) and writes what was pasted and a newline to
+potluck's stdin. The invite is never an argument or in the environment, so no other user of the Mac sees it in the
+process list. The app runs potluck directly, never through a shell, writes nothing of the run to a log, and keeps
+the invite in the field, in memory only, until this window shows that setup went through with it or the app quits, so a setup that stops needs no second paste. With the field empty
+it runs `args`, with nothing on stdin (`potluck host` then shares with the one pool this machine is already in). A
+`do` with `app` is an act only the app can do: turning its login item on (`login_item`) or off (`login_item_off`), or
+opening System Settings > General > Login Items (`login_item_settings`); one this build does not know has no button.
+A `do` with `auto` the app also runs by itself, once each time it starts, and never with a password step: the one
+there is starts the daemon of a Mac whose setup was begun, finished or not, since nothing else starts it after a
+restart. It is not set after `potluck daemon stop` or an uninstall until the daemon is started again, nor for another program's daemon.
 
-An action runs with no time limit (the status asks are ended after 25 seconds) and shows "<label>…" while it runs.
-If potluck fails, the window shows its error in red (the message and hint of its `--json` error). The button stays
-off until a status asked after the action, or after the window opened, is drawn. Closing the window empties the invite field. If the action's `--json` answer holds `admin_step`
-(`{"why", "argv"}`, from `--no-sudo`, [softnet.md](softnet.md#without-a-terminal---no-sudo)), the window shows `why` with Continue and Cancel;
+### An invite link
+
+`potluck://open?invite=<invite>`, the invite (`https://potluck.sh/join#v1.…`) percent-encoded, opens the app and this
+window with the invite in the invite field, or keeps it until a step asks for one. Any
+web page can open such a link, so it only fills the field: the person presses the button, and Return does not press
+it while a link's invite is anywhere in the field. A field that holds other text is replaced only after a question, whose answer on
+Return keeps the text. A link that does not hold exactly one invite of that shape does nothing. While a step runs, the
+link is not used and the window says to open it again.
+
+An action runs with no time limit (a plain status ask is ended after 25 seconds, one with `--probe` after 60) and shows "<label>…" while it runs.
+If potluck fails, the window says so in red, in the error's plain words (`plain` of its `--json` error, written by the
+command that failed for someone who has never used a terminal). An error without them shows its
+message and hint, unless it is potluck's own failure (code `internal` or `unavailable`) or is not JSON: then the
+window says to try again. The message, hint and whatever else the program or macOS said are only in what "Copy details" copies. The button stays
+off until a status asked after the action, or after the window opened, is drawn. Closing the window keeps the invite in its field. If the action's `--json` answer holds `admin_step`
+(`{"why", "argv"}`, from `--no-sudo`, [softnet.md](softnet.md#without-a-terminal---no-sudo)), the window shows `why` (plain words, "macOS will ask for this Mac's password to install the network helper.";
+`potluck` in a terminal says instead what the step puts where and why it needs root) with Continue and Cancel;
 Continue runs `argv` as root through macOS's own administrator password dialog (AppleScript `do shell script ...
 with administrator privileges`, each word quoted for the shell; the app never sees the password), then runs the
 same action once more, with the same program. Cancel, at either question, says what the action's answer (`done`)
 says was already done, and "Nothing was changed" only when that list is there and empty; an action that does not
-say what it did gets "The admin step did not run". Then potluck's reason again, and
-Ask again, which runs that action again with the same arguments (the invite too, held in memory only while that
+say what it did gets "You cancelled the password step, so this isn't finished". It does not repeat the reason the
+person just read; it points to Try again, which runs that action again with the same arguments and stdin (the invite too, held in memory only while that
 action is still the next step and the window is open), as often as the person likes. A
-failed root step shows its error text. A failure stays until the next action, closing the window, or a full check
-after it was shown that has another next step (for a line's own button: that no longer has that button).
+failed root step is said in plain words too, with its error text in the details.
 
-The code is `Run.swift` (finding and running potluck, and that action rule), `Admin.swift` (the admin step: its
+A failure stays until the next action, closing the window, or a full check asked after it that finds its step over:
+the check whose `do` was run (`setup.checks`) is `done`, `running` or `info`. While that check is open, could not be
+read or is missing, and while anything in the window still offers the action, the failure stays, whatever step is
+next by then. An action no check has goes by whether the window still offers it.
+
+With a potluck too old for this window (no `setup.view`, or a `do` that takes the invite as an argument: `invite`
+without `invite_args`) the window says "Potluck needs updating". Its button there, Update Potluck, is the app's own
+and runs `potluck upgrade`; another program's potluck, which has no such command, gets no button. The other lines,
+with theirs (turning on daily updates), and the details stay. Setup is not offered: the app never gives an invite as
+an argument. Such a potluck's `host status` may not know `--probe`; the app then asks without it. The other way
+round, an older app appends what was pasted to `args`, so those end in `--`: a paste is never read as a flag.
+
+The code is `SetupFlow.swift` (what the window shows of an answer, when a failure is old, when a button may be
+pressed), `Run.swift` (finding and running potluck, errors, and the action rule), `Admin.swift` (the admin step: its
 answer, the quoting, the AppleScript) and `SetupWindow.swift`.
 
-The Go side is `menubar.Setup` (`setup` in the status JSON) and `menubar.Background` (`background`); the Swift side
-is `StatusModel.swift` (the fields it reads) and `SetupWindow.swift`. The window draws the stages from the
-answer's `stage_order` (`hostsetup.Order` with each stage's label), so a new stage needs no Swift change. `go test
-./menubar` writes nothing, but checks five sample answers (never set up, setup running, the join waiting for a
+The Go side is `menubar.Setup` (`setup` in the status JSON); the Swift side
+is `StatusModel.swift` (the fields it reads) and `SetupWindow.swift`. The window draws the stages from
+`view.progress`, so a new stage needs no Swift change. `go test
+./menubar` writes nothing, but checks nine sample answers (never set up, setup running, the join waiting for a
 tailnet login, blocked at validation, lending) against
 `menubar/testdata/status-*.json`; `go test ./menubar -run TestStatusFixtures -update` rewrites them, and
 `macos/PotluckMenu/test.sh` compiles the app's decoder structs with `swiftc` and decodes each of them. It also
 decodes sample action answers with and without `admin_step` (`macos/PotluckMenu/test/answers`), runs the action rule
-against a fake potluck with a stand-in for the password dialog, and checks that an
+against a fake potluck with a stand-in for the password dialog, checks that `ps` and the environment show the invite
+in no run of it (the re-run after an admin step and Try again too), and checks that an
 argv with spaces, quotes, `$`, backticks and a newline reaches a program word for word through the same shell
 quoting and AppleScript the admin step uses (without administrator privileges).
 
 ## Uninstall Potluck
 
-"Uninstall Potluck…" opens a window of what `potluck --json uninstall --dry-run` answers
-([install.md](install.md#removing-it)): the steps in order (`left`), what stays (`not_removed`: Tart's images,
-Tailscale and so on), and, in red, what is lost for good (`warning`: this Mac's identity, and the pools it runs,
-which end for all their members; when its daemon does not say which those are, the warning says that). Opening it
-changes nothing.
+"Uninstall Potluck…" opens a window drawn from what `potluck --json uninstall --dry-run` answers
+([install.md](install.md#removing-it)). Its words are the answer's `view` (`cli/uninstall_view.go`), written for
+someone who has never used a terminal: what will happen, what stays, and, in red, what is lost for good (this Mac's
+identity, and the groups it runs, which end for everyone in them; when Potluck cannot say which those are, the
+warning says that). Opening it changes nothing. Copy details copies the same answer in the terminal's words, for
+whoever helps. An answer with no `view` (an older potluck) removes nothing: the window says to update Potluck.
+
+When there is something to take, a box, not ticked, offers to also remove Tart, if Potluck installed it, and the
+images Potluck pulled (`view.choice`; what it takes and never takes is in
+[lending.md](lending.md#tart-and-its-images-uninstall---with-tart)). Pressing it asks for the plan again with
+`--with-tart`, so the steps, the question and the arguments Remove… runs all come from that plan. Opening the window
+again starts with the box not ticked.
 
 Remove… asks for the plan again, then asks for a yes with that plan's warning, and runs the plan's own arguments
 (`remove.args`: `potluck --json uninstall --yes --no-sudo`), with the admin step rule above. Return never removes.
 
-- Cancelled at the admin step: the window lists what was already done (lending has stopped, the pools were left)
-  and offers Continue removing….
-- A failed step: potluck's error, what was done before it, and that the step may be partly done.
-- Sandboxes running: potluck's refusal. The app never forces by itself; Remove anyway… shows what forcing does
-  (`force`), with the plan's warning as it is then, and asks once more.
-- Removed: what was done, what is left for you to remove, and "Move the app to the Trash and quit", which moves only
-  this app's own bundle, to the Trash, when clicked. It does not change Login Items.
+- Cancelled at the admin step, or a failed step: where it stopped, what was done before it, and what is still to do.
+  Remove… goes on. A failed step may be partly done.
+- Work still running: potluck's refusal says so and what each button does. The app never forces by itself; Remove
+  anyway… shows what forcing does (`force`), with the plan's warning as it is then, and asks once more. It removes
+  what the refused run would have: the box cannot be changed meanwhile.
+- Removed: what was done, what stays, and "Move to Trash and Quit", which moves only this app's own
+  bundle, to the Trash, when clicked. The app takes itself off the login items first.
 
 While a removal runs the app asks potluck nothing else (the 15-second status included), the menu offers nothing, the
 window stays open and Quit is refused; it starts once the status asks already under way have ended. A `potluck host`
@@ -231,37 +293,80 @@ On a Mac, with the release's installer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar
-open ~/Applications/"Potluck Menu.app"
+open ~/Applications/Potluck.app
 ```
 
 `--menubar` is off unless you ask for it. It installs potluck as usual, then takes `Potluck-Menu.zip` out of the same
 signed tarball (its hash is in the signed manifest, and install.sh checks it again), unpacks it into
-`~/Applications` (`POTLUCK_MENUBAR_DIR` changes that) and replaces an older copy, asking a running one to quit first.
+`~/Applications` (`POTLUCK_MENUBAR_DIR` changes that) and replaces an older copy there, asking a running one to quit
+first. The app was called `Potluck Menu.app` before it was `Potluck.app` (its program, `PotluckMenu`, and bundle id,
+`sh.potluck.menu`, did not change): the installer takes either name from a release, and replaces a copy under either.
+A replaced copy goes to the Trash. An app under one of those names that is not Potluck's (another bundle id) is left
+alone, and the installer stops rather than replace it.
 A release built without the app makes `--menubar` stop after installing potluck and say so. The app is a universal
 binary (Apple silicon and Intel), macOS 13 or newer.
 
-**This build is not Developer ID signed or notarized yet.** It is signed ad hoc. Installed this way (curl, not a
-browser download) macOS runs it. If you unzip a copy you downloaded in a browser and macOS refuses it, right-click
-it in Finder and choose Open once. The installer says "not Developer ID signed" while that is true.
+**A release made without Apple's keys carries an app that is not Developer ID signed or notarized.** It is signed ad
+hoc. Installed this way (curl, not a browser download) macOS runs it. If you unzip a copy you downloaded in a browser
+and macOS refuses it, right-click it in Finder and choose Open once. The installer says "not Developer ID signed" when
+that is so.
 
-To start it at login, add it in System Settings > General > Login Items. Quit it from its menu. To update the app,
+To start it at login, choose "Set up and check…" in its menu, then "Start at login" ("Turn off" there undoes it). If
+it was turned off in System Settings > General > Login Items, macOS lets only the person turn it on again, there, and
+the button opens those settings. Quit it from its menu. To update the app,
 run the installer with `--menubar` again; `potluck upgrade` and the daily update do not touch it yet.
+
+Opened outside an Applications folder (from Downloads, say), the app asks to move itself to `/Applications`, or
+`~/Applications` when it may not write there. It copies itself, takes the download quarantine off the copy, opens the
+copy and puts the one it came from in the Trash; macOS's temporary copy of a download (Gatekeeper's translocation)
+stays where macOS keeps it, and the download with it. When Potluck is installed there already, the app asks whether to
+open that one (Return's answer) or replace it with this one. A `Potluck.app` already there is replaced (the old one to the
+Trash) only when it has Potluck's bundle id and the app was opened from there before; else the app says so and moves
+nothing. "Not now" is remembered for that place. Without `POTLUCK_MENUBAR_DIR` the installer replaces an app of
+Potluck's in `/Applications` when `~/Applications` has none, so there is one app.
+
+The renamed app, in an Applications folder, moves a `Potluck Menu.app` that asked potluck before (below) and has
+Potluck's bundle id to the Trash when it starts, after it quit, so one item shows in the menu bar. It then offers to
+start at login, as the old one may have.
+
+### First run, from an app that carries a release
+
+An app built with a release in it (`POTLUCK_BUNDLE_RELEASE`, below; the release's `Potluck.zip` is one, its `Potluck-Menu.zip` is not)
+can install Potluck on a Mac that has none. When it starts and finds no potluck, nor any record of a
+Potluck daemon whose program is still there, it runs the `install.sh` in it on the
+release in it (`--from <release> --no-modify-path`): the terminal's installer, which checks the manifest's signature
+and the tarball before anything of the release runs. The programs go in the app's cache directory
+(`~/Library/Caches/sh.potluck.menu/potluck.<pid>`, one for each running app), not in the install directory, and no home, daemon or setting of this
+Mac's takes part. Then the setup window opens, drawn by that potluck, whose first step is "Install Potluck":
+`potluck upgrade --release <release> --dir <install dir>`, which checks the release again and refuses one older than
+this Mac installed. The app tells that potluck of the release in `POTLUCK_BUNDLED_RELEASE`; told so, `upgrade` never
+replaces a potluck already in the install directory or installs beside a daemon that runs, and the checklist offers no daily update and no start by itself.
+Once a potluck is installed the app runs that one, never has it install the carried release, and empties the cache directory. When Potluck goes while the app is open (a removal in Terminal, a cleared cache), the setup window does the same again. A release that does
+not pass, or cannot be unpacked, is not used: the window says to press "Check again", which checks it once more, or to download it again, and "Copy details" copies the installer's words.
+An app moved or deleted while it was open says so. Where there is no potluck to run at all, the window's button is "Get Potluck", which opens potluck.sh.
+
+Whether or not it carries a release, the app opens the setup window by itself once, the first time it runs on a Mac
+that was never set up.
 
 ### What host status knows of the app
 
-`potluck host status` lists the app in its setup checklist. Installed is a `Potluck Menu.app` in the last place it
-ran from, `$POTLUCK_MENUBAR_DIR`, `~/Applications` or `/Applications`. Running is only the app's own word: when the
-program that runs `host status` is the app (its parent process is `Potluck Menu.app/Contents/MacOS/PotluckMenu`),
+`potluck host status` lists the app in its setup checklist. Installed is a `Potluck.app` (or a
+`Potluck Menu.app`, its name before) in the last place it ran from, `$POTLUCK_MENUBAR_DIR`, `~/Applications` or
+`/Applications`. Running is only the app's own word: when the
+program that runs `host status` is the app (its parent process is `Contents/MacOS/PotluckMenu` in an app, under either name),
 host status notes the app and the time in the home's `menubar-seen.json`, and the app counts as running while that
-time is under a minute old (it asks every 15 seconds). `open` exiting 0 is no proof that it shows. Potluck cannot
-read your Login Items, so the checklist says how to add it there instead of guessing.
+time is under a minute old (it asks every 15 seconds). `open` exiting 0 is no proof that it shows. The app
+tells it its login item too (`on`, `off`, or `refused` in System Settings), in `POTLUCK_LOGIN_ITEM`, which counts only
+from the app; an app from before that says nothing, and the checklist says how to add it by hand. The note keeps the
+other places the app asked from that are still there: those under the old name are `setup.old_apps`.
 
-It runs `$POTLUCK_BIN`; else `potluck` from `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` or
+The app runs `$POTLUCK_BIN`; else `potluck` from `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` or
 `~/go/bin`; else the program of the machine's Potluck daemon, from its record
 ([daemon.md](daemon.md#one-daemon-per-machine)). That program must have potluck's `host status` and `host set`
-commands; when it has not, the menu shows the error it prints. The app uses a record only when exactly one, of a
-program other than potluck, names a running process of yours, in a directory and file that are yours alone. Unlike
-the `potluck` command, it does not ask that daemon's socket whether it answers: a live process is enough.
+commands; when it has not, the menu shows the error it prints. The app uses a record only in a directory and file
+that are yours alone: the only one of a program other than potluck that names a running process of yours, else
+potluck's own, whether or not its daemon runs. Unlike
+the `potluck` command, it does not ask that daemon's socket whether it answers.
 
 Setting the switch writes `/Users/Shared/Potluck/host-override.json` as you, so run the app as the user who owns
 the host (the one who ran `potluck host`).
@@ -271,11 +376,13 @@ the host (the one who ran `potluck host`).
 On a Mac with the Xcode command line tools:
 
 ```sh
-macos/PotluckMenu/build.sh ~/Applications   # writes ~/Applications/Potluck Menu.app (ad hoc signed, this Mac's CPU)
-open ~/Applications/"Potluck Menu.app"
+macos/PotluckMenu/build.sh ~/Applications   # writes ~/Applications/Potluck.app (ad hoc signed, this Mac's CPU)
+open ~/Applications/Potluck.app
 ```
 
-`POTLUCK_MENU_UNIVERSAL=1` builds both CPUs, as the release does.
+`POTLUCK_MENU_UNIVERSAL=1` builds both CPUs, as the release does. `POTLUCK_BUNDLE_RELEASE=<dir>` puts a signed release
+in the app ("First run", above): that directory's manifest, its two signatures and both Mac tarballs, and the tree's
+`install.sh`.
 
 ## Signing and notarizing
 
@@ -288,6 +395,7 @@ turns that into a Developer ID signature, and notarizes it, when the environment
 | `POTLUCK_NOTARY_PROFILE` | a keychain profile made with `xcrun notarytool store-credentials` |
 | `POTLUCK_NOTARY_KEY`, `POTLUCK_NOTARY_KEY_ID`, `POTLUCK_NOTARY_ISSUER` | instead of a profile: an App Store Connect API key (path to `AuthKey_*.p8`, its key id, its issuer id) |
 
+- `sign.sh --programs <dir>` signs every Mach-O file under a directory instead of an app, and does not notarize.
 - With an identity it signs nested code first and the app last (hardened runtime, secure timestamp, never `--deep`),
   then runs `codesign --verify --deep --strict`.
 - With a notary profile or key as well it zips the app with `ditto`, runs `notarytool submit --wait`, staples the
@@ -305,3 +413,16 @@ Apple's service yet.
 `.github/workflows/release.yml` builds the app in its own job on a GitHub-hosted Mac (`macos-latest`, never a
 self-hosted runner), zips it (`ditto`), and `scripts/release -menubar` puts the zip into each darwin tarball. If that
 job fails, the release still ships, without the app.
+
+When Apple's keys are set up ([release-keys.md](release-keys.md#apples-signing-keys)) a release made by a push also:
+
+- signs that app and the Mac programs in the tarballs with the Developer ID (not notarized: the release would wait for
+  Apple, and what `curl` downloads is not quarantined). `sign.sh --programs` signs the programs. They are signed
+  because Apple's notary service looks inside the archives of an app it is sent.
+- after the release is out, starts `.github/workflows/app.yml`, which builds the app again with that release in it, signs, notarizes and staples it, and adds it to
+  the release as `Potluck.zip`. Until then (Apple's answer usually takes minutes, and `sign.sh` waits 30 at most) the
+  newest release has no `Potluck.zip`, and one whose signing or notarizing failed never gets it.
+
+`scripts/ci/publish-app.sh` uploads it under another name and renames it only when GitHub holds all of it. A failure in
+any of this leaves the release as it is and opens an issue. While the keys are not set up, or signing fails, the app is
+ad hoc signed as `build.sh` left it.

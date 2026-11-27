@@ -64,7 +64,9 @@ block test leaves out:
 - Tailscale's resolver, `100.100.100.100:53`, when it opens from here: a box that reached it got through this
   machine's forward path to the tailnet;
 - any `--net-forbid host:port` you add (each must open from here);
-- two boxes at once, neither reaching the other (`--net-peers`).
+- two boxes at once, neither reaching the other (`--net-peers`);
+- a datagram a box sends to a multicast group, which must reach no program on this machine that joined the group on
+  any of its interfaces (`--net-multicast`).
 
 It passes only when every one of those checks ran and passed. A check that could not run (a target that does not
 open from here, a box without `nc`) proves nothing, so it fails the test. When neither the router nor the tailnet
@@ -103,7 +105,7 @@ To run the same checks by hand against any driver:
 ```sh
 potluck-conformance <driver> --kind box --config k=v... --only net \
   --net-forbid <this machine's address>:<a port it listens on> \
-  --net-forbid <router>:53 --net-forbid 100.100.100.100:53 --net-peers
+  --net-forbid <router>:53 --net-forbid 100.100.100.100:53 --net-peers --net-multicast
 ```
 
 ## Results

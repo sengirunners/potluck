@@ -4,17 +4,23 @@
 // format `shasum -a 256 -c` reads. scripts/release-sign signs them; it
 // publishes nothing.
 //
-//	go run ./scripts/release -version main-1eacf23e722f -commit <sha> [-out dist] [-targets darwin/arm64,linux/amd64] [-menubar Potluck-Menu.zip]
+//	go run ./scripts/release -version main-1eacf23e722f -commit <sha> [-out dist] [-targets darwin/arm64,linux/amd64] [-menubar Potluck-Menu.zip] [-signed dir]
+//	go run ./scripts/release -version main-1eacf23e722f -commit <sha> -programs dir
 //
-// -menubar names a zip of Potluck Menu.app (macos/PotluckMenu, built on a
+// -menubar names a zip of Potluck.app (macos/PotluckMenu, built on a
 // macOS runner: swiftc is not Go); it goes into each darwin tarball as
 // MenubarZip, so the signed manifest's hash covers it and install.sh
 // --menubar unpacks it from there. No -menubar, no app in the tarballs.
 //
+// -programs only builds the Mac programs, into dir/<os>_<arch>/, for
+// macos/PotluckMenu/sign.sh to sign; -signed takes them back, and refuses one
+// that differs from this build's in anything but its signature (signed.go).
+//
 // Builds are CGO_ENABLED=0 and -trimpath, stamped with -ldflags so
 // `potluck --version` names the release; archive entries are sorted and
 // carry one fixed time (SOURCE_DATE_EPOCH, else the commit's time), so the
-// same commit and Go version give byte-identical tarballs. It refuses to
+// same commit and Go version give byte-identical tarballs (the darwin ones
+// only without -signed: a signature carries its time). It refuses to
 // build while internal/upgrade/release_keys.txt is empty or malformed: such
 // a build would refuse every upgrade. A local or test release signed with
 // another key is trusted through config update_keys.
@@ -61,7 +67,7 @@ var TargetCommands = map[string][]string{
 // Docs are copied next to the programs.
 var Docs = []string{"README.md", "LICENSE", "NOTICE"}
 
-// MenubarZip is the name of Potluck Menu.app's zip inside a darwin tarball
+// MenubarZip is the name of Potluck.app's zip inside a darwin tarball
 // (docs/menubar.md); install.sh --menubar reads it by this name.
 const MenubarZip = "Potluck-Menu.zip"
 
@@ -74,9 +80,16 @@ func main() {
 	commit := flag.String("commit", "unknown", "commit stamped into the programs")
 	out := flag.String("out", "dist", "output directory (its old tarballs, SHA256SUMS, manifest and .build are replaced; nothing else is touched)")
 	targets := flag.String("targets", strings.Join(Targets, ","), "comma list of os/arch")
-	menubar := flag.String("menubar", "", "a zip of Potluck Menu.app to put in each darwin tarball as "+MenubarZip)
+	menubar := flag.String("menubar", "", "a zip of Potluck.app to put in each darwin tarball as "+MenubarZip)
+	signed := flag.String("signed", "", "a directory of this build's Mac programs (as -programs lays them out), signed, to pack in place of the built ones")
+	programs := flag.String("programs", "", "only build the darwin targets' programs, into this directory")
 	flag.Parse()
-	if err := run(*version, *commit, *out, strings.Split(*targets, ","), *menubar); err != nil {
+	list := strings.Split(*targets, ",")
+	do := func() error { return run(*version, *commit, *out, list, *menubar, *signed) }
+	if *programs != "" {
+		do = func() error { return buildDarwin(*version, *commit, *programs, list) }
+	}
+	if err := do(); err != nil {
 		fmt.Fprintln(os.Stderr, "release:", err)
 		os.Exit(1)
 	}
@@ -87,7 +100,7 @@ func commandsFor(goos, goarch string) []string {
 	return append(append([]string(nil), Commands...), TargetCommands[goos+"/"+goarch]...)
 }
 
-func run(version, commit, out string, targets []string, menubar string) error {
+func run(version, commit, out string, targets []string, menubar, signed string) error {
 	if !versionRE.MatchString(version) {
 		return fmt.Errorf("bad version %q", version)
 	}
@@ -106,27 +119,24 @@ func run(version, commit, out string, targets []string, menubar string) error {
 		return err
 	}
 	defer os.RemoveAll(build)
-	ldflags := fmt.Sprintf("-s -w -X %s/kit/api.Version=%s -X %s/kit/api.Commit=%s", module, version, module, commit)
 	var sums []string
 	for _, t := range targets {
-		goos, goarch, ok := strings.Cut(strings.TrimSpace(t), "/")
-		if !ok || goos == "" || goarch == "" {
-			return fmt.Errorf("bad target %q (want os/arch)", t)
+		goos, goarch, err := splitTarget(t)
+		if err != nil {
+			return err
 		}
 		name := strings.TrimSuffix(release.Potluck.Tarball(version, goos, goarch), ".tar.gz")
 		dir := filepath.Join(build, name)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
-		args := []string{"build", "-trimpath", "-ldflags", ldflags, "-o", dir + "/"}
-		for _, c := range commandsFor(goos, goarch) {
-			args = append(args, module+"/cmd/"+c)
+		if err := buildPrograms(version, commit, goos, goarch, dir); err != nil {
+			return err
 		}
-		cmd := exec.Command("go", args...)
-		cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
-		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("build %s: %w", t, err)
+		if signed != "" && goos == "darwin" {
+			if err := takeSigned(filepath.Join(signed, goos+"_"+goarch), dir, commandsFor(goos, goarch)); err != nil {
+				return fmt.Errorf("-signed: %s: %w", t, err)
+			}
 		}
 		for _, d := range Docs {
 			if err := copyFile(d, filepath.Join(dir, d)); err != nil {
@@ -151,6 +161,31 @@ func run(version, commit, out string, targets []string, menubar string) error {
 	}
 	sort.Strings(sums)
 	return os.WriteFile(filepath.Join(out, "SHA256SUMS"), []byte(strings.Join(sums, "\n")+"\n"), 0o644)
+}
+
+func splitTarget(t string) (goos, goarch string, err error) {
+	goos, goarch, ok := strings.Cut(strings.TrimSpace(t), "/")
+	if !ok || goos == "" || goarch == "" {
+		return "", "", fmt.Errorf("bad target %q (want os/arch)", t)
+	}
+	return goos, goarch, nil
+}
+
+// buildPrograms builds the platform's programs into dir.
+func buildPrograms(version, commit, goos, goarch, dir string) error {
+	ldflags := fmt.Sprintf("-s -w -X %s/kit/api.Version=%s -X %s/kit/api.Commit=%s", module, version, module, commit)
+	// -buildvcs=false: the stamp says whether the checkout is clean, which the output directory alone changes.
+	args := []string{"build", "-trimpath", "-buildvcs=false", "-ldflags", ldflags, "-o", dir + "/"}
+	for _, c := range commandsFor(goos, goarch) {
+		args = append(args, module+"/cmd/"+c)
+	}
+	cmd := exec.Command("go", args...)
+	cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("build %s/%s: %w", goos, goarch, err)
+	}
+	return nil
 }
 
 // clean removes only what a release writes into out, never out itself.

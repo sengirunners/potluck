@@ -15,6 +15,7 @@ import (
 	"github.com/sengirunners/potluck/internal/workflowlint"
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/tailnet/tailnettest"
 )
 
@@ -253,6 +254,39 @@ func TestCIPRUsesThePoolLabel(t *testing.T) {
 	}
 	if _, errout, code := runCI(t, "acme/app", "--job", "native", "--os", "solaris", "--dry-run"); code == 0 || !strings.Contains(errout, "solaris") {
 		t.Fatalf("an OS the pool does not serve was accepted: %s", errout)
+	}
+}
+
+// --labels may be a label of the pool's runners.labels map alone when its entry names the OS, as the broker reads
+// it; one whose entry names none, or the pool's own label, is refused for lacking an OS, as before.
+func TestCIPRLabelsAcceptsAMappedLabelThatNamesTheOS(t *testing.T) {
+	m := startMachine(t, tailnettest.New(), "mini", "judy@example.com")
+	if _, err := client.NewUnix(m.dm.Deps.Config.SocketPath()).CreateProject(context.Background(), api.NewProjectRequest{Slug: "pool"}); err != nil {
+		t.Fatal(err)
+	}
+	m.ok(t, "runners", "setup", "pool", "--url", "https://pool.example")
+	m.dm.Deps.Config.File.Runners.Labels = map[string]config.RunnersLabel{
+		"mac-box": {Size: "c4m16", OS: "macos"},
+		"big-box": {Size: "c4m16"},
+	}
+	g := newFakeGH(t)
+	g.workflows(t, map[string]string{"ui.yml": prWorkflow})
+	t.Setenv(EnvHome, m.home)
+	out, errout, code := runCI(t, "acme/app", "--job", "native", "--labels", "mac-box", "--dry-run")
+	if code != 0 {
+		t.Fatalf("a mapped label that names the OS: exit %d: %s %s", code, out, errout)
+	}
+	if !strings.Contains(out, `'["mac-box"]'`) || !strings.Contains(out, "fromJSON") {
+		t.Errorf("the guarded runs-on does not ask for the mapped label alone, with the fork guard:\n%s", out)
+	}
+	m.dm.Deps.Config.File.Runners.Labels["broken"] = config.RunnersLabel{Size: "c4m16", OS: "plan9"}
+	if _, errout, code := runCI(t, "acme/app", "--job", "native", "--labels", "broken", "--dry-run"); code == 0 || !strings.Contains(errout, "plan9") {
+		t.Errorf("a mapped entry the broker cannot serve: exit %d, want its reason: %s", code, errout)
+	}
+	for _, labels := range []string{"big-box", "self-hosted,pool", "nope"} {
+		if out, errout, code := runCI(t, "acme/app", "--job", "native", "--labels", labels, "--dry-run"); code == 0 || !strings.Contains(errout, "must name the OS") {
+			t.Errorf("--labels %s: exit %d, want a refusal naming the OS: %s %s", labels, code, out, errout)
+		}
 	}
 }
 

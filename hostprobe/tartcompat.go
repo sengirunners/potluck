@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sengirunners/potluck/imagepins"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/vmhost"
 )
 
@@ -64,8 +65,10 @@ func tartCLI(layer Layer) string {
 	return resolveTart()
 }
 
-// tartInstallWords is how a lender gets Tart without a Terminal or root.
-const tartInstallWords = "download tart.tar.gz from " + TartReleases + ", unpack it and drag tart.app into Applications (no Terminal or root needed; guide: https://tart.run/quick-start/)"
+// tartInstallWords is how a lender gets Tart, without root.
+func tartInstallWords() string {
+	return "run `" + config.PotluckCommand("tart install") + "`, or download tart.tar.gz from " + TartReleases + ", unpack it and drag tart.app into Applications (no Terminal or root needed; guide: https://tart.run/quick-start/)"
+}
 
 // detectTartCLI finds Tart (vmhost.FindTart: PATH, the usual bin
 // directories, then tart.app in Applications) and checks it runs and has
@@ -77,10 +80,10 @@ func detectTartCLI(ctx context.Context, run Runner, f Facts, l *Layer) []string 
 	path := found.Path
 	if path == "" {
 		for _, app := range found.Hollow {
-			l.Problems = append(l.Problems, fmt.Sprintf("%s has no Contents/MacOS/tart in it, so it is not a whole Tart download: delete it and %s", app, tartInstallWords))
+			l.Problems = append(l.Problems, fmt.Sprintf("%s has no Contents/MacOS/tart in it, so it is not a whole Tart download: delete it and %s", app, tartInstallWords()))
 		}
 		if len(found.Hollow) == 0 {
-			l.Problems = append(l.Problems, "tart is not installed: "+tartInstallWords)
+			l.Problems = append(l.Problems, "tart is not installed: "+tartInstallWords())
 		}
 		return found.Hollow
 	}
@@ -129,7 +132,12 @@ func detectTartArguments(ctx context.Context, run Runner, path string, l *Layer)
 		l.Problems = append(l.Problems, "cannot read Tart run capabilities at "+path+": "+commandFailure(res, err))
 		return
 	}
-	for _, arg := range vmhost.TartBootArguments(true) {
+	args, err := vmhost.TartBootArguments(true)
+	if err != nil {
+		l.Problems = append(l.Problems, err.Error())
+		return
+	}
+	for _, arg := range args {
 		flag, _, _ := strings.Cut(arg, "=")
 		if !vmhost.TartHelpHas(res.Stdout, flag) {
 			l.Problems = append(l.Problems, "Tart at "+path+" lacks required run option "+flag+"; use a compatible Tart build that supports Potluck's isolation policy")
@@ -140,7 +148,7 @@ func detectTartArguments(ctx context.Context, run Runner, path string, l *Layer)
 	}
 	for _, h := range vmhost.TartHardeningArguments() {
 		if !vmhost.TartHelpHas(res.Stdout, h.Flag) {
-			l.Warnings = append(l.Warnings, fmt.Sprintf("Tart %s at %s has no %s (Tart %s or newer), so boxes keep %s; to drop it, %s", l.Version, path, h.Flag, h.Since, h.Without, vmhost.TartUpdateHint))
+			l.Warnings = append(l.Warnings, fmt.Sprintf("Tart %s at %s has no %s (Tart %s or newer), so boxes keep %s; to drop it, %s", l.Version, path, h.Flag, h.Since, h.Without, vmhost.TartUpdateHint()))
 		}
 	}
 }

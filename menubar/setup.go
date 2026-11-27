@@ -7,12 +7,15 @@ package menubar
 // say the same when setup is going on or blocked.
 
 import (
+	"cmp"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/hostsetup"
 	"github.com/sengirunners/potluck/protocol"
@@ -20,6 +23,12 @@ import (
 
 // SetupFacts are what the checklist is made from, beside the lending facts.
 type SetupFacts struct {
+	// AutoStart is that the app may start the daemon by itself: it is
+	// Potluck's own and no person stopped it.
+	AutoStart bool
+	// Stopped is that `potluck daemon stop` stopped it and nothing started
+	// it since.
+	Stopped bool
 	// Version is this program's version.
 	Version string
 	// Run is the last host run's record (nil: none); RunErr why it could
@@ -27,6 +36,10 @@ type SetupFacts struct {
 	Run     *hostsetup.Run
 	RunErr  string
 	RunLive bool
+	// Pools are the pools this machine is in now, when PoolsRead: the
+	// record says what a run did, and they what still stands.
+	Pools     []Pool
+	PoolsRead bool
 	// Menu is the menu bar item on a Mac (nil elsewhere).
 	Menu *MenuApp
 	// Updates is the daily update (nil: the program that answers keeps
@@ -52,6 +65,142 @@ type SetupFacts struct {
 	Mac *hostprobe.MacParts
 }
 
+// Pool is a pool this machine is in. Joined is when it joined (zero: the
+// pool runs on this machine), at the machine with that name and key
+// fingerprint.
+type Pool struct {
+	Slug, ID             string
+	Joined               time.Time
+	Machine, Fingerprint string
+	// Lends is that it joined it as a machine that lends.
+	Lends bool
+}
+
+// runNow is the last host run as running it again now must go: a pool it
+// joined and was cut off before it noted (its invite is spent) is named, one
+// renamed since goes by its name now, and one this machine has since left
+// needs an invite.
+func runNow(s SetupFacts) *hostsetup.Run {
+	r := s.Run
+	if r == nil || !s.PoolsRead {
+		return r
+	}
+	if p := r.Pool(); p != "" {
+		i := slices.IndexFunc(s.Pools, func(x Pool) bool { return r.PoolID != "" && x.ID == r.PoolID || r.PoolID == "" && x.Slug == p })
+		switch {
+		case i < 0:
+			return r.WithoutPool()
+		case s.Pools[i].Slug != p:
+			return r.Renamed(s.Pools[i].Slug)
+		}
+		return r
+	}
+	if !r.NeedsInvite {
+		return r
+	}
+	if p := joinedBy(r, s.Pools); p != nil {
+		return r.WithPool(p.Slug)
+	}
+	c := *r
+	if c.Else == "" {
+		if p := lendsTo(s.Pools); p != nil {
+			c.Else, c.ElseID = p.Slug, p.ID
+		}
+		return &c
+	}
+	i := slices.IndexFunc(s.Pools, func(p Pool) bool { return c.ElseID != "" && p.ID == c.ElseID || c.ElseID == "" && p.Slug == c.Else })
+	if i < 0 { // left since: no other stands in for it
+		c.Else, c.ElseID, c.Lost = "", "", true
+		return &c
+	}
+	c.Else, c.ElseID = s.Pools[i].Slug, s.Pools[i].ID
+	return &c
+}
+
+// A pool is r's invite's only if it was joined while r could join: from its
+// Joining until it ended, or, of a run cut off, until it would have given the
+// sign-in up (joinMost), and a little after (joinSlack): the daemon ends a
+// join whose answer nobody waited for.
+const (
+	joinMost  = 12 * time.Minute
+	joinSlack = time.Minute
+)
+
+// joinedBy is the one of pools that r spent its invite on (nil: none, or not
+// known).
+func joinedBy(r *hostsetup.Run, pools []Pool) *Pool {
+	if r.Joining == nil {
+		return nil
+	}
+	began, err := time.Parse(time.RFC3339, r.Joining.At)
+	if err != nil {
+		return nil
+	}
+	until := began.Add(joinMost)
+	if ended, err := time.Parse(time.RFC3339, r.Ended); err == nil {
+		until = ended
+	}
+	var at []Pool
+	for _, p := range pools {
+		if r.Joining.Names(p.Fingerprint, p.Machine) && !p.Joined.Before(began) && !p.Joined.After(until.Add(joinSlack)) {
+			at = append(at, p)
+		}
+	}
+	if len(at) != 1 {
+		return nil
+	}
+	return &at[0]
+}
+
+// lendsTo is the pool a run that needs an invite may go on with instead of
+// one: the only one this machine joined to lend, else the only one it is in
+// (nil: none, or several).
+func lendsTo(pools []Pool) *Pool {
+	for _, only := range [][]Pool{slices.DeleteFunc(slices.Clone(pools), func(p Pool) bool { return !p.Lends }), pools} {
+		if len(only) == 1 {
+			return &only[0]
+		}
+		if len(only) > 1 {
+			break
+		}
+	}
+	return nil
+}
+
+// newRun is the run a setup with no record to go by starts: it needs an
+// invite, or goes on with the pool lendsTo finds.
+func newRun(s SetupFacts) *hostsetup.Run {
+	r := &hostsetup.Run{AgainArgs: []string{"host"}, NeedsInvite: true}
+	if p := lendsTo(s.Pools); s.PoolsRead && p != nil {
+		r.Else, r.ElseID = p.Slug, p.ID
+	}
+	return r
+}
+
+// pressRun is the run the setup's button starts: the last one again, or a new
+// one when no record says how (none, or one written before again_args).
+func pressRun(s SetupFacts) *hostsetup.Run {
+	if s.Run == nil || len(s.Run.AgainArgs) == 0 {
+		return newRun(s)
+	}
+	return s.Run
+}
+
+// Stranded reports that t is shared only with pools this machine is in no
+// more (each ended, or left): nothing can use it.
+func (s SetupFacts) Stranded(t computeapi.RunTargetView) bool {
+	return s.PoolsRead && len(t.Shared) > 0 && !slices.ContainsFunc(s.Pools, func(p Pool) bool {
+		return slices.Contains(t.Shared, p.Slug) || slices.Contains(t.Shared, p.ID)
+	})
+}
+
+// AppName is the Mac app's bundle, and AppNames every name it is installed
+// under: this one, then the one it had before. Its executable (PotluckMenu)
+// and bundle id (sh.potluck.menu) are the same under both.
+const AppName = "Potluck.app"
+
+var AppNames = []string{AppName, "Potluck Menu.app"}
+
 // MenuApp is the menu bar item as this machine shows it.
 type MenuApp struct {
 	// Path is where the app is installed ("" when it is not).
@@ -61,7 +210,28 @@ type MenuApp struct {
 	Seen time.Time
 	// Open is the command that opens it.
 	Open string
+	// Login is the app's login item, as the app says it ("" when it has
+	// not: an older app, or one that never asked).
+	Login string
+	// Old are the places an app under its old name asked from, still there.
+	Old []string
 }
+
+// The app's login item, as only the app can read it: on, off, or refused
+// (turned off in System Settings, where only the person turns it on).
+const (
+	LoginOn      = "on"
+	LoginOff     = "off"
+	LoginRefused = "refused"
+)
+
+// What only the app can do (Do.App): turn its login item on or off, or
+// open the Login Items settings.
+const (
+	ActLoginOn       = "login_item"
+	ActLoginOff      = "login_item_off"
+	ActLoginSettings = "login_item_settings"
+)
 
 // MenuSeenWithin is how recent Seen must be for the app to count as
 // running: it asks every 15 seconds.
@@ -107,7 +277,12 @@ type Check struct {
 	// lending works without it.
 	words, help string
 	optional    bool
-	// other is another way to do it, a small button on its own line.
+	// waits is a blocked check that waits on Potluck finishing something of
+	// its own, not on this Mac: the steps before it that do not need it
+	// (installing Potluck and Tart) are still worth doing.
+	waits bool
+	// other is another way to do it, or of a done one the way to undo it: a
+	// small button on its own line.
 	other *Do
 }
 
@@ -124,18 +299,25 @@ type Do struct {
 	Label string `json:"label"`
 	// Args are potluck's arguments that do it, run as the user (no shell).
 	Args []string `json:"args,omitempty"`
-	// Invite is that the app asks for an invite code and appends it to Args
-	// as their last argument (they end in "--"); it is never in Args. When
-	// the person gives none, Args run as they are, as the action's words
-	// say: a host run with no argument shares with the one pool this machine
-	// is in.
+	// InviteArgs, set only beside Args, is that the app asks for an invite
+	// code. When the person gives one, these run instead of Args, with the
+	// code and a newline on the run's stdin: it is never an argument, where
+	// any user of this machine reads it. When they give none, Args run, with
+	// nothing on stdin: with no record, a host run with no argument, which
+	// shares with the one pool this machine is in; else one that goes on with
+	// the pool the words name, or refuses (InsteadFlag).
+	InviteArgs []string `json:"invite_args,omitempty"`
+	// Invite, set with InviteArgs, is only for an app built before it, which
+	// appends the code to Args: potluck updates itself and the app does not,
+	// and without this its window would have no place for an invite.
 	Invite bool `json:"invite,omitempty"`
 	// URL is a page to open (in the browser, or a file URL the system
 	// opens) instead of running anything.
 	URL string `json:"url,omitempty"`
-	// App is an act only the app itself can do. No check gives one yet.
+	// App is an act only the app itself can do (ActLoginOn and the rest).
 	App string `json:"app,omitempty"`
-	// Auto is that the app may do it without a click. No check sets it yet.
+	// Auto is that the app may do it without a click, once each time it
+	// starts.
 	Auto bool `json:"auto,omitempty"`
 }
 
@@ -145,16 +327,8 @@ type Do struct {
 // it does for the menu's own items (Menu.Windows); a record's again_args are
 // spelled the same way.
 var (
-	startArgs   = []string{"daemon", "--detach"}
+	startArgs   = []string{"--json", "daemon", "--detach"}
 	upgradeArgs = []string{"--json", "upgrade", "enable"}
-	// hostArgs run a setup with no record in the background; the invite
-	// is appended after the "--", so a paste that starts with "-" is never
-	// read as a flag. --yes: a press asks for the run, so one where this
-	// machine already shares sizes goes on rather than only saying what it
-	// would do.
-	// --no-sudo: the app has no terminal to ask at, so a root step the run
-	// stops at is its answer (admin_step), never skipped.
-	hostArgs = []string{"--json", "host", "--yes", "--no-sudo", "--detach", "--"}
 )
 
 // menuInstallDoc is where installing the menu bar item is written down:
@@ -172,12 +346,15 @@ type Setup struct {
 	// State is the last host run's: none, running, succeeded, blocked or
 	// interrupted (it stopped before it ended), or unreadable.
 	State string `json:"state"`
+	// Started is when that run began: the same until another run begins, so
+	// a reader can tell whose result State and the view are.
+	Started string `json:"started,omitempty"`
 	// Stages are that run's stages. A stage's open_url shows only while
 	// the run goes on.
 	Stages []hostsetup.Stage `json:"stages,omitempty"`
 	// AgainArgs and NeedsInvite are that run's: the program's arguments
-	// that run the setup again, and whether the invite code must be
-	// appended to them (hostsetup.Run).
+	// that run the setup again, and whether they need the invite
+	// code (hostsetup.Run).
 	AgainArgs   []string `json:"again_args,omitempty"`
 	NeedsInvite bool     `json:"needs_invite,omitempty"`
 	// StageOrder is every stage a host run goes through, in order
@@ -194,6 +371,9 @@ type Setup struct {
 	// View is the setup window, in words for someone who has never used a
 	// terminal.
 	View SetupView `json:"view"`
+	// OldApps are the app's places under its old name, as the app noted them
+	// when it ran there: the renamed app moves them to the Trash.
+	OldApps []string `json:"old_apps,omitempty"`
 }
 
 // The last host run's states.
@@ -242,7 +422,7 @@ func buildSetup(f Facts, st Status) Setup {
 				out.Stages[i].OpenURL = ""
 			}
 		}
-		out.AgainArgs, out.NeedsInvite = s.Run.AgainArgs, s.Run.NeedsInvite
+		out.Started, out.AgainArgs, out.NeedsInvite = s.Run.Started, s.Run.AgainArgs, s.Run.NeedsInvite
 	}
 	add := func(c Check) { out.Checks = append(out.Checks, c) }
 	if s.Mac != nil {
@@ -255,7 +435,10 @@ func buildSetup(f Facts, st Status) Setup {
 		out.Checks = append(out.Checks, potluckCheck(s))
 	}
 	if f.Daemon != "" {
-		add(Check{ID: "daemon", State: Todo, Detail: "the Potluck daemon is not running: " + f.Daemon, Action: f.Start, Do: &Do{Label: "Start Potluck", Args: startArgs}}.
+		// A Mac set up to lend, or part way there, starts it again when the
+		// app starts (after a restart nothing else does), unless a person
+		// stopped it; one never set up waits for a press.
+		add(Check{ID: "daemon", State: Todo, Detail: "the Potluck daemon is not running: " + f.Daemon, Action: f.Start, Do: &Do{Label: "Start Potluck", Args: startArgs, Auto: out.State != SetupNone && s.AutoStart && !notInstalled(s)}}.
 			say("Potluck isn't running", "Potluck runs quietly in the background. Start it to go on."))
 	} else {
 		add(Check{ID: "daemon", State: Done, Detail: "the Potluck daemon is running"}.say("Potluck is running", ""))
@@ -279,11 +462,11 @@ func buildSetup(f Facts, st Status) Setup {
 		}
 		add(menu)
 		if m.Path != "" {
-			add(Check{ID: "login", State: Unknown, optional: true, Detail: "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings > General > Login Items"}.
-				say("To have this menu appear every time you log in, add Potluck Menu in System Settings > General > Login Items", ""))
+			add(loginCheck(m))
+			out.OldApps = m.Old
 		}
 	}
-	if u := s.Updates; u != nil {
+	if u := s.Updates; u != nil && !notInstalled(s) { // its job would run that copy
 		c := Check{ID: "updates", State: Done, optional: true}
 		turnOn := &Do{Label: "Turn on daily updates", Args: upgradeArgs}
 		switch {
@@ -313,7 +496,11 @@ func buildSetup(f Facts, st Status) Setup {
 	// none (this Mac cannot lend, or the person must free disk or update
 	// what Potluck cannot) stops the walk: what follows cannot help, so
 	// NextID names it and Next is empty.
+	// What only the app can do is no step of a terminal's.
 	for _, c := range out.Checks {
+		if c.Do != nil && c.Do.App != "" {
+			continue
+		}
 		if (c.State == Todo || c.State == Blocked || c.State == Running) && c.Action != "" {
 			out.Next, out.NextID = c.Action, c.ID
 			break
@@ -327,31 +514,79 @@ func buildSetup(f Facts, st Status) Setup {
 	return out
 }
 
+// loginCheck is the app's login item, optional: the setup window turns it on
+// and off. Without it nothing starts Potluck after a restart.
+func loginCheck(m *MenuApp) Check {
+	const window = "in the Potluck menu, choose Set up and check…, then "
+	c := Check{ID: "login", optional: true}
+	if m.Login != "" && now().Sub(m.Seen) > MenuSeenWithin { // it may have changed since
+		c.State, c.Detail = Unknown, "starting the menu bar item at login: only the app can tell, and it is not running (when it last ran: "+m.Login+")"
+		return c
+	}
+	switch m.Login {
+	case LoginOn:
+		c.State, c.Detail = Done, "the menu bar item starts at login"
+		return c.say("Potluck starts when you log in", "").or(&Do{Label: "Turn off", App: ActLoginOff})
+	case LoginOff:
+		c.State, c.Detail = Todo, "the menu bar item has not been set to start at login (optional: after a restart nothing else starts Potluck), unless you added it to Login Items yourself"
+		c.Do = &Do{Label: "Start at login", App: ActLoginOn}
+		c.Action = window + c.Do.Label
+		return c.say("Potluck can open automatically when you log in", "")
+	case LoginRefused:
+		c.State, c.Detail = Todo, "the menu bar item's start at login is turned off in System Settings > General > Login Items"
+		c.Do = &Do{Label: "Open Login Items", App: ActLoginSettings}
+		c.Action = "turn Potluck on in System Settings > General > Login Items"
+		return c.say("Allow Potluck in Login Items to open it automatically when you log in", "")
+	}
+	name := strings.TrimSuffix(filepath.Base(m.Path), ".app") // what Login Items calls it
+	c.State, c.Detail = Unknown, "starting the menu bar item at login: the app has not said whether it does; to have it start at every login, add "+name+" in System Settings > General > Login Items"
+	return c.say("To have this menu appear every time you log in, add "+name+" in System Settings > General > Login Items", "")
+}
+
 // openApp opens the app at path (a file URL the system opens).
 func openApp(path string) *Do {
 	return &Do{Label: "Open the menu bar item", URL: (&url.URL{Scheme: "file", Path: path}).String()}
 }
 
 // againDo runs the last host run again in the background (label: the
-// button's words): its own arguments when the record has them, else
-// hostArgs, the invite asked for. Like hostArgs it goes on where this
-// machine already shares sizes (--yes) and hands back a root step
-// (--no-sudo).
+// button's words). A press asks for the run, so one where this machine
+// already shares sizes goes on rather than only saying what it would do
+// (--yes), and the app has no terminal to ask at, so a root step the run stops
+// at is its answer (--no-sudo: admin_step), never skipped.
 func againDo(r *hostsetup.Run, label string) *Do {
-	if r == nil || len(r.AgainArgs) == 0 { // never run, or a record written before again_args
-		return &Do{Label: label, Args: hostArgs, Invite: true}
-	}
-	args := append([]string{"--json"}, r.AgainArgs...) // a record's again_args never hold --json or --detach (cli startSetup)
-	for _, flag := range []string{"--yes", "--no-sudo"} {
-		if !slices.ContainsFunc(args, func(a string) bool { return a == flag || a == flag+"=true" }) {
-			args = append(args, flag)
+	full := func(again []string) []string {
+		args := append([]string{"--json"}, again...) // a record's again_args never hold --json or --detach (cli startSetup)
+		for _, flag := range []string{"--yes", "--no-sudo"} {
+			if !slices.ContainsFunc(args, func(a string) bool { return a == flag || a == flag+"=true" }) {
+				args = append(args, flag)
+			}
 		}
+		return append(args, "--detach")
 	}
-	args = append(args, "--detach")
-	if r.NeedsInvite {
-		args = append(args, "--")
+	d := &Do{Label: label, Args: full(r.AgainArgs)}
+	if !r.NeedsInvite {
+		return d
 	}
-	return &Do{Label: label, Args: args, Invite: r.NeedsInvite}
+	d = askInvite(d)
+	// With no invite given it goes on with the pool the words name, or
+	// refuses: never with just any this machine is in. A flag, not the
+	// argument: an app from before InviteArgs appends the invite as that.
+	d.Args = append(full(r.AgainArgs), "--"+InsteadFlag+"="+r.Else, "--")
+	return d
+}
+
+// InsteadFlag is host's flag for a run the checklist starts with no invite
+// when its setup needs one: the pool it goes on with, or "" to refuse.
+const InsteadFlag = "instead-of-invite"
+
+// askInvite is d, a host run with no pool named, that takes an invite code.
+// Args end in "--" so that a paste starting with "-", which an app built
+// before InviteArgs appends to them, is never read as a flag.
+func askInvite(d *Do) *Do {
+	d.InviteArgs = append(slices.Clone(d.Args), "--invite-stdin")
+	d.Args = append(slices.Clone(d.Args), "--")
+	d.Invite = true
+	return d
 }
 
 // RunAgain is how to run the last setup again (share: the command when the
@@ -383,10 +618,18 @@ func setupCheck(f Facts, state string, shares bool) Check {
 	c := func(st, detail, action string, do *Do) Check {
 		return Check{ID: "setup", State: st, Detail: detail, Action: action, Do: do}
 	}
-	const tellSomeone = "If it stops again, press Copy details and send what it copies to the person who invited you."
+	const tellSomeone = "If it stops again, copy the details and send them to the person who invited you."
 	switch state {
 	case SetupUnreadable:
-		return c(Unknown, "the last setup's record cannot be read: "+f.Setup.RunErr, "", nil).say("Couldn't tell how the last setup went", "")
+		detail, words := "the last setup's record cannot be read: "+f.Setup.RunErr, "Couldn't tell how the last setup went"
+		if f.Setup.RunLive {
+			return c(Running, "setting up now (its record cannot be read: "+f.Setup.RunErr+")", "", nil).say("Setting up now", "")
+		}
+		if shares || f.ListErr != "" || f.Daemon != "" { // what it lends says enough, or the daemon comes first
+			return c(Unknown, detail, "", nil).say(words, "")
+		}
+		lost := newRun(f.Setup)
+		return c(Todo, detail, f.Share, againDo(lost, "Set up again")).say(words, "Potluck couldn't read the last setup. Set up this Mac again to reuse what's already downloaded."+inviteAgain(lost)+" "+tellSomeone)
 	case SetupNone:
 		if shares { // set up before a run kept a record, or the record is gone
 			return c(Done, "this machine lends; it has no record of how it was set up", "", nil).say("Set up to lend", "")
@@ -399,9 +642,13 @@ func setupCheck(f Facts, state string, shares bool) Check {
 			words = "Setup can be checked once Potluck is running"
 		}
 		if endedEarly(f) {
-			help = "The last try stopped early; if it happens again, press Copy details and send what it copies to the person who invited you. "
+			help = "The last setup stopped early. If it happens again, copy the details and send them to the person who invited you. "
 		}
-		return c(Todo, "this machine has not been set up to lend yet", f.Share, againDo(nil, "Set up this Mac")).say(words, help+"Paste the invite you were sent, then press the button. Setting up downloads what jobs need and tests it, which can take an hour or more. You can keep using this Mac meanwhile.")
+		run, paste := newRun(f.Setup), "Paste your invite link, then choose Set up this Mac."
+		if run.Else != "" {
+			paste = "Paste your invite link, then choose Set up this Mac. Leave the invite field empty to lend to the group " + run.Else + "."
+		}
+		return c(Todo, "this machine has not been set up to lend yet", f.Share, againDo(run, "Set up this Mac")).say(words, help+paste+" Downloads and checks can take an hour or more. You can keep using your Mac.")
 	case SetupRunning:
 		cur := r.Current()
 		switch {
@@ -412,7 +659,7 @@ func setupCheck(f Facts, state string, shares bool) Check {
 		}
 		detail := "setting up now: " + hostsetup.Line(cur.Name, cur.Result, cur.Detail)
 		if u := cur.OpenURL; cur.Result == hostsetup.Running && strings.HasPrefix(u, "https://") { // the run waits on this page
-			return c(Running, detail, "open this page and sign in for the setup to go on: "+u, &Do{Label: "Sign in", URL: u}).say("Waiting for you to sign in", "Press the button and sign in on the page that opens in your browser. Setup goes on by itself after that.")
+			return c(Running, detail, "open this page and sign in for the setup to go on: "+u, &Do{Label: "Sign in", URL: u}).say("Waiting for you to sign in", "Setup will continue after you sign in.")
 		}
 		return c(Running, detail, "", nil).say("Setting up now", "")
 	case SetupBlocked:
@@ -422,21 +669,21 @@ func setupCheck(f Facts, state string, shares bool) Check {
 			detail = fmt.Sprintf("the last setup run was blocked at %s (%d of %d): %s; what was shared before still lends",
 				hostsetup.Label(b.Name), hostsetup.Number(b.Name), len(hostsetup.Order), b.Detail)
 		}
-		words, try := "The last setup stopped before it finished", againDo(r, "Try again")
+		words, try := "The last setup stopped before it finished", againDo(pressRun(f.Setup), "Try again")
 		switch {
 		case b.Flag != "" && b.Fix == "": // an earlier share kept the refused setting and no flag turns it off: running again fails the same way
-			return c(Blocked, detail, RunAgain(r, f.Share), nil).say(words, stopped[b.Name]+" Trying again won't fix it. Press Copy details and send what it copies to the person who invited you.")
+			return c(Blocked, detail, RunAgain(r, f.Share), nil).say(words, stopped[b.Name]+" Copy details and send them to the person who invited you.")
 		case b.Flag != "":
-			return c(Blocked, detail, RunAgain(r, f.Share), try).say(words, stopped[b.Name]+" One of its settings doesn't work on this Mac; trying again leaves that setting out."+inviteAgain(r)+" "+tellSomeone)
+			return c(Blocked, detail, RunAgain(r, f.Share), try).say(words, stopped[b.Name]+" Choose Try again to skip the setting this Mac can't use."+inviteAgain(pressRun(f.Setup))+" "+tellSomeone)
 		}
-		return c(Blocked, detail, "fix what the "+hostsetup.Label(b.Name)+" stage says, then "+RunAgain(r, f.Share), try).say(words, stopped[b.Name]+inviteAgain(r)+" "+tellSomeone)
+		return c(Blocked, detail, "fix what the "+hostsetup.Label(b.Name)+" stage says, then "+RunAgain(r, f.Share), try).say(words, stopped[b.Name]+seeTo[b.Name]+inviteAgain(pressRun(f.Setup))+" "+tellSomeone)
 	case SetupInterrupted:
 		at := "before its first stage"
 		if n := len(r.Stages); n > 0 {
 			at = "at " + hostsetup.Label(r.Stages[n-1].Name)
 		}
-		return c(Blocked, "the last setup stopped "+at+" before it finished (a pull that stopped resumes)", again, againDo(r, "Continue setup")).
-			say("The last setup was cut off", "Setup was cut off before it finished. Press the button to go on from where it stopped."+inviteAgain(r))
+		return c(Blocked, "the last setup stopped "+at+" before it finished (a pull that stopped resumes)", again, againDo(pressRun(f.Setup), "Continue setup")).
+			say("Setup was interrupted", "Choose Continue setup to pick up where it stopped."+inviteAgain(pressRun(f.Setup)))
 	}
 	return c(Done, fmt.Sprintf("set up: all %d stages succeeded (%s)", len(hostsetup.Order), strings.Join(stageNames(), ", ")), "", nil).say("Set up to lend", "")
 }
@@ -452,9 +699,13 @@ func lendingCheck(out *Setup, f Facts, st Status) {
 		out.Checks = append(out.Checks, Check{ID: "lending", State: Unknown, Detail: "what this machine shares cannot be read: " + f.ListErr}.say("Couldn't tell what this Mac lends just now", ""))
 		return
 	case l.Sizes == 0:
-		c := Check{ID: "lending", State: Todo, Detail: "this machine shares no size with a pool yet"}.say("Not lending anything yet", "This Mac was set up but lends nothing now."+inviteAgain(f.Setup.Run)+" Press the button to lend it again.")
+		c := Check{ID: "lending", State: Todo, Detail: "this machine shares no size with a pool yet"}.say("Not lending anything yet", "Setup is complete. Choose Lend this Mac to take jobs again."+inviteAgain(pressRun(f.Setup)))
 		if out.State == SetupNone || out.State == SetupSucceeded {
-			c.Action, c.Do = f.Share, againDo(f.Setup.Run, "Lend this Mac")
+			r := pressRun(f.Setup)
+			c.Action, c.Do = f.Share, againDo(r, "Lend this Mac")
+			if r.NeedsInvite {
+				c.Action = cmp.Or(r.Again, f.Share)
+			}
 		}
 		out.Checks = append(out.Checks, c)
 		return

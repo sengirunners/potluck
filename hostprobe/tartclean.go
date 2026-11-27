@@ -71,6 +71,8 @@ type TartItem struct {
 // a shared size needs that it does not.
 type TartInventory struct {
 	Items []TartItem `json:"items"`
+	// Unfinished is what Tart does not list: Potluck's unfinished downloads.
+	Unfinished *UnfinishedPulls `json:"unfinished,omitempty"`
 }
 
 // Removable is the inventory's removable items.
@@ -162,13 +164,8 @@ func ReadTartInventory(ctx context.Context, run Runner, r Report, read BindingsR
 	}
 	lent, lentTart := tartLent(served.Targets)
 	rec, recErr := readTartPulls(r.TartDir)
-	tags := map[string][]string{} // Tart's tags, by repository
-	for _, e := range entries {
-		if e.OCI && !strings.Contains(e.Name, "@") {
-			tags[imageRepository(e.Name)] = append(tags[imageRepository(e.Name)], e.Name)
-		}
-	}
-	inv := TartInventory{Items: []TartItem{}} // never null in JSON
+	tags := tartTags(entries)
+	inv := TartInventory{Items: []TartItem{}, Unfinished: readUnfinishedPulls(r.TartDir)} // Items never null in JSON
 	held := map[string]bool{}
 	for _, e := range entries {
 		it := TartItem{Name: e.Name, VM: !e.OCI, GB: e.SizeGB, Measured: e.SizeOK}
@@ -395,6 +392,9 @@ type TartRemoval struct {
 	Kept bool `json:"kept,omitempty"`
 	// Note says what Tart answered when that is not a plain removal.
 	Note string `json:"note,omitempty"`
+	// unread is why it was kept, when that is only that something could not
+	// be read or locked.
+	unread error
 }
 
 // TartCleanup is a removal's account: the inventory it acted on, what
@@ -452,22 +452,33 @@ func RemoveTartImages(ctx context.Context, run Runner, r Report, read BindingsRe
 		}
 	}
 	layer, _ := r.Layer("tart")
-	cli := tartCLI(layer)
+	again := func(ctx context.Context) (TartInventory, error) { return ReadTartInventory(ctx, run, r, read) }
+	return removeTart(ctx, run, layer.CLI, r.TartDir, inv, todo, again, mayRemove)
+}
+
+// removeTart runs cli's delete on each of todo, which inv (what again reads)
+// said may go, as RemoveTartImages says; mayRemove is asked of each once
+// more as again reads it under the record's lock.
+func removeTart(ctx context.Context, run Runner, cli, tartDir string, inv TartInventory, todo []TartItem,
+	again func(context.Context) (TartInventory, error), mayRemove func(TartItem) bool) (TartCleanup, error) {
+	c := TartCleanup{Before: inv}
+	cli = cmp.Or(cli, resolveTart())
 	failed := map[string]string{}
 	for _, it := range todo {
 		rm := TartRemoval{TartItem: it}
-		unlock, err := lockTartPulls(r.TartDir)
+		unlock, err := lockTartPulls(tartDir)
 		if err != nil {
-			rm.Kept, rm.Note = true, "kept: Potluck's record of what it pulled could not be locked just before its delete ("+err.Error()+")"
+			rm.Kept, rm.unread, rm.Note = true, err, "kept: Potluck's record of what it pulled could not be locked just before its delete ("+err.Error()+")"
 			c.Removals = append(c.Removals, rm)
 			continue
 		}
-		now, err := ReadTartInventory(ctx, run, r, read)
+		now, err := again(ctx)
 		if i := slices.IndexFunc(now.Items, func(n TartItem) bool { return n.Name == it.Name && n.State != TartAbsent }); err != nil || i < 0 || !mayRemove(now.Items[i]) {
 			unlock()
 			rm.Kept = true
 			switch {
 			case err != nil:
+				rm.unread = err
 				rm.Note = "kept: what Tart holds could not be read again just before its delete (" + err.Error() + ")"
 			case i < 0:
 				rm.Kept, rm.Removed, rm.Note = false, true, "Tart's list no longer had it just before its delete: it was already gone"
@@ -491,10 +502,10 @@ func RemoveTartImages(ctx context.Context, run Runner, r Report, read BindingsRe
 		for _, it := range inv.Items {
 			held[it.Name] = it.State != TartAbsent
 		}
-		forgetGone(r.TartDir, held)
+		forgetGone(tartDir, held)
 		return c, nil
 	}
-	after, listErr := tartList(ctx, run, layer.CLI)
+	after, listErr := tartList(ctx, run, cli)
 	still := map[string]bool{}
 	for _, e := range after {
 		still[e.Name] = true
@@ -530,7 +541,7 @@ func RemoveTartImages(ctx context.Context, run Runner, r Report, read BindingsRe
 				c.AlsoGone = append(c.AlsoGone, it.Name)
 			}
 		}
-		forgetGone(r.TartDir, still)
+		forgetGone(tartDir, still)
 	}
 	return c, errors.Join(errs...)
 }

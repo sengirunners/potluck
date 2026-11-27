@@ -39,7 +39,7 @@ its socket is there and does not answer as another process (a daemon too slow to
 second daemon of the same program on another home leaves a live record alone. The code is `kit/daemonrecord`;
 `kit/server` writes it.
 
-**Which daemon `potluck` uses**, decided once per command (`cli/attach.go`):
+**Which daemon `potluck` uses**, decided once per command (the rule is package `attach`; `cli/attach.go` applies it):
 
 1. `POTLUCK_BOX_CREDENTIAL` set: the authority that credential names, and no daemon on this machine.
 2. `POTLUCK_HOME` set: that home. When a daemon of another program that serves compute runs on it, potluck uses
@@ -1069,11 +1069,16 @@ its version, the release it installed, the hold switch, the last update check, a
   refuses it and the daemon leaves it out for an hour).
 - `job.min_age_s`: how old a release must be, in seconds since it was published, before the job takes it. `0` means
   it takes a release at once; no `min_age_s` means the job's minimum age is unknown, never zero.
+- `sources`: the release repositories this machine's updater reads, in order, as the program reports them through
+  `core.Deps.UpdateSources` each time the numbers are built. No `sources` means none reported: a build from before the
+  field, a program that sets no hook, or a config the program could not read (the last check shows the failure). The
+  order comes from the `update_repos` key of `config.json`, which the kit keeps raw (`config.File.UpdateRepos`) and
+  never checks: the program that reads it validates it, so a wrongly typed value cannot fail a config load.
 
 An authority older than a field either ignores it or refuses the report naming it. On a refusal the daemon sends the
-numbers again without that field. `zm`, `job` and `script_runs` stay out for an hour; `task_slots`, `sandbox_tasks`
-and `sandbox_slots` are dropped again on each send. A refused `potluck` is sent again as `zm`, with no back-off. For
-`job` only the job goes, the rest of the build still arrives.
+numbers again without that field. `zm`, `job`, `sources` and `script_runs` stay out for an hour; `task_slots`,
+`sandbox_tasks` and `sandbox_slots` are dropped again on each send. A refused `potluck` is sent again as `zm`, with no back-off. For
+`job` only the job goes, and for `sources` only the sources, the rest of the build still arrives.
 
 ### Inviters
 
@@ -1329,6 +1334,13 @@ runs. A limit on an area the project no longer defines is dropped at the next ch
 `cmd/potluck-e2b` (`internal/e2bgateway`; old name `cmd/zm-e2b`): a socket client like `potluck sandbox` (no routes of
 its own) that lets the unmodified E2B SDKs run on boxes.
 
+- Which daemon: the same rule as `potluck` (above, package `attach`). On a machine whose Potluck daemon is another
+  program's and that has no `~/.potluck`, the gateway serves from that daemon and makes no `~/.potluck`; it also
+  waits, as `potluck` does (end of rule 5), for such a daemon that is restarting. It writes nothing under another
+  program's home, so there its CA, token secret and keys go where `--state <dir>` says (also for `keygen`), and it
+  refuses without it. The old name `zm-e2b` follows the same rule with zm's names: it keeps zm's home when zm has
+  one (`~/.zm`, `ZM_HOME`), else uses the machine's one daemon. `POTLUCK_BOX_CREDENTIAL` is not read: the gateway
+  runs on a host.
 - Control plane: create (placement as `potluck sandbox create`), get, list, kill, timeout and connect (a renew within
   `ttl_max_s`). A sandbox id is a hash of the handle.
 - Data plane: it answers envd's `process.Process/Start` (Connect, JSON) and `GET`/`POST /files` itself with `exec`
@@ -1637,8 +1649,8 @@ Waiting and failing:
   most 5 minutes apart (sooner once a served job completes, except a serve backing off after an error) for as long as
   GitHub has it queued (asked at most every 15 minutes; a `completed` delivery ends it at once; a day at most). It is
   never dropped after a number of tries.
-- A delivery fails out after 6 failures in a row of anything else (a check GitHub does not answer), its job `failed`
-  with why.
+- A serve that fails 6 times in a row on anything else (a check GitHub does not answer) is logged and tried again every
+  8 minutes, until GitHub has the job ended (a day at most). Another delivery is dropped then.
 - While an installation's API budget, from GitHub's `X-RateLimit-*` headers, is at or below 10% of its hourly limit
   (at most 100 calls), a waiting serve makes no call until the reset.
 
@@ -1651,7 +1663,8 @@ A box lost before its job started:
   its host took back (`reclaimed`) or stopped serving (a drain, a close, its owner back) does not count against the
   job's serves: the job is served again each time, until a box keeps it or GitHub cancels it. A box that failed on its
   own (`expired`, `lost`, gone, ended by itself, or its runner did not start within 300 s) counts like a takeover:
-  three serves in all.
+  three serves at once, then one every 10 minutes while GitHub still has the job queued (logged as `ALERT`; the job is
+  `taken` with why).
 
 A box lost while its job ran:
 
@@ -1725,8 +1738,8 @@ Other runs taking the runner:
   run, passes.
 - `in_progress` is checked against the same rules: a runner of a serving job taken by a job they refuse (or cannot
   check) has its box released and the runner deleted at once, and its job is served again in the serve lane while
-  GitHub still has it waiting (runner `potluck-<job id>-<n>`, request id `gh-<job id>-<n>`, at most 3 serves per
-  job; then `failed`). A job they would serve taking it is a swap, left alone. The refused job, if it is the pool's,
+  GitHub still has it waiting (runner `potluck-<job id>-<n>`, request id `gh-<job id>-<n>`, 3 serves at
+  once, then one every 10 minutes). A job they would serve taking it is a swap, left alone, and uses up none of them. The refused job, if it is the pool's,
   is recorded `ignored` with why ("refused when it started on runner ...").
 - On a runner with an open guard, every job that starts, the runner's own job too, is decided again
   at `in_progress` (unless its run already passed the full rules, its own branches and a trusted event, which hold
@@ -2173,7 +2186,16 @@ box, and nothing is minted before GitHub says the right job holds it.
   marker `<run id> <workflow ref> <ref>` lets the hook pass it (driver capability `github-jit-guard-reguard`). The
   grants of the job the box was acquired for are never looked up for it, and nothing was issued for that job (a JIT
   runner takes one job). The box then goes to the taker's record, and the job it was acquired for is served again
-  with a new box. A box with an open guard (fork serving) is never taken over: the taker gets nothing and is stopped.
+  with a new box. A taker no grant names whose run passes the same way gets the box re-guarded to its run with
+  nothing issued, the marker alone, so it runs there as on a box of its own, when GitHub's run says its ref: a `push`
+  or `workflow_dispatch` whose commit is on a branch of its head's name that no tag is named like (GitHub gives the
+  head branch, which a tag's run shares), or a `schedule` or `repository_dispatch` on the default branch. Any other
+  (a `pull_request`'s `refs/pull/...`, a release's tag, a `merge_group`) is bounced. A box whose own job completed or
+  was cancelled before any job claimed its record holds nothing: a job of another run that took it is taken over the
+  same way, and one of its run gets the run's grants there. A box with an open guard (fork serving) is never taken
+  over: the driver's hook never holds a job for a re-guard marker under `open_if_private` (`docs/protocol.md`), so the
+  taker is stopped there whatever the broker does, gets nothing and is not re-run; the job the box was acquired for
+  is served again once the taker ends.
 - **Bounce**: when any of those checks refuses (or the driver cannot re-guard), the taker is stopped by the hook
   (killed, so none of its steps run, `if: always()` ones included), recorded to be re-run once GitHub fails it and
   its run completed (whichever of GitHub's `in_progress` and `completed` comes first, or the sweep), and the job the
@@ -2185,7 +2207,12 @@ box, and nothing is minted before GitHub says the right job holds it.
   When GitHub says the taker is in progress on that runner, the broker releases the box (ending the taker's steps),
   logs an `ALERT`, records it bounced, and serves the box's own job again at once; the taker is re-run on a box of its
   own as above. Its steps may run, without secrets, until the release ends them. A `completed` that comes first is
-  recorded the same way when the taker's own serve recorded its run's grants. A taker no grant names is left alone.
+  recorded the same way when the taker's own serve recorded its run's grants. When the broker never heard of the
+  taker there (a restart, lost deliveries, a taker never served itself), a failed taker's `completed`, the sweep that
+  finds it completed, or the serve of its late `queued` asks GitHub whether a grant names its run now, and if one does
+  records it bounced the same way (an `ALERT`, once) so it is re-run instead of staying red: its first attempt ran
+  there without its secrets. GitHub not answering applies the delivery again. A taker no grant names, or one that did
+  not fail, is left alone.
 - **Fails closed**: GitHub not answering, a grant gone, an issue refused (two grants giving one name different
   permissions among them), the issuer not started within the 240 s, or the marker not written revokes what the box
   got and writes no marker; the hook stops the job before its first step when the hold ends. The broker records why (`runners_job_secrets`).

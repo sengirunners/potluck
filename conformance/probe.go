@@ -37,6 +37,7 @@ const ProbeScript = `#!/bin/sh
 #                         closed from IP (another guest's address, taken and announced) and from the first
 #                         and last address of this guest's subnet; 5, printing them, if it opens from one
 #   net unfilter          as root: empty whatever packet filter this guest runs itself (nft, iptables)
+#   net mcast GROUP PORT TOKEN  send TOKEN to the multicast GROUP:PORT over UDP, three times (the suite listens)
 #   net kernel            print this guest's kernel's boot id
 #   net kset [N]          print kernel.printk_ratelimit_burst, a setting of the whole kernel; as root with N, set it first
 #   (net exits 65 when the guest lacks the tools: nc or bash, ip, ping; link, readdress, neighbour, take,
@@ -103,6 +104,10 @@ net)
 	case "$2" in
 	allow) hostport "$3"; tcp "$h" "$p" || exit 7 ;;
 	forbid) hostport "$3"; if tcp "$h" "$p"; then exit 5; fi ;;
+	mcast)
+		# A failed sender proves nothing about the host's filter.
+		command -v nc >/dev/null 2>&1 || exit 65
+		for i in 1 2 3; do printf '%s\n' "$5" | nc -u -w 1 "$3" "$4" >/dev/null 2>&1 || exit 66; done; exit 0 ;;
 	resolve)
 		if command -v getent >/dev/null 2>&1; then getent hosts "$3" >/dev/null 2>&1 || exit 8
 		else tcp "$3" "$4" || exit 7; fi ;;

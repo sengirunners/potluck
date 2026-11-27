@@ -308,7 +308,7 @@ func TestHostSetupDoRuns(t *testing.T) {
 			do = c.Do
 		}
 	}
-	if st.Setup.State != menubar.SetupInterrupted || do == nil || do.Invite || st.Setup.NextID != "setup" {
+	if st.Setup.State != menubar.SetupInterrupted || do == nil || do.InviteArgs != nil || st.Setup.NextID != "setup" {
 		t.Fatalf("setup %s: do %+v, next_id %q\n%+v", st.Setup.State, do, st.Setup.NextID, st.Setup.Checks)
 	}
 	// Without --yes the same run only says what it would do.
@@ -382,6 +382,42 @@ func TestHostDetachInviteOffArgv(t *testing.T) {
 	}
 	if st := lender.ok(t, "--json", "host", "status"); strings.Contains(st, code) || strings.Contains(st, "invite-stdin") {
 		t.Fatalf("host status:\n%s", st)
+	}
+}
+
+// The setup button's runs, as host status gives them to the app: with an
+// invite pasted, the run reads it from stdin and refuses a damaged one
+// before anything starts; with none, it shares with the only pool.
+func TestSetupButtonRuns(t *testing.T) {
+	m := onePoolMachine(t, refPin)
+	useSwitch(t)
+	hostsetup.Start(m.home, hostsetup.Command{Prefix: "potluck host", Path: []string{"host"}}).Begin(hostsetup.Preflight, "checking") // a run with an invite, cut off
+	var st menubar.Status
+	if err := json.Unmarshal([]byte(m.ok(t, "--json", "host", "status")), &st); err != nil {
+		t.Fatal(err)
+	}
+	var do *menubar.Do
+	for _, c := range st.Setup.Checks {
+		if c.ID == "setup" {
+			do = c.Do
+		}
+	}
+	if do == nil || len(do.InviteArgs) == 0 {
+		t.Fatalf("no setup button that takes an invite: %+v", st.Setup.Checks)
+	}
+	const damaged = "potluck-mini:abc:ABCD-EFGH"
+	if o, e, c := m.runIn(t, damaged+"\n", do.InviteArgs...); c != 2 || !strings.Contains(e, "invite is damaged") || strings.Contains(o+e, damaged) {
+		t.Fatalf("a damaged invite on stdin: exit %d\n%s%s", c, o, e)
+	}
+	old := hostSpawn
+	t.Cleanup(func() { hostSpawn = old })
+	spawned := ""
+	hostSpawn = func(_ []string, arg string, _, _ *os.File) (int, error) {
+		spawned = arg
+		return 4242, nil
+	}
+	if o, e, c := m.run(t, do.Args...); c != 0 || spawned == "" || strings.Contains(spawned, ":") {
+		t.Fatalf("nothing pasted: exit %d, shares with %q\n%s%s", c, spawned, o, e)
 	}
 }
 

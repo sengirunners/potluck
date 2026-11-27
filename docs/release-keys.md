@@ -81,3 +81,97 @@ repository's releases) or hand someone a `--release` directory.
 3. Do steps 1, 2, 4 and 5 at once: list only the new key, set the new secret, release. Installs older than that
    release still trust only the leaked key and refuse the new one: tell users to run `install.sh` again, and
    publish the new key's fingerprint somewhere other than the repository so they can check it.
+
+## Apple's signing keys
+
+Separate from the release key, and not needed for a release. With them, the release workflow signs the Mac programs
+and `Potluck.app` with a Developer ID certificate, and `.github/workflows/app.yml` then publishes `Potluck.zip`: the app
+with that release in it, signed, notarized by Apple and stapled. `Potluck.zip` is never published otherwise.
+
+The repository variable `POTLUCK_APPLE_SIGNING` turns it on (`on`). Without it the release workflow says so and passes,
+nothing of Apple's runs, and the app ships ad hoc signed. Deleting it turns signing off again: the quick way out when
+Macs or Apple's services hold up releases (a run that already waits for a Mac must be cancelled; run the workflow again). But a lender's signed app that a later release replaces with an ad hoc one may lose its login item.
+
+They are in the GitHub environment `potluck-apple` of the repository the releases run in:
+
+| name | kind | what it is |
+| --- | --- | --- |
+| `POTLUCK_SIGN_KEY` | secret | the Developer ID Application certificate's private key: unencrypted RSA PEM |
+| `POTLUCK_NOTARY_KEY` | secret | an App Store Connect API key's `AuthKey_*.p8` text |
+| `POTLUCK_SIGN_CERT` | variable | the certificate, then Apple's intermediate that issued it, both as PEM (public) |
+| `POTLUCK_NOTARY_KEY_ID` | variable | that API key's id (not a secret) |
+| `POTLUCK_NOTARY_ISSUER` | variable | its issuer id (not a secret) |
+
+With one missing the `sign` job fails, and the release ships as with none.
+
+Notarizing uses an API key, not an Apple ID's app-specific password: `notarytool` reads the API key from a file, while
+a password goes in its arguments or is typed. An API key also belongs to the team, not a person, and can be limited
+and revoked by itself. The two are told apart by `macos/PotluckMenu/sign.sh`; a person's own Mac may use either
+([menubar.md](menubar.md#signing-and-notarizing)).
+
+### Setting them up
+
+1. **Make the environment first**, with main as its only branch, before any secret. (A workflow that names an
+   environment that does not exist makes one with no rule at all.) No required reviewers and no wait timer: a release would wait for them.
+
+   ```sh
+   repo=<public repository>
+   gh api -X PUT repos/$repo/environments/potluck-apple -F 'deployment_branch_policy[protected_branches]=false' \
+     -F 'deployment_branch_policy[custom_branch_policies]=true'
+   gh api -X POST repos/$repo/environments/potluck-apple/deployment-branch-policies -f name=main -f type=branch
+   gh api repos/$repo/environments/potluck-apple/deployment-branch-policies --jq '.branch_policies[].name'   # main, only
+   ```
+
+2. **The certificate.** The Apple team's Account Holder makes a "Developer ID Application" certificate (developer.apple.com,
+   Certificates) from a certificate signing request whose private key you hold, and gets a `.cer` file. Download
+   Apple's "Developer ID - G2" intermediate (apple.com/certificateauthority). Then, with both as PEM in one file:
+
+   ```sh
+   { openssl x509 -inform der -in developerID_application.cer; openssl x509 -inform der -in DeveloperIDG2CA.cer; } > cert.pem
+   gh variable set POTLUCK_SIGN_CERT -e potluck-apple -R $repo < cert.pem
+   gh secret set POTLUCK_SIGN_KEY -e potluck-apple -R $repo < <private key PEM>
+   ```
+
+   A key in a `.p12` comes out with `openssl pkcs12 -in <file>.p12 -nocerts -nodes` (into a file only you can read,
+   deleted after).
+3. **The notary key.** App Store Connect, Users and Access, Integrations, Team Keys: make a key with the Developer role.
+   Its `.p8` can be downloaded once.
+
+   ```sh
+   gh secret set POTLUCK_NOTARY_KEY -e potluck-apple -R $repo < AuthKey_<key id>.p8
+   gh variable set POTLUCK_NOTARY_KEY_ID -e potluck-apple -R $repo --body <key id>
+   gh variable set POTLUCK_NOTARY_ISSUER -e potluck-apple -R $repo --body <issuer id>
+   ```
+
+4. **Turn it on**, last: `gh variable set POTLUCK_APPLE_SIGNING -R $repo --body on` (a variable of the repository, not
+   the environment).
+5. **Check it** on the next release that a push to main makes: the `sign` and `try` jobs pass, then the `app` workflow
+   does, and the release has `Potluck.zip`. While signing fails there is one open issue, "Signing the Mac app and
+   programs failing"; while the zip does, "Potluck.zip failing". A failed `app` run can be re-run (all jobs: what they hand on is kept a day). A release whose `sign`
+   failed is out unsigned and stays so: do not re-run it, the next push signs. A release started by hand
+   (`workflow_dispatch`) is not signed with Apple's key and has no `Potluck.zip`.
+
+Keep one offline copy of the private key with the owners, as for the release key. When the certificate expires or the
+team changes, replace `POTLUCK_SIGN_CERT` and `POTLUCK_SIGN_KEY` together. Programs already signed keep working: the
+signatures carry Apple's time. If the key leaks, the Account Holder revokes the certificate (macOS then refuses what it
+signed) and the secret is replaced; a leaked notary key is revoked in App Store Connect.
+
+### What can read what
+
+- Only the `sign` job (release.yml) and the `notarize` job (app.yml) name the environment: on GitHub-hosted Macs, with a
+  read-only token, for a push to main. (app.yml runs only when release.yml's own token started it.) No pull request and
+  no other branch can.
+- `sign` is given the signing key alone; `notarize` both keys. Each is in the environment of one step, the one that
+  runs `signing-keychain.sh open`, which takes it out of its environment before it starts any program. From then it is
+  in a temporary keychain and, for the notary key, a file only that user reads; `signing-keychain.sh close` removes
+  them even when signing failed. Nothing secret is in a program's arguments.
+- Those jobs run `sign.sh` and `signing-keychain.sh` from the workflow's own commit, Apple's tools, and GitHub's
+  checkout and artifact actions pinned by commit, checked out after the files to sign are
+  unpacked, in directories of their own with no links. They run nothing of the commit being released: the app and programs
+  they sign are only read. But they do sign what those earlier jobs built from it.
+- The jobs that build (`menubar`, `programs`, `fullapp`) and the one that runs the signed programs (`try`) run the
+  released commit's code, hold no Apple secret and can write nothing. `publishapp` can write to the repository, has no
+  Apple secret, and runs only `publish-app.sh` and Apple's checks.
+- The `release` job builds the Mac programs itself as well, and takes a signed one only when the signature is all that
+  differs from its own (`scripts/release/signed.go`); else it ships its own. So the release key still vouches only for
+  what that job built, and the manifest's SHA-256 sums cover the signed files. The app's own program is not compared.

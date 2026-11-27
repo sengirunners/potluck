@@ -348,7 +348,7 @@ func TestShareRefusesATooSmallTartDiskBeforeAnyPull(t *testing.T) {
 			o.Report, o.Images, o.With, o.DryRun = macReportWithDisk(t, c.free), nil, c.with, dry
 			run := tartListing(t)
 			_, err := shareOn(context.Background(), run, nil, o)
-			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("only %.0f GB free in /Users/o/.tart", c.free)) || !strings.Contains(err.Error(), c.need) || !strings.Contains(err.Error(), "nothing was downloaded") {
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("only %.0f GB free in /Users/o/.tart", c.free)) || !strings.Contains(err.Error(), c.need) || !strings.Contains(err.Error(), "nothing more was downloaded") {
 				t.Fatalf("%s, dry %t: err %v", c.name, dry, err)
 			}
 		}

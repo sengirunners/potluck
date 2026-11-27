@@ -35,7 +35,8 @@ refusal is off for a private repository whose owner turned on
 
 The labels are this machine's pool's, from the daemon (`potluck runners
 setup`), checked with the broker's own label rule; `--labels` gives them
-directly and needs no daemon; they must name the OS.
+directly; when one of them is an OS label no daemon is needed. Without one, the daemon is asked: a label of the
+pool's `runners.labels` whose entry names an OS is enough on its own.
 
 Only that one value changes. Comments, quoting, key order and line endings
 stay as they are; the edit is checked to change nothing else in the decoded

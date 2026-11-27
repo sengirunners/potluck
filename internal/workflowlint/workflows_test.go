@@ -118,6 +118,7 @@ func TestLintCatchesEachRule(t *testing.T) {
 		{"Jobs and Runs-On", "name: x\non: [pull_request]\n" + ro + "Jobs:\n  a:\n    Runs-On: sengi\n", "not a GitHub-hosted label"},
 		{"ON beside on", "name: x\non: [push]\nON: [issue_comment]\n" + ro + "jobs:\n  a:\n    runs-on: sengi\n", "duplicate key"},
 		{"true beside on", "name: x\non: [push]\ntrue: [issue_comment]\n" + ro + "jobs:\n  a:\n    runs-on: sengi\n", "duplicate key"},
+		{"a colon in a plain scalar", wf("  push:\n", ro, "ubuntu-latest") + "      - run: echo (out: fine)\n", "not YAML"},
 		{"no on", "name: x\n" + ro + "jobs:\n  a:\n    runs-on: sengi\n", "no `on` key"},
 		{"tab indentation", "name: x\non:\n\tpull_request:\n" + ro + "jobs:\n", "tab"},
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/softnet"
 )
 
@@ -86,7 +87,9 @@ func (a *app) softnetStatusCmd() *cobra.Command {
 			}
 			w := a.host.Stdout
 			fmt.Fprintf(w, "this Mac: macOS %s, %s\n", orUnknown(r.MacOS), orUnknown(r.Arch))
-			fmt.Fprintf(w, "to get a Softnet that enforces Potluck's rules: %s\n", a.softnetAdvice(r))
+			if adv := softnet.For(hostprobe.MacOSMajor(r.MacOS), r.Arch); len(used.Problems) > 0 || adv.Kind != softnet.Managed || used.SoftnetBuild != adv.Build.ID {
+				fmt.Fprintf(w, "to get a Softnet that enforces Potluck's rules: %s\n", a.softnetAdvice(r))
+			}
 			printInstalled(w, "managed, in use", st.Current)
 			printInstalled(w, "managed, previous", st.Previous)
 			if used.SoftnetPath != "" {
@@ -110,7 +113,11 @@ func printInstalled(w io.Writer, label string, in *softnet.Installed) {
 	case in.Problem != "":
 		fmt.Fprintf(w, "%s: %s, cannot be used: %s\n", label, in.ID, in.Problem)
 	default:
-		fmt.Fprintf(w, "%s: %s (%s)\n", label, in.ID, in.Path)
+		note := ""
+		if b, ok := softnet.ByID(in.ID); ok && b.Candidate() {
+			note = ", a candidate not yet validated on a real Mac of its macOS"
+		}
+		fmt.Fprintf(w, "%s: %s%s (%s)\n", label, in.ID, note, in.Path)
 	}
 }
 
@@ -155,7 +162,7 @@ app to run as root itself. Run install again afterwards to check the result.`,
 			if err := noSudoNotAsRoot(adminStep, noSudo); err != nil {
 				return err
 			}
-			return a.adminStepCmd(a.cmd("softnet install")+" again to check it", func() error {
+			return a.adminStepCmd(a.softnetInstallAs(candidate)+" again to check it", func() error {
 				return a.softnetInstall(cmd.Context(), from, candidate, adminStep, noSudo)
 			})
 		},
@@ -261,7 +268,7 @@ func (a *app) removeManagedSoftnet(ctx context.Context, store softnet.Store, noS
 	if softnetEUID() == 0 {
 		return false, errors.New("run " + a.cmd("softnet uninstall") + " as yourself, not as root: it asks for the admin password itself")
 	}
-	if err := a.softnetAdmin(ctx, []string{"uninstall", "--admin-step"}, "disarms and removes every managed Softnet build in "+store.Dir, noSudo); err != nil {
+	if err := a.softnetAdmin(ctx, []string{"uninstall", "--admin-step"}, "remove the network helper", "disarms and removes every managed Softnet build in "+store.Dir, noSudo); err != nil {
 		return false, err
 	}
 	if _, err := os.Lstat(store.Dir); !errors.Is(err, os.ErrNotExist) {
@@ -310,6 +317,11 @@ func (a *app) managedLeft() string {
 	return ""
 }
 
+// softnetInstallAs is the install as it was typed.
+func (a *app) softnetInstallAs(candidate bool) string {
+	return softnet.Advice{Candidate: candidate}.Install(a.cmd("softnet"))
+}
+
 func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminStep, noSudo bool) error {
 	b, r, l, err := a.softnetBuild(ctx, candidate, adminStep)
 	if err != nil {
@@ -318,7 +330,7 @@ func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminS
 	w := a.host.Stdout
 	if adminStep {
 		if softnetEUID() != 0 {
-			return errors.New("--admin-step runs as root: run " + a.cmd("softnet install") + " instead")
+			return errors.New("--admin-step runs as root: run " + a.softnetInstallAs(candidate) + " instead")
 		}
 		if from == "" {
 			return errors.New("--admin-step needs --from")
@@ -338,12 +350,18 @@ func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminS
 		return nil
 	}
 	if softnetEUID() == 0 {
-		return errors.New("run " + a.cmd("softnet install") + " as yourself, not as root: it checks Tart as you and asks for the admin password itself")
+		return errors.New("run " + a.softnetInstallAs(candidate) + " as yourself, not as root: it checks Tart as you and asks for the admin password itself")
 	}
 	if len(l.Problems) > 0 {
-		return fmt.Errorf("this Mac cannot run Potluck's Tart boxes yet, so Softnet was not installed: %s", strings.Join(l.Problems, "; "))
+		return api.Plainly(fmt.Errorf("this Mac cannot run Potluck's Tart boxes yet, so Softnet was not installed: %s", strings.Join(l.Problems, "; ")),
+			"This Mac isn't ready for the network helper, which needs Tart to be working first. Nothing was installed. Press Check again and do the step it shows, if any."+plainGetHelp)
 	}
-	if cur := softnetStore().Status().Current; cur != nil && cur.ID == b.ID && cur.Pinned && from == "" {
+	if from != "" {
+		if err := isBuild(from, b); err != nil {
+			return err
+		}
+	}
+	if cur := softnetStore().Status().Current; cur != nil && cur.ID == b.ID && cur.Pinned {
 		fmt.Fprintf(w, "Softnet %s is in use already at %s; nothing to do\n", b.ID, softnetStore().Current())
 		forgetKeptDownload(b)
 		return a.softnetAfter(ctx, r)
@@ -356,12 +374,12 @@ func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminS
 		var err error
 		var done func()
 		if file, done, err = a.downloadSoftnet(ctx, b, noSudo); err != nil {
-			return err
+			return api.Plainly(err, "The network helper couldn't be downloaded and checked, so nothing was installed. If this Mac is offline or low on disk space, see to that, then try again."+plainGetHelp)
 		}
 		defer done()
-	}
-	if err := isBuild(file, b); err != nil {
-		return err
+		if err := isBuild(file, b); err != nil {
+			return err
+		}
 	}
 	abs, err := filepath.Abs(file)
 	if err != nil {
@@ -371,11 +389,11 @@ func (a *app) softnetInstall(ctx context.Context, from string, candidate, adminS
 	if candidate {
 		args = append(args, "--candidate")
 	}
-	if err := a.softnetAdmin(ctx, args, "installs Softnet "+b.ID+" owned by root and setuid in "+softnet.Dir, noSudo); err != nil {
+	if err := a.softnetAdmin(ctx, args, "install the network helper", "installs Softnet "+b.ID+" owned by root and setuid in "+softnet.Dir, noSudo); err != nil {
 		return err
 	}
 	if err := inUse(b.ID); err != nil {
-		return err
+		return api.Plainly(err, "The password step ended, but the network helper isn't in place. Try again."+plainGetHelp)
 	}
 	return a.softnetAfter(ctx, r)
 }
@@ -478,7 +496,7 @@ func (a *app) softnetRollback(ctx context.Context, adminStep, noSudo bool) error
 	if softnetEUID() == 0 {
 		return errors.New("run " + a.cmd("softnet rollback") + " as yourself, not as root: it asks for the admin password itself")
 	}
-	if err := a.softnetAdmin(ctx, []string{"rollback", "--admin-step"}, "puts Softnet "+st.Previous.ID+" back in use in "+softnet.Dir, noSudo); err != nil {
+	if err := a.softnetAdmin(ctx, []string{"rollback", "--admin-step"}, "put back the network helper this Mac used before", "puts Softnet "+st.Previous.ID+" back in use in "+softnet.Dir, noSudo); err != nil {
 		return err
 	}
 	if err := inUse(st.Previous.ID); err != nil {
@@ -490,8 +508,9 @@ func (a *app) softnetRollback(ctx context.Context, adminStep, noSudo bool) error
 
 // softnetAdmin runs this program's softnet command words args as root
 // through sudo, after saying what the admin step does. With noSudo it runs
-// nothing and returns an *adminStepLeft naming the step.
-func (a *app) softnetAdmin(ctx context.Context, args []string, does string, noSudo bool) error {
+// nothing and returns an *adminStepLeft naming the step, its reason in a
+// person's words (to, as helperWhy takes it) and in a terminal's (does).
+func (a *app) softnetAdmin(ctx context.Context, args []string, to, does string, noSudo bool) error {
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
@@ -502,7 +521,7 @@ func (a *app) softnetAdmin(ctx context.Context, args []string, does string, noSu
 	words := append(strings.Fields(a.cmd("softnet"))[1:], args...)
 	why := "The admin step " + does + ", because Tart starts Softnet as root for each box's network."
 	if noSudo {
-		return &adminStepLeft{adminStep{Why: why, Argv: append([]string{exe}, words...)}}
+		return &adminStepLeft{adminStep{Why: helperWhy(to), Argv: append([]string{exe}, words...), detail: why}}
 	}
 	fmt.Fprintf(a.host.Stdout, "%s sudo asks for your Mac password once.\n", why)
 	if err := softnetSudo(ctx, exe, words, a.host.Stdout, a.host.Stderr); err != nil {

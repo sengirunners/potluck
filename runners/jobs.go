@@ -43,8 +43,9 @@ var (
 )
 
 const (
-	maxTries     = 6                // failures in a row before a delivery is dropped (a serve waiting for a box is not one)
-	maxServes    = 3                // serves of one job: the first and two after its runner was taken or its box failed (a box taken back before the job started is not counted)
+	maxTries     = 6                // failures in a row before a delivery is dropped (a serve waiting for a box is not one; a serve is not dropped but tried on at its longest gap)
+	maxServes    = 3                // serves of one job at once: the first and two after its runner was taken by a job the broker refuses or its box failed (a box taken back before the job started, or a runner a job the broker serves took, is not counted)
+	serveLater   = 10 * time.Minute // after maxServes a job GitHub still has queued is served again this long after its last serve ended
 	maxMints     = 1000             // runners minted for one job, refused boxes included (a backstop: RefuseCool and queueMax bound it first)
 	queueMax     = 24 * time.Hour   // GitHub cancels a job queued this long: a waiting serve stops then
 	laneServe    = 0                // queued deliveries and re-serves: a serve waits for a box to boot
@@ -147,6 +148,11 @@ type item struct {
 	received, job   int64
 }
 
+// serves reports whether it serves a job.
+func (it item) serves() bool {
+	return it.event == eventRequeue || it.event == "workflow_job" && it.job != 0
+}
+
 func (s *Service) drain(ctx context.Context, lane int) {
 	for ctx.Err() == nil {
 		it, ok := s.next(ctx, lane)
@@ -246,11 +252,17 @@ func (s *Service) settle(ctx context.Context, lane int, it item, err error) {
 			s.giveUp(ctx, it.job, "GitHub kept it queued for a day: given up ("+w.why+")")
 			s.rerunDropped(ctx, it, "its run did not end within a day")
 		}
-	} else if it.fails++; it.fails < maxTries {
+	} else if it.fails++; it.fails < maxTries || lane == laneServe && it.serves() && now.Sub(time.Unix(0, it.received)) <= queueMax {
 		// An error backs off by the errors in a row, not by earlier waits:
 		// at most Retry<<(maxTries-2) (8 min at the default 30 s) before
-		// the next try, whatever the delivery waited for before.
-		gap = s.Retry << (it.fails - 1)
+		// the next try, whatever the delivery waited for before. A serve
+		// keeps that longest gap until queueMax: its job is still queued on
+		// GitHub, which nothing would serve if the delivery were dropped
+		// (check.go: a job with a record is not queued again).
+		gap = s.Retry << min(it.fails-1, maxTries-2)
+		if it.fails == maxTries {
+			s.logf("runners: job %d: its serve failed %d times in a row, still tried again: %s", it.job, it.fails, oneLine(err.Error()))
+		}
 	} else {
 		done = 2
 		s.logf("runners: delivery %s dropped after %d failed tries: %v", it.delivery, it.fails, err)
@@ -447,7 +459,16 @@ func (s *Service) try(ctx context.Context, l link, d delivery, w want, again boo
 		observed = &gj
 		switch {
 		case gj.Status == "completed":
-			return s.upsert(ctx, d, jobDone, "completed before it was served", toServe...)
+			// On another job's runner, its completion never applied: recorded
+			// for a re-run first if it was stopped there or ran there without
+			// its secrets (endedOnGuardedBox).
+			if err := s.endedOnGuardedBox(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, gj.RunID, gj.RunAttempt, gj.RunnerName, gj.Conclusion); err != nil {
+				return err
+			}
+			if err := s.upsert(ctx, d, jobDone, "completed before it was served", toServe...); err != nil {
+				return err
+			}
+			return s.lostEnded(ctx, d.Job.ID, gj.RunID, gj.RunAttempt, gj.Conclusion)
 		case gj.Status == "in_progress" && again:
 			return s.upsert(ctx, d, jobDone, "GitHub has it running elsewhere: not served again", toServe...)
 		case gj.Status == "in_progress" && gj.RunnerName != "" && !ourRunner.MatchString(gj.RunnerName):
@@ -944,8 +965,18 @@ func (s *Service) reserve(ctx context.Context, body []byte) error {
 		return err
 	case j.state == jobServing && j.runner == q.From:
 		return errors.New("the taken runner's box is still being released") // started retries it
-	case j.state == jobTaken && j.reserves >= maxServes-1:
-		return s.move(ctx, q.Job, jobTaken, jobFailed, fmt.Sprintf("its runner was taken or its box failed %d times: not served again", j.reserves+1))
+	case j.state == jobTaken && j.reserves >= maxServes-1 && s.now().Before(time.Unix(j.updated, 0).Add(serveLater)):
+		// Still queued on GitHub: served again, only slower. updated stays the
+		// last serve's end.
+		until := time.Unix(j.updated, 0).Add(serveLater)
+		why := fmt.Sprintf("its runner was taken or its box failed %d times: served again at %s", j.reserves+1, until.UTC().Format("15:04:05 UTC"))
+		if j.why != why {
+			s.logf("runners: ALERT: job %d of %s: %s (%s)", q.Job, j.repo, why, j.why)
+			if _, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET why = ? WHERE job = ? AND state = ?`, why, q.Job, jobTaken); err != nil {
+				return err
+			}
+		}
+		return &waitErr{why: why, until: until}
 	case j.state == jobTaken:
 		// Re-serving clears only the old box assignment. Each actual job's
 		// selected budget and first execution clock remain on its own row.
@@ -977,10 +1008,12 @@ func (s *Service) reserve(ctx context.Context, body []byte) error {
 	return s.try(ctx, l, d, w, true)
 }
 
-// notOurs is why a job the pool recorded is not served any more: the pool's
-// label changed, and the job's labels do not name the new one.
+// notOurs is why a job the pool recorded is not served any more: its labels
+// no longer name the pool's label (runners.label, or the pool's own name) nor
+// a label of the pool's label map (runners.labels), whichever of the two was
+// changed since the job was recorded.
 func (s *Service) notOurs() string {
-	return "its labels no longer name the pool: the pool's label is now " + placement.Quote(s.conf().Label) + " (" + s.cmd("runners set label <name>") + "): not served"
+	return "its labels no longer name the pool: they name neither the pool's label " + placement.Quote(s.conf().Label) + " (" + s.cmd("runners set label <name>") + ") nor a label in runners.labels in config.json: not served"
 }
 
 // poolSubject is zm-runners as the link's token: capped to the pool project
@@ -1054,15 +1087,23 @@ func (s *Service) ended(ctx context.Context, d delivery) error {
 	secretsErr := s.endJobSecrets(ctx, d.Job.ID) // revoked now, not only when its box ends
 	// Stopped on a box guarded to another run, whichever of GitHub's
 	// in_progress and completed came first: recorded before lostEnded reads.
-	s.endedOnGuardedBox(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt, d.Job.RunnerName)
-	if err := s.githubEnded(ctx, d.Job.ID, d.Job.Conclusion); err != nil {
-		return err
+	// GitHub not answering whether a job grant names it: applied again
+	// (lostEnded finds no record until then). A taker the broker never knew
+	// of holds no box here, so the box it took stays with its owner until
+	// GitHub answers; a delivery dropped after its tries leaves the taker
+	// red, as before.
+	guardErr := s.endedOnGuardedBox(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt, d.Job.RunnerName, d.Job.Conclusion)
+	endErr := s.githubEnded(ctx, d.Job.ID, d.Job.Conclusion, d.Job.RunnerName)
+	if endErr != nil && !errors.Is(endErr, errRunnerUnknown) {
+		return errors.Join(endErr, guardErr)
 	}
 	if err := s.lostEnded(ctx, d.Job.ID, d.Job.RunID, d.Job.RunAttempt, d.Job.Conclusion); err != nil {
 		return err
 	}
-	s.nudge(ctx)      // a box may be free: waiting serves try now
-	return secretsErr // the completion not recorded: applied again
+	s.nudge(ctx) // a box may be free: waiting serves try now
+	// The completion not recorded, its box kept until GitHub says whose its
+	// runner is, or its grants not asked: applied again.
+	return errors.Join(secretsErr, endErr, guardErr)
 }
 
 // jobEnded releases what a job GitHub completed held. The box it ran on is
@@ -1072,7 +1113,7 @@ func (s *Service) ended(ctx context.Context, d delivery) error {
 // queued (reserve asks; one that runs elsewhere or ended is done). The job's
 // own box goes too unless another job runs on it: then it stays, renewed,
 // until that job ends.
-func (s *Service) jobEnded(ctx context.Context, id int64) error {
+func (s *Service) jobEnded(ctx context.Context, id int64, ranOn string) error {
 	rows, err := s.db().QueryContext(ctx, `SELECT job, runner FROM runners_jobs WHERE state = ? AND runs = ? AND job != ?`, jobServing, id, id)
 	if err != nil {
 		return err
@@ -1095,7 +1136,7 @@ func (s *Service) jobEnded(ctx context.Context, id int64) error {
 		if err := s.finishAs(ctx, h.job, jobTaken); err != nil {
 			return err
 		}
-		if err := s.move(ctx, h.job, jobTaken, jobTaken, "job "+itoa(id)+" ran on its runner "+h.runner+" and ended: box released"); err != nil {
+		if err := s.uncounted(ctx, h.job, "job "+itoa(id)+" ran on its runner "+h.runner+" and ended: box released, served again"); err != nil {
 			return err
 		}
 		if err := s.requeue(ctx, h.job, h.runner); err != nil {
@@ -1109,7 +1150,62 @@ func (s *Service) jobEnded(ctx context.Context, id int64) error {
 	if err != nil || j.state == jobServing && j.runs != 0 && j.runs != id {
 		return err // another job runs on its box
 	}
+	if j.state == jobServing && !j.started && j.handle != "" {
+		if taken, err := s.runnerTaken(ctx, j, ranOn); taken || err != nil {
+			return err // in_progress of the job on it, or the sweep, says what next
+		}
+	}
 	return s.finish(ctx, id)
+}
+
+// runnerTaken deletes the runner of job j, which ended and is not known to
+// have run on it, before j's box goes: GitHub refuses when it has just given
+// the runner to another job, whose in_progress is not applied yet, and that
+// job must keep the box. A runner busy with j's own last moments is not
+// taken: ranOn, the runner GitHub said j ran on, tells the two apart, and GitHub
+// is asked when it has not said (""). One GitHub does not say whose is (errRunnerUnknown) keeps its box,
+// and is asked about again soon: a waiting job may need that box.
+func (s *Service) runnerTaken(ctx context.Context, j job, ranOn string) (bool, error) {
+	l, err := s.link(ctx, j.installation)
+	if err != nil {
+		return false, nil
+	}
+	if !ghapp.RunnerBusy(s.deleteRunner(ctx, l, j)) {
+		return false, nil // gone, or finish meets the same error
+	}
+	if ranOn == "" {
+		cl, err := s.client(ctx)
+		if err != nil {
+			return true, fmt.Errorf("%w: %w", errRunnerUnknown, err)
+		}
+		gj, err := cl.Job(ctx, j.installation, j.repo, j.id)
+		if err != nil {
+			return true, fmt.Errorf("%w: %w", errRunnerUnknown, err)
+		}
+		ranOn = gj.RunnerName
+	}
+	switch ranOn {
+	case j.runner:
+		return false, nil
+	case "":
+		return true, fmt.Errorf("%w: GitHub names no runner for job %d yet", errRunnerUnknown, j.id)
+	}
+	s.logf("runners: job %d ended elsewhere and GitHub has its runner %s busy with another job: its box is kept", j.id, j.runner)
+	return true, nil
+}
+
+// errRunnerUnknown: an ended job's runner is busy and GitHub did not say with
+// which job.
+var errRunnerUnknown = errors.New("runners: busy runner of an ended job, kept until GitHub says whose it is")
+
+// uncounted has job id, whose box was just released (finishAs, jobTaken),
+// wait to be served again without using up one of its serves: a job the
+// broker serves took its runner, so no box failed it. The caller requeues it.
+// checked = 0: the serve asks GitHub first whether it still waits.
+func (s *Service) uncounted(ctx context.Context, id int64, why string) error {
+	_, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = ?, checked = 0, started = 0, runs = 0, updated = ? WHERE job = ? AND state = ?`,
+		jobWaiting, clip(why), s.now().Unix(), id, jobTaken)
+	return err
 }
 
 // finish ends a served job: the box released, the runner gone.
@@ -1130,6 +1226,7 @@ func (s *Service) finishAs(ctx context.Context, id int64, end string) error {
 		if err != nil || j.state != jobServing {
 			return err
 		}
+		released := false // its box is gone: its runner can run nothing more
 		l, err := s.link(ctx, j.installation)
 		if err == nil && j.handle != "" {
 			if sub, svc, perr := s.poolSubject(ctx, l); perr == nil {
@@ -1140,10 +1237,18 @@ func (s *Service) finishAs(ctx context.Context, id int64, end string) error {
 					s.logf("runners: job %d: its box on %s was not renewed for its whole lease and the host did not answer the release (%s): row ended",
 						id, j.target, oneLine(rerr.Error()))
 				}
+				released = true
 			}
 		}
 		if err == nil {
-			if derr := s.deleteRunner(ctx, l, j); derr != nil {
+			derr := s.deleteRunner(ctx, l, j)
+			if released && ghapp.RunnerBusy(derr) {
+				// The job on it went with the box; GitHub lists the runner
+				// offline and busy until its lost-communication timeout (about
+				// 10 minutes). It serves nothing, so nothing waits for it: the
+				// sweep deletes it once it is not busy.
+				s.logf("runners: job %d: its box is released and GitHub still has its runner %s busy: left to GitHub", id, j.runner)
+			} else if derr != nil {
 				return derr
 			}
 		}
@@ -1249,10 +1354,17 @@ func (s *Service) Sweep(ctx context.Context) {
 				s.renew(ctx, j, caps)
 			}
 		case gj.Status == "completed":
-			if on != id { // its completion never came: sweepLost re-runs it if it was stopped there
-				s.endedOnGuardedBox(ctx, j.installation, j.repo, on, gj.RunID, gj.RunAttempt, j.runner)
+			// Its completion never came: sweepLost re-runs it if it was stopped
+			// there, or ran there without the secrets a grant names it for. That
+			// job is the one that took j's runner, or j itself on another job's
+			// runner. GitHub not answering: not recorded (githubEnded below ends
+			// the record, so no later sweep asks again).
+			if on != id {
+				_ = s.endedOnGuardedBox(ctx, j.installation, j.repo, on, gj.RunID, gj.RunAttempt, j.runner, gj.Conclusion)
+			} else if gj.RunnerName != j.runner {
+				_ = s.endedOnGuardedBox(ctx, j.installation, j.repo, on, gj.RunID, gj.RunAttempt, gj.RunnerName, gj.Conclusion)
 			}
-			_ = s.githubEnded(ctx, on, gj.Conclusion)
+			_ = s.githubEnded(ctx, on, gj.Conclusion, gj.RunnerName)
 		case j.handle != "":
 			if !j.started && gj.Status == "in_progress" && gj.RunnerName == j.runner {
 				if s.startRuntime(ctx, j.id, on, &gj) != nil {

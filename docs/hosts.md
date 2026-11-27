@@ -266,6 +266,13 @@ A host run goes through five stages and says each as one line on stderr (not und
 | join | joining the pool of the invite (only once a size passed), or the pool already joined |
 | usable capacity | sharing the sizes that passed and seeing the pool list them: what the pool can use |
 
+On a Mac, a download that stopped partway (the Mac restarted, the network went, the run was killed) goes on from where
+it stopped when the setup runs again. Potluck keeps it in its own folder in Tart's (`~/.tart/potluck-pull`), where no
+other `tart` command deletes it; the finished image goes into Tart's cache as ever. The next setup deletes there what it
+will not go on with, and `potluck uninstall` the rest. In such a pull Tart deletes none of your own images to make room:
+a disk that is short stops the setup instead. `potluck host images` says how much disk the unfinished downloads take,
+and how to delete them without setting up again.
+
 A blocked run's error says what happened and what to do. A run blocked by a flag the layer this machine shares on does not take (`--docker`
 on a Mac's Tart layer, `--root` on OCI, `--net-mbit` off OCI) records that flag, and the command it gives to run
 again leaves it out (or, when an earlier share kept `--docker`, adds `--docker=false`): `next: run again without
@@ -275,23 +282,25 @@ went through ends with `next:`, the one thing left to do. The pull and conforman
 The run writes its stages to the home's `host-setup.json` as they change (never the invite code; the command that
 runs it again names it `'<invite code>'`). Beside that command as a person types it (`again`), the record holds it
 for a program to run: `again_args`, the arguments after the program (`["host", "--no-sudo=true"]`; no shell, no
-quoting), and `needs_invite`, true while the invite code must be appended to them because nothing was joined yet.
+quoting), and `needs_invite`, true while they need the invite code, given on stdin with `--invite-stdin`, because nothing was joined yet.
 Once the run joined, the pool's name stands in the invite's place and `needs_invite` is gone. While the join waits
 for a tailnet login, the join stage carries the login page as `open_url` (the same URL as the stderr line `log in to
 your tailnet to continue (waiting): <url>`); the stage's next change clears it. `potluck host status` reads that file
-with what else is set up and prints the checklist, and `--json` carries it as `setup` (`state`, `stages`,
+with what else is set up and prints the checklist, and `--json` carries it as `setup` (`state`, `started`, `stages`,
 `stage_order`, `again_args`, `needs_invite`, `checks`, `next`, `next_id`; a stage's `open_url` only while the run
-goes on). `stage_order` is every stage in order, reached or not, each with its `name` and `label`. Each check has an
+goes on). `started` is when that run began, the same until another begins. `stage_order` is every stage in order, reached or not, each with its `name` and `label`. Each check has an
 `id`, a `state` (done, todo, blocked, running, unknown, info) and its words (`detail`); one with something to do
 has `action`, the command as a person types it, and `do`, the same thing for a program, so the menu bar app never
 reads words to know what to run: `label` (the button's words) and one of `args` (the program's arguments, no
-shell; with `invite`, they end in `--` and the app appends the invite code the person gives after it, or runs
-them as they are when they give none, as the words say; the code is never in `args`), `url`
+shell; with `invite_args` the app asks for an invite code and, when the person gives one, runs those instead with
+the code and a newline on stdin, never as an argument; when they give none it runs `args`, which
+go on with the pool the words name or refuses (`--instead-of-invite`, below); `invite` true beside it is for a menu bar app built before `invite_args`), `url`
 (a page to open: the tailnet login while the join waits for it, only an `https` page) or `app` (an act only the app
-can do; no check gives one yet); `auto` means it may be done without a click (no check sets it yet). The setup
-check's `args` are the record's `again_args` with `--json` before them and `--yes --no-sudo --detach` after (a press asks for
+can do: its login item); `auto` means the app may do it without a click, once each time it starts (the daemon's, on a
+machine whose setup was begun, however it ended, unless a person stopped it). The setup
+check's `args` are the record's `again_args`, as the pools this machine is in now change them (below), with `--json` before them and `--yes --no-sudo --detach` after (a press asks for
 the run, so one where this machine already shares sizes goes on, and a root step is handed back, below), or
-`--json host --yes --no-sudo --detach --` with the invite when there is no record. One check has an `action` but no `do`: a setup blocked on a refused setting an
+`--json host --yes --no-sudo --detach` when there is no record to go by; `invite_args`, there with no record or while running it again needs the invite, are the same with `--invite-stdin`. While the daemon answers, a pool the record names that was renamed goes by its name now, and one this machine has left, or whose owner ended it, asks for an invite. A run cut off after it spent its invite and before it noted the pool (`joining` in the record: the machine the invite names, and when the join began) names the pool this machine joined there then, and asks for none. While an invite is needed, `args` carry `--instead-of-invite=<pool>`, the pool a press with no invite goes on with, which the window's words name: the pool the refused invite was for, or the only one it joined at the machine that invite names, when this machine is in it (`else_pool`), else the only one this machine joined to lend, else the only one it is in. With none of these, or a pool it has left, it is empty and the run refuses, naming the pools this machine is in. `view.invite_refused` is that the last setup's invite was refused where it is from: given again it is refused again. A size shared only with pools this machine is in no more is not counted as lent; a job still on it is counted as running. One check has an `action` but no `do`: a setup blocked on a refused setting an
 earlier share kept and no flag turns off, where running it again fails the same way. `next_id` is the `id` of the check `next` is the action of, or, with no `next`, of a blocked check nothing Potluck runs fixes (an Intel Mac, a full disk): the walk stops there, and `next:` points at that line. `view` is the menu bar app's setup window, in words for someone who has never used a terminal ([menubar.md](menubar.md#set-up-and-check)). The checklist covers:
 
 - with `--probe`, on a Mac, what the Mac needs before a host run can work (below);
@@ -301,19 +310,20 @@ earlier share kept and no flag turns off, where running it again fails the same 
 - what this machine shares now, and apart from that, when it may lend: only while you are away (after the idle
   time, `--when away`) or any time, and whether it takes work now;
 - on a Mac, the menu bar item ([menubar.md](menubar.md#what-host-status-knows-of-the-app)): installed, running
-  (only once the app itself has read this status), and Login Items, which Potluck cannot read;
+  (only once the app itself has read this status), and whether it starts at login, as the app says;
 - the daily update (`potluck upgrade enable`), which covers Potluck alone: not the menu bar item, Tart or Softnet.
 
 `potluck host status --probe` adds, on a Mac, checks made from what `potluck doctor` reads, part by part, so each
 state comes from a fact and never from a problem's words (the words are the detail). They come first, in this order:
 
-- `mac`: Apple silicon, macOS 13 or newer, and virtualization (`kern.hv_support`). When any is missing the check is
+- `mac`: Apple silicon, macOS 13 or newer, and virtualization (`kern.hv_support`; macOS inside a virtual machine
+  has none, and `kern.hv_vmm_present` 1 there is a definite no). When any is missing the check is
   blocked with plain words and nothing to run, and the tart, softnet and disk checks are left out: nothing Potluck
   installs makes such a Mac able to lend.
 - `potluck`: done, unless the app that started it carries a signed release (`POTLUCK_BUNDLED_RELEASE`, a directory
   with `manifest.json`, its signature and the tarballs) and this program does not run from the install directory
-  (`$POTLUCK_INSTALL_DIR`, else `~/.local/bin`). Then it is todo, and its `do` runs `upgrade --release <dir> --dir
-  <install dir>`; unknown when there is no home and `POTLUCK_INSTALL_DIR` is unset. This one is read without
+  (`$POTLUCK_INSTALL_DIR`, else `~/.local/bin`). Then it is todo, and its `do` runs `--json upgrade --release <dir>
+  --dir <install dir>`, and the daily update is left out; unknown when there is no home and `POTLUCK_INSTALL_DIR` is unset. This one is read without
   `--probe` too.
 - `tart`: found where `vmhost.FindTart` looks (PATH, the usual bin directories, then `tart.app` in Applications or
   `~/Applications`), and it runs with Potluck's run options. Missing, a `tart.app` with no program in it, or a
@@ -322,10 +332,11 @@ state comes from a fact and never from a problem's words (the words are the deta
   link on PATH) that is too old: blocked, with how to update it, since a download would not replace it.
 - `softnet`: usable, else what `softnet.For` says this Mac's macOS can have. A Potluck build validated for it: todo,
   `do` runs `--json softnet install --no-sudo`, whose answer names the one admin step ([softnet.md](softnet.md)).
-  Where only upstream's own release fits, `do` opens its releases page; where only its permissions are wrong and
-  no build can be installed: blocked, with the root command. macOS 15, whose only build is a candidate
+  Where only upstream's own release fits (Potluck's build of it was withdrawn): blocked, its `detail` (Copy details, in the
+  window) with how to install it by hand; where only its permissions are wrong and no build can be installed: blocked, with the root command. macOS 15, whose only build is a candidate
   not yet validated, or a macOS no build covers: blocked, nothing to run. A managed Softnet that cannot be used, left
-  on a Mac that has no use for it, comes first: todo, `do` runs `--json softnet uninstall --no-sudo`.
+  on a Mac that has no use for it, comes first: todo, `do` runs `--json softnet uninstall --no-sudo`. A candidate that
+  cannot be used: blocked.
 - `disk`: the free disk where Tart keeps images against what Potluck's image for this Mac needs (its pin's
   `min_free_gb`). Done when Tart already has that image. Short: blocked, with how much to free, on a Mac that shares
   nothing yet; only `info` (next steps go on) when it shares a size, a host run is going on, or the last one's
@@ -347,7 +358,7 @@ daemon does not answer: starting it comes first.
 Where this machine already shares sizes, a later blocked run stays in the checklist, as "the last setup run was
 blocked at <stage>: <why>; what was shared before still lends", until another host run replaces its record.
 
-`next:` is the first thing left in that order. Nothing in the checklist is done for you: it never installs the
+`next:` is the first thing left in that order. `host status` does none of the checklist for you: it never installs the
 menu bar item, adds a login item or turns on the daily update. The menu bar item's title and note come from the
 same facts, so the menu and the terminal name the same blocked stage.
 
@@ -482,7 +493,7 @@ A layer `potluck-driver-tart` cannot serve yet (`incus`) is reported by `doctor`
 
 Then it pulls each image through the layer's CLI and, per size, runs `potluck-conformance <driver> --kind box` on the
 box config (`vm`, `size`, `cpu`, `memory`, `images`, and for oci `oci_runtime`, `oci_cli`, `oci_network`), with the
-box network targets: `--net-peers`, the owner's `--net-allow`, `--net-forbid` and `--net-mail`, and a `--net-forbid`
+box network targets: `--net-peers`, `--net-multicast`, the owner's `--net-allow`, `--net-forbid` and `--net-mail`, and a `--net-forbid`
 for each of this machine's own addresses but loopback and IPv6 link-local, on a port `host` listens on during the
 runs, so a pass means blocked rather than closed.
 
@@ -753,6 +764,9 @@ the record when a removal or a share next reads that list (the homes that used i
 more. When any list of what this machine shares cannot be read (a daemon running here does not answer, or one pool's
 list fails), no image is removable; when its macOS version cannot be read, it refuses.
 
+`potluck uninstall --with-tart` uses the same record when Potluck leaves the Mac
+([lending.md](lending.md#tart-and-its-images-uninstall---with-tart)).
+
 The Cirrus Xcode image does not include Chrome. Workflows needing Chrome must
 install it until a Potluck Mac image ships it. Real-Mac acceptance is the S4 runner
 probe and worm native on a Mac lent with `--with xcode`, without `--image` or
@@ -827,7 +841,8 @@ like this:
   ref, or one whose marker never comes, is stopped as above. A guest that keeps no box secrets (macOS) gets no
   `github-jit-guard-run` and refuses a run guard. A job of another run that the strict guard would serve otherwise
   (`github-jit-guard-reguard`) is held for a marker of `<run id> <workflow ref> <ref>` naming its own run: the
-  broker re-guards the box to it and issues its own grants. No such marker within the hold stops it as above.
+  broker re-guards the box to it and issues its own grants (none, for a job no grant names). No such marker within
+  the hold stops it as above.
 
 - With `jit_guard.open_if_private`, a job the events refuse is served when the event payload
   (`GITHUB_EVENT_PATH`) says `repository.private` is true and `repository.visibility` is `"private"`; anything else

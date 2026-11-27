@@ -115,8 +115,8 @@ func (r *run) net() {
 		r.skip(name, "run and box targets only")
 		return
 	}
-	if len(r.opt.NetAllow)+len(r.opt.NetForbid)+len(r.opt.NetMail)+len(r.opt.NetResolve) == 0 && !r.opt.NetPeers {
-		r.skip(name, "no --net-allow, --net-forbid, --net-mail, --net-resolve or --net-peers")
+	if len(r.opt.NetAllow)+len(r.opt.NetForbid)+len(r.opt.NetMail)+len(r.opt.NetResolve) == 0 && !r.opt.NetPeers && !r.opt.NetMulticast {
+		r.skip(name, "no --net-allow, --net-forbid, --net-mail, --net-resolve, --net-peers or --net-multicast")
 		return
 	}
 	in := func(a ...string) (int, error) { return r.runExit(append([]string{"net"}, a...)...) }
@@ -248,6 +248,9 @@ func (r *run) net() {
 				return fmt.Errorf("the probe exited %d", c)
 			}, "forbid", to)
 		}
+	}
+	if r.opt.NetMulticast {
+		r.multicast(in)
 	}
 	if r.opt.NetPeers && r.kind == "box" {
 		r.peersBox(in)

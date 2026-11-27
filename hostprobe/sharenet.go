@@ -11,25 +11,29 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sengirunners/potluck/vmhost"
 )
 
-// HostAddrs answers this machine's own addresses, which a box must reach on
-// no port: every interface address but loopback and IPv6 link-local (its
-// zone names a host interface, which means nothing inside a guest; the
-// suite's --net-peers covers link-local neighbours). A tailnet address is an
-// interface address too.
+// HostAddrs answers this machine's own addresses (vmhost.HostAddresses, the
+// list a box's block rules come from), which a box must reach on no port:
+// every interface address but loopback and IPv6 link-local (its zone names a
+// host interface, which means nothing inside a guest; the suite's
+// --net-peers covers link-local neighbours). A tailnet address is an
+// interface address too. None when they cannot be read, which fails the
+// block test.
 func HostAddrs() []string {
-	as, err := net.InterfaceAddrs()
+	as, err := vmhost.HostAddresses()
 	if err != nil {
 		return nil
 	}
 	var out []string
-	for _, a := range as {
-		n, ok := a.(*net.IPNet)
-		if !ok || n.IP.IsLoopback() || n.IP.To4() == nil && n.IP.IsLinkLocalUnicast() {
+	for _, p := range as {
+		a := p.Addr()
+		if a.IsLoopback() || a.Is6() && a.IsLinkLocalUnicast() {
 			continue
 		}
-		out = append(out, n.IP.String())
+		out = append(out, a.String())
 	}
 	return out
 }
@@ -176,7 +180,7 @@ func netArgs(o ShareOptions) (args []string, stop func(), err error) {
 	for _, h := range o.HostAddrs {
 		args = append(args, "--net-forbid", net.JoinHostPort(h, port))
 	}
-	return append(args, "--net-peers"), stop, nil
+	return append(args, "--net-peers", "--net-multicast"), stop, nil
 }
 
 // checkAddrs refuses a network target conformance would refuse.

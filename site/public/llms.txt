@@ -19,6 +19,8 @@ Potluck is a program (`potluck`) for macOS and Linux. One machine runs a pool; f
 
 ## Blog
 
+- [How a group of people can share their spare compute with each other](https://potluck.sh/blog/group-people-share-their-spare-compute-each-other.md): Ways for a group to share spare compute: BOINC, Folding@home, Petals, Golem, Akash, or a private Potluck pool of Macs and Linux boxes you already own.
+- [macOS Runners Cheaper Than GitHub Hosted, Plus Linux Runners With gVisor or Kata (November 2026)](https://potluck.sh/blog/macos-runners-cheaper-than-github-hosted.md): Self-hosted macOS runners on Macs you own beat per-minute hosted billing. How to run GitHub Actions on Linux with gVisor or Kata, and where Potluck fits.
 - [Actions Runner Controller (ARC): Self-Hosted GitHub Actions Runners on Kubernetes in 2026](https://potluck.sh/blog/actions-runner-controller-github-actions-runner-controller-arc.md): How to install Actions Runner Controller (ARC) with Helm: controller chart, GitHub auth, runner scale sets, workflows. Plus Potluck for spare Macs.
 - [Open Source Self-Hosted CI Runner Tools for CI Jobs and Coding Agents on Your Own Machines (November 2026)](https://potluck.sh/blog/best-self-hosted-ci-runners.md): Open-source tools that run CI jobs and coding agents on machines you already own, compared for November 2026: isolation, setup and where Potluck fits.
 - [Claude Code permissions and sandbox settings explained (2026)](https://potluck.sh/blog/claude-code-permissions-sandboxing-explained.md): How Claude Code permission rules, permission modes and the Bash sandbox fit together in 2026, what each blocks, and when to isolate the whole agent.

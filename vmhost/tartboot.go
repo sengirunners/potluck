@@ -5,17 +5,24 @@ import (
 	"os/exec"
 	"regexp"
 	"time"
+
+	kitconfig "github.com/sengirunners/potluck/kit/config"
 )
 
 // TartBootArguments is the production headless boot policy; preflight checks
 // that the selected Tart understands each option before pulling an image,
-// and refuses a Tart that lacks one.
-func TartBootArguments(isolated bool) []string {
+// and refuses a Tart that lacks one. An isolated boot carries this Mac's
+// block rules now (SoftnetBlockRules), and fails when they cannot be made.
+func TartBootArguments(isolated bool) ([]string, error) {
 	a := []string{"--no-graphics", "--no-audio", "--no-clipboard"}
 	if isolated {
-		a = append(a, softnetArgs...)
+		block, err := SoftnetBlockRules()
+		if err != nil {
+			return nil, err
+		}
+		a = append(a, softnetArgs(block)...)
 	}
-	return a
+	return a, nil
 }
 
 // TartHardening is a boot option that takes away something Tart gives a
@@ -51,7 +58,9 @@ func TartHardeningArguments() []TartHardening {
 }
 
 // TartUpdateHint says how to get a newer Tart.
-const TartUpdateHint = "download the latest tart.tar.gz from https://github.com/openai/tart/releases/latest and replace tart.app in Applications with it (or the tart on your PATH; brew upgrade tart, if Homebrew installed it)"
+func TartUpdateHint() string {
+	return "run `" + kitconfig.PotluckCommand("tart install") + "` if Potluck installed it, else download the latest tart.tar.gz from https://github.com/openai/tart/releases/latest and replace tart.app in Applications with it (or the tart on your PATH; brew upgrade tart, if Homebrew installed it)"
+}
 
 // TartHelpHas reports whether `tart run --help` output lists flag.
 func TartHelpHas(help, flag string) bool {

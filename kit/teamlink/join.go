@@ -165,7 +165,8 @@ func (s *Service) finishJoin(ctx context.Context, req api.JoinRequest, red api.R
 	if old != nil && old.Snapshot().State == api.RemoteOK {
 		// The new token is not needed: it revokes itself.
 		_ = s.call(ctx, via, hc, http.MethodPost, base+"/v0/team/leave", red.Token, struct{}{}, nil)
-		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", red.Cap.Slug).WithHint(config.Command("leave", red.Cap.Slug) + " first")
+		return nil, api.Errorf(api.CodeConflict, "this machine already joined %s", red.Cap.Slug).WithHint(config.Command("leave", red.Cap.Slug) + " first").
+			WithData(api.ProjectRef{ID: red.Cap.Project, Slug: red.Cap.Slug})
 	}
 	// Refusals that leave the code usable come before the token file: a
 	// file written for a join that is refused would be an orphan zm leave

@@ -1349,3 +1349,61 @@ func TestParkedOldHQ(t *testing.T) {
 		t.Fatalf("a refused press reached the engine: %+v", got[n:])
 	}
 }
+
+// The codes zm's HQ puts in a standby setup's failure (its Setup* codes)
+// pass through the status as sent; not_opted_in and term_no_copy also pass
+// as a standby's reason and keep their reason on a refused press. A code
+// outside the vocabulary answers as unknown. The codes are zm's literals, so
+// the test does not read them from the list it checks.
+func TestHQSetupReasonCodesPassThrough(t *testing.T) {
+	ctx := context.Background()
+	tn := tailnettest.New()
+	e := &fakeEngine{}
+	hq := newHQDaemon(t, tn, "mini", tailnettest.Identity{NodeID: "nMINI", NodeKey: "nodekey:mini", Login: "judy@example.com", Host: "mini"}, e)
+	teamProject(t, hq.c, "orchid")
+	answer := func(code string) (failure, standby string) {
+		e.mu.Lock()
+		e.status = api.AuthorityStatus{
+			Standby: api.StandbyStatus{Machine: "delta", State: api.StandbyCopying, Reasons: []api.Reason{{Code: code, Text: "a fixed phrase"}}},
+			Setup:   &api.StandbySetup{Machine: "delta", Step: api.SetupAsking, Failure: &api.Reason{Code: code, Text: "a fixed phrase"}},
+		}
+		e.mu.Unlock()
+		st, err := hq.c.Authority(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Setup.Failure.Code, st.Standby.Reasons[0].Code
+	}
+	setup := []string{"is_authority", "not_serving", "switch_busy", "unreachable", "file_system", "no_disk", "no_tokens",
+		"no_set", "build", "check", "not_owner", "identity", "sealed", "stop", "not_opted_in", "not_linked",
+		"unsupported_os", "no_tool", "term_no_copy", "interrupted", "parked_start", "wrong_key", "no_answer", "op_ended",
+		"released"}
+	// Also a candidate's or standby's reason.
+	reasons := []string{"no_disk", "not_owner", "not_opted_in", "term_no_copy"}
+	for _, code := range setup {
+		f, s := answer(code)
+		if f != code {
+			t.Errorf("setup failure %q answered as %q", code, f)
+		}
+		want := "unknown"
+		if slices.Contains(reasons, code) {
+			want = code
+		}
+		if s != want {
+			t.Errorf("standby reason %q answered as %q, want %q", code, s, want)
+		}
+	}
+	for _, code := range []string{"not_a_reason", "NOT_OPTED_IN", "no_engine", ""} {
+		if f, _ := answer(code); f != "unknown" {
+			t.Errorf("setup failure %q answered as %q, want unknown", code, f)
+		}
+	}
+	for _, code := range []string{"not_opted_in", "term_no_copy"} {
+		e.err = &api.Error{Code: api.CodeConflict, Message: "anything", Data: json.RawMessage(`{"reason":"` + code + `"}`)}
+		_, err := sockCall(hq.dm, http.MethodPost, api.MoveAbortPath, `{"move_id":"mv1"}`)
+		var got *api.Error
+		if !errors.As(err, &got) || api.HQRefusalReason(got) != code || strings.Contains(got.Message, "log says why") || got.Hint == "" {
+			t.Errorf("a press refused with %q answered %+v", code, err)
+		}
+	}
+}

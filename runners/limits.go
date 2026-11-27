@@ -207,7 +207,8 @@ func (s *Service) startRuntime(ctx context.Context, id, by int64, known *ghapp.J
 // first). Where by has its own box, id keeps carrying this one: by's idle
 // runner is there for id's job. So too where id's box holds job grants of
 // id's run (it is guarded to that run and its secrets are issued through
-// id's row, issueSecrets) or has an open guard (fork serving: the retire of
+// id's row, issueSecrets; a row ended before any job claimed it still
+// guards the box: claimUnclaimed) or has an open guard (fork serving: the retire of
 // open runners, retireOpen, and the rules for who may take one go by id's
 // row). A box re-guarded to by's run (takeOver) is by's like any other; by's
 // rows of job grants for no box it holds go then, so nothing is ever issued
@@ -232,7 +233,7 @@ func (s *Service) followTaker(ctx context.Context, id, by int64) error {
 	var moved int64
 	if !holder.openGuard {
 		res, err := tx.ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = '', target = ?, handle = ?, runner = ?, ttl = ?, leased = ?, started = 1, runs = ?,
-			updated = ? WHERE job = ? AND state = ? AND NOT EXISTS (SELECT 1 FROM runners_job_secrets WHERE job = ? AND run = ? AND state IN (?, ?, ?))`, jobServing, holder.target,
+			updated = ? WHERE job = ? AND state = ? AND NOT EXISTS (SELECT 1 FROM runners_job_secrets WHERE job = ? AND run = ? AND (state IN (?, ?, ?) OR `+claimUnclaimed+`))`, jobServing, holder.target,
 			holder.handle, holder.runner, ttl, holder.leased, by, now, by, jobRunning, id, holder.run, secretsPlanned, secretsIssuing, secretsIssued)
 		if err != nil {
 			return err
@@ -250,7 +251,7 @@ func (s *Service) followTaker(ctx context.Context, id, by int64) error {
 		if n, _ := res.RowsAffected(); n == 0 {
 			return nil // the box changed hands meanwhile: nothing moved
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM runners_job_secrets WHERE job = ? AND state NOT IN `+secretsHeld, by); err != nil {
+		if err := dropServes(ctx, tx, by); err != nil {
 			return err
 		}
 		if err := s.queueAgain(ctx, tx, id, holder.runner); err != nil {
@@ -293,7 +294,7 @@ func (s *Service) activeJob(ctx context.Context, holder job) (job, error) {
 func (s *Service) runtimeExpired(ctx context.Context, j job) bool {
 	actual, err := s.activeJob(ctx, j)
 	if err == nil && actual.stopCause == causeGitHubTimeout {
-		_ = s.jobEnded(ctx, actual.id)
+		_ = s.jobEnded(ctx, actual.id, "")
 		return true
 	}
 	if err != nil || actual.deadline == 0 || s.now().Unix() < actual.deadline {
@@ -302,7 +303,7 @@ func (s *Service) runtimeExpired(ctx context.Context, j job) bool {
 	if actual.stopCause == "" {
 		if cl, e := s.client(ctx); e == nil {
 			if gj, e := cl.Job(ctx, j.installation, j.repo, actual.id); e == nil && gj.Status == "completed" {
-				_ = s.githubEnded(ctx, actual.id, gj.Conclusion)
+				_ = s.githubEnded(ctx, actual.id, gj.Conclusion, gj.RunnerName)
 				return true
 			}
 		}
@@ -385,7 +386,7 @@ func (s *Service) stopRunning(ctx context.Context, j job, victim int64, cause, w
 		// A trusted job took this runner: the original queued job still needs a
 		// runner. Its original budget and actual clock were never overwritten.
 		_, _ = s.db().ExecContext(ctx, `UPDATE runners_jobs SET why = ?, state = CASE WHEN state = ? AND runs != 0 AND runs != job THEN state ELSE ? END, updated = ? WHERE job = ?`, clip(why), jobServing, jobDone, s.now().Unix(), victim)
-		_ = s.jobEnded(ctx, victim)
+		_ = s.jobEnded(ctx, victim, "")
 		_ = s.requeue(ctx, j.id, j.runner)
 	}
 	return nil
@@ -393,7 +394,8 @@ func (s *Service) stopRunning(ctx context.Context, j job, victim int64, cause, w
 
 // githubEnded preserves GitHub's authoritative timeout conclusion. A generic
 // failure or cancellation alone does not establish that a time limit fired.
-func (s *Service) githubEnded(ctx context.Context, id int64, conclusion string) error {
+// ranOn is the runner GitHub says the job ran on, "" when it has not said.
+func (s *Service) githubEnded(ctx context.Context, id int64, conclusion, ranOn string) error {
 	if conclusion == "timed_out" {
 		_, err := s.db().ExecContext(ctx, `UPDATE runners_jobs SET stop_cause = ? WHERE job = ? AND stop_cause = ''`, causeGitHubTimeout, id)
 		if err != nil {
@@ -409,7 +411,7 @@ func (s *Service) githubEnded(ctx context.Context, id int64, conclusion string) 
 	if err != nil {
 		return err
 	}
-	return s.jobEnded(ctx, id)
+	return s.jobEnded(ctx, id, ranOn)
 }
 
 // timeoutReason derives the user-visible cause from the actual job's first

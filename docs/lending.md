@@ -29,7 +29,7 @@ This is the whole list, in the order things appear.
 | Install | The programs `potluck`, `potluck-driver-tart`, `potluck-driver-local`, `potluck-conformance` and `potluck-e2b` | `~/.local/bin` | `potluck` is the command you type. `potluck-driver-tart` makes and ends the virtual machines. The others are for testing and for E2B's tools. After an update each has a `.prev` copy beside it, so an update can be undone. |
 | Install | One line in `~/.zshrc` (or the startup file of your shell), after a comment that starts `# Potluck (install.sh)` | your home folder | Only when `~/.local/bin` is not already on your PATH. It lets a new Terminal window find `potluck`. `--no-modify-path` skips it. |
 | First command | A folder `~/.potluck` (the "home") | your home folder | Your Potluck identity, the pools you joined with their tokens, the pools you run, the isolation test results, and the daemon's log. |
-| First command | The **daemon**: a background program, `potluck daemon` | runs until you stop it or the Mac restarts | It does the work: it talks to the pool and starts and ends sandboxes. Potluck starts it the first time a command needs it. On a Mac it is started through a one-time launchd job that removes its own files; nothing starts it at login or after a restart, and `potluck daemon --detach` starts it again. |
+| First command | The **daemon**: a background program, `potluck daemon` | runs until you stop it or the Mac restarts | It does the work: it talks to the pool and starts and ends sandboxes. Potluck starts it the first time a command needs it. On a Mac it is started through a one-time launchd job that removes its own files; after a restart nothing starts it but the menu bar app, when you open it or have it start at login (on a Mac set up to lend), and `potluck daemon --detach` starts it again. |
 | `potluck create`, `join` or `host` | A Tailscale node in your Tailscale account, named `potluck-` followed by your Mac's host name and `-potluck` | Tailscale's admin console | How the pool's machines reach each other. It is Potluck's own node inside the daemon, separate from the Tailscale app, and the first command prints a login link: you need a Tailscale account to sign in. With `--via tunnel` there is none. |
 | `potluck host` | A macOS image, about 27 GB (60 GB free are needed) | Tart's folder, `~/.tart` (or `$TART_HOME`) | Every sandbox starts as a copy of it. A file there, `potluck-pulls.json`, records which images Potluck pulled, so that `potluck host images --remove` deletes only those. |
 | `potluck host` | A record of the sandboxes the driver made, and a report for each one that failed to start | `~/.potluck-driver-tart` | The driver's own state: it ends a sandbox at its deadline even when the daemon is down. |
@@ -47,7 +47,7 @@ Things Potluck does **not** put on your Mac:
   `~/Applications`. A `tart.app` that is there but will not run, or has no program inside, is named in `potluck doctor`
   as a problem. It does not install the Tailscale app either; the node above lives in Potluck.
 - `install.sh` never asks for your password and never uses `sudo`.
-- No login item or LaunchAgent unless you add one. The two optional ones are below.
+- No login item or LaunchAgent unless you add one. The two optional things that can be one are below.
 
 ### The one step that needs your password
 
@@ -73,8 +73,9 @@ So there is one step that needs an administrator:
 - **A daily update job** (`potluck upgrade enable`): a LaunchAgent, `~/Library/LaunchAgents/sh.potluck.update.plist`,
   that runs `potluck upgrade` at about 03:00. Only signed releases are installed. `potluck upgrade disable` removes it
   ([install.md](install.md)).
-- **The menu bar app** (`sh install.sh --menubar`): `Potluck Menu.app` in `~/Applications`, a switch to pause and
-  resume lending. You add it to Login Items yourself, in System Settings. It is not signed by an Apple developer
+- **The menu bar app** (`sh install.sh --menubar`): `Potluck.app` in `~/Applications`, a switch to pause and
+  resume lending. It starts at login only when you press "Start at login" in its setup window, and "Turn off" there
+  undoes it. Opened outside an Applications folder it offers to move itself to one. It is not signed by an Apple developer
   yet; if macOS refuses to open it, [menubar.md](menubar.md) says what to do.
 
 ## What other people can and cannot do
@@ -175,7 +176,7 @@ potluck host status     # what you lend, what runs now, and whether new work sta
 | Stop for now, keep the setup | `potluck host pause` (`--for 2h` or `--until 23:00` for a while) | Nothing new starts; what you share stays shared. Refused while a sandbox runs, since it would end it. `potluck host resume` lends again. |
 | Wind down | `potluck host set drain` | Nothing new starts; running work finishes (cut after 30 minutes by default). |
 | Stop at once | `potluck host set closed` | No new work, and running work is ended now. `potluck host set auto` returns to your own rules. |
-| Stop with the menu bar | the switch in Potluck Menu | The same switch file as `host set`. |
+| Stop with the menu bar | the switch in the Potluck menu | The same switch file as `host set`. |
 
 Stopping the daemon (`potluck daemon stop`) does not end a sandbox that is already running: each one ends at its
 own deadline even with no daemon. Pause or close first.
@@ -249,28 +250,35 @@ potluck uninstall                  #    does it, after you type yes (--yes does 
 Step 2 comes before step 3 because it asks the daemon what is shared, and `uninstall` stops the daemon.
 `--remove` deletes only images Potluck's own record says it pulled and no longer needs. **It keeps the current macOS
 image, the big one (about 27 GB):** Potluck keeps it so a retry does not download it again. To get that space back,
-run `tart delete <name>` with the name `potluck host images` prints.
+pass `--with-tart` to step 3's commands, or run `tart delete <name>` with the name `potluck host images` prints.
 
 `potluck uninstall` does these, in this order, and stops at the first one that fails (run it again to carry on; every
 step is safe to repeat):
 
 1. stops a setup run (`potluck host`) still going on, then stops sharing every size your Mac lends (refused while a sandbox runs, unless `--force`);
 2. leaves every pool you joined and asks that pool's machine to revoke your token;
-3. on a Mac with the managed Softnet, removes it (this is the step that asks for your password);
+3. on a Mac with the managed Softnet, removes it, and `/Library/Application Support/Potluck` when nothing else is in it
+   (this is the step that asks for your password);
 4. stops the daemon;
 5. removes the daily update job, the host override file and the lines `install.sh` added to your shell's startup file
    (they put the install directory, `~/.local/bin` by default, on PATH; if you have put other tools there, add the
    directory back). It removes only the exact line `install.sh` wrote; a line you changed stays. A file it cannot
    write is named, and the run goes on;
-6. removes the home folder, `~/.potluck`: this Mac's identity, the pools it runs and everything they hold.
-   `--keep-home` keeps it;
-7. removes the programs from the folder you ran `potluck` from, with their `.prev` copies, last.
+6. with `--with-tart`, deletes the Tart images Potluck pulled, then the `tart.app` it installed and the record of it
+   ([below](#tart-and-its-images-uninstall---with-tart));
+7. deletes the image downloads a setup left unfinished, in Potluck's own folder in Tart's (`~/.tart/potluck-pull`; not
+   one another Potluck home goes on with), and removes the home folder, `~/.potluck`: this Mac's identity, the pools it
+   runs and everything they hold. `--keep-home` keeps both. The home is renamed `~/.potluck.removing` first, so a removal
+   cut off there (the Mac restarts, the app is quit) leaves no part of it under its name, and the next `uninstall`
+   removes what is left, also after you set Potluck up again (`--keep-home` keeps that too);
+8. removes the programs from the folder you ran `potluck` from, with their `.prev` copies, last.
 
 It never starts a daemon. With none running (the usual state after a restart), it skips steps 1 and 2 and says so:
 the pools you joined are not told, so start the daemon (`potluck daemon --detach`) and run `uninstall` again, or ask
 each pool's owner to revoke your token. A daemon that is there but does not answer, or whose lock on the home is
 taken, stops the run before anything is removed. It refuses a home folder that does not hold a registry file (`registry.db`) or
-a `program` file naming `potluck`, and your own home folder. It does not remove files it did not make: a file such as
+a `program` file naming `potluck` (unless it holds nothing but the files of a `potluck host` cut off before the daemon
+first started, or nothing), and your own home folder. It does not remove files it did not make: a file such as
 `potluck-mine` beside the programs stays, and a symbolic link to `potluck` is removed without touching where it
 leads (it takes the programs from the folder of the `potluck` on your PATH when that is the one running). `potluck softnet uninstall` removes only the managed Softnet.
 
@@ -278,25 +286,62 @@ leads (it takes the programs from the folder of the `potluck` on your PATH when 
 
 `potluck uninstall` ends by naming what it did not touch:
 
-- **Tart, its images and any VM it still holds.** Tart is yours, and an image or VM may be too. `tart list` shows
+- **Tart, its images and any VM it still holds**, but for what `--with-tart` took (below). `tart list` shows
   them; `tart delete <name>` removes one. Sandboxes that were still running when you uninstalled, and kept
   (`--persist`) disks, are Tart VMs, and nothing removes them after the driver is gone. `potluck-pulls.json` in
-  Tart's folder (`~/.tart`) is Potluck's record of its pulls and is left too.
+  Tart's folder (`~/.tart`) is Potluck's record of its pulls and is left too, and so is the lock file beside it
+  (`.potluck-pulls.json.lock`): deleting it while another run holds it would let two run at once. The record of
+  `potluck tart install` (`~/Library/Application Support/potluck/tart-install.json`) and its lock file stay while that
+  `tart.app` does, and go with it. A lock file with no record (an install cut off early) goes either way.
 - **Softnet, if you set it up yourself** (Homebrew's, for example). Potluck's root step made it setuid root. If you
   do not use Tart for anything else: `sudo chmod u-s <path to softnet>`.
 - **The Tailscale node** in your [Tailscale admin console](https://login.tailscale.com/admin/machines), named
   `potluck-` followed by your Mac's host name and `-potluck`.
-- **Potluck Menu**, if you installed it: quit it from its menu, remove it from System Settings > General > Login
-  Items, and delete the app ([menubar.md](menubar.md)).
+- **The menu bar app**, `Potluck.app` (or `Potluck Menu.app`, its name before), if you installed it (its own uninstall window offers the move to the Trash): press "Turn off" in its setup window if it starts at login, quit it from its menu, and delete the app ([menubar.md](menubar.md)). Its own files,
+  `~/Library/Caches/sh.potluck.menu` and `~/Library/Preferences/sh.potluck.menu.plist`, stay: it may be using them.
+  The app's Move to Trash and Quit removes them as it goes.
+- **An empty `/Library/Application Support/Potluck`**, if an earlier removal of the managed Softnet left one:
+  `sudo rmdir '/Library/Application Support/Potluck'`. It does no harm, so uninstall asks for no password over it.
+- **What you downloaded**, such as `Potluck.zip` and a `Potluck.app` in your Downloads folder. `uninstall` never looks in
+  that folder. An empty `~/Applications`, `~/.local/bin` or `~/Library/LaunchAgents` stays too: other programs use them.
 - **The Tart driver's records**, `~/.potluck-driver-tart`, and a `--state-dir` you chose. They say which Tart VMs are
   Potluck's sandboxes, so uninstall never removes them: when no sandbox runs, `rm -r ~/.potluck-driver-tart`.
+
+### Tart and its images: `uninstall --with-tart`
+
+`potluck uninstall --with-tart` also removes what Potluck brought for Tart, and nothing else. In the menu bar app it is a
+box in the uninstall window. Without it, all of this stays, and the last lines say so.
+
+- **The images Potluck pulled**: the ones Potluck's record (`potluck-pulls.json`, [hosts.md](hosts.md#freeing-a-macs-disk-after-a-failed-or-replaced-setup))
+  says a share of Potluck's downloaded. The current macOS image goes too, since nothing of this Potluck lends it any
+  more. An image it found already there, one pulled before it kept that record, a tag, or an image whose repository
+  has a tag stays, and so does one that was downloaded again since, by you.
+- **The `tart.app` Potluck installed** in `~/Applications` (`potluck tart install`), and the record of it, only when
+  it is still the one Potluck put there, and only when Tart then holds nothing else (no VM at all, no other image), no
+  `tart` process runs, and Potluck's record is in Tart's folder (`TART_HOME` in the uninstall's environment, else
+  `~/.tart`). Before any share was set up there is no record: then it goes only when `TART_HOME` is not set, `~/.tart`
+  is not there or holds nothing but the empty `cache` and `tmp` folders Tart makes (they go too), and nothing says
+  Potluck used Tart in another folder (its note of that beside the install's record, a setup that reached the images, the Tart driver's records, a daily update job
+  that names a `TART_HOME`). A `~/.tart` that is a link, or that cannot be read, keeps it. A Tart folder of your own that the uninstall's environment does
+  not name (the menu bar app does not see your shell's `TART_HOME`) is not looked in: VMs there are not touched, but need a
+  Tart to run. `--with-tart=images` takes the images only. A
+  Tart from Homebrew or anywhere else is never touched, and no VM is ever deleted. A hidden work folder of an
+  interrupted `potluck tart install` in `~/Applications` that may hold a `tart.app` of yours stays, and the record with
+  it; the uninstall names it.
+
+While another Potluck on this Mac may use Tart (a daemon runs on another home, or the record names one), or what may
+use it cannot be read, all of it stays. When it cannot be read and Potluck may have something there, a run with
+`--with-tart` stops before the Potluck home and programs go (before anything goes, when it is known from the start), so
+it can be run again (or without `--with-tart`, or with the app's box unticked, which leaves Tart as it is). (A stopped Potluck that never shared through `potluck host`, and whose
+machine record another one replaced, is not seen.) Each is read again just before it is deleted. What stays and why is said in
+the plan and at the end.
 
 ## Where each fact comes from
 
 | Claim | Where |
 | --- | --- |
 | What install.sh writes | `install.sh`, [install.md](install.md) |
-| What `potluck uninstall` does, and its tests | `cli/uninstall.go`, `cli/uninstall_test.go` |
+| What `potluck uninstall` does, and its tests | `cli/uninstall.go`, `cli/uninstall_tart.go`, `hostprobe/tartleave.go`, `tartpin/remove.go`, and their tests |
 | What `potluck disband` does, and its tests | `cli/pool_remove.go`, `kit/project/remove.go`, `cli/pool_remove_test.go` |
 | What Softnet is and why it is root | [softnet.md](softnet.md), `hostprobe/tartmac.go` |
 | Sandbox network, no shared folder | [network.md](network.md), [isolation.md](isolation.md), `vmhost/vm.go` |

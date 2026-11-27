@@ -122,6 +122,7 @@
         "do": {
           "label": "Install Potluck",
           "args": [
+            "--json",
             "upgrade",
             "--release",
             "/Applications/Potluck.app/Contents/Resources/release",
@@ -172,6 +173,7 @@
         "do": {
           "label": "Start Potluck",
           "args": [
+            "--json",
             "daemon",
             "--detach"
           ]
@@ -190,7 +192,16 @@
             "--yes",
             "--no-sudo",
             "--detach",
+            "--instead-of-invite=",
             "--"
+          ],
+          "invite_args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--invite-stdin"
           ],
           "invite": true
         }
@@ -203,36 +214,18 @@
       {
         "id": "login",
         "state": "unknown",
-        "detail": "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings \u003e General \u003e Login Items"
-      },
-      {
-        "id": "updates",
-        "state": "todo",
-        "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
-        "action": "potluck upgrade enable",
-        "do": {
-          "label": "Turn on daily updates",
-          "args": [
-            "--json",
-            "upgrade",
-            "enable"
-          ]
-        }
-      },
-      {
-        "id": "coverage",
-        "state": "info",
-        "detail": "the daily update covers Potluck itself only: to update the menu bar item, run its installer again (install-menu); Tart and Softnet are updated the way you installed them, and potluck doctor says which versions this Mac needs"
+        "detail": "starting the menu bar item at login: the app has not said whether it does; to have it start at every login, add Potluck in System Settings \u003e General \u003e Login Items"
       }
     ],
     "next": "potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin",
     "next_id": "potluck",
     "view": {
       "heading": "This Mac isn't set up yet",
-      "lead": "First, install Potluck on this Mac. It takes a few seconds.",
+      "lead": "Install Potluck to get started. It takes a few seconds.",
       "do": {
         "label": "Install Potluck",
         "args": [
+          "--json",
           "upgrade",
           "--release",
           "/Applications/Potluck.app/Contents/Resources/release",
@@ -240,13 +233,14 @@
           "/Users/b/.local/bin"
         ]
       },
+      "invite_later": true,
       "sections": [
         {
           "title": "This Mac",
           "rows": [
             {
               "state": "done",
-              "text": "This Mac is the right kind"
+              "text": "This Mac meets the requirements"
             },
             {
               "state": "todo",
@@ -279,19 +273,7 @@
           "rows": [
             {
               "state": "info",
-              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
-            },
-            {
-              "state": "info",
-              "text": "Potluck doesn't update itself",
-              "do": {
-                "label": "Turn on daily updates",
-                "args": [
-                  "--json",
-                  "upgrade",
-                  "enable"
-                ]
-              }
+              "text": "To have this menu appear every time you log in, add Potluck in System Settings \u003e General \u003e Login Items"
             }
           ]
         }
@@ -299,7 +281,7 @@
       "progress": {
         "title": ""
       },
-      "key": "none daemon=false shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=potluck upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"
+      "key": "none daemon=false shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=potluck --json upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"
     }
   }
 }

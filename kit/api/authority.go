@@ -145,12 +145,43 @@ const (
 	ReasonIsHQ          = "is_hq"
 	ReasonIsStandby     = "is_standby"
 	ReasonBehind        = "behind" // the standby is more than two minutes behind HQ
+	// Also on the setup view (StandbySetup.Failure) and as a candidate's
+	// reason, and an engine refuses a press that sets a standby up with them.
+	ReasonNotOptedIn = "not_opted_in" // the machine's owner has not opted it in to be a standby
+	ReasonNoTermCopy = "term_no_copy" // the engine's program cannot yet make any machine the standby
 
 	// Why an HQ route refused a press.
 	ReasonNoEngine = "no_engine" // this daemon's program has no move engine
 	ReasonStale    = "stale"     // what the screen showed no longer holds (Shown, plan id, move id, machine)
 	ReasonNotOwner = "not_owner" // the caller is not owner of every team project this home holds
 	ReasonHQAlive  = "hq_alive"  // a takeover while HQ answers the standby, without Force
+)
+
+// Why a standby setup stopped: StandbySetup.Failure.Code. The failure codes
+// are SetupFailures; ReasonNoDisk, ReasonNotOwner, ReasonNotOptedIn and
+// ReasonNoTermCopy are among them.
+const (
+	SetupFailIsAuthority = "is_authority"   // the machine is the authority of a team project
+	SetupFailNotServing  = "not_serving"    // the machine's home does not serve now
+	SetupFailBusy        = "switch_busy"    // a switch, its cleanup or a restore is under way on the machine
+	SetupFailUnreachable = "unreachable"    // HQ cannot reach the machine's standby (no tailnet, no tunnel URL)
+	SetupFailFileSystem  = "file_system"    // the machine's home is on a file system the switch cannot use
+	SetupFailNoTokens    = "no_tokens"      // the machine holds no token of HQ's team projects
+	SetupFailNoSet       = "no_set"         // no set of HQ's restores on the machine
+	SetupFailBuild       = "build"          // building the standby home failed
+	SetupFailCheck       = "check"          // the standby home built did not check
+	SetupFailIdentity    = "identity"       // the standby's identity key would not be the machine's
+	SetupFailSealed      = "sealed"         // the setup's sealed secrets did not open on the machine
+	SetupFailStop        = "stop"           // stopping the machine's home for the switch failed; it serves again
+	SetupFailNotLinked   = "not_linked"     // the setup does not come from the authority the machine is linked to
+	SetupFailUnsupported = "unsupported_os" // the switch does not run on the machine's operating system
+	SetupFailNoTool      = "no_tool"        // the tool the backup target needs could not be fetched there
+	SetupFailInterrupted = "interrupted"    // the setup was cut short; the machine's home serves again
+	SetupFailParkedStart = "parked_start"   // the standby did not start three times; the machine's home serves again
+	SetupFailWrongKey    = "wrong_key"      // the built standby does not answer at the key HQ knows the machine by
+	SetupFailNoAnswer    = "no_answer"      // the built standby did not answer HQ as its standby in time
+	SetupFailOpEnded     = "op_ended"       // the setup ended before the machine reported its standby built
+	SetupFailReleased    = "released"       // the standby was released and the machine's own home serves again
 )
 
 // Preflight check codes: PreflightCheck.Code.
@@ -178,7 +209,12 @@ var (
 	StepStates    = []string{StepPending, StepRunning, StepDone, StepFailed, StepSkipped}
 	Probes        = []string{ProbeAnswers, ProbeSilent, ProbeUnknown}
 	Reasons       = []string{ReasonNotTrusted, ReasonNeedsUpdate, ReasonOffline, ReasonNoDisk, ReasonPublicAddress, ReasonIsHQ,
-		ReasonIsStandby, ReasonBehind, ReasonNoEngine, ReasonStale, ReasonNotOwner, ReasonHQAlive}
+		ReasonIsStandby, ReasonBehind, ReasonNotOptedIn, ReasonNoTermCopy, ReasonNoEngine, ReasonStale, ReasonNotOwner, ReasonHQAlive}
+	SetupFailures = []string{ReasonNoDisk, ReasonNotOwner, ReasonNotOptedIn, ReasonNoTermCopy, SetupFailIsAuthority,
+		SetupFailNotServing, SetupFailBusy, SetupFailUnreachable, SetupFailFileSystem, SetupFailNoTokens, SetupFailNoSet,
+		SetupFailBuild, SetupFailCheck, SetupFailIdentity, SetupFailSealed, SetupFailStop, SetupFailNotLinked,
+		SetupFailUnsupported, SetupFailNoTool, SetupFailInterrupted, SetupFailParkedStart, SetupFailWrongKey,
+		SetupFailNoAnswer, SetupFailOpEnded, SetupFailReleased}
 	Checks = []string{CheckHQServing, CheckStandbyFollowing, CheckStandbyBuild, CheckStandbyDisk, CheckMemberBuilds,
 		CheckPublicAddress, CheckSecretsAcked, CheckNoRestoreMarker}
 )
@@ -299,7 +335,8 @@ type StandbyStatus struct {
 type StandbySetup struct {
 	Machine string `json:"machine"`
 	Step    string `json:"step"` // SetupAsking ... SetupReady
-	// Failure is why it stopped at Step, left out while it runs. The
+	// Failure is why it stopped at Step, left out while it runs. Its code
+	// is one of SetupFailures. The
 	// machine is as it was before.
 	Failure *Reason `json:"failure,omitempty"`
 }

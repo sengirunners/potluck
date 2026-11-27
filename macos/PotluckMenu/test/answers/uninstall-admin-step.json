@@ -4,7 +4,7 @@
     "leave the pools this machine joined, asking each pool's machine to revoke this one's token: studio"
   ],
   "admin_step": {
-    "why": "The admin step disarms and removes every managed Softnet build in /Library/Application Support/Potluck/softnet.",
+    "why": "The network helper Potluck installed can only be removed with this Mac's password. macOS asks for it next.",
     "argv": [
       "/Users/bailey/.local/bin/potluck",
       "softnet",
@@ -19,12 +19,56 @@
     "remove the programs in ~/.local/bin: potluck, potluck-driver-tart (this one last)"
   ],
   "not_removed": [
-    "Tart, its images and any VM it still holds (the macOS image Potluck pulled is about 27 GB, and the current one is never removed by potluck host images --remove): `tart list` shows them and `tart delete <name>` removes one. Potluck deletes none of them: some may be yours",
-    "Potluck Menu, if you installed it: quit it from its menu, remove it from System Settings > General > Login Items, and delete the app (docs/menubar.md)",
+    "the tart.app Potluck installed (~/Applications/tart.app, Tart 2.42.0; its record is ~/Library/Application Support/potluck/tart-install.json); the Tart images Potluck pulled (ghcr.io/sengirunners/potluck-macos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, about 27 GB). `tart delete <name>` removes an image, and tart.app can go to the Trash",
+    "Potluck's menu bar app, if you installed it (Potluck.app, or before its rename Potluck Menu.app, in your Applications folder unless you put it elsewhere; not another program's app of that name): quit it from its menu, remove it from System Settings > General > Login Items, and delete the app (docs/menubar.md)",
     "a Tailscale node named potluck-<this Mac's host name>-potluck, if you used Tailscale: remove it in the Tailscale admin console (https://login.tailscale.com/admin/machines)"
   ],
   "pools_run": [
     "friends"
   ],
-  "warning": "This deletes this machine's identity for good. This machine runs these pools, and they end for all their members: friends."
+  "warning": "This deletes this machine's identity for good. This machine runs these pools, and they end for all their members: friends.",
+  "view": {
+    "heading": "Not everything is removed yet",
+    "lead": "The step that needs this Mac's password didn't run, so nothing after it was done. Press Remove… to go on.",
+    "failed": "The step that needs this Mac's password didn't work, so nothing after it was done. Press Remove… to try again. If it stops here again, press Copy details and send what it copies to the person who invited you.",
+    "done": [
+      {
+        "id": "lending",
+        "will": "Stop lending this Mac",
+        "did": "Stopped lending this Mac"
+      },
+      {
+        "id": "groups",
+        "will": "Leave the groups this Mac joined: studio",
+        "did": "Left the groups this Mac joined: studio"
+      }
+    ],
+    "left": [
+      {
+        "id": "helper",
+        "will": "Remove the network helper (macOS asks for this Mac's password)",
+        "did": "Removed the network helper"
+      },
+      {
+        "id": "stop",
+        "will": "Stop Potluck",
+        "did": "Stopped Potluck"
+      },
+      {
+        "id": "data",
+        "will": "Delete Potluck's data on this Mac, with this Mac's identity and any groups it runs",
+        "did": "Deleted Potluck's data on this Mac"
+      },
+      {
+        "id": "programs",
+        "will": "Remove the Potluck program",
+        "did": "Removed the Potluck program"
+      }
+    ],
+    "stays": [
+      "Tart, which Potluck installed to run jobs, and everything Potluck downloaded for it (about 27 GB)",
+      "If you used Tailscale with Potluck: this Mac's Potluck entry in your Tailscale account"
+    ],
+    "details": "Potluck 0.0.0 uninstall\ndone:\n  - stop sharing mac-c4m8 (as potluck host stop does)\n  - leave the pools this machine joined, asking each pool's machine to revoke this one's token: studio\nleft:\n  - remove the managed Softnet in /Library/Application Support/Potluck/softnet (the one root step: asks for your Mac password)\n  - stop the daemon\n  - remove the home ~/.potluck: this machine's identity, the pools it runs and their data, and the daemon's log\n  - remove the programs in ~/.local/bin: potluck, potluck-driver-tart (this one last)\nnot removed:\n  - the tart.app Potluck installed (~/Applications/tart.app, Tart 2.42.0; its record is ~/Library/Application Support/potluck/tart-install.json); the Tart images Potluck pulled (ghcr.io/sengirunners/potluck-macos@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, about 27 GB). `tart delete <name>` removes an image, and tart.app can go to the Trash\n  - Potluck's menu bar app, if you installed it (Potluck.app, or before its rename Potluck Menu.app, in your Applications folder unless you put it elsewhere; not another program's app of that name): quit it from its menu, remove it from System Settings > General > Login Items, and delete the app (docs/menubar.md)\n  - a Tailscale node named potluck-<this Mac's host name>-potluck, if you used Tailscale: remove it in the Tailscale admin console (https://login.tailscale.com/admin/machines)"
+  }
 }

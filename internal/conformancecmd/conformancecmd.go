@@ -124,6 +124,7 @@ func run(argv []string) int {
 	fs.Var((*mailAddrs)(&opt.NetMail), "net-mail", "an outside mail server, host (on 25, 465 and 587) or host:port, a run or box must not open; a SKIP unless it opens from here (repeatable)")
 	fs.Var((*names)(&opt.NetResolve), "net-resolve", "a DNS name (or name:port, opened where the guest has no getent; default 443) a run or box must resolve; default with --net-allow: its names, or github.com (repeatable)")
 	fs.BoolVar(&opt.NetPeers, "net-peers", false, "run two runs or boxes at once and check neither reaches the other (IPv4 /24 and IPv6 link-local neighbours)")
+	fs.BoolVar(&opt.NetMulticast, "net-multicast", false, "check that what a run or box sends to a multicast group reaches no program on this machine that joined it")
 	fs.IntVar(&opt.NetPeerPort, "net-peer-port", 0, "the port the listening run uses for --net-peers (default 47123)")
 	fs.StringVar(&only, "only", "", "comma list of check groups: "+strings.Join(conformance.Groups, ", "))
 	fs.BoolVar(&asJSON, "json", false, "print results as JSON")

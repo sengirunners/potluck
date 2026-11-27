@@ -16,10 +16,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/tailnet/tailnettest"
 	"github.com/sengirunners/potluck/softnet"
+	"github.com/sengirunners/potluck/tartpin"
+	"github.com/sengirunners/potluck/vmhost"
 )
 
 // lender is a person's machine as install.sh and a few commands leave it: a
@@ -66,6 +69,18 @@ func newLender(t *testing.T) *lender {
 	softnetDownloadDir = func() (string, error) { return filepath.Join(l.home, "Library", "Caches", "potluck", "softnet"), nil }
 	softnetGOOS = "darwin"
 	t.Cleanup(func() { softnetStore, softnetGOOS, softnetDownloadDir = oldStore, oldGOOS, oldDownloads })
+	// No Tart of this Mac's either: a test that wants one makes it (lenderTart).
+	oldSearch, oldPlace, oldRunner, oldSetup := tartSearch, tartPlace, tartRunner, setupGOOS
+	tartSearch = func() vmhost.TartSearch {
+		no := func(string) bool { return false }
+		return vmhost.TartSearch{LookPath: func(string) (string, bool) { return "", false }, Executable: no, Exists: no, Home: l.home}
+	}
+	tartPlace = func() (tartpin.Place, error) {
+		return tartpin.Place{AppsDir: filepath.Join(l.home, "Applications"), RecordFile: filepath.Join(l.home, "support", "tart-install.json")}, nil
+	}
+	setupGOOS = "darwin"
+	t.Setenv("TART_HOME", filepath.Join(l.home, "tart"))
+	t.Cleanup(func() { tartSearch, tartPlace, tartRunner, setupGOOS = oldSearch, oldPlace, oldRunner, oldSetup })
 	oldGone := processGone
 	processGone = func(int) bool { return true } // the daemon under test shares this process
 	t.Cleanup(func() { processGone = oldGone })
@@ -150,7 +165,7 @@ func TestUninstallDryRunJSON(t *testing.T) {
 		slices.ContainsFunc(a.NotRemoved, func(s string) bool { return strings.Contains(s, "friends") }) {
 		t.Fatalf("plan: %+v", a)
 	}
-	if a.Remove == nil || a.Remove.Detail != a.Warning ||
+	if a.Remove == nil || a.Remove.Detail != a.View.Warning || !strings.Contains(a.View.Warning, "friends") ||
 		!slices.Equal(a.Remove.Args, []string{"--json", "uninstall", "--yes", "--no-sudo"}) {
 		t.Fatalf("remove: %+v", a.Remove)
 	}
@@ -193,10 +208,23 @@ func TestUninstallStopsASetupRun(t *testing.T) {
 	}
 	// A run and a program it started, in a session of their own; the run
 	// holds the lock as it does in hostSpawn.
-	run := exec.Command("sh", "-c", "sleep 60 & wait")
+	// Its first download starts after the person saw the plan.
+	tart := filepath.Join(l.home, "tart")
+	part := filepath.Join(tart, hostprobe.TartPullHome, "tmp", "x")
+	if err := os.MkdirAll(tart, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := exec.Command("sh", "-c", `trap 'mkdir -p "$0"; exit 0' TERM; sh -c 'echo up; sleep 60' & wait`, part)
+	up, err := run.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	run.ExtraFiles = []*os.File{lock}
 	run.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := run.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := up.Read(make([]byte, 8)); err != nil { // a child only forked yet would run the trap, and go on
 		t.Fatal(err)
 	}
 	lock.Close()
@@ -219,8 +247,8 @@ func TestUninstallStopsASetupRun(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the run goes on")
 	}
-	if l.exists(home) {
-		t.Error("the home is still there")
+	if l.exists(home) || l.exists(part) {
+		t.Errorf("still there: the home %v, the run's download %v", l.exists(home), l.exists(part))
 	}
 }
 
@@ -351,7 +379,8 @@ func TestUninstallAppFixtures(t *testing.T) {
 		d := json.NewDecoder(bytes.NewReader(b))
 		d.DisallowUnknownFields()
 		var a uninstallAnswer
-		if err := d.Decode(&a); err != nil || a.Done == nil || a.Left == nil || a.NotRemoved == nil || a.PoolsRun == nil {
+		if err := d.Decode(&a); err != nil || a.Done == nil || a.Left == nil || a.NotRemoved == nil || a.PoolsRun == nil ||
+			a.View == nil || a.View.Heading == "" || a.View.Done == nil || a.View.Left == nil || a.View.Stays == nil {
 			t.Errorf("%s: %v %+v", p, err, a)
 		}
 	}

@@ -24,6 +24,12 @@ type SetupView struct {
 	Heading string `json:"heading"`
 	Lead    string `json:"lead,omitempty"`
 	Do      *Do    `json:"do,omitempty"`
+	// InviteRefused is that the last setup's invite was refused where it is
+	// from: the same one is refused again.
+	InviteRefused bool `json:"invite_refused,omitempty"`
+	// InviteLater is that a step still to come takes an invite: one from a
+	// link is kept for it, though the field shows only beside that step.
+	InviteLater bool `json:"invite_later"`
 	// Sections are the lines under it. Progress is the setup going on or
 	// the one that stopped ("" title: none).
 	Sections []ViewSection `json:"sections"`
@@ -58,7 +64,7 @@ var (
 		hostsetup.Preflight:  "Check this Mac",
 		hostsetup.Images:     "Download what jobs need",
 		hostsetup.Validation: "Test that jobs run safely",
-		hostsetup.Join:       "Join the group that uses it",
+		hostsetup.Join:       "Join your group",
 		hostsetup.Capacity:   "Start lending",
 	}
 	stopped = map[string]string{
@@ -70,12 +76,29 @@ var (
 	}
 )
 
+// seeTo is what a person can see to before trying a stopped stage again.
+var seeTo = map[string]string{
+	hostsetup.Images: " Check your internet connection and free disk space before trying again.",
+}
+
 // inviteAgain asks for the invite when running r again needs it.
 func inviteAgain(r *hostsetup.Run) string {
 	if r != nil && len(r.AgainArgs) > 0 && !r.NeedsInvite {
+		if r.Joining != nil { // runNow found the pool its invite joined
+			return " This Mac has already joined " + r.Pool() + "."
+		}
 		return ""
 	}
-	return " Paste your invite again first; if it no longer works, ask for a new one."
+	if r != nil && r.Else != "" {
+		return " Paste your new invite link, or leave the invite field empty to lend to the group " + r.Else + "."
+	}
+	if r != nil && r.InviteRefused {
+		return " The invite wasn't accepted. Ask for a new link and paste your invite here."
+	}
+	if r != nil && r.Lost {
+		return " This Mac is no longer in its group. Ask for a new link and paste your invite here."
+	}
+	return " Paste your invite link again. If it doesn't work, ask for a new one."
 }
 
 // probeIDs are the checks --probe adds.
@@ -90,12 +113,17 @@ func setupView(f Facts, st Status, s Setup) SetupView {
 	if next != nil {
 		v.Do = next.Do
 	}
+	v.InviteLater = slices.ContainsFunc(s.Checks, func(c Check) bool { return c.Do != nil && c.Do.InviteArgs != nil }) &&
+		!slices.ContainsFunc(s.Checks, func(c Check) bool { return c.ID == "mac" && c.State == Blocked })
+	if r := f.Setup.Run; r != nil {
+		v.InviteRefused = r.NeedsInvite && r.InviteRefused && !f.Setup.RunLive // a run going on may have another, not noted yet
+	}
 	main, extra := ViewSection{Title: "This Mac"}, ViewSection{Title: "Optional"}
 	for _, c := range s.Checks {
 		switch {
 		case c.words == "", c.ID == "lending" && c.State == Todo && s.State != SetupSucceeded: // the setup line says it
 		case c.optional:
-			extra.Rows = append(extra.Rows, ViewRow{State: optionalState(c.State), Text: c.words, Do: c.Do})
+			extra.Rows = append(extra.Rows, ViewRow{State: optionalState(c.State), Text: c.words, Do: cmp.Or(c.Do, c.other)})
 		default:
 			row := ViewRow{State: c.State, Text: c.words}
 			if next != nil && next.ID == c.ID { // only beside the step it is another way to do
@@ -133,8 +161,9 @@ func optionalState(state string) string {
 
 // viewNext is the check the window's heading and button are about: the
 // setup while it goes on, else something in this Mac's way that nothing here
-// fixes (so nobody installs things for nothing), else the first required one
-// that is open; nil for none. An optional one never is.
+// fixes (so nobody installs things for nothing; one that waits on Potluck
+// only stops the steps after it), else the first required one that is open;
+// nil for none. An optional one never is.
 func viewNext(s Setup) *Check {
 	for i, c := range s.Checks {
 		if c.ID == "setup" && c.State == Running {
@@ -142,7 +171,7 @@ func viewNext(s Setup) *Check {
 		}
 	}
 	for i, c := range s.Checks {
-		if c.State == Blocked && c.Do == nil && slices.Contains(probeIDs, c.ID) {
+		if c.State == Blocked && c.Do == nil && !c.waits && slices.Contains(probeIDs, c.ID) {
 			return &s.Checks[i]
 		}
 	}
@@ -170,12 +199,12 @@ func viewHeading(f Facts, st Status, s Setup, next *Check) (heading, lead string
 	case next.State == Running && next.Do != nil:
 		heading = "Sign in to finish setting up"
 	case next.State == Running:
-		heading, lead = "Setting up this Mac", "Nothing for you to do. This can take an hour or more; you can close this window and keep using this Mac."
+		heading, lead = "Setting up this Mac", "Setup can take an hour or more. You can close this window and keep using your Mac."
 	case next.ID == "daemon":
 		heading = "Potluck isn't running"
 	case next.ID == "setup" && next.State == Blocked && shares:
 		heading = "This Mac is set up, but the last change didn't finish"
-		lead += " What it lent before is still lent."
+		lead += " Your previous lending settings are still in place."
 	case next.ID == "setup" && next.State == Blocked:
 		heading = "Setup stopped"
 	case shares, s.State == SetupNone && f.ListErr != "", s.State == SetupSucceeded && next.ID != "lending":
@@ -184,6 +213,8 @@ func viewHeading(f Facts, st Status, s Setup, next *Check) (heading, lead string
 		heading = "This Mac isn't lending"
 	case s.State == SetupNone:
 		heading = "This Mac isn't set up yet"
+	case next.ID == "setup" && s.State == SetupUnreadable:
+		heading = "Potluck can't tell how setup went"
 	default:
 		heading = "Setup isn't finished"
 	}
@@ -192,24 +223,22 @@ func viewHeading(f Facts, st Status, s Setup, next *Check) (heading, lead string
 
 // lendingHeading is a Mac with no required step open.
 func lendingHeading(f Facts, st Status) (heading, lead string) {
-	const done = "It is set up; there is nothing else to do."
+	const done = "Setup is complete."
 	switch {
 	case f.ListErr != "" && st.Lending.Sizes == 0:
-		return "Potluck can't tell what this Mac lends", "It didn't answer just now. Press Check again in a moment."
-	case st.Lending.Sizes == 0:
-		return "Potluck can't tell how setup went", "Its record of the last setup can't be read. Press Copy details and send what it copies to the person who invited you."
+		return "Potluck can't tell what this Mac lends", "Potluck couldn't check lending. Try again in a moment."
 	case switchUnread(f, st):
-		return "Lending is on hold", "Potluck can't read whether lending is on or off, so nothing new starts on this Mac. Press Copy details and send what it copies to the person who invited you."
+		return "Lending is on hold", "Potluck can't check whether lending is on, so new jobs are on hold. Copy details and send them to the person who invited you."
 	case st.Mode == protocol.HostClosed:
-		return "Lending is paused", "Nothing new starts on this Mac until you choose Resume lending in the Potluck menu."
+		return "Lending is paused", "Choose Resume lending in the menu bar to take jobs again."
 	case st.Mode == protocol.HostDrain:
-		return "Lending is winding down", "Nothing new starts on this Mac while the jobs already here end. To go on lending, choose Keep lending in the Potluck menu."
+		return "Lending is winding down", "Running jobs can finish. Choose Keep lending in the menu bar to take new jobs."
 	case f.LendErr != "":
-		return "Lending is on hold", "Potluck can't read your lending limits, so nothing new starts on this Mac. Press Copy details and send what it copies to the person who invited you."
+		return "Lending is on hold", "Potluck can't read your lending limits, so new jobs are on hold. Copy details and send them to the person who invited you."
 	case st.State == protocol.HostAccepting && st.Refused != nil:
-		return "This Mac isn't taking jobs right now", "Potluck is holding new jobs back for now. The Potluck menu says why."
+		return "This Mac isn't taking jobs right now", "Open Potluck in the menu bar to see why."
 	case st.State != protocol.HostAccepting:
-		return "This Mac is ready and waiting", "It takes no jobs while you use it or while your lending rules say not now. " + done
+		return "This Mac is ready and waiting", "Potluck will take jobs when your lending settings allow it."
 	}
 	return "This Mac is lending", done
 }
@@ -230,9 +259,9 @@ func progress(f Facts, s Setup) ViewSection {
 	if s.State != SetupRunning && s.State != SetupBlocked && s.State != SetupInterrupted {
 		return ViewSection{}
 	}
-	v := ViewSection{Title: "The last setup"}
+	v := ViewSection{Title: "Last setup"}
 	if s.State == SetupRunning {
-		v.Title = "Setup so far"
+		v.Title = "Setup progress"
 	}
 	for _, n := range s.StageOrder {
 		row := ViewRow{Text: stageWords[n.Name]}
@@ -248,7 +277,7 @@ func progress(f Facts, s Setup) ViewSection {
 			default:
 				row.State = Running
 				if at, err := time.Parse(time.RFC3339, stage.At); err == nil {
-					row.Text += " (last news at " + at.In(locOf(f)).Format("15:04") + ")"
+					row.Text += " (updated at " + at.In(locOf(f)).Format("15:04") + ")"
 				}
 			}
 		}
@@ -266,7 +295,7 @@ func viewDetails(f Facts, st Status, s Setup) string {
 		if c.optional || c.State != Blocked && c.State != Unknown && (c.State != Todo || c.Action == "") {
 			continue
 		}
-		help = help || c.State != Todo
+		help = help || c.State != Todo || c.ID == "setup" && s.State == SetupUnreadable // the person may have to send it on
 		out = append(out, c.ID+": "+c.State+": "+c.Detail)
 		if c.Action != "" {
 			out = append(out, "  "+c.Action)

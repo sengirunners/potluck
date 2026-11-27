@@ -133,6 +133,33 @@ const (
 // completion must still find the row to revoke them.
 const secretsHeld = "('" + secretsIssuing + "', '" + secretsIssued + "')"
 
+// A row is taken when another job than its own held its box and completed
+// (a box taken over, takeOver, or swapped within the run): that box's
+// runner ran that job, so no later job is on it and it guards nothing
+// live. It is kept past its job's next serve (dropServes) for two readers:
+// its holder's completion, applied again, finds it and knows its holder was
+// served there, not bounced; and its job's own completion, which counts it
+// among the rows that show grants name the job's run (endedOnGuardedBox).
+// Every other reader passes over it (boxRow, the guard count).
+const secretsTaken = "(state = '" + secretsEnded + "' AND holder NOT IN (0, job))"
+
+// taken is whether r, a row of job owner, is taken (secretsTaken).
+func (r secretsRow) taken(owner int64) bool {
+	return r.state == secretsEnded && r.holder != 0 && r.holder != owner
+}
+
+// dropServes deletes the rows of job's earlier serves (secretsRun, and
+// followTaker for the job a re-guarded box went to), in db (a transaction,
+// or the store). A held row stays for its holder's completion
+// (secretsHeld), and so does a taken one (secretsTaken). A planned row
+// never has a holder, so it always goes.
+func dropServes(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, job int64) error {
+	_, err := db.ExecContext(ctx, `DELETE FROM runners_job_secrets WHERE job = ? AND state NOT IN `+secretsHeld+` AND NOT `+secretsTaken, job)
+	return err
+}
+
 // jobOf is d's job as GitHub answers it now: its run (repository and head
 // repository with their ids, workflow file, event, head branch and commit,
 // the workflows it called) and the repository (its id and default branch).
@@ -250,15 +277,14 @@ func matching(iss issuers.Minter, candidates []computeapi.SecretGrant, job jobru
 // secretsRun is the run d's box is guarded to when job grants name its job
 // (nil: none do, and the job is served as any other), and records it as a
 // new row. It mints nothing. GitHub not answering is an error: the job
-// waits, never served unchecked. Rows of the job's earlier serves that are
-// not held go; a held one stays for its holder's completion (secretsHeld).
+// waits, never served unchecked. Rows of the job's earlier serves go, but
+// for those another job still needs (dropServes).
 // reguard: the box's driver lists protocol.CapJITGuardReguard (takeOver).
 func (s *Service) secretsRun(ctx context.Context, cl *ghapp.Client, l link, d delivery, reguard bool) (*protocol.JITRun, error) {
 	// Served unguarded: no planned row may stay from an earlier serve, or a
 	// later in_progress would mint into a box that does not hold the job.
 	unguarded := func() (*protocol.JITRun, error) {
-		_, err := s.db().ExecContext(ctx, `DELETE FROM runners_job_secrets WHERE job = ? AND state NOT IN `+secretsHeld, d.Job.ID)
-		return nil, err
+		return nil, dropServes(ctx, s.db(), d.Job.ID)
 	}
 	if issuers.From(s.d) == nil {
 		return unguarded()
@@ -286,7 +312,7 @@ func (s *Service) secretsRun(ctx context.Context, cl *ghapp.Client, l link, d de
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM runners_job_secrets WHERE job = ? AND state NOT IN `+secretsHeld, d.Job.ID); err != nil {
+	if err := dropServes(ctx, tx, d.Job.ID); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO runners_job_secrets (job, project, area, run, workflow, ref, state, updated, reguard) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -343,10 +369,7 @@ func (s *Service) startedOn(ctx context.Context, d delivery, owner int64) error 
 func (s *Service) issueSecrets(ctx context.Context, d delivery, owner int64) {
 	ctx, cancel := context.WithTimeout(ctx, issueLimit)
 	defer cancel()
-	var r secretsRow
-	// The newest row is the job's current serve; older ones are held boxes.
-	err := s.db().QueryRowContext(ctx, `SELECT id, project, area, run, workflow, ref, state, holder, reguard FROM runners_job_secrets WHERE job = ? ORDER BY id DESC LIMIT 1`, owner).
-		Scan(&r.id, &r.project, &r.area, &r.run, &r.workflow, &r.ref, &r.state, &r.holder, &r.reguard)
+	r, err := s.boxRow(ctx, owner, d.Job.RunnerName)
 	if errors.Is(err, sql.ErrNoRows) {
 		// No job grant names owner: its box is unguarded and holds nothing.
 		// A job of another job's making that took it may be a credentialed
@@ -364,8 +387,8 @@ func (s *Service) issueSecrets(ctx context.Context, d delivery, owner int64) {
 		s.takeOver(ctx, d, owner, r)
 		return
 	}
-	if r.state != secretsPlanned {
-		return // issuing or issued (a redelivery), failed or ended: never again
+	if !r.unclaimed() {
+		return // issuing or issued (a redelivery), failed, or ended after a claim: never again
 	}
 	id, run := r.id, r.run
 	gj, why := s.startedHere(ctx, d, owner, run)
@@ -437,21 +460,66 @@ func (s *Service) issueSecrets(ctx context.Context, d delivery, owner int64) {
 
 // secretsRow is a runners_job_secrets row as issueSecrets reads it.
 type secretsRow struct {
-	id, run, holder              int64
-	project, area, workflow, ref string
-	state                        string
-	reguard                      bool // its box's driver re-guards (protocol.CapJITGuardReguard)
+	id, run, holder                      int64
+	project, area, workflow, ref, handle string
+	state                                string
+	reguard                              bool // its box's driver re-guards (protocol.CapJITGuardReguard)
 }
 
-// claim takes row id for job d, which runs on the box of job owner: one
-// issueSecrets per box, however often GitHub redelivers. A job GitHub said
-// completed claims nothing: its completion, applied before (endJobSecrets
-// records it first), found no row held by it, and none would revoke what it
-// got; the row stays for a job that does start there.
+// boxRow is the row of the box of job owner on runner (sql.ErrNoRows: that
+// box has none, it is not guarded to any run). The newest row is owner's
+// newest guarded serve, older ones held boxes; a serve that no job grant
+// named (unguarded) adds none, so the newest row is that box's only while
+// it is of no other box: a taken row never is (secretsTaken), and a row
+// whose box is recorded (handle) is the box on runner only while the record
+// that carries that box (owner's, or its holder's once the box went there:
+// carrierOf) has it on runner.
+func (s *Service) boxRow(ctx context.Context, owner int64, runner string) (secretsRow, error) {
+	var r secretsRow
+	err := s.db().QueryRowContext(ctx, `SELECT id, project, area, run, workflow, ref, handle, state, holder, reguard FROM runners_job_secrets WHERE job = ? ORDER BY id DESC LIMIT 1`, owner).
+		Scan(&r.id, &r.project, &r.area, &r.run, &r.workflow, &r.ref, &r.handle, &r.state, &r.holder, &r.reguard)
+	if err != nil {
+		return r, err
+	}
+	if r.taken(owner) {
+		return secretsRow{}, sql.ErrNoRows
+	}
+	if r.handle == "" {
+		return r, nil
+	}
+	j, err := s.carrierOf(ctx, owner, r.holder, r.handle)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return r, err
+	}
+	if j.handle != r.handle || j.runner != runner {
+		return secretsRow{}, sql.ErrNoRows
+	}
+	return r, nil
+}
+
+// A row is unclaimed while no job has claimed it: planned, or ended before
+// any job claimed it (its own job completed or was cancelled while its box
+// waited). Nothing was ever issued for it: only a claim records a holder
+// (claim; endJobSecrets ends a planned row as it is). Its box is still
+// guarded to its run and holds nothing, so a job that took the box's runner
+// may claim it: one of its run (issueSecrets), or of another (takeOver).
+const claimUnclaimed = `(state = '` + secretsPlanned + `' OR (state = '` + secretsEnded + `' AND holder = 0))`
+
+// unclaimed is whether row r is unclaimed (claimUnclaimed).
+func (r secretsRow) unclaimed() bool {
+	return r.state == secretsPlanned || r.state == secretsEnded && r.holder == 0
+}
+
+// claim takes unclaimed row id (claimUnclaimed) for job d, which runs on
+// the box of job owner: one issueSecrets per box, however often GitHub
+// redelivers. A job GitHub said completed claims nothing: its completion,
+// applied before (endJobSecrets records it first), found no row held by
+// it, and none would revoke what it got; the row stays for a job that does
+// start there.
 func (s *Service) claim(ctx context.Context, d delivery, owner, id int64) bool {
-	res, err := s.db().ExecContext(ctx, `UPDATE runners_job_secrets SET state = ?, holder = ?, updated = ? WHERE id = ? AND state = ?
+	res, err := s.db().ExecContext(ctx, `UPDATE runners_job_secrets SET state = ?, holder = ?, updated = ? WHERE id = ? AND `+claimUnclaimed+`
 		AND NOT EXISTS (SELECT 1 FROM runners_job_secrets_completed WHERE job = ?)`,
-		secretsIssuing, d.Job.ID, s.now().Unix(), id, secretsPlanned, d.Job.ID)
+		secretsIssuing, d.Job.ID, s.now().Unix(), id, d.Job.ID)
 	if err != nil {
 		s.logf("runners: job %d: claiming its job grants: %v; its box gets nothing", owner, err)
 		return false
@@ -523,20 +591,27 @@ func (s *Service) issueInto(ctx context.Context, d delivery, owner, id int64, bo
 // anything of owner's. Owner's grants are never looked up here; nothing
 // was issued into the box for owner (a JIT runner takes one job, and d
 // holds it). Then the box goes to d's row and owner is served again with a
-// new box (followTaker).
+// new box (followTaker). A d that no job grant names, but that its own
+// serve would take at trustAll, is served there as on a box of its own
+// with no grants: the box is re-guarded to its run with nothing issued, the
+// marker alone (bareGuard), so it is not stopped and re-run for nothing. A
+// row whose own job completed (or was cancelled) before any job claimed it
+// is taken over the same way: nothing was ever issued for it.
 //
 // Anything that does not pass revokes what the box got and bounces d (its
 // box's hook stops it before its first step, as before: no step runs) to be
 // re-run on a box of its own, and owner is served again at once. A box with
-// an open guard (fork serving) is never taken over nor bounced: d is
-// stopped and gets nothing, as before.
+// an open guard (fork serving) is never taken over nor bounced: the driver's
+// hook never holds a job for a re-guard marker under an open guard
+// (protocol.CapJITGuardReguard), so d is stopped there whatever the broker
+// does, gets nothing, and is not re-run; owner is served again once d ends.
 func (s *Service) takeOver(ctx context.Context, d delivery, owner int64, r secretsRow) {
-	if r.state != secretsPlanned {
+	if !r.unclaimed() {
 		if r.holder == d.Job.ID {
 			return // taken over or refused already: a redelivery
 		}
-		// Its box holds nothing for d and is guarded to another run (its
-		// own job ended, or its row failed): its hook stops d.
+		// Its box holds nothing for d and is guarded to another run (another
+		// job claimed it, or its row failed): its hook stops d.
 		s.bounce(ctx, d, owner, "its box was guarded to run "+itoa(r.run)+" ("+r.state+")")
 		return
 	}
@@ -548,10 +623,18 @@ func (s *Service) takeOver(ctx context.Context, d delivery, owner int64, r secre
 		return
 	}
 	if !s.claim(ctx, d, owner, r.id) {
-		if s.completed(ctx, d.Job.ID) {
+		switch holder, err := s.rowHolder(ctx, r.id); {
+		case s.completed(ctx, d.Job.ID):
 			// GitHub's completed for d was applied first: its box's hook
 			// stopped it, and nothing was ever issued for it.
 			s.bounce(ctx, d, owner, "it completed before the broker could take its box over")
+		case err == nil && holder == d.Job.ID:
+			// A redelivery of d's in_progress claimed it first: that one
+			// takes the box over.
+		default:
+			// Another job claimed the row, or it failed or went meanwhile:
+			// the box stays guarded to another run and its hook stops d.
+			s.bounce(ctx, d, owner, "its box was guarded to run "+itoa(r.run)+" and claimed for another job meanwhile")
 		}
 		return
 	}
@@ -625,12 +708,21 @@ func (s *Service) takeOver(ctx context.Context, d delivery, owner int64, r secre
 		refuse("GitHub could not be asked about its run: " + err.Error())
 		return
 	}
-	gs := matching(iss, candidates, job)
-	if job.RunID != d.Job.RunID || len(gs) == 0 {
-		refuse("no job grant names its run")
+	if job.RunID != d.Job.RunID {
+		refuse("GitHub answered another run for it")
 		return
 	}
+	gs := matching(iss, candidates, job)
+	workflow, ref := job.Workflow, job.Ref
 	guard := protocol.JITRun{ID: job.RunID, WorkflowRef: job.Repo + "/" + job.Workflow + "@" + job.Ref, Ref: job.Ref}
+	if len(gs) == 0 {
+		var why string
+		if guard, workflow, why = s.bareGuard(ctx, cl, d, job); why != "" {
+			refuse("no job grant names its run, and " + why)
+			return
+		}
+		ref = guard.Ref
+	}
 	if err := guard.Check(d.Repo.FullName); err != nil {
 		refuse("its run cannot guard a box: " + err.Error())
 		return
@@ -641,7 +733,7 @@ func (s *Service) takeOver(ctx context.Context, d delivery, owner int64, r secre
 	// renewal asks about d (jobHolds), and nothing of owner's run is ever
 	// issued through it.
 	res, err := s.db().ExecContext(ctx, `UPDATE runners_job_secrets SET run = ?, workflow = ?, ref = ?, handle = ?, why = ?, updated = ?
-		WHERE id = ? AND state = ? AND holder = ?`, job.RunID, job.Workflow, job.Ref, j.handle,
+		WHERE id = ? AND state = ? AND holder = ?`, job.RunID, workflow, ref, j.handle,
 		clip("re-guarded from run "+itoa(r.run)+" (job "+itoa(owner)+") to run "+itoa(job.RunID)+" of job "+itoa(d.Job.ID)+", which took its runner"),
 		s.now().Unix(), r.id, secretsIssuing, d.Job.ID)
 	if n, err := rowsOf(res, err); err != nil {
@@ -654,11 +746,74 @@ func (s *Service) takeOver(ctx context.Context, d delivery, owner int64, r secre
 	if !s.issueInto(ctx, d, owner, r.id, *box, gs, job, protocol.ReguardMarker(guard), fail) {
 		return
 	}
-	s.logf("runners: job %d of %s took the runner of job %d: its box is re-guarded to run %d and holds its own job grants alone; job %d is served again",
-		d.Job.ID, d.Repo.FullName, owner, job.RunID, owner)
+	holds := "its own job grants alone"
+	if len(gs) == 0 {
+		holds = "nothing (no job grant names its run)"
+	}
+	s.logf("runners: job %d of %s took the runner of job %d: its box is re-guarded to run %d and holds %s; job %d is served again",
+		d.Job.ID, d.Repo.FullName, owner, job.RunID, holds, owner)
 	if err := s.followTaker(context.WithoutCancel(ctx), owner, d.Job.ID); err != nil {
 		s.logf("runners: job %d: giving its box to job %d: %v; it is served again when that job ends", owner, d.Job.ID, err)
 	}
+}
+
+// rowHolder is the holder of row id now.
+func (s *Service) rowHolder(ctx context.Context, id int64) (int64, error) {
+	var holder int64
+	err := s.db().QueryRowContext(context.WithoutCancel(ctx), `SELECT holder FROM runners_job_secrets WHERE id = ?`, id).Scan(&holder)
+	return holder, err
+}
+
+// bareGuard is the guard of the run of job d, which no job grant names, for
+// its box's re-guard with nothing issued (takeOver): the run's id, workflow
+// ref and ref as the box's hook reads them (GITHUB_RUN_ID,
+// GITHUB_WORKFLOW_REF, GITHUB_REF) and its workflow file, from GitHub's
+// answer for the run (job is jobOf's); or why that answer cannot say them.
+// GitHub gives a run's head branch, not its ref. The ref is that branch for
+// push and workflow_dispatch while no tag is named like it (a tag's run gives
+// the tag's name: GITHUB_REF would be refs/tags/...) and its commit is on a
+// branch of that name (a tag deleted since leaves none), and the default branch
+// for schedule and repository_dispatch. Any other trusted event's ref is not
+// one the hook re-guards to (pull_request: refs/pull/...; release: a tag) or
+// not one GitHub's run says (merge_group). A wrong ref would leave d stopped
+// by the hook and recorded served, so never re-run: only a ref known from
+// GitHub's answer is used.
+func (s *Service) bareGuard(ctx context.Context, cl *ghapp.Client, d delivery, job jobrule.Job) (protocol.JITRun, string, string) {
+	run, err := cl.Run(ctx, d.Installation.ID, d.Repo.FullName, d.Job.RunID)
+	if err != nil {
+		return protocol.JITRun{}, "", "GitHub could not be asked about its run: " + err.Error()
+	}
+	branch := run.HeadBranch
+	switch run.Event {
+	case "push", "workflow_dispatch":
+		tag, err := cl.TagExists(ctx, d.Installation.ID, d.Repo.FullName, branch)
+		switch {
+		case err != nil:
+			return protocol.JITRun{}, "", "GitHub could not be asked whether its head " + strconv.Quote(branch) + " is a tag: " + err.Error()
+		case tag:
+			return protocol.JITRun{}, "", "a tag is named like its head branch " + strconv.Quote(branch) + ", so its ref is not known"
+		}
+		// A tag's run whose tag is gone since: no branch of that name has its
+		// commit, so it is not taken for one.
+		on, _, err := cl.OnBranch(ctx, d.Installation.ID, d.Repo.FullName, branch, run.HeadSHA)
+		switch {
+		case err != nil:
+			return protocol.JITRun{}, "", "GitHub could not compare its commit with a branch " + strconv.Quote(branch) + ": " + err.Error()
+		case !on:
+			return protocol.JITRun{}, "", "its commit is not on a branch " + strconv.Quote(branch) + ", so its ref is not known"
+		}
+	case "schedule", "repository_dispatch":
+		if branch == "" || branch != job.DefaultBranch {
+			return protocol.JITRun{}, "", "its " + run.Event + " run's head " + strconv.Quote(branch) + " is not the default branch"
+		}
+	default:
+		return protocol.JITRun{}, "", "a " + run.Event + " run's ref is not a branch its box can be re-guarded to"
+	}
+	if run.ID != d.Job.RunID {
+		return protocol.JITRun{}, "", "GitHub answered another run for it"
+	}
+	ref := "refs/heads/" + branch
+	return protocol.JITRun{ID: run.ID, WorkflowRef: run.Repo + "/" + run.Path + "@" + ref, Ref: ref}, run.Path, ""
 }
 
 // unguardedTaker is job d, which took the runner of job owner, whose box has
@@ -720,7 +875,7 @@ func (s *Service) unguardedTaker(ctx context.Context, d delivery, owner int64) {
 	s.recordBounce(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt,
 		"it took the runner of job "+itoa(owner)+", whose box is not guarded to any run and cannot hold it for its secrets: its box was released, ending it there before it could be served")
 	if carrier == owner {
-		s.reserveOwner(ctx, owner, d.Job.ID, runner)
+		s.reserveOwner(ctx, owner, d.Job.ID, runner, true)
 	} else if err := s.finishAs(context.WithoutCancel(ctx), carrier, jobTaken); err != nil {
 		s.logf("runners: ALERT: job %d: releasing its unguarded box: %v; it runs there until its box ends", d.Job.ID, err)
 	}
@@ -735,21 +890,23 @@ func (s *Service) unguardedTaker(ctx context.Context, d delivery, owner int64) {
 // whose runner is gone, is served again now.
 func (s *Service) bounce(ctx context.Context, d delivery, owner int64, why string) {
 	s.recordBounce(ctx, d.Installation.ID, d.Repo.FullName, d.Job.ID, d.Job.RunID, d.Job.RunAttempt, guardedBounceWhy(owner, why))
-	s.reserveOwner(ctx, owner, d.Job.ID, d.Job.RunnerName)
+	s.reserveOwner(ctx, owner, d.Job.ID, d.Job.RunnerName, true)
 }
 
 // recordBounce is bounce's record (INSERT OR IGNORE: redeliveries, and the
 // completion's own check, record it once).
-func (s *Service) recordBounce(ctx context.Context, installation int64, repo string, job, run int64, attempt int, why string) {
+func (s *Service) recordBounce(ctx context.Context, installation int64, repo string, job, run int64, attempt int, why string) bool {
 	res, err := s.db().ExecContext(context.WithoutCancel(ctx), `INSERT OR IGNORE INTO runners_lost (job, installation, repo, run, attempt, state, why, updated, bounced)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`, job, installation, repo, run, max(attempt, 1), lostRunning, clip(why), s.now().Unix())
 	if err != nil {
 		s.logf("runners: job %d: recording it for a re-run: %v; it is not re-run", job, err)
-		return
+		return false
 	}
 	if n, _ := res.RowsAffected(); n == 1 {
 		s.logf("runners: job %d of %s: %s; re-run once GitHub ends it and its run", job, repo, why)
+		return true
 	}
+	return false
 }
 
 // guardedBounceWhy is the record of a job stopped on job owner's box, which
@@ -760,8 +917,10 @@ func guardedBounceWhy(owner int64, why string) string {
 
 // reserveOwner serves job owner again now: job taker, of another run, took
 // its runner and was stopped there (bounce), so the box is no one's. Only
-// while owner's row still has that runner and no other job on it.
-func (s *Service) reserveOwner(ctx context.Context, owner, taker int64, runner string) {
+// while owner's row still has that runner and no other job on it. admitted:
+// the broker would serve taker (started decided it, or a job grant names
+// it), so it uses up none of owner's serves.
+func (s *Service) reserveOwner(ctx context.Context, owner, taker int64, runner string, admitted bool) {
 	ctx = context.WithoutCancel(ctx)
 	o, err := s.job(ctx, owner)
 	if err != nil || o.state != jobServing || o.runner != runner || (o.runs != 0 && o.runs != taker) {
@@ -771,7 +930,12 @@ func (s *Service) reserveOwner(ctx context.Context, owner, taker int64, runner s
 		s.logf("runners: job %d: releasing its box, whose runner job %d took: %v", owner, taker, err)
 		return
 	}
-	_ = s.move(ctx, owner, jobTaken, jobTaken, clip("its runner "+runner+" was taken by job "+itoa(taker)+" of another run, stopped there: box released, served again"))
+	why := clip("its runner " + runner + " was taken by job " + itoa(taker) + " of another run, stopped there: box released, served again")
+	if admitted {
+		_ = s.uncounted(ctx, owner, why)
+	} else {
+		_ = s.move(ctx, owner, jobTaken, jobTaken, why)
+	}
 	if err := s.requeue(ctx, owner, runner); err != nil {
 		s.logf("runners: job %d: queueing it again: %v", owner, err)
 	}
@@ -788,10 +952,10 @@ func (s *Service) reserveOwner(ctx context.Context, owner, taker int64, runner s
 // a job never served, only the in_progress route catches it). A box guarded
 // to job's own run (a swap within the run), or to no run for a job no grant
 // names, is not.
-func (s *Service) endedOnGuardedBox(ctx context.Context, installation int64, repo string, job, run int64, attempt int, runner string) {
+func (s *Service) endedOnGuardedBox(ctx context.Context, installation int64, repo string, job, run int64, attempt int, runner, conclusion string) error {
 	m := ourRunner.FindStringSubmatch(runner)
 	if m == nil || run == 0 {
-		return
+		return nil
 	}
 	minted, _ := strconv.ParseInt(m[2], 10, 64) // potluck-<job>[-<k>]: the job it was minted for
 	var owner, ownerRun int64
@@ -799,27 +963,103 @@ func (s *Service) endedOnGuardedBox(ctx context.Context, installation int64, rep
 	err := s.db().QueryRowContext(ctx, `SELECT job, run, open_guard FROM runners_jobs WHERE installation = ? AND repo = ? COLLATE NOCASE AND (runner = ? OR job = ?)
 		ORDER BY runner = ? DESC LIMIT 1`, installation, repo, runner, minted, runner).Scan(&owner, &ownerRun, &open)
 	if err != nil || owner == job || ownerRun == run {
-		return
+		return nil
 	}
 	var guarded, ours, granted int
+	// A taken row guards no live box (secretsTaken), so it is not owner's
+	// guard; it still tells that grants name job's run (granted) and that job
+	// was served there (ours).
 	if err := s.db().QueryRowContext(ctx, `SELECT
-		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND run = ?),
+		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND run = ? AND NOT `+secretsTaken+`),
 		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND holder = ? AND run = ? AND state IN (?, ?, ?)),
 		(SELECT count(*) FROM runners_job_secrets WHERE job = ? AND run = ?)`,
 		owner, ownerRun, owner, job, run, secretsIssuing, secretsIssued, secretsEnded, job, run).Scan(&guarded, &ours, &granted); err != nil || ours > 0 {
-		return
+		return nil
 	}
+	unguardedWhy := "it ran on the runner " + runner + " of job " + itoa(owner) + ", whose box is not guarded to any run and could not hold it for its secrets (GitHub says it completed there)"
 	switch {
 	case guarded > 0 && !open:
 		s.recordBounce(ctx, installation, repo, job, run, attempt, guardedBounceWhy(owner, "GitHub says it ran on runner "+runner))
 	case guarded == 0 && granted > 0:
 		// recordBounce logs it once (its redeliveries and the sweep record nothing new).
-		s.recordBounce(ctx, installation, repo, job, run, attempt,
-			"it ran on the runner "+runner+" of job "+itoa(owner)+", whose box is not guarded to any run and could not hold it for its secrets (GitHub says it completed there)")
+		s.recordBounce(ctx, installation, repo, job, run, attempt, unguardedWhy)
+	case guarded == 0 && conclusion == "failure" && !s.lost(ctx, job):
+		// No row of job's own: it was never served (or its serve's rows are
+		// gone), and unguardedTaker did not record it (its in_progress missed,
+		// or GitHub did not show it started then). If a job grant names its
+		// run as GitHub answers now, it ran here without its secrets: it is
+		// re-run on a box of its own as any taker unguardedTaker stops. A job
+		// that did not fail is left as it ended (lostEnded re-runs failures
+		// alone), and GitHub is not asked about it, nor about one already
+		// recorded lost.
+		named, err := s.grantNamesNow(ctx, installation, repo, job, run, attempt)
+		if err != nil {
+			return err
+		}
+		if !named {
+			return nil
+		}
+		if s.recordBounce(ctx, installation, repo, job, run, attempt, unguardedWhy) {
+			s.logf("runners: ALERT: job %d of %s, which a job grant names, ran on the runner %s of job %d, whose box is not guarded to any run and could not hold it for its secrets: it is re-run on a box of its own",
+				job, repo, runner, owner)
+		}
+		granted = 1
 	default:
-		return
+		return nil
 	}
-	s.reserveOwner(ctx, owner, job, runner)
+	s.reserveOwner(ctx, owner, job, runner, granted > 0)
+	return nil
+}
+
+// grantLimit bounds grantNamesNow's GitHub reads.
+const grantLimit = 20 * time.Second
+
+// grantNamesNow is whether a job grant names job's run (of repo, through
+// installation, at attempt) as GitHub answers it now: unguardedTaker's
+// check, for a job the broker never saw start. No job grants in the
+// repository's area (or no link, or no minting on this machine): false,
+// GitHub not asked. err: the store or GitHub did not answer, so the caller
+// asks again later.
+func (s *Service) grantNamesNow(ctx context.Context, installation int64, repo string, job, run int64, attempt int) (bool, error) {
+	iss := issuers.From(s.d)
+	if iss == nil {
+		return false, nil
+	}
+	l, err := s.link(ctx, installation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	candidates, err := grants.JobGrants(ctx, s.d, l.project, l.Area, repo)
+	if err != nil {
+		return false, err
+	}
+	if len(candidates) == 0 {
+		return false, nil
+	}
+	cl, err := s.client(ctx)
+	if err != nil {
+		return false, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, grantLimit)
+	defer cancel()
+	var d delivery
+	d.Installation.ID, d.Repo.FullName = installation, repo
+	d.Job.ID, d.Job.RunID, d.Job.RunAttempt = job, run, attempt
+	j, err := s.jobOf(ctx, cl, d, candidates)
+	if err != nil {
+		return false, err
+	}
+	return len(matching(iss, candidates, j)) > 0, nil
+}
+
+// lost is whether job is recorded lost (runners_lost), bounced or not.
+func (s *Service) lost(ctx context.Context, job int64) bool {
+	var n int
+	_ = s.db().QueryRowContext(context.WithoutCancel(ctx), `SELECT count(*) FROM runners_lost WHERE job = ?`, job).Scan(&n)
+	return n > 0
 }
 
 // startedLimit is how long startedHere asks GitHub again while it does not

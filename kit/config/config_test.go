@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -189,5 +191,47 @@ func TestSandboxTaskConfig(t *testing.T) {
 	}
 	if c, err = Load(); err != nil || c.File.SandboxTaskCmd != "farm/zm-task.mjs" || c.File.SandboxTaskSlots != 40 {
 		t.Fatalf("Save rewrote the bad values: %+v %v", c.File, err)
+	}
+}
+
+// update_repos stays raw: any JSON loads, whatever its type, and is saved
+// back as it was. Unset means nothing.
+func TestUpdateReposStaysRaw(t *testing.T) {
+	for _, raw := range []string{`["a/b","c/d"]`, `"a/b"`, `42`, `{"x":1}`, `null`} {
+		home := t.TempDir()
+		path := filepath.Join(home, FileConfig)
+		if err := os.WriteFile(path, []byte(`{"human":"ana","update_repos":`+raw+`}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		c, err := LoadFrom(home)
+		if err != nil {
+			t.Fatalf("update_repos %s fails the load: %v", raw, err)
+		}
+		if string(c.File.UpdateRepos) != raw {
+			t.Fatalf("update_repos %s read as %q", raw, c.File.UpdateRepos)
+		}
+		if err := c.Save(); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(path)
+		var doc map[string]json.RawMessage
+		if err := json.Unmarshal(b, &doc); err != nil {
+			t.Fatal(err)
+		}
+		var got bytes.Buffer
+		if err := json.Compact(&got, doc["update_repos"]); err != nil || got.String() != raw {
+			t.Fatalf("update_repos %s saved as %s", raw, b)
+		}
+	}
+	home := t.TempDir()
+	c, err := LoadFrom(home)
+	if err != nil || c.File.UpdateRepos != nil {
+		t.Fatalf("unset: %q %v", c.File.UpdateRepos, err)
+	}
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(home, FileConfig)); strings.Contains(string(b), "update_repos") {
+		t.Fatalf("unset key written: %s", b)
 	}
 }

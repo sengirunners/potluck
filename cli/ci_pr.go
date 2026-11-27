@@ -99,8 +99,21 @@ func (a *app) ciPRLabels(ctx context.Context, labels, size, osName string) ([]st
 				out = append(out, l)
 			}
 		}
-		if !slices.ContainsFunc(out, func(l string) bool { return slices.Contains([]string{"linux", "macos", "windows"}, strings.ToLower(l)) }) {
-			return nil, errors.New("--labels must name the OS (macos, linux or windows): the broker places a job that names none on linux")
+		if slices.ContainsFunc(out, func(l string) bool { return slices.Contains([]string{"linux", "macos", "windows"}, strings.ToLower(l)) }) {
+			return out, nil
+		}
+		// A mapped label of the pool's runners.labels can name the OS itself: the broker's own rule says.
+		noOS := "--labels must name the OS (macos, linux or windows), or a mapped label of the pool that does: the broker places a job that names none on linux"
+		st, err := a.poolSetup(ctx)
+		if err != nil {
+			return nil, errors.New(noOS + " (this machine's pool could not be asked: " + err.Error() + ")")
+		}
+		ask := runners.ParseLabels(out, st)
+		switch {
+		case ask.Ours && ask.Why != "":
+			return nil, fmt.Errorf("the pool would not take a job asking for %s: %s", strings.Join(out, ", "), ask.Why)
+		case !ask.Ours || !ask.OSNamed:
+			return nil, errors.New(noOS)
 		}
 		return out, nil
 	}

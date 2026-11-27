@@ -345,10 +345,40 @@ func TestUnlistedHostDoesNotLoseARunningJob(t *testing.T) {
 	}
 }
 
+// lostOf lists only the ended jobs of the attempt asked for, and counts the
+// run's running ones of every attempt: a re-run waits for both.
+func TestLostOfCountsRunningOfEveryAttempt(t *testing.T) {
+	f := pinned(t, "a")
+	ctx := context.Background()
+	for _, r := range []struct {
+		job, run int64
+		attempt  int
+		ended    bool
+	}{
+		{9401, 600, 1, true},  // an earlier attempt's: not this re-run's
+		{9402, 600, 2, true},  // this attempt's
+		{9403, 600, 1, false}, // counted, whatever its attempt
+		{9404, 600, 2, false},
+		{9407, 600, 3, false},
+		{9405, 601, 2, true}, // another run
+		{9406, 601, 2, false},
+	} {
+		if err := f.svc.SeedLost(ctx, "acme/app", r.job, r.run, r.attempt, r.ended); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ended, running, err := f.svc.LostOf(ctx, "Acme/App", 600, 2)
+	if err != nil || running != 3 || !slices.Equal(ended, []int64{9402}) {
+		t.Fatalf("ended %v, running %d, %v; want only job 9402 ended and 3 running", ended, running, err)
+	}
+}
+
 // Two jobs of one run lose their boxes. GitHub's completed for the second
-// arrives after the run is already completed: the re-run waits for it, then
-// asks once for the run's failed jobs, never for the first job alone (GitHub
-// would refuse the second while that re-run runs).
+// arrives after the run is already completed, while a try of the first's
+// re-run is between reading the run's lost jobs and asking GitHub about the
+// run: the re-run waits for it, then asks once for the run's failed jobs,
+// never for the first job alone (GitHub would refuse the second while that
+// re-run runs).
 func TestTwoLostJobsOfARunAreRerunTogether(t *testing.T) {
 	f := pinned(t, "a", "b")
 	ctx := context.Background()
@@ -365,13 +395,36 @@ func TestTwoLostJobsOfARunAreRerunTogether(t *testing.T) {
 		return jobs[9301].State == "lost" && jobs[9302].State == "lost"
 	})
 	f.runIs(500, "completed")
+	// The re-run's reads of run 500 wait at a gate, so 9302 ends at a known
+	// point of a try: the first try is held; it waits (9302 still runs),
+	// and the next is held while 9302 ends.
+	hold := func() chan struct{} {
+		gate := make(chan struct{})
+		f.gh.mu.Lock()
+		f.gh.gate, f.gh.gateOn, f.gh.waiting = gate, "/actions/runs/500", 0
+		f.gh.mu.Unlock()
+		return gate
+	}
+	open := func(gate chan struct{}) {
+		f.gh.mu.Lock()
+		f.gh.gate = nil
+		f.gh.mu.Unlock()
+		close(gate)
+	}
+	held := func() bool { f.gh.mu.Lock(); defer f.gh.mu.Unlock(); return f.gh.waiting == 1 }
+	gate := hold()
 	f.deliver(t, "workflow_job", endEvent(9301, 500, "acme/app", "failure", 1, "pool:sa"))
 	eventually(t, "9301 ended", func() bool { return strings.Contains(f.jobs(t)[9301].Why, "GitHub failed it") })
-	time.Sleep(500 * time.Millisecond) // several tries of the waiting re-run
+	eventually(t, "a try of the re-run at its run read", held)
+	open(gate)
+	gate = hold()
+	eventually(t, "the next try of the re-run at its run read", held)
 	if got := f.reruns(); len(got) != 0 {
 		t.Fatalf("re-run before the run's other lost job ended: %v", got)
 	}
 	f.deliver(t, "workflow_job", endEvent(9302, 500, "acme/app", "failure", 1, "pool:sb"))
+	eventually(t, "9302 ended", func() bool { return strings.Contains(f.jobs(t)[9302].Why, "GitHub failed it") })
+	open(gate)
 	eventually(t, "the run's failed jobs re-queued", func() bool { return len(f.reruns()) > 0 && f.svc.Undone(ctx) == 0 })
 	if got := f.reruns(); !slices.Equal(got, []string{"run 500"}) {
 		t.Errorf("re-runs asked %v, want one for the run's failed jobs", got)

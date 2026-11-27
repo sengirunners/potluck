@@ -9,8 +9,11 @@ package cli
 import (
 	"cmp"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
@@ -26,6 +29,7 @@ import (
 	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/project"
+	"github.com/sengirunners/potluck/menubar"
 )
 
 // The pool's areas.
@@ -344,6 +348,9 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 		return err
 	}
 	pool, machine := sc.pool, sc.machine
+	if sc.poolID != "" {
+		o.Stages.Shares(sc.poolID)
+	}
 	if err := root(&o); err != nil {
 		return err
 	}
@@ -390,16 +397,25 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 	}
 	if byCode {
 		say(o.Stages.Begin(hostsetup.Join, "joining the pool of your invite"))
+		if jc, err := project.ParseJoinCode(arg); err == nil { // else the join says what is wrong with it
+			o.Stages.Joining(codeJoining(jc))
+		}
 		rem, err := a.poolJoin(ctx, c, arg, "", func(url string) { o.Stages.Open(hostsetup.Join, url) })
 		if err != nil {
-			if ours := joinedAtAuthority(ctx, c, arg); len(ours) > 0 && api.IsCode(err, api.CodeForbidden) {
-				return &spentCodeError{err: err, Pools: ours, p: prefix(a.host.Prefix)}
+			ours := joinedAtAuthority(ctx, c, arg)
+			if joinRefused(err) {
+				had, refused := inviteRefused(err, ours)
+				o.Stages.NotJoined(refused, had.Slug, had.ID)
+			}
+			if len(ours) > 0 && api.IsCode(err, api.CodeForbidden) {
+				return &spentCodeError{err: err, Pools: slugsOf(ours), p: prefix(a.host.Prefix)}
 			}
 			return err
 		}
 		pool, machine = rem.Project.Slug, rem.Machine
 		say(o.Stages.Succeed(hostsetup.Join, "joined pool "+pool))
-		o.Stages.Joined(pool) // the flags stay
+		hostJoined()
+		o.Stages.Joined(pool, rem.Project.ID) // the flags stay
 	} else if machine != "" {
 		say(o.Stages.Succeed(hostsetup.Join, "already in pool "+pool))
 	} else {
@@ -445,7 +461,7 @@ func (a *app) poolHost(ctx context.Context, c *client.Client, run hostprobe.Runn
 type hostScope struct {
 	pool, machine string
 	byCode        bool
-	poolID        string // a joined pool's id at its machine
+	poolID        string // its id: a joined pool's at its machine ("": a code's)
 	// shared is each machine-level binding's share list (a joined pool's
 	// scope), by name.
 	shared map[string][]string
@@ -459,14 +475,17 @@ func (a *app) hostScope(ctx context.Context, c *client.Client, arg string, o *ho
 			return sc, err
 		}
 		for _, r := range rems {
-			if r.Project.Slug == sc.pool {
+			if r.Project.Slug == sc.pool && r.State == api.RemoteOK { // not one of that name that was left or ended
 				sc.machine, sc.poolID = r.Machine, r.Project.ID
 			}
 		}
 		if sc.machine == "" {
-			if _, err := c.GetProject(ctx, sc.pool); err != nil {
-				return sc, fmt.Errorf("%s is no pool this machine joined or runs: pass the invite code, %s", sc.pool, a.cmd("host '<code>'"))
+			p, err := c.GetProject(ctx, sc.pool)
+			if err != nil {
+				return sc, api.Plainly(fmt.Errorf("%s is no pool this machine joined or runs: pass the invite code, %s", sc.pool, a.cmd("host '<code>'")),
+					"That isn't a whole invite, or a group this Mac is in now. Nothing was changed. If you pasted an invite, copy all of it and paste it again; if not, this Mac may have left its group: ask the person who invited you for a new invite."+plainGetHelp)
 			}
+			sc.poolID = p.ID
 		}
 	}
 	var l computeapi.RunTargetList
@@ -515,9 +534,57 @@ func (e *spentCodeError) Error() string {
 	return b.String()
 }
 
+// codeJoining is the machine an invite code names, as a host run records it.
+func codeJoining(jc project.JoinCode) hostsetup.Joining {
+	return hostsetup.Joining{Fingerprint: jc.Fingerprint, Machine: jc.Machine}
+}
+
+// joinRefused reports that a join's machine answered no: nothing was joined.
+// Any other error (no answer, or its own trouble) may have come after it joined.
+func joinRefused(err error) bool {
+	e := new(api.Error)
+	return errors.As(err, &e) && e.Status() < http.StatusInternalServerError
+}
+
+// inviteRefused reports that err, a join's refusal, refuses the invite itself
+// (wrong, used or expired, or for a pool this machine is in), so that it is
+// refused again, and not something to see to first (a name that is taken).
+// had is which of ours, the pools this machine joined where the invite is
+// from, is left to go on with: the one it is for, when err says, else the only
+// one ({}: none, or not known).
+func inviteRefused(err error, ours []api.Remote) (had api.ProjectRef, refused bool) {
+	e := new(api.Error)
+	if !errors.As(err, &e) {
+		return had, false
+	}
+	switch e.Code {
+	case api.CodeForbidden:
+		if len(ours) == 1 {
+			had = ours[0].Project
+		}
+		return had, true
+	case api.CodeConflict:
+		var of api.ProjectRef
+		if len(e.Data) == 0 || json.Unmarshal(e.Data, &of) != nil || of.ID == "" {
+			return had, false
+		}
+		for _, r := range ours {
+			if r.Project.ID == of.ID {
+				had = r.Project
+			}
+		}
+		return had, true
+	}
+	return had, false
+}
+
+// hostJoined runs once a host run joined, before its record says so (tests
+// end the run there).
+var hostJoined = func() {}
+
 // joinedAtAuthority is the pools this machine holds a healthy remote for at
 // the machine a join code names.
-func joinedAtAuthority(ctx context.Context, c *client.Client, code string) []string {
+func joinedAtAuthority(ctx context.Context, c *client.Client, code string) []api.Remote {
 	jc, err := project.ParseJoinCode(code)
 	if err != nil {
 		return nil
@@ -526,13 +593,17 @@ func joinedAtAuthority(ctx context.Context, c *client.Client, code string) []str
 	if err != nil {
 		return nil
 	}
-	var pools []string
+	return slices.DeleteFunc(rems, func(r api.Remote) bool {
+		return r.State != api.RemoteOK || !codeJoining(jc).Names(r.Fingerprint, r.Authority)
+	})
+}
+
+func slugsOf(rems []api.Remote) []string {
+	var out []string
 	for _, r := range rems {
-		if r.State == api.RemoteOK && strings.EqualFold(r.Fingerprint, jc.Fingerprint) && (jc.Machine == "" || r.Authority == jc.Machine) {
-			pools = append(pools, r.Project.Slug)
-		}
+		out = append(out, r.Project.Slug)
 	}
-	return pools
+	return out
 }
 
 // shareFlagArgs renders the flags the user set as arguments to retype.
@@ -546,14 +617,14 @@ func shareFlagArgs(cmd *cobra.Command, skip ...string) string {
 
 // givenFlags are the flags the user set, but skip, in order: each as a
 // person retypes it (each argument with a leading space) and as a
-// program's arguments. Never host's --invite-stdin: it says where the
-// argument came from, not how to share, and a command built from these
+// program's arguments. Never host's --invite-stdin or --instead-of-invite:
+// they say where the argument came from, not how to share, and a command built from these
 // gets the argument some other way (the setup record's command to run
 // again, a hint, the background run's argv with its own --invite-stdin).
 func givenFlags(cmd *cobra.Command, skip ...string) []hostsetup.Flag {
 	var out []hostsetup.Flag
 	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if f.Name == flagInviteStdin || slices.Contains(skip, f.Name) {
+		if f.Name == flagInviteStdin || f.Name == menubar.InsteadFlag || slices.Contains(skip, f.Name) {
 			return
 		}
 		hf := hostsetup.Flag{Name: f.Name}
@@ -684,8 +755,11 @@ sandboxes is always refused.`,
 }
 
 // needsForce is hostStop's refusal that --force overrides: sandboxes run, or
-// may run, on a size shared with a pool this machine joined.
-type needsForce struct{ error }
+// may run (live false), on a size shared with a pool this machine joined.
+type needsForce struct {
+	error
+	live bool
+}
 
 func (e *needsForce) Unwrap() error { return e.error }
 
@@ -715,10 +789,10 @@ func hostStop(ctx context.Context, c *client.Client, only string, force bool, wa
 		case force && len(t.Live) > 0:
 			fmt.Fprintf(warn, "%s: %s: %s still running; removed anyway (--force): they go on until their lease ends\n", name, t.Name, sandboxCount(len(t.Live)))
 		case t.Error != "":
-			fail(&needsForce{fmt.Errorf("%s: could not tell whether sandboxes run on it (%s): try again, or pass --force", t.Name, t.Error)})
+			fail(&needsForce{error: fmt.Errorf("%s: could not tell whether sandboxes run on it (%s): try again, or pass --force", t.Name, t.Error)})
 			continue
 		case len(t.Live) > 0:
-			fail(&needsForce{fmt.Errorf("%s still running on %s: stop them first or pass --force", sandboxCount(len(t.Live)), t.Name)})
+			fail(&needsForce{fmt.Errorf("%s still running on %s: stop them first or pass --force", sandboxCount(len(t.Live)), t.Name), true})
 			continue
 		}
 		if err := computeclient.UnbindHostRunTarget(ctx, c, t.Name); err != nil {

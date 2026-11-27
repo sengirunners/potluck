@@ -13,7 +13,7 @@ read it.
 | macOS | Softnet |
 | --- | --- |
 | 26 or newer | upstream's release `0.26.0`, through `potluck softnet install`; or an upstream release 0.25.0 or newer you set up yourself, owned by root and setuid |
-| 15 | Potluck's build `0.23.0-potluck-pr227-candidate.1`, through `potluck softnet install` |
+| 15 | Potluck's build `0.23.0-potluck-pr227-candidate.1`, a candidate (below), through `potluck softnet install --candidate` |
 | 14 and older | none that enforces Potluck's rules: this Mac cannot lend isolated boxes |
 
 Upstream 0.23.0 runs on macOS 15 but refuses protocol and port rules; 0.24.0 and newer use vmnet calls that need
@@ -33,8 +33,8 @@ The macOS 15 build is a **candidate**: it has not yet passed Potluck's isolation
 does, preflight does not tell people to install it, and `potluck softnet install` needs `--candidate`. A Mac that
 installs it still runs every preflight check before it lends.
 
-`potluck softnet status` says which row this Mac is in, what the managed install holds, and which Softnet
-Potluck's boxes run.
+`potluck softnet status` says this Mac's macOS, what the managed install holds, which Softnet Potluck's boxes run
+and, when that is not this Mac's row, how to get it.
 
 ## Install, update, roll back
 
@@ -85,7 +85,7 @@ the checks above and the download), then, in place of running sudo, says the roo
 `--json` the answer is data:
 
 ```json
-{"admin_step": {"why": "The admin step installs Softnet ...", "argv": ["/Users/you/.local/bin/potluck", "softnet", "install", "--admin-step", "--from", "/Users/you/Library/Caches/potluck/softnet/softnet-<build>-darwin-arm64"]}}
+{"admin_step": {"why": "macOS will ask for this Mac's password to install the network helper.", "argv": ["/Users/you/.local/bin/potluck", "softnet", "install", "--admin-step", "--from", "/Users/you/Library/Caches/potluck/softnet/softnet-<build>-darwin-arm64"]}}
 ```
 
 `argv[0]` is the absolute path of this potluck program. Run `argv` as root as a list of words: an app that hands it
@@ -132,7 +132,8 @@ then `potluck host` again.
 `potluck upgrade` (and its daily run, `potluck upgrade enable`) keeps potluck current without a password, so it
 cannot replace a root-owned setuid file. When a newer potluck pins a newer build for this macOS, `potluck doctor`,
 `potluck host` and `potluck softnet status` warn that the managed Softnet is not this potluck's build and name
-the command: run `potluck softnet install` to update. The build in use keeps working until then.
+the command: run `potluck softnet install` to update (with `--candidate` for a candidate build). The build in use
+keeps working until then.
 
 ## License and provenance
 
@@ -143,6 +144,30 @@ recipe) is in `softnet.Builds` and in the `provenance.json` beside it. The upstr
 26 and newer is under the same license: the `LICENSE` in its archive is byte for byte `softnet/UPSTREAM-LICENSE`,
 the copy an install places beside it. Potluck does not republish it; `install` downloads it
 from upstream's release.
+
+## Rehearsing a build in a macOS VM
+
+`scripts/softnet-sim` checks a Softnet build on a macOS version without a Mac that runs it: in a macOS VM (Tart, a
+`macos-<version>-vanilla` image by digest), where a guest cannot start VMs of its own, it runs the real executable
+on that macOS's real vmnet with a fake VM on its socket. The fake VM speaks what Tart passes, raw Ethernet frames
+in a Unix datagram socket pair, and asks for its address with DHCP. The harness makes every endpoint (this Mac's
+own ports, a LAN, a tailnet range, a mail server, a second VM) and shows frame by frame what left Softnet, what was
+answered and what came in. Run it as root inside the VM; it refuses to run outside one:
+
+```sh
+CGO_ENABLED=0 go build ./scripts/softnet-sim     # then copy it into the VM
+sudo ./softnet-sim -softnet "/Library/Application Support/Potluck/Softnet/current/softnet" \
+  -mutant <softnet built to filter nothing> -forbid <a real LAN address:port> -md report.md -json report.json
+```
+
+A probe counts as stopped only when the same probe, with no rules in the way, left Softnet and its endpoint
+answered; where nothing can answer (a spoofed or malformed frame) the mutant, a Softnet built with its filter
+always saying yes, shows it would have left. Each deliberately broken rule set must fail, in each group of probes it
+breaks. It checks the destinations in `probes.go` and no others. The run passes (exit status 0) only when all of that
+ran; what it could not show is listed as "not shown".
+
+It is a rehearsal and does not set `Validated`: no guest kernel, no Tart and no conformance run take part, so a
+build is validated on real hardware all the same.
 
 ## Publishing a build
 

@@ -103,7 +103,7 @@ func TestHostStatusProbeAddsTheMac(t *testing.T) {
 	oldProbe, oldOS := probeMac, setupGOOS
 	t.Cleanup(func() { probeMac, setupGOOS = oldProbe, oldOS })
 	setupGOOS = "darwin"
-	probeMac = func(context.Context) hostprobe.MacParts {
+	probeMac = func(context.Context, string) hostprobe.MacParts {
 		return hostprobe.MacParts{Report: hostprobe.Report{Arch: "amd64"}}
 	}
 	if out := m.ok(t, "--json", "host", "status", "--probe"); !strings.Contains(out, "Intel processor") {

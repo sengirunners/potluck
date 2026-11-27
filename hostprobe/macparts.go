@@ -24,6 +24,9 @@ type MacParts struct {
 	// HV is whether macOS offers virtualization to apps
 	// (kern.hv_support).
 	HV bool
+	// InVM is that macOS runs inside a virtual machine with no
+	// kern.hv_support (kern.hv_vmm_present is 1), so HV is a definite no.
+	InVM bool
 	// HVUnread is why that could not be read ("": it was); ArchUnread and
 	// MacOSUnread the same for Report.Arch ("unknown" then) and
 	// Report.MacOS ("" then).
@@ -44,8 +47,9 @@ type MacParts struct {
 	// installed (nil: none).
 	SoftnetStore *softnet.Status
 	// NeedGB is the free disk Potluck's default image for this Mac needs
-	// where Tart keeps images (its pin's min_free_gb); 0 when the disk is
-	// shorter than that but Tart already has the image.
+	// where Tart keeps images (its pin's min_free_gb); on a disk shorter
+	// than that, less what an unfinished download already takes, and 0 when
+	// Tart already has the image.
 	NeedGB int
 	// ImagesUnread is why Tart's images could not be listed on a disk
 	// shorter than NeedGB, or which image this Mac needs is not known, so
@@ -60,8 +64,8 @@ type MacParts struct {
 }
 
 // macSetupTimeout is the most CheckMacSetup takes, whatever wedges: well
-// under the 25 s a menu bar ask has; macSetupGrace is how long after it a
-// command it ended may take to say so.
+// under the 60 s the setup window's probe has; macSetupGrace is how long
+// after it a command it ended may take to say so.
 var (
 	macSetupTimeout = 12 * time.Second
 	macSetupGrace   = 3 * time.Second
@@ -69,12 +73,13 @@ var (
 
 // CheckMacSetup reads this Mac's preflight part by part (MacParts). What is
 // not read within macSetupTimeout is left unread, never a verdict. run ends
-// with its context (ExecRunner with a WaitDelay).
-func CheckMacSetup(ctx context.Context, run Runner, f Facts) MacParts {
+// with its context (ExecRunner with a WaitDelay). home is the Potluck home a
+// setup would share from.
+func CheckMacSetup(ctx context.Context, run Runner, f Facts, home string) MacParts {
 	ctx, cancel := context.WithTimeout(ctx, macSetupTimeout)
 	defer cancel()
 	done := make(chan MacParts, 1)
-	go func() { done <- checkMacSetup(ctx, run, f) }()
+	go func() { done <- checkMacSetup(ctx, run, f, home) }()
 	select {
 	case p := <-done:
 		return p
@@ -92,7 +97,7 @@ func CheckMacSetup(ctx context.Context, run Runner, f Facts) MacParts {
 		Tart: Layer{Name: "tart", Unread: why, Problems: []string{why}}, Softnet: Layer{Name: "tart", Unread: why, Problems: []string{why}}}
 }
 
-func checkMacSetup(ctx context.Context, run Runner, f Facts) MacParts {
+func checkMacSetup(ctx context.Context, run Runner, f Facts, home string) MacParts {
 	r := Report{OS: "darwin"}
 	p := macParts(ctx, run, f, &r)
 	if p.ArchUnread+p.MacOSUnread != "" && r.TartFreeGB < float64(p.NeedGB) {
@@ -100,7 +105,7 @@ func checkMacSetup(ctx context.Context, run Runner, f Facts) MacParts {
 	}
 	if p.image != "" && p.Tart.CLI != "" && r.TartDiskUnread == "" && r.TartFreeGB < float64(p.NeedGB) {
 		var err error
-		if _, p.NeedGB, err = tartPullNeed(ctx, run, p.Tart.CLI, []string{p.image}); err != nil {
+		if _, p.NeedGB, err = tartPullNeed(ctx, run, r.TartDir, home, p.Tart.CLI, []string{p.image}); err != nil {
 			p.ImagesUnread = err.Error()
 		}
 	}
@@ -114,6 +119,11 @@ func macParts(ctx context.Context, run Runner, f Facts, r *Report) MacParts {
 	res, err := runBounded(ctx, run, "sysctl", "-n", "kern.hv_support")
 	if err != nil || res.Exit != 0 {
 		p.HVUnread = commandFailure(res, err)
+		// macOS inside a virtual machine has no kern.hv_support at all, and
+		// says it is a guest (kern.hv_vmm_present 1): a definite no.
+		if vm, verr := runBounded(ctx, run, "sysctl", "-n", "kern.hv_vmm_present"); verr == nil && vm.Exit == 0 && strings.TrimSpace(vm.Stdout) == "1" {
+			p.HVUnread, p.InVM = "", true
+		}
 	}
 	p.HV = p.HVUnread == "" && strings.TrimSpace(res.Stdout) == "1"
 	if !p.HV {

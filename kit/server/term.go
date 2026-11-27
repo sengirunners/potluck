@@ -187,6 +187,11 @@ func (dm *Daemon) term(w http.ResponseWriter, r *http.Request) {
 // termAnswer is t as the term route answers it to the caller of ctx.
 func (dm *Daemon) termAnswer(ctx context.Context, t hometerm.Term) api.AuthorityTerm {
 	a := api.AuthorityTerm{State: string(t.State), Epoch: t.Epoch}
+	if t.State == hometerm.Standby {
+		if copyOf, ok := dm.Deps.Service(core.StandbyCopyService).(func(context.Context, uint64) *api.StandbyCopy); ok {
+			a.Standby = copyOf(ctx, t.Epoch)
+		}
+	}
 	if rm := core.RemoteOf(ctx); rm != nil { // a network caller; the socket carries no Remote
 		if fp, err := dm.Deps.HomeFingerprint(ctx, cmp.Or(rm.Via, core.ViaTailnet)); err == nil {
 			a.Fingerprint = fp

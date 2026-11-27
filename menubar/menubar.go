@@ -192,12 +192,15 @@ type Item struct {
 	Confirm string   `json:"confirm,omitempty"`
 }
 
-// Menu is the menu as drawn: a title and detail beside the pot, an optional
-// note, a row of one mark per core, then the items.
+// Menu is the menu as drawn: a title and detail, an optional note, a row of
+// one mark per core, then the items.
 type Menu struct {
 	Title  string `json:"title"`
 	Detail string `json:"detail"`
 	Note   string `json:"note,omitempty"`
+	// Attention is that the menu bar marks its picture (needsAttention);
+	// the title and the note say why.
+	Attention bool `json:"attention,omitempty"`
 	// Cores is one rune per core: '●' in use, '○' lent and free, '·' kept.
 	Cores string `json:"cores"`
 	// Memory is the memory pressure line ("" when not read).
@@ -273,32 +276,40 @@ func Build(f Facts) Status {
 	if loc == nil {
 		loc = time.UTC
 	}
+	ended := Lend(slices.DeleteFunc(slices.Clone(f.Targets), func(t computeapi.RunTargetView) bool { return !f.Setup.Stranded(t) }), f.Lend)
+	f.Targets = slices.DeleteFunc(slices.Clone(f.Targets), f.Setup.Stranded)
 	l := Lend(f.Targets, f.Lend)
+	over := overNote(l)
+	// A size nobody can use any more lends nothing, but a job still on it runs.
+	l.Jobs, l.InUse, l.MemoryInUse = l.Jobs+ended.Jobs, l.InUse+ended.InUse, l.MemoryInUse+ended.MemoryInUse
 	st := Status{Cores: f.Cores, Lending: l, Mode: protocol.HostUnreadable, State: protocol.HostHolding, Background: f.Background}
 	if f.Host != nil {
 		st.Mode, st.State, st.Until = f.Host.Mode, f.Host.State, f.Host.Until
 	}
 	st.Refused = Refused(f.Host, f.Targets)
+	f.Setup.Run = runNow(f.Setup)
 	setup := runState(f.Setup)
 	m := &st.Menu
 	lent := l.Lent
 	switch {
+	case f.Daemon != "": // before the switch, as in needsAttention
+		m.Title = "Potluck is not running"
+		m.Note = "start it: " + f.Start
 	case f.Host == nil || st.Mode == protocol.HostUnreadable:
 		m.Title = "Held: the host switch cannot be read"
 		m.Note = cmp.Or(f.HostErr, "no new jobs start until it can")
-	case f.Daemon != "":
-		m.Title = "Potluck is not running"
-		m.Note = "start it: " + f.Start
 	case l.Sizes == 0 && f.ListErr != "":
 		m.Title = "Cannot read what this Mac lends"
 	case l.Sizes == 0 && setup == SetupRunning:
-		m.Title = "Setting up: " + stageOf(f.Setup.Run)
+		m.Title = "Setting up: " + stageSaid(f.Setup.Run)
 		if n := len(f.Setup.Run.Stages); n > 0 {
 			m.Note = f.Setup.Run.Stages[n-1].Detail
 		}
 	case l.Sizes == 0 && (setup == SetupBlocked || setup == SetupInterrupted):
-		m.Title = "Setup blocked at " + stageOf(f.Setup.Run)
-		m.Note = setupNote(f.Setup.Run, f.Share)
+		m.Title = stoppedSaid(f.Setup.Run) // the menu's Set up and check… and host status's setup lines say why, and what next
+	case l.Sizes == 0 && ended.Sizes > 0:
+		m.Title = "Not lending"
+		m.Note = "the group this Mac lent to is gone; ask for a new invite"
 	case l.Sizes == 0:
 		m.Title = "Not lending"
 		m.Note = "share this Mac: " + f.Share
@@ -311,6 +322,8 @@ func Build(f Facts) Status {
 		} else if d := clock(f.Host.DrainDeadline, loc); d != "" {
 			m.Note = "jobs still running end at " + d
 		}
+	case noDriver(l):
+		m.Title = "Cannot reach what this Mac lends"
 	case st.State == protocol.HostAccepting && st.Refused != nil:
 		m.Title = "Refusing new work now"
 		m.Note = st.Refused.Reason
@@ -339,10 +352,15 @@ func Build(f Facts) Status {
 	}
 	switch {
 	case l.Sizes == 0 && setup == SetupRunning: // the stage says it
+	case f.Daemon != "" && !f.Setup.Stopped && (setup == SetupBlocked || setup == SetupInterrupted):
+		m.Note = join(m.Note, "the last setup "+strings.TrimPrefix(stoppedSaid(f.Setup.Run), "Setup "))
 	case l.Sizes > 0 && setup == SetupRunning:
-		m.Note = join(m.Note, "setting up again: "+stageOf(f.Setup.Run))
+		m.Note = join(m.Note, "setting up again: "+stageSaid(f.Setup.Run))
 	case l.Sizes > 0 && (setup == SetupBlocked || setup == SetupInterrupted):
-		m.Note = join(m.Note, "the last setup run was blocked at "+stageOf(f.Setup.Run)+"; what was shared before still lends")
+		m.Note = join(m.Note, "the last setup "+strings.TrimPrefix(stoppedSaid(f.Setup.Run), "Setup "))
+		if !noDriver(l) {
+			m.Note += "; what was shared before still lends"
+		}
 	case f.Background != nil && f.Background.State == "running":
 		m.Note = join(m.Note, "sharing goes on in the background: "+f.Background.Last)
 	}
@@ -358,12 +376,13 @@ func Build(f Facts) Status {
 	}
 	if f.LendErr != "" {
 		m.Note = join(m.Note, "no new jobs start until your limits can be read: "+f.LendErr)
-	} else if n := overNote(l); n != "" && f.Daemon == "" {
-		m.Note = join(m.Note, n)
+	} else if over != "" && f.Daemon == "" {
+		m.Note = join(m.Note, over)
 	}
 	if n := DialsIgnored(l); n != "" && f.Daemon == "" {
 		m.Note = join(m.Note, n)
 	}
+	m.Attention = needsAttention(f, st, setup, ended.Sizes)
 	m.Cores = dots(f.Cores, lent, l.InUse)
 	m.Memory = memoryLine(f, l)
 	keep := st.Mode == protocol.HostAuto || st.Mode == protocol.HostOpen
@@ -393,25 +412,63 @@ func Build(f Facts) Status {
 	return st
 }
 
-// stageOf is the stage the run is at or stopped at, as "validation (3 of 5)".
-func stageOf(r *hostsetup.Run) string {
-	s := r.Blocked()
-	if s == nil && len(r.Stages) > 0 {
-		s = &r.Stages[len(r.Stages)-1]
+// needsAttention is that lending stopped and nobody chose that: not on a Mac
+// nobody set up (as far as can be read), one a person paused, winds down or
+// stopped, or one that still lends. ended is how many sizes lend to a group
+// that is gone.
+func needsAttention(f Facts, st Status, setup string, ended int) bool {
+	l := st.Lending
+	switch {
+	case st.Mode == protocol.HostClosed, st.Mode == protocol.HostDrain:
+		return false
+	case f.Daemon != "":
+		return !f.Setup.Stopped && setup != SetupNone && setup != SetupRunning // a first run starts it
+	case l.Sizes == 0 && ended > 0 && setup != SetupRunning: // the group it lent to is gone; it needs a new invite
+		return true
+	case l.Sizes == 0 && f.ListErr == "" && setup == SetupNone:
+		return false
+	case switchUnread(f, st), f.LendErr != "":
+		return true
+	case l.Sizes == 0:
+		return f.ListErr != "" || setup == SetupBlocked || setup == SetupInterrupted
 	}
-	if s == nil {
-		return hostsetup.Label(hostsetup.Order[0]) + fmt.Sprintf(" (1 of %d)", len(hostsetup.Order))
-	}
-	return fmt.Sprintf("%s (%d of %d)", hostsetup.Label(s.Name), hostsetup.Number(s.Name), len(hostsetup.Order))
+	return noDriver(l)
 }
 
-// setupNote is a blocked or cut-off setup's reason and the way on (share:
-// the command when the record names none).
-func setupNote(r *hostsetup.Run, share string) string {
-	if b := r.Blocked(); b != nil {
-		return b.Detail + "; then " + RunAgain(r, share)
+// noDriver is that no shared size's driver answers.
+func noDriver(l Lending) bool { return l.Sizes > 0 && len(l.Unknown) == l.Sizes }
+
+// stageAt is the stage the run is at or stopped at: the first before any.
+func stageAt(r *hostsetup.Run) string {
+	if s := r.Blocked(); s != nil {
+		return s.Name
 	}
-	return "it stopped before it finished; " + RunAgain(r, share)
+	if n := len(r.Stages); n > 0 {
+		return r.Stages[n-1].Name
+	}
+	return hostsetup.Order[0]
+}
+
+// stageSaid is the stage the run is at, in the setup window's words, as
+// "download what jobs need". The menu is a person's, so it names no
+// command; the setup checklist (host status's "setup:") has the details.
+// A stage this Potluck has no words for (a record from another version) is
+// named as the record names it.
+func stageSaid(r *hostsetup.Run) string {
+	w, ok := stageWords[stageAt(r)]
+	if !ok || w == "" {
+		return hostsetup.Label(stageAt(r))
+	}
+	return strings.ToLower(w[:1]) + w[1:]
+}
+
+// stoppedSaid is where the run stopped, as "Setup stopped while checking
+// this Mac".
+func stoppedSaid(r *hostsetup.Run) string {
+	if s, ok := stopped[stageAt(r)]; ok {
+		return strings.TrimSuffix(s, ".")
+	}
+	return "Setup stopped at " + stageSaid(r)
 }
 
 func item(id, label, sub string, checked bool, mode string) Item {

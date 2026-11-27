@@ -490,6 +490,8 @@ var brokenDrivers = []struct {
 	{"run", "wrong-head", "code", "FAIL  a run's HEAD is the commit sent", nil},
 	{"run", "ended-wrong-exit", "code", "FAIL  the probe can fail", nil},
 	{"run", "ended-wrong-exit", "net", "FAIL  the net probe can fail", func(o *Options) { o.NetForbid = []string{"127.0.0.1:9"} }},
+	{"box", "multicast-past-fence", "net", "FAIL  a box's multicast reaches no program on this machine", func(o *Options) { o.NetMulticast = true }},
+	{"box", "host-alias-past-fence", "net", "opened from inside the box", fenceAliasNet},
 	{"run", "dirty", "code", "FAIL  a dirty working tree does not leak in", nil},
 	{"run", "run-worktree", "code", "FAIL  a run's HEAD is the commit sent", nil},
 	// renew
@@ -806,6 +808,12 @@ func TestBrokenDrivers(t *testing.T) {
 				out := Format(res)
 				if c.group == "ports" {
 					t.Log(out)
+				}
+				// The check this row must fail could not be shown to mean
+				// anything on this machine (a multicast group no datagram
+				// from here reaches, say).
+				if name, ok := strings.CutPrefix(c.want, "FAIL  "); ok && strings.Contains(out, "SKIP  "+name+": not proven:") {
+					refdriver.NotHere(t, "this machine cannot prove "+strconv.Quote(name)+":\n"+out)
 				}
 				if !strings.Contains(out, c.want) {
 					t.Fatalf("want %q in:\n%s", c.want, out)

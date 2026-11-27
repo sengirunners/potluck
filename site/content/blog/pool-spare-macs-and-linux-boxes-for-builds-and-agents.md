@@ -119,7 +119,7 @@ potluck host set closed
 potluck host set auto
 ```
 
-`auto` returns to the machine's own rules. `--for 2h` and `--until 23:00` return the machine to `auto` at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar`, which installs the app but does not start it, then open it with `open ~/Applications/"Potluck Menu.app"`. It is not yet signed with an Apple Developer ID.
+`auto` returns to the machine's own rules. `--for 2h` and `--until 23:00` return the machine to `auto` at a set time. On a Mac there is also a menu bar item with Wind down and Stop now entries. Install it with `curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh -s -- --menubar`, which installs the app but does not start it, then open it from your `~/Applications` folder. It is not yet signed with an Apple Developer ID.
 
 To stop sharing for good, `potluck host stop` removes every size the machine shared, and `potluck leave` leaves the pool.
 

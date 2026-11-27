@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"strings"
 )
@@ -14,6 +15,15 @@ import (
 type adminStep struct {
 	Why  string   `json:"why"`
 	Argv []string `json:"argv"`
+	// detail is what the step does in a terminal's words (what it puts
+	// where, and why it needs root); "" when Why says it.
+	detail string
+}
+
+// helperWhy is an admin step's reason, as the Mac app's password dialog
+// says it: to is what the step does, as "install the network helper".
+func helperWhy(to string) string {
+	return "macOS will ask for this Mac's password to " + to + "."
 }
 
 // command is the step as one line for a terminal, each word quoted for a
@@ -47,7 +57,7 @@ func (a *app) adminStepCmd(then string, run func() error) error {
 	case errors.As(err, &left) && a.asJSON():
 		return a.printJSON(map[string]adminStep{"admin_step": left.step})
 	case errors.As(err, &left):
-		a.say("--no-sudo: the admin step was not run. %s\nRun this as root, then %s:\n  %s", left.step.Why, then, left.step.command())
+		a.say("--no-sudo: the admin step was not run. %s\nRun this as root, then %s:\n  %s", cmp.Or(left.step.detail, left.step.Why), then, left.step.command())
 		return nil
 	case err != nil:
 		return err

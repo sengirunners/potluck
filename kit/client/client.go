@@ -7,6 +7,7 @@ package client
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -288,7 +289,8 @@ func (c *Client) send(ctx context.Context, method, path string, in any, hdr http
 			return nil, ctx.Err()
 		}
 		return nil, &api.Error{Code: api.CodeUnavailable, Message: config.Program + " daemon not running at " + c.Socket + " and it did not start: " + serr.Error(),
-			Hint: "start it by hand to see why: " + config.Command("daemon")}
+			Hint:  "start it by hand to see why: " + config.Command("daemon"),
+			Plain: cmp.Or(api.PlainForm(serr), "Potluck isn't running on this Mac and didn't start. Try again in a minute.")}
 	}
 	return c.sendOnce(ctx, method, path, body, in != nil, hdr)
 }

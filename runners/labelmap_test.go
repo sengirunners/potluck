@@ -36,9 +36,9 @@ func TestParseLabelsLabelMap(t *testing.T) {
 	}{
 		{name: "one mapped label", labels: []string{"big-box"}, want: runners.LabelAsk{Ours: true, Size: "c2m4", OS: "linux"}},
 		{name: "mapped label in another case", labels: []string{"self-hosted", "SMALL-BOX"}, want: runners.LabelAsk{Ours: true, Size: "c1m2", OS: "linux"}},
-		{name: "mapped os", labels: []string{"mac-box", "arm64"}, want: runners.LabelAsk{Ours: true, Size: "c1m2", OS: "macos"}},
-		{name: "mapped label with its own os", labels: []string{"mac-box", "macos"}, want: runners.LabelAsk{Ours: true, Size: "c1m2", OS: "macos"}},
-		{name: "two mapped labels that agree", labels: []string{"small-box", "mac-box"}, want: runners.LabelAsk{Ours: true, Size: "c1m2", OS: "macos"}},
+		{name: "mapped os", labels: []string{"mac-box", "arm64"}, want: runners.LabelAsk{Ours: true, Size: "c1m2", OS: "macos", OSNamed: true}},
+		{name: "mapped label with its own os", labels: []string{"mac-box", "macos"}, want: runners.LabelAsk{Ours: true, Size: "c1m2", OS: "macos", OSNamed: true}},
+		{name: "two mapped labels that agree", labels: []string{"small-box", "mac-box"}, want: runners.LabelAsk{Ours: true, Size: "c1m2", OS: "macos", OSNamed: true}},
 		{name: "unmapped label only", labels: []string{"other-box"}},
 		{name: "github label mapped", labels: []string{"linux"}},
 		{name: "pool size still works", labels: []string{"pool:c2m4"}, want: runners.LabelAsk{Ours: true, Size: "c2m4", OS: "linux"}},
@@ -216,5 +216,30 @@ func TestDoctorLabelMap(t *testing.T) {
 				t.Fatalf("check %d: %+v", tt.check, got)
 			}
 		})
+	}
+}
+
+// A job recorded under a mapped label whose mapping was removed since is
+// ignored, and its row names both settings that could make it the pool's
+// (runners.label and runners.labels), not only the pool's label.
+func TestRemovedMappedLabelEndsItsJobs(t *testing.T) {
+	f := newPoolFixture(t, func(c *config.Runners) { c.Labels = labelMap })
+	if w := f.link(t, inst, "good"); w.Code != http.StatusOK {
+		t.Fatalf("link: %d %s", w.Code, w.Body)
+	}
+	ctx := context.Background()
+	f.gh.mu.Lock()
+	f.gh.status[9981] = "queued"
+	f.gh.mu.Unlock()
+	f.deliver(t, "workflow_job", jobEvent("queued", 9981, 981, "acme/app", true, "big-box")) // no box of its size: it waits
+	eventually(t, "9981 waiting under the mapped label", func() bool { return f.jobs(t)[9981].State == "waiting" })
+	f.restart(t, func(c *config.Config) { c.File.Runners.Labels = nil })
+	eventually(t, "9981 ignored, saying why", func() bool {
+		f.svc.Watch(ctx)
+		j := f.jobs(t)[9981]
+		return j.State == "ignored" && strings.Contains(j.Why, "neither the pool's label") && strings.Contains(j.Why, "runners set label <name>") && strings.Contains(j.Why, "runners.labels")
+	})
+	if why := f.jobs(t)[9981].Why; strings.Contains(why, "label is now") {
+		t.Fatalf("row says %q: the pool's label did not change", why)
 	}
 }

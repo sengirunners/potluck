@@ -79,9 +79,11 @@ type Options struct {
 	// the port the probe opens where the guest has no getent; default 443) a
 	// run or box must resolve; unset, a guest NetAllow gives a network must
 	// resolve NetAllow's names, or github.com (zm-eakh.12.24.7). All empty
-	// skips the net checks.
+	// skips the net checks. NetMulticast checks that a datagram an acquired box
+	// sends to a multicast group reaches no program on this machine that
+	// joined it on any interface.
 	NetAllow, NetForbid, NetMail, NetResolve []string
-	NetPeers                                 bool
+	NetPeers, NetMulticast                   bool
 	NetPeerPort                              int
 	// ReclaimIn is how long the reclaim window stays open (default 1 min):
 	// it must outlast an acquire.

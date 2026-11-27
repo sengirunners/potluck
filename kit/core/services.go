@@ -13,6 +13,11 @@ import (
 // that they Serve with them, and nothing else of them (kit/server term.go).
 const ParkedRoutesService = "parked-routes"
 
+// StandbyCopyService is a func(context.Context, uint64) *api.StandbyCopy
+// supplied by a parked standby's wiring. It answers only for the given term
+// epoch and returns nil when no copy is known.
+const StandbyCopyService = "standby-copy"
+
 // ParkedRoutes are routes a parked daemon answers to its machine's owner on
 // its socket (ParkedRoutesService): teamlink's HQ routes there.
 type ParkedRoutes interface {

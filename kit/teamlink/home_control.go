@@ -342,6 +342,8 @@ var refusals = map[string]refusal{
 	api.ReasonIsHQ:          {"that machine is HQ already", ""},
 	api.ReasonIsStandby:     {"that machine is the standby already", ""},
 	api.ReasonBehind:        {"the standby is more than two minutes behind HQ", "wait until it catches up, then press again"},
+	api.ReasonNotOptedIn:    {"that machine is not opted in to be the standby", "an owner of that machine opts it in, then press again"},
+	api.ReasonNoTermCopy:    {"this program cannot yet make any machine the standby", "update it, then press again"},
 	api.ReasonNoEngine:      {"moving HQ needs a program with a move engine on this machine", ""},
 	api.ReasonStale:         {"the screen is out of date", "read HQ's status again, then press again"},
 	api.ReasonNotOwner:      {"only an owner of every team project this home holds moves HQ", ""},

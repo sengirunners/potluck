@@ -14,6 +14,7 @@
 //     the ones whose payload has github.event.pull_request;
 //   - a permissions block (top level, or a job of a fork-reachable workflow) has a flow map or a scope but read/none,
 //     or is empty;
+//   - the file is not YAML;
 //   - the file holds a bare CR, U+0085, U+2028 or U+2029, which hide lines from this reader.
 //
 // It reads these workflows' simple layout (block style, jobs at two spaces, one-line runs-on) and fails closed on any
@@ -181,6 +182,11 @@ func Lint(src string) (problems []string) {
 			fail("contains a line separator (%U) the line reader does not split on", []rune(r)[0])
 			return
 		}
+	}
+	// GitHub runs nothing of a file that is not YAML, and the line reader below would not notice.
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(src), &doc); err != nil {
+		fail("not YAML: %v", err)
 	}
 	var lines []string
 	for _, l := range strings.Split(src, "\n") {

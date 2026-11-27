@@ -237,11 +237,20 @@ func (b Build) Covers(major int, arch string) bool {
 	return b.Arch == arch && major >= b.MinMacOS && major <= b.MaxMacOS
 }
 
+// Install is how a person types the install of a Managed build: one not
+// validated yet is installed only with --candidate.
+func (a Advice) Install(command string) string {
+	if a.Candidate {
+		return command + " install --candidate"
+	}
+	return command + " install"
+}
+
 // Text says what a Mac of this major version should do to get a Softnet
 // that enforces Potluck's rules. command is how a person types Potluck's
 // softnet command ("potluck softnet").
 func (a Advice) Text(major int, command string) string {
-	install := command + " install"
+	install := a.Install(command)
 	switch {
 	case a.Kind == Upstream:
 		return fmt.Sprintf("install the latest upstream Softnet (%s or newer, %s)", UpstreamMinVersion, UpstreamReleases)
@@ -250,7 +259,7 @@ func (a Advice) Text(major int, command string) string {
 	case a.Kind == Managed && !a.Candidate:
 		return fmt.Sprintf("install Potluck's Softnet build for macOS %d with `%s` (upstream %s and newer need macOS %d)", major, install, UpstreamMinVersion, UpstreamMinMacOS)
 	case a.Kind == Managed:
-		return fmt.Sprintf("upstream Softnet %s and newer need macOS %d, and older releases cannot enforce Potluck's protocol and port rules; Potluck's macOS %d build %s is a candidate not yet validated on a real macOS %d Mac (to help validate it: `%s --candidate`)", UpstreamMinVersion, UpstreamMinMacOS, major, a.Build.ID, major, install)
+		return fmt.Sprintf("upstream Softnet %s and newer need macOS %d, and older releases cannot enforce Potluck's protocol and port rules; Potluck's macOS %d build %s is a candidate not yet validated on a real macOS %d Mac (to help validate it: `%s`)", UpstreamMinVersion, UpstreamMinMacOS, major, a.Build.ID, major, install)
 	case major == 0:
 		return "no Softnet known to enforce Potluck's protocol and port rules runs on this Mac (its macOS version is unknown)"
 	default:

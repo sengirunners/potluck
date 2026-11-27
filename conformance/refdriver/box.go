@@ -115,12 +115,16 @@ func (d *drv) exec(req request) (any, error) {
 	cmd.Dir = dir
 	tmp := d.boxTmp(r) // volumes.go
 	path := os.Getenv("PATH")
-	if d.cfg["kind"] == "box" { // root.go: a stand-in sudo and docker
+	if d.cfg["kind"] == "box" { // root.go: a stand-in sudo and docker; netfence.go: the host's fence
 		bin, err := d.rootPath()
 		if err != nil {
 			return nil, err
 		}
-		path = bin + string(os.PathListSeparator) + path
+		fence, err := d.fencePath()
+		if err != nil {
+			return nil, err
+		}
+		path = fence + string(os.PathListSeparator) + bin + string(os.PathListSeparator) + path
 	}
 	if err := d.showShelf(r); err != nil { // shelf.go
 		return nil, err

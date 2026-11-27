@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/attach"
 	"path/filepath"
 	"strings"
 
@@ -40,8 +41,10 @@ removable (an image Potluck pulled, by its record of its pulls, that nothing
 here needs: an earlier version of a pinned image, or one this Mac's macOS
 cannot lend), absent (a retry or a shared size needs it and Tart does not hold
 it), or not Potluck's (a tag or a VM Potluck did not make). Sizes are what Tart
-measured on disk, or an estimate where it says none. It changes nothing and
-starts no daemon.
+measured on disk, or an estimate where it says none. Downloads a setup left
+unfinished, which Tart does not list, are named with the disk they take; the
+next setup that needs one goes on with it. It changes nothing and starts no
+daemon.
 
 What this machine shares is read from every Potluck daemon running here (this
 command's, and another program's built on Potluck), in every pool and at
@@ -164,7 +167,20 @@ func (a *app) servedTargets(ctx context.Context, home string) (hostprobe.Served,
 		}
 		return hostprobe.Served{}, errors.New(oneLineErr(err))
 	}
-	s := hostprobe.Served{Homes: []string{home}}
+	s, err := othersServed(ctx, home)
+	if err != nil {
+		return hostprobe.Served{}, err
+	}
+	s.Homes = append([]string{home}, s.Homes...)
+	for _, v := range vs {
+		s.Targets = append(s.Targets, v.RunTarget)
+	}
+	return s, nil
+}
+
+// othersServed is every binding that every Potluck daemon running here but
+// the one on home serves, and those daemons' homes.
+func othersServed(ctx context.Context, home string) (s hostprobe.Served, err error) {
 	others, err := daemonrecord.Live(ctx, func(r daemonrecord.Record) bool {
 		return r.Serves(rt.Name) && !daemonrecord.SameHome(r.Home, home) // any daemon with bindings, whatever else it serves
 	})
@@ -174,13 +190,12 @@ func (a *app) servedTargets(ctx context.Context, home string) (hostprobe.Served,
 	for _, r := range others {
 		ovs, _, err := servedViewsOn(ctx, client.NewUnix(r.Socket), false)
 		if err != nil {
-			return hostprobe.Served{}, fmt.Errorf("%s's daemon at %s: %s", r.Program, tildePath(r.Home), oneLineErr(err))
+			return hostprobe.Served{}, fmt.Errorf("%s's daemon at %s: %s", r.Program, attach.Tilde(r.Home), oneLineErr(err))
 		}
-		vs = append(vs, ovs...)
+		for _, v := range ovs {
+			s.Targets = append(s.Targets, v.RunTarget)
+		}
 		s.Homes = append(s.Homes, r.Home)
-	}
-	for _, v := range vs {
-		s.Targets = append(s.Targets, v.RunTarget)
 	}
 	return s, nil
 }
@@ -298,6 +313,9 @@ func (a *app) sayTartInventory(r hostprobe.Report, inv hostprobe.TartInventory, 
 			size = fmt.Sprintf("about %d GB to download", it.GB)
 		}
 		a.say("  %s%s, %s: %s", it.Name, kind, size, it.Why)
+	}
+	if u := inv.Unfinished; u != nil {
+		a.say("unfinished downloads: %d GB in %s: the next setup that needs one goes on with it (with no setup running, rm -r %s deletes them)", u.GB, u.Dir, shellQuote(u.Dir))
 	}
 	if len(inv.Items) == 0 {
 		a.say("  Tart holds nothing, and nothing a retry needs is missing.")

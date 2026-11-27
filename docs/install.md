@@ -73,7 +73,9 @@ Which keys are trusted, and how the signing key is replaced: [release-keys.md](r
 `potluck upgrade` checks the newest release with the keys built into the installed potluck and installs it
 (`--release <dir>` from a directory, `--dry-run` to only check). The new build's preflight must accept this home
 first, each replaced program is kept as `<name>.prev`, the drivers it replaced are re-pinned, and a running daemon is
-restarted on it (or, if the new one does not come up, the old programs and the old daemon come back).
+restarted on it (or, if the new one does not come up, the old programs and the old daemon come back). `potluck` itself
+is placed last, and one cut off part way (the Mac restarts) is finished by the next `potluck upgrade`, which starts the daemon
+the first one stopped, and goes back to the programs before both if that does not come up.
 
 ### Daily upgrades
 
@@ -99,7 +101,8 @@ If another unit or agent on the machine already runs `potluck upgrade`, `enable`
 
 `potluck uninstall` takes off what the script and the first commands put on the machine: the programs and their
 `.prev` copies, the PATH line in your shell's startup file, the daily update job, the host override file, the home (`~/.potluck`) and, on a Mac, the managed Softnet. It prints its plan first and asks; `--dry-run` only prints. What it does, in order, and what
-it leaves for you to remove (Tart's images, Tailscale, the menu bar app) is in [lending.md](lending.md#pause-leave-and-remove-everything).
+it leaves for you to remove (Tailscale, the menu bar app and, unless you pass `--with-tart`, the Tart Potluck installed
+and the images it pulled) is in [lending.md](lending.md#pause-leave-and-remove-everything).
 
 On a Mac the managed Softnet's removal is a root step, which `uninstall` runs through sudo. An app without a
 terminal runs `potluck uninstall --yes --no-sudo --json` instead: it does the steps before the root step and stops
@@ -117,7 +120,10 @@ to ask the person (`confirm`, `detail`) and the arguments to run (`args`).
 
 `potluck --json uninstall --dry-run` answers the plan and changes nothing: `left` is every step, `pools_run` the pools
 this machine runs, `warning` what removing the home loses for good, and `remove` the question to ask and the
-arguments that run the plan. Potluck Menu's uninstall window ([menubar.md](menubar.md#uninstall-potluck)) is drawn
+arguments that run the plan. Every answer also has `view`, the same facts in plain words for a window: `heading`,
+`lead`, `failed` (what to say when the root step failed), `warning`, the steps `done` and `left` (each with an `id`, and `will` and `did` words), `stays`, the box for
+`--with-tart` (`choice`: its `label`, whether it is `on`, and the `args` that plan with it the other way) and
+`details`, the terminal's words. The menu bar app's uninstall window ([menubar.md](menubar.md#uninstall-potluck)) is drawn
 from it.
 
 ## From source

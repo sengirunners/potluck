@@ -25,6 +25,12 @@ type Unfinished struct {
 	To   string    `json:"to"`             // the staged build (its preflight's build)
 	PID  int       `json:"pid"`            // the swapper's
 	At   time.Time `json:"at"`
+	// What a restart of its daemon needs, for the one that ends this upgrade
+	// when its swapper died: the program that ran it and whether it was on the
+	// tailnet, and that the staged build may have changed its data for good.
+	Bin     string `json:"bin,omitempty"`
+	Tailnet bool   `json:"tailnet,omitempty"`
+	OneWay  bool   `json:"one_way,omitempty"`
 }
 
 // Version is To's version (a build reads "version (commit)").

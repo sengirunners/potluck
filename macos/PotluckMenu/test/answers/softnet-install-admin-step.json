@@ -1,6 +1,6 @@
 {
   "admin_step": {
-    "why": "The admin step installs Softnet 0.9 root-owned in /Library/Application Support/Potluck/softnet, because Tart starts Softnet as root for each box's network.",
+    "why": "macOS will ask for this Mac's password to install the network helper.",
     "argv": [
       "/Users/bailey/.local/bin/potluck",
       "softnet",

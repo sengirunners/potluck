@@ -33,6 +33,15 @@ func shellQuote(v string) string {
 	return singleQuoted(v)
 }
 
+// shellLine is argv as a line a shell runs as it is.
+func shellLine(argv []string) string {
+	q := make([]string, len(argv))
+	for i, v := range argv {
+		q[i] = shellQuote(v)
+	}
+	return strings.Join(q, " ")
+}
+
 // pastedOdd is the first character of s (past the spaces around it) that no
 // invite, pool name or flag holds, and what a copy put it where: a chat,
 // document or web page swaps a terminal's plain spaces, quotes and dashes
@@ -175,6 +184,7 @@ func (a *app) checkInvite(arg, newCode string) error {
 	default:
 		why = "this invite is damaged: it has more than the 3 parts a whole one has, joined by ':'; " + whole
 	}
-	return exitWith{2, api.Errorf(api.CodeBadRequest, "%s. Nothing was downloaded or changed, and the invite is not spent %s", why, notShown).
-		WithHint("copy the whole invite again, quotes included, as one line; or ask the owner for a new one: " + newCode)}
+	return exitWith{2, api.Plainly(api.Errorf(api.CodeBadRequest, "%s. Nothing was downloaded or changed, and the invite is not spent %s", why, notShown).
+		WithHint("copy the whole invite again, quotes included, as one line; or ask the owner for a new one: "+newCode),
+		"That isn't a whole invite. Copy all of it again and paste it here, or ask the person who invited you for a new one. Nothing was changed.")}
 }

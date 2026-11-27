@@ -193,7 +193,18 @@ file writable.
 
 ### Tart
 
-Tart boxes run on Softnet: Softnet's gateway blocked but DNS, outbound mail blocked (tcp 25, 465, 587 to anywhere).
+Tart boxes run on Softnet: Softnet's gateway blocked but DNS, outbound mail blocked (tcp 25, 465, 587 to anywhere),
+multicast blocked (`224.0.0.0/4`), and every IPv4 address the Mac holds on any interface blocked, with that
+interface's network and broadcast addresses (`vmhost/softnetrules.go`). Softnet on its own lets a box reach any
+global address, so without that last rule a Mac with a public address on one of its interfaces (a rented or hosted
+Mac, or one plugged straight into a modem) would be reached at it on every port. Softnet lets no IPv6 out of a box,
+so the Mac's IPv6 addresses need no rule.
+
+The addresses are read when each box boots; a box does not boot when they cannot be read. An address the Mac gains
+while a box runs (a new DHCP lease on a Mac with a public address, an alias added by hand) is not blocked for that
+box: it is blocked for every box that boots after. Restart the boxes after giving a lending Mac a new public address. Restarting the daemon does not
+restart existing boxes or refresh their rules.
+
 Softnet gives every box egress, so Tart lists no `net-off`, and `potluck host` forbids the forward path (the default
 gateway, read with `route -n get default`, and Tailscale's resolver) in every Tart size's net checks, as for a runner
 box above. `potluck isolation test` runs the same checks on a bound size again (`docs/isolation.md`).
@@ -210,8 +221,8 @@ to anywhere); the driver checks the expanded config before boot. An ACL it canno
 ## Conformance's net group
 
 - With `--kind box`, group `net` acquires its networked box with `net` `on` from a driver listing `net-off`, so the
-  net checks (this machine's addresses, `--net-forbid`, outbound mail, peers, `--net-allow`) cover a sandbox on that
-  network.
+  net checks (this machine's addresses, `--net-forbid`, outbound mail, peers, multicast, `--net-allow`) cover a
+  sandbox on that network.
 - It then checks that a box acquired with `net` `off` reaches none of `--net-allow`, while its probe still sees a
   port open inside it. With no `--net-allow` that is a SKIP.
 - The flags themselves are in `docs/conformance.md`.

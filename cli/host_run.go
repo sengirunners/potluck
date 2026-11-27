@@ -27,6 +27,7 @@ import (
 
 	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/hostsetup"
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/project"
@@ -90,7 +91,7 @@ func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string, askFirst bo
 		}
 		defer unlock()
 		if arg == "" {
-			if arg, err = a.onlyPool(ctx, c); err != nil {
+			if arg, err = a.poolInstead(ctx, cmd, c, s.instead); err != nil {
 				return a.hostManyPools(err)
 			}
 		}
@@ -122,6 +123,24 @@ func (a *app) runHost(cmd *cobra.Command, s *shareFlags, arg string, askFirst bo
 	return err
 }
 
+// poolInstead is the pool a run with no invite code and no pool given shares
+// with: the only one this machine is in, or, of a run the setup window started
+// that needs an invite, the one it named (none: it refuses).
+func (a *app) poolInstead(ctx context.Context, cmd *cobra.Command, c *client.Client, instead string) (string, error) {
+	switch {
+	case !cmd.Flags().Changed(menubar.InsteadFlag):
+		return a.onlyPool(ctx, c)
+	case instead == "":
+		or := ""
+		if slugs, err := poolSlugs(ctx, c); err == nil && len(slugs) > 0 {
+			or = ", or type the name of a group this Mac is in (" + strings.Join(slugs, ", ") + ") where the invite goes"
+		}
+		return "", api.Plainly(fmt.Errorf("no invite code or pool was given, and the setup names none to go on with: %s, or %s to share with one it is in", a.cmd("host '<invite code>'"), a.cmd("host <pool>")),
+			"Paste an invite first"+or+", then press the button again. If yours no longer works, ask the person who sent it for a new one. Nothing was changed.")
+	}
+	return instead, nil
+}
+
 // notes is where a line beside a command's answer goes: stdout, or stderr
 // under --json so stdout stays the answer.
 func (a *app) notes() io.Writer {
@@ -150,10 +169,10 @@ func (a *app) afterLend(s *shareFlags, dryRun bool) func() {
 func (a *app) hostDetach(cmd *cobra.Command, c *client.Client, arg string, o hostprobe.ShareOptions, s *shareFlags, home string, lock *os.File) error {
 	ctx := cmd.Context()
 	if _, err := a.hostScope(ctx, c, arg, &o); err != nil {
-		return err
+		return notStarted(err)
 	}
 	if err := a.rootStep(ctx, s)(&o); err != nil {
-		return err
+		return notStarted(err)
 	}
 	dry := o
 	dry.DryRun, dry.Progress = true, nil
@@ -162,7 +181,7 @@ func (a *app) hostDetach(cmd *cobra.Command, c *client.Client, arg string, o hos
 		if left != nil {
 			return a.printJSON(map[string]adminStep{"admin_step": left.step})
 		}
-		return err
+		return notStarted(err)
 	}
 	logPath := filepath.Join(home, hostLogName)
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
@@ -182,6 +201,16 @@ func (a *app) hostDetach(cmd *cobra.Command, c *client.Client, arg string, o hos
 	}
 	a.say("sharing goes on in the background (process %d): %s says how it goes, and %s holds its words", pid, a.cmd("host status"), logPath)
 	return nil
+}
+
+// notStarted is a host run's refusal before anything was pulled or joined,
+// with its plain words.
+func notStarted(err error) error {
+	var nr *hostprobe.NotReadyError
+	if errors.As(err, &nr) {
+		return api.Plainly(err, "Something on this Mac isn't ready yet, so setup didn't start. Press Check again: if it shows another step, do that first."+plainGetHelp)
+	}
+	return api.Plainly(err, "Setup couldn't start on this Mac. Try again."+plainGetHelp)
 }
 
 // softnetStepLeft is the root step a --json --no-sudo run of the Mac app
@@ -212,6 +241,7 @@ func (a *app) softnetStepLeft(ctx context.Context, o hostprobe.ShareOptions, s *
 	}
 	if ierr != nil {
 		fmt.Fprintf(a.host.Stderr, "Softnet could not be made ready: %v\n", ierr)
+		err = api.Plainly(err, api.PlainForm(ierr))
 	}
 	return nil, err
 }
@@ -343,7 +373,8 @@ func (a *app) hostLock(home string, handed int) (lock *os.File, unlock func(), e
 	if lock == nil {
 		if lock, err = takeLock(path); err != nil {
 			if errors.Is(err, syscall.EWOULDBLOCK) {
-				return nil, nil, fmt.Errorf("another host run is going on%s: %s says how it goes; run this again once it ends", pidWords(home), a.cmd("host status"))
+				return nil, nil, api.Plainly(fmt.Errorf("another host run is going on%s: %s says how it goes; run this again once it ends", pidWords(home), a.cmd("host status")),
+					"A setup is already going on. Try again once it ends.")
 			}
 			return nil, nil, err
 		}

@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sengirunners/potluck/hostprobe"
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/tartpin"
 	"github.com/sengirunners/potluck/vmhost"
 )
@@ -137,7 +138,8 @@ func (a *app) tartInstall(ctx context.Context, dryRun bool) error {
 		}
 		return a.tartAnswer(ans, fmt.Sprintf("Tart is already on this Mac at %s; it is left as it is and nothing was installed", found.Path))
 	case errors.Is(planErr, tartpin.ErrNotOurs):
-		return fmt.Errorf("%s is there but Potluck did not install it, so it is left as it is and nothing was installed; if it is not wanted, move it to the Bin and run %s again", place.App(), a.cmd("tart install"))
+		return api.Plainly(fmt.Errorf("%s is there but Potluck did not install it, so it is left as it is and nothing was installed; if it is not wanted, move it to the Bin and run %s again", place.App(), a.cmd("tart install")),
+			"There is already an app called tart in the Applications folder in your home folder, and Potluck didn't put it there, so it was left as it is. If you don't want it, move it to the Trash, then try again.")
 	case planErr != nil:
 		return planErr
 	case plan.Action == tartpin.Keep:
@@ -153,7 +155,8 @@ func (a *app) tartInstall(ctx context.Context, dryRun bool) error {
 	}
 	r := hostprobe.MacRelease(ctx, tartRunner)
 	if !b.Runs(hostprobe.MacOSMajor(r.MacOS), r.Arch) {
-		return fmt.Errorf("Tart %s needs macOS %d or newer on %v; this Mac runs macOS %s on %s. Nothing was installed", b.Version, b.MinMacOS, b.Arches, orUnknown(r.MacOS), orUnknown(r.Arch))
+		return api.Plainly(fmt.Errorf("Tart %s needs macOS %d or newer on %v; this Mac runs macOS %s on %s. Nothing was installed", b.Version, b.MinMacOS, b.Arches, orUnknown(r.MacOS), orUnknown(r.Arch)),
+			fmt.Sprintf("Tart needs macOS %d or newer and an Apple chip, which Potluck couldn't find on this Mac. Nothing was installed."+plainGetHelp, b.MinMacOS))
 	}
 	if dryRun {
 		ans.Plan = []string{
@@ -186,11 +189,11 @@ func (a *app) tartInstall(ctx context.Context, dryRun bool) error {
 		fmt.Fprintf(a.host.Stdout, "downloading Tart %s from %s\n", b.Version, b.URL)
 	}
 	if err := tartpin.Fetch(ctx, tartHTTP, b, file); err != nil {
-		return err
+		return api.Plainly(err, "Tart couldn't be downloaded and checked, so nothing was installed. If this Mac is offline or low on disk space, see to that, then try again."+plainGetHelp)
 	}
 	res, err := place.Install(file, b)
 	if err != nil {
-		return err
+		return api.Plainly(err, "Tart was downloaded but couldn't be put in your Applications folder. Try again."+plainGetHelp)
 	}
 	ans.Installed, ans.AlreadyPresent = !res.Already, res.Already
 	ans.Version, ans.Replaced = res.Version, res.Replaced

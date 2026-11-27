@@ -51,12 +51,12 @@ func TestAManagedSoftnetNotThisPotlucksBuildIsNamed(t *testing.T) {
 	softnet.Builds = append([]softnet.Build{newer}, old...)
 	f := managedMac{mac(false), softnet.Status{Current: &softnet.Installed{ID: old[0].ID, Pinned: true}}}
 	l, _ := Detect(context.Background(), managedRunner("15.6"), f, "/state").Layer("tart")
-	if w := strings.Join(l.Warnings, ";"); !l.Available || !strings.Contains(w, "update it with `potluck softnet install`") {
+	if w := strings.Join(l.Warnings, ";"); !l.Available || !strings.Contains(w, "update it with `potluck softnet install --candidate`") {
 		t.Fatalf("layer %+v", l)
 	}
 	f.st.Current.Pinned, f.st.Current.Problem = false, "it is not setuid"
 	l, _ = Detect(context.Background(), managedRunner("15.6"), f, "/state").Layer("tart")
-	if l.Available || !strings.Contains(strings.Join(l.Problems, ";"), "install it again with `potluck softnet install`") {
+	if l.Available || !strings.Contains(strings.Join(l.Problems, ";"), "install it again with `potluck softnet install --candidate`") {
 		t.Fatalf("unsound managed install: %+v", l)
 	}
 }

@@ -152,7 +152,16 @@
             "--yes",
             "--no-sudo",
             "--detach",
+            "--instead-of-invite=",
             "--"
+          ],
+          "invite_args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--invite-stdin"
           ],
           "invite": true
         }
@@ -170,7 +179,16 @@
             "--yes",
             "--no-sudo",
             "--detach",
+            "--instead-of-invite=",
             "--"
+          ],
+          "invite_args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--invite-stdin"
           ],
           "invite": true
         }
@@ -178,12 +196,17 @@
       {
         "id": "menu",
         "state": "done",
-        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck Menu.app)"
+        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck.app)"
       },
       {
         "id": "login",
-        "state": "unknown",
-        "detail": "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+        "state": "todo",
+        "detail": "the menu bar item has not been set to start at login (optional: after a restart nothing else starts Potluck), unless you added it to Login Items yourself",
+        "action": "in the Potluck menu, choose Set up and check…, then Start at login",
+        "do": {
+          "label": "Start at login",
+          "app": "login_item"
+        }
       },
       {
         "id": "updates",
@@ -209,7 +232,7 @@
     "next_id": "setup",
     "view": {
       "heading": "This Mac isn't set up yet",
-      "lead": "Paste the invite you were sent, then press the button. Setting up downloads what jobs need and tests it, which can take an hour or more. You can keep using this Mac meanwhile.",
+      "lead": "Paste your invite link, then choose Set up this Mac. Downloads and checks can take an hour or more. You can keep using your Mac.",
       "do": {
         "label": "Set up this Mac",
         "args": [
@@ -218,17 +241,27 @@
           "--yes",
           "--no-sudo",
           "--detach",
+          "--instead-of-invite=",
           "--"
+        ],
+        "invite_args": [
+          "--json",
+          "host",
+          "--yes",
+          "--no-sudo",
+          "--detach",
+          "--invite-stdin"
         ],
         "invite": true
       },
+      "invite_later": true,
       "sections": [
         {
           "title": "This Mac",
           "rows": [
             {
               "state": "done",
-              "text": "This Mac is the right kind"
+              "text": "This Mac meets the requirements"
             },
             {
               "state": "done",
@@ -261,7 +294,11 @@
           "rows": [
             {
               "state": "info",
-              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+              "text": "Potluck can open automatically when you log in",
+              "do": {
+                "label": "Start at login",
+                "app": "login_item"
+              }
             },
             {
               "state": "info",
@@ -281,7 +318,7 @@
       "progress": {
         "title": ""
       },
-      "key": "none daemon=true shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=setup --json host --yes --no-sudo --detach --"
+      "key": "none daemon=true shares=false listed=true limits=true mode=auto state=accepting refused=false early=false next=setup --json host --yes --no-sudo --detach --instead-of-invite= --"
     }
   }
 }

@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/sengirunners/potluck/main/install.sh | sh
 #   sh install.sh --version potluck-main-<12 hex>   # a given release, not the newest
 #   sh install.sh --from <dir>     # a release directory you already have (air-gapped hosts)
-#   sh install.sh --menubar        # on a Mac, also install Potluck Menu.app (docs/menubar.md), off unless asked
+#   sh install.sh --menubar        # on a Mac, also install Potluck.app (docs/menubar.md), off unless asked
 #   curl -fsSL https://potluck.sh/install.sh | sh -s -- --join '<invite link or code>'   # install, then join that pool
 #
 # When the install directory is not on PATH, it adds one line to the shell's startup file (~/.zshrc, ~/.bashrc,
@@ -32,7 +32,7 @@
 #
 # Environment:
 #   POTLUCK_INSTALL_DIR  where the programs go (default ~/.local/bin)
-#   POTLUCK_MENUBAR_DIR  where --menubar puts Potluck Menu.app (default ~/Applications)
+#   POTLUCK_MENUBAR_DIR  where --menubar puts Potluck.app (default ~/Applications)
 #   GH_TOKEN, GITHUB_TOKEN  a token: the release is then read through GitHub's API with it (a private repository needs
 #                        one). Without a token the script takes no API call: it downloads from github.com's release
 #                        links, which GitHub's anonymous API limit (60 calls an hour per address, shared by everyone
@@ -80,7 +80,7 @@ usage() {
 	say "--no-modify-path leaves shell startup files alone (by default a line putting the install directory on PATH is added)."
 	say "--version takes a release (potluck-main-<12 hex>) instead of the newest."
 	say "--from installs from a directory holding a release's files (its manifest, signatures and tarball)."
-	say "--menubar also installs Potluck Menu.app into \$POTLUCK_MENUBAR_DIR (default ~/Applications); macOS only."
+	say "--menubar also installs Potluck.app into \$POTLUCK_MENUBAR_DIR (default ~/Applications); macOS only."
 	say "--unsafe-skip-signature-check installs a download from GitHub even when no tool here can check its signature,"
 	say "  trusting HTTPS alone (not with --from). A signature that does not verify is refused even then."
 }
@@ -372,57 +372,99 @@ installed_potluck() {
 	fi
 }
 
-# menu_running APP: whether this user runs the Potluck Menu at APP.
+# menu_running APP: whether this user runs the menu bar app at APP.
 menu_running() {
 	# The command must start with the path, so this pipeline's own awk never matches.
 	ps -u "$(id -u)" -o command= 2>/dev/null | awk -v p="$1/Contents/MacOS/PotluckMenu" 'index($0, p) == 1 { f = 1 } END { exit !f }'
 }
 
-# install_menubar DIR: put Potluck Menu.app from the release's darwin tarball (already checked, but its hash is
-# compared with the manifest's again here) into $POTLUCK_MENUBAR_DIR (default ~/Applications). The app's build is not Developer ID signed yet, and
-# the script says so when that is the case.
+# menu_ours APP: whether APP is Potluck's menu bar app, by its bundle id.
+menu_ours() {
+	[ -d "$1" ] && [ ! -L "$1" ] && [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$1/Contents/Info.plist" 2>/dev/null)" = sh.potluck.menu ]
+}
+
+# menu_trash APP: move APP to this user's Trash, never over anything there.
+menu_trash() {
+	mt_to="${HOME:?HOME is not set}/.Trash/$(basename "$1" .app) $(date +%Y-%m-%d-%H%M%S)-$$.app"
+	mkdir -p "$HOME/.Trash" 2>/dev/null && mv "$1" "$mt_to" 2>/dev/null && return 0
+	# A Terminal that macOS keeps out of the Trash: the system's own move to it.
+	osascript -l JavaScript -e 'ObjC.import("Foundation"); function run(a) { if (!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPath(a[0]), null, null)) throw new Error("refused") }' "$1" >/dev/null 2>&1
+}
+
+# install_menubar DIR: put the menu bar app from the release's darwin tarball (already checked, but its hash is
+# compared with the manifest's again here) into $POTLUCK_MENUBAR_DIR (default ~/Applications). It is Potluck.app, or
+# Potluck Menu.app in a release from before its rename; a copy there under either name is replaced by the one the
+# release has. The app's build is not Developer ID signed yet, and the script says so when that is the case.
 install_menubar() {
-	[ "$os" = darwin ] || die "--menubar is for macOS: Potluck Menu.app is a Mac menu bar item"
+	[ "$os" = darwin ] || die "--menubar is for macOS: Potluck.app is a Mac menu bar item"
 	command -v ditto >/dev/null 2>&1 || die "--menubar needs ditto (macOS)"
 	mv_version=$(manifest_version "$1/manifest.json")
 	mv_tarball="potluck_${mv_version}_${os}_${arch}.tar.gz"
 	mv_want=$(awk -v f="\"$mv_tarball\":" '$1 == f { v = $2; gsub(/[",]/, "", v); print v; exit }' "$1/manifest.json")
 	[ -n "$mv_want" ] && [ "$(sha256 "$1/$mv_tarball")" = "$mv_want" ] || die "$mv_tarball does not match the manifest: not installing the menu bar item"
 	mv_entry="potluck_${mv_version}_${os}_${arch}/Potluck-Menu.zip"
-	tar -tzf "$1/$mv_tarball" 2>/dev/null | grep -qx "$mv_entry" || die "release $mv_version has no Potluck Menu.app (potluck itself is installed)"
+	tar -tzf "$1/$mv_tarball" 2>/dev/null | grep -qx "$mv_entry" || die "release $mv_version has no menu bar app (potluck itself is installed)"
 	mkdir "$tmp/menubar"
 	tar -xzf "$1/$mv_tarball" -C "$tmp/menubar" "$mv_entry" || die "could not unpack $mv_entry from $mv_tarball"
 	mkdir "$tmp/menubar/app"
-	ditto -x -k "$tmp/menubar/$mv_entry" "$tmp/menubar/app" || die "could not unpack Potluck Menu.app"
-	[ -d "$tmp/menubar/app/Potluck Menu.app" ] || die "the release's Potluck-Menu.zip holds no Potluck Menu.app"
+	ditto -x -k "$tmp/menubar/$mv_entry" "$tmp/menubar/app" || die "could not unpack the menu bar app"
+	mv_app=""
+	for n in "Potluck.app" "Potluck Menu.app"; do
+		if [ -z "$mv_app" ] && menu_ours "$tmp/menubar/app/$n"; then mv_app=$n; fi
+	done
+	[ -n "$mv_app" ] || die "the release's Potluck-Menu.zip holds no menu bar app of Potluck's"
 	mv_dir="${POTLUCK_MENUBAR_DIR:-${HOME:?HOME is not set}/Applications}"
+	# The app may have moved itself to /Applications: replace it there rather than add a second one.
+	if [ -z "${POTLUCK_MENUBAR_DIR:-}" ] && ! menu_ours "$mv_dir/Potluck.app" && menu_ours /Applications/Potluck.app && [ -w /Applications ]; then
+		mv_dir=/Applications
+	fi
 	mkdir -p "$mv_dir" || die "could not create $mv_dir"
 	mv_dir=$(cd "$mv_dir" && pwd -P) || die "could not enter $mv_dir" # ps shows the real path
-	mv_dest="$mv_dir/Potluck Menu.app"
+	mv_dest="$mv_dir/$mv_app"
+	if [ -e "$mv_dest" ] || [ -L "$mv_dest" ]; then
+		menu_ours "$mv_dest" || die "$mv_dest is not Potluck's app, so it is not replaced: move it, or choose another place with POTLUCK_MENUBAR_DIR (potluck itself is installed)"
+	fi
 	# Replacing an installed copy: ask this copy (not another one on the Mac) to quit first, and do not swap it
 	# while it still runs.
-	if [ -d "$mv_dest" ] && menu_running "$mv_dest"; then
-		say "quitting the running Potluck Menu to replace it; open it again afterwards"
-		osascript -e "tell application \"$mv_dest\" to quit" >/dev/null 2>&1 || true
+	for n in "Potluck.app" "Potluck Menu.app"; do
+		mv_old="$mv_dir/$n"
+		if ! menu_ours "$mv_old" || ! menu_running "$mv_old"; then continue; fi
+		say "quitting the running $mv_old to replace it; open it again afterwards"
+		osascript -e "tell application \"$mv_old\" to quit" >/dev/null 2>&1 || true
 		for _ in 1 2 3 4 5 6 7 8 9 10; do
-			menu_running "$mv_dest" || break
+			menu_running "$mv_old" || break
 			sleep 1
 		done
-		! menu_running "$mv_dest" || die "Potluck Menu is still running: quit it from its menu and run this again (potluck itself is installed)"
-	fi
+		! menu_running "$mv_old" || die "$mv_old is still running: quit it from its menu and run this again (potluck itself is installed)"
+	done
 	# Copy beside the old one, then swap, so a failed copy leaves the old app in place.
-	rm -rf "$mv_dir/.Potluck Menu.app.new"
-	ditto "$tmp/menubar/app/Potluck Menu.app" "$mv_dir/.Potluck Menu.app.new" || die "could not place the app in $mv_dir"
-	rm -rf "$mv_dest"
-	mv "$mv_dir/.Potluck Menu.app.new" "$mv_dest" || die "could not place $mv_dest"
+	rm -rf "$mv_dir/.$mv_app.new"
+	ditto "$tmp/menubar/app/$mv_app" "$mv_dir/.$mv_app.new" || die "could not place the app in $mv_dir"
+	mv_replaced=""
+	for n in "Potluck.app" "Potluck Menu.app"; do
+		menu_ours "$mv_dir/$n" || continue
+		menu_trash "$mv_dir/$n" || die "could not move the old $mv_dir/$n to the Trash: move it there in Finder and run this again (potluck itself is installed)"
+		mv_replaced="$mv_replaced$n"
+	done
+	mv "$mv_dir/.$mv_app.new" "$mv_dest" || die "could not place $mv_dest"
 	say "installed $mv_dest"
+	[ -z "$mv_replaced" ] || say "  the copy it replaces is in the Trash"
 	if codesign -dv --verbose=2 "$mv_dest" 2>&1 | grep -q '^Authority=Developer ID Application'; then
 		say "it is signed with a Developer ID"
 	else
 		say "note: this build is not Developer ID signed (ad hoc only). It runs when installed this way; if macOS blocks it, right-click it in Finder and choose Open."
 	fi
 	say "  open it:       open \"$mv_dest\""
-	say "  at every login: System Settings > General > Login Items > add Potluck Menu"
+	if [ "$mv_app" = "Potluck.app" ]; then
+		say "  at every login: choose \"Set up and check…\" in its menu, then Start at login"
+	else
+		say "  at every login: System Settings > General > Login Items > add ${mv_app%.app}"
+	fi
+	case "$mv_replaced" in
+	*"Potluck Menu.app"*)
+		[ "$mv_app" = "Potluck Menu.app" ] || say "  (it was called Potluck Menu: if that is in your Login Items, remove it there)"
+		;;
+	esac
 	say "  is it running: potluck host status (the menu bar item counts as running once it has read that status itself)"
 }
 
@@ -642,7 +684,7 @@ main() {
 		arch=arm64
 	fi
 
-	[ "$MENUBAR" != 1 ] || [ "$os" = darwin ] || die "--menubar is for macOS: Potluck Menu.app is a Mac menu bar item"
+	[ "$MENUBAR" != 1 ] || [ "$os" = darwin ] || die "--menubar is for macOS: Potluck.app is a Mac menu bar item"
 
 	# A wget without --https-only (BusyBox's) may follow a redirect to plain http: then the newest release is not
 	# taken on its word (name one with --version, whose signed manifest must say so), and nothing is installed

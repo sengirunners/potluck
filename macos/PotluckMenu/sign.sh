@@ -1,6 +1,7 @@
 #!/bin/sh
 # Signs, and when asked notarizes, a built app (docs/menubar.md, "Signing and notarizing").
 # Usage: macos/PotluckMenu/sign.sh <path to the .app>
+#        macos/PotluckMenu/sign.sh --programs <dir>   signs every Mach-O file under dir (programs, not an app), no notary
 #
 #   POTLUCK_SIGN_IDENTITY   a Developer ID Application identity (name, or SHA-1) in the keychain.
 #                           Unset (and no notary settings): the app stays as build.sh left it, signed ad hoc.
@@ -17,9 +18,17 @@ fail() {
 	exit 1
 }
 
-[ $# -eq 1 ] || fail "usage: sign.sh <path to the .app>"
-app=${1%/}
-[ -f "$app/Contents/Info.plist" ] || fail "$app is not an app bundle (no Contents/Info.plist)"
+usage="usage: sign.sh <path to the .app> | sign.sh --programs <dir>"
+programs=
+if [ "${1:-}" = --programs ]; then
+	[ $# -eq 2 ] || fail "$usage"
+	programs=${2%/}
+	[ -d "$programs" ] || fail "$programs is not a directory"
+else
+	[ $# -eq 1 ] || fail "$usage"
+	app=${1%/}
+	[ -f "$app/Contents/Info.plist" ] || fail "$app is not an app bundle (no Contents/Info.plist)"
+fi
 
 identity=${POTLUCK_SIGN_IDENTITY:-}
 profile=${POTLUCK_NOTARY_PROFILE:-}
@@ -44,6 +53,11 @@ if [ "$notary" != none ] && [ -z "$identity" ]; then
 	fail "notarizing needs POTLUCK_SIGN_IDENTITY: a notary submission of an ad hoc app is always rejected"
 fi
 
+if [ -n "$programs" ]; then
+	[ -n "$identity" ] || fail "--programs needs POTLUCK_SIGN_IDENTITY"
+	[ "$notary" = none ] || fail "--programs does not notarize: Apple's notary service takes the app that carries them"
+fi
+
 if [ -z "$identity" ]; then
 	codesign --verify --deep --strict --verbose=2 "$app" ||
 		fail "the app has no valid ad hoc signature either; build it with build.sh"
@@ -60,6 +74,27 @@ security find-identity -v -p codesigning | grep -F -q -- "$identity" ||
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+
+sign() { # sign PATH: Apple's timestamp service is not always there, so a failure is tried twice more
+	for pause in 5 20 0; do
+		codesign --force --options runtime --timestamp --prefix sh.potluck. --sign "$identity" "$1" && return 0
+		[ "$pause" = 0 ] || sleep "$pause"
+	done
+	fail "could not sign $1"
+}
+
+if [ -n "$programs" ]; then
+	find "$programs" -type f -print | while IFS= read -r f; do
+		case $(file -b "$f") in *Mach-O*) echo "$f" ;; esac
+	done >"$tmp/order"
+	[ -s "$tmp/order" ] || fail "no Mach-O file is under $programs"
+	while IFS= read -r f; do
+		sign "$f"
+		codesign --verify --strict --verbose=2 "$f"
+	done <"$tmp/order"
+	echo "sign.sh: signed the programs under $programs with the identity named in POTLUCK_SIGN_IDENTITY (hardened runtime, timestamped)."
+	exit 0
+fi
 
 # Nested code first, deepest first, then the app: never --deep, which signs everything alike and
 # leaves a wrong seal on frameworks and helpers. Bundles are signed as bundles; loose Mach-O files
@@ -81,9 +116,6 @@ done >>"$tmp/found"
 awk '{ n = gsub("/", "/"); print n "\t" $0 }' "$tmp/found" | sort -t "$(printf '\t')" -k1,1nr -k2 |
 	cut -f2- >"$tmp/order"
 
-sign() { # sign PATH
-	codesign --force --options runtime --timestamp --sign "$identity" "$1"
-}
 while IFS= read -r nested; do
 	sign "$nested"
 done <"$tmp/order"
@@ -116,6 +148,9 @@ status=$(plutil -extract status raw -o - "$tmp/submit.plist" 2>/dev/null) || sta
 if [ -z "$id" ]; then
 	cat "$tmp/submit.plist" >&2
 	fail "notarytool submit gave no submission id"
+fi
+if [ "$status" != Accepted ] && [ "$status" != Invalid ] && [ "$status" != Rejected ]; then
+	fail "Apple gave no answer in time for submission $id (${status:-unknown}); run this again later"
 fi
 if [ "$status" != Accepted ]; then
 	echo "sign.sh: notarization of submission $id ended as ${status:-unknown}; Apple's log:" >&2

@@ -14,9 +14,9 @@
     "sizes": 0
   },
   "menu": {
-    "title": "Setup blocked at validation (3 of 5)",
+    "title": "Setup stopped while testing that jobs run safely",
     "detail": "nothing running",
-    "note": "conformance failed at boot; then run again: potluck host",
+    "attention": true,
     "cores": "········",
     "items": [
       {
@@ -90,6 +90,7 @@
   },
   "setup": {
     "state": "blocked",
+    "started": "2026-11-19T11:57:00Z",
     "stages": [
       {
         "name": "preflight",
@@ -154,7 +155,16 @@
             "--yes",
             "--no-sudo",
             "--detach",
+            "--instead-of-invite=",
             "--"
+          ],
+          "invite_args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--invite-stdin"
           ],
           "invite": true
         }
@@ -167,12 +177,17 @@
       {
         "id": "menu",
         "state": "done",
-        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck Menu.app)"
+        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck.app)"
       },
       {
         "id": "login",
-        "state": "unknown",
-        "detail": "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+        "state": "todo",
+        "detail": "the menu bar item has not been set to start at login (optional: after a restart nothing else starts Potluck), unless you added it to Login Items yourself",
+        "action": "in the Potluck menu, choose Set up and check…, then Start at login",
+        "do": {
+          "label": "Start at login",
+          "app": "login_item"
+        }
       },
       {
         "id": "updates",
@@ -198,7 +213,7 @@
     "next_id": "setup",
     "view": {
       "heading": "Setup stopped",
-      "lead": "Setup stopped while testing that jobs run safely. Paste your invite again first; if it no longer works, ask for a new one. If it stops again, press Copy details and send what it copies to the person who invited you.",
+      "lead": "Setup stopped while testing that jobs run safely. Paste your invite link again. If it doesn't work, ask for a new one. If it stops again, copy the details and send them to the person who invited you.",
       "do": {
         "label": "Try again",
         "args": [
@@ -207,10 +222,20 @@
           "--yes",
           "--no-sudo",
           "--detach",
+          "--instead-of-invite=",
           "--"
+        ],
+        "invite_args": [
+          "--json",
+          "host",
+          "--yes",
+          "--no-sudo",
+          "--detach",
+          "--invite-stdin"
         ],
         "invite": true
       },
+      "invite_later": true,
       "sections": [
         {
           "title": "This Mac",
@@ -234,7 +259,11 @@
           "rows": [
             {
               "state": "info",
-              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+              "text": "Potluck can open automatically when you log in",
+              "do": {
+                "label": "Start at login",
+                "app": "login_item"
+              }
             },
             {
               "state": "info",
@@ -252,7 +281,7 @@
         }
       ],
       "progress": {
-        "title": "The last setup",
+        "title": "Last setup",
         "rows": [
           {
             "state": "done",
@@ -268,7 +297,7 @@
           },
           {
             "state": "",
-            "text": "Join the group that uses it"
+            "text": "Join your group"
           },
           {
             "state": "",
@@ -277,7 +306,7 @@
         ]
       },
       "details": "Potluck v1.2.3 setup\nsetup: blocked: setup blocked at validation (3 of 5): conformance failed at boot\n  fix what the validation stage says, then run again: potluck host",
-      "key": "blocked daemon=true shares=false listed=true limits=true mode=auto state=accepting refused=false early=true next=setup --json host --yes --no-sudo --detach --"
+      "key": "blocked daemon=true shares=false listed=true limits=true mode=auto state=accepting refused=false early=true next=setup --json host --yes --no-sudo --detach --instead-of-invite= --"
     }
   }
 }

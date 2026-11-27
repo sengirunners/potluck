@@ -14,7 +14,7 @@
     "sizes": 0
   },
   "menu": {
-    "title": "Setting up: join (4 of 5)",
+    "title": "Setting up: join your group",
     "detail": "nothing running",
     "note": "waiting for a tailnet login",
     "cores": "········",
@@ -90,6 +90,7 @@
   },
   "setup": {
     "state": "running",
+    "started": "2026-11-19T11:57:00Z",
     "stages": [
       {
         "name": "preflight",
@@ -169,12 +170,17 @@
       {
         "id": "menu",
         "state": "done",
-        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck Menu.app)"
+        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck.app)"
       },
       {
         "id": "login",
-        "state": "unknown",
-        "detail": "starting the menu bar item at login: Potluck cannot read your Login Items; to have it start at every login, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+        "state": "todo",
+        "detail": "the menu bar item has not been set to start at login (optional: after a restart nothing else starts Potluck), unless you added it to Login Items yourself",
+        "action": "in the Potluck menu, choose Set up and check…, then Start at login",
+        "do": {
+          "label": "Start at login",
+          "app": "login_item"
+        }
       },
       {
         "id": "updates",
@@ -200,11 +206,12 @@
     "next_id": "setup",
     "view": {
       "heading": "Sign in to finish setting up",
-      "lead": "Press the button and sign in on the page that opens in your browser. Setup goes on by itself after that.",
+      "lead": "Setup will continue after you sign in.",
       "do": {
         "label": "Sign in",
         "url": "https://login.example/a/1"
       },
+      "invite_later": false,
       "sections": [
         {
           "title": "This Mac",
@@ -228,7 +235,11 @@
           "rows": [
             {
               "state": "info",
-              "text": "To have this menu appear every time you log in, add Potluck Menu in System Settings \u003e General \u003e Login Items"
+              "text": "Potluck can open automatically when you log in",
+              "do": {
+                "label": "Start at login",
+                "app": "login_item"
+              }
             },
             {
               "state": "info",
@@ -246,7 +257,7 @@
         }
       ],
       "progress": {
-        "title": "Setup so far",
+        "title": "Setup progress",
         "rows": [
           {
             "state": "done",
@@ -262,7 +273,7 @@
           },
           {
             "state": "running",
-            "text": "Join the group that uses it (last news at 11:58)"
+            "text": "Join your group (updated at 11:58)"
           },
           {
             "state": "",

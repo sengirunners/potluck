@@ -34,20 +34,15 @@ var bootCauses = []bootCause{{
 	line:  softnetLine,
 }}
 
-// softnetRules are the protocol and port rules softnetArgs passes Softnet,
+// softnetRules are the protocol and port rules Potluck passes Softnet,
 // lowercased: a boot output that quotes one is Softnet refusing it. A bare
-// "@host" is left out: it is also part of words such as user@hostname.
+// "@host" or address is left out: it is also part of other words (such as
+// user@hostname).
 var softnetRules = func() []string {
 	var rs []string
-	for _, a := range softnetArgs {
-		_, v, ok := strings.Cut(a, "=")
-		if !ok {
-			continue
-		}
-		for _, r := range strings.Split(v, ",") {
-			if strings.Contains(r, " port ") {
-				rs = append(rs, strings.ToLower(r))
-			}
+	for _, r := range strings.Split(softnetMailBlock+","+SoftnetAllowRules(), ",") {
+		if strings.Contains(r, " port ") {
+			rs = append(rs, strings.ToLower(r))
 		}
 	}
 	return rs

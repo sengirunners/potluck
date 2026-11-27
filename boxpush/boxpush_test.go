@@ -914,6 +914,35 @@ func TestResolveThenPushSource(t *testing.T) {
 	}
 }
 
+// An edit of the same size in the same clock tick as the last git add is
+// still in the resolved source: git sees it only by the index's own time.
+func TestResolveSeesAnEditAsOldAsTheIndex(t *testing.T) {
+	dir := repo(t, 1<<10)
+	v, index := filepath.Join(dir, "v.txt"), filepath.Join(dir, ".git", "index")
+	then := time.Now().Add(-time.Hour).Truncate(time.Second)
+	dated := func(p string) {
+		t.Helper()
+		if err := os.Chtimes(p, then, then); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// No file's change time can be set, so git is told not to look at it.
+	gitOut(t, dir, "config", "core.trustctime", "false")
+	gitOut(t, dir, "config", "core.checkStat", "minimal")
+	dated(v)
+	gitOut(t, dir, "update-index", "--refresh")
+	write(t, v, "dirty") // as long as the committed "three"
+	dated(v)
+	dated(index)
+	src, err := boxpush.Resolve(context.Background(), boxpush.MakeOptions{Dir: dir, Dirty: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOut(t, dir, "show", src.Head+":v.txt"); got != "dirty" {
+		t.Fatalf("the resolved source has %q, want the edit", got)
+	}
+}
+
 func TestPushAutomaticallyUsesHostBaseAndSurvivesRemoval(t *testing.T) {
 	ctx := context.Background()
 	c, target, id := refBox(t)

@@ -1,0 +1,346 @@
+{
+  "mode": "auto",
+  "state": "accepting",
+  "cores": 8,
+  "lending": {
+    "shared": 4,
+    "lent": 4,
+    "in_use": 2,
+    "jobs": 1,
+    "memory_shared_mb": 0,
+    "memory_lent_mb": 0,
+    "memory_in_use_mb": 0,
+    "groups": 1,
+    "sizes": 1
+  },
+  "menu": {
+    "title": "Lending 4 of 8 cores",
+    "detail": "2 cores in use by 1 job",
+    "note": "the last setup stopped while testing that jobs run safely; what was shared before still lends",
+    "cores": "●●○○····",
+    "items": [
+      {
+        "id": "keep",
+        "label": "Keep lending",
+        "checked": true
+      },
+      {
+        "id": "wind",
+        "label": "Wind down",
+        "sub": "finish jobs, take no new ones",
+        "checked": false,
+        "args": [
+          "host",
+          "set",
+          "drain"
+        ]
+      },
+      {
+        "id": "stop",
+        "label": "Stop now",
+        "sub": "end jobs now",
+        "checked": false,
+        "args": [
+          "host",
+          "set",
+          "closed"
+        ],
+        "confirm": "End 1 running job now? Their work is lost."
+      }
+    ],
+    "dials": [
+      {
+        "id": "cores",
+        "label": "Cores lent: all shared, 4 cores",
+        "choices": [
+          {
+            "id": "cores-2",
+            "label": "2 cores",
+            "checked": false,
+            "args": [
+              "host",
+              "lend",
+              "--cores",
+              "2"
+            ]
+          },
+          {
+            "id": "cores-all",
+            "label": "All shared (4 cores)",
+            "checked": true
+          }
+        ]
+      }
+    ],
+    "windows": [
+      {
+        "id": "setup",
+        "label": "Set up and check…",
+        "sub": "what this Mac has, what it lacks, and the next step",
+        "checked": false,
+        "args": [
+          "--json",
+          "host",
+          "status",
+          "--probe"
+        ]
+      },
+      {
+        "id": "jobs",
+        "label": "Jobs this Mac ran…",
+        "sub": "when, how long, counts and electricity",
+        "checked": false,
+        "args": [
+          "--json",
+          "host",
+          "jobs"
+        ]
+      },
+      {
+        "id": "uninstall",
+        "label": "Uninstall Potluck…",
+        "sub": "shows what it would remove first, and asks",
+        "checked": false,
+        "args": [
+          "--json",
+          "uninstall",
+          "--dry-run"
+        ]
+      }
+    ]
+  },
+  "setup": {
+    "state": "blocked",
+    "started": "2026-11-19T11:57:00Z",
+    "stages": [
+      {
+        "name": "preflight",
+        "result": "succeeded",
+        "at": "2026-11-19T11:58:00Z"
+      },
+      {
+        "name": "images",
+        "result": "succeeded",
+        "at": "2026-11-19T11:58:00Z"
+      },
+      {
+        "name": "validation",
+        "result": "blocked",
+        "detail": "conformance failed at boot",
+        "at": "2026-11-19T11:58:00Z"
+      }
+    ],
+    "stage_order": [
+      {
+        "name": "preflight",
+        "label": "preflight"
+      },
+      {
+        "name": "images",
+        "label": "images"
+      },
+      {
+        "name": "validation",
+        "label": "validation"
+      },
+      {
+        "name": "join",
+        "label": "join"
+      },
+      {
+        "name": "capacity",
+        "label": "usable capacity"
+      }
+    ],
+    "checks": [
+      {
+        "id": "potluck",
+        "state": "done",
+        "detail": "Potluck v1.2.3 is installed"
+      },
+      {
+        "id": "daemon",
+        "state": "done",
+        "detail": "the Potluck daemon is running"
+      },
+      {
+        "id": "setup",
+        "state": "blocked",
+        "detail": "the last setup run was blocked at validation (3 of 5): conformance failed at boot; what was shared before still lends",
+        "action": "fix what the validation stage says, then run again: potluck host",
+        "do": {
+          "label": "Try again",
+          "args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--instead-of-invite=",
+            "--"
+          ],
+          "invite_args": [
+            "--json",
+            "host",
+            "--yes",
+            "--no-sudo",
+            "--detach",
+            "--invite-stdin"
+          ],
+          "invite": true
+        }
+      },
+      {
+        "id": "lending",
+        "state": "done",
+        "detail": "shares 1 size with its pools, up to 4 cores at once"
+      },
+      {
+        "id": "when",
+        "state": "info",
+        "detail": "it may lend any time, whether or not you are using it (potluck host --when away: only while you are away); now it takes work"
+      },
+      {
+        "id": "menu",
+        "state": "done",
+        "detail": "the menu bar item is running: it read this status at 11:59:55 (/Users/b/Applications/Potluck.app)"
+      },
+      {
+        "id": "login",
+        "state": "todo",
+        "detail": "the menu bar item has not been set to start at login (optional: after a restart nothing else starts Potluck), unless you added it to Login Items yourself",
+        "action": "in the Potluck menu, choose Set up and check…, then Start at login",
+        "do": {
+          "label": "Start at login",
+          "app": "login_item"
+        }
+      },
+      {
+        "id": "updates",
+        "state": "todo",
+        "detail": "the daily update is off (optional: your choice; Potluck never turns it on by itself)",
+        "action": "potluck upgrade enable",
+        "do": {
+          "label": "Turn on daily updates",
+          "args": [
+            "--json",
+            "upgrade",
+            "enable"
+          ]
+        }
+      },
+      {
+        "id": "coverage",
+        "state": "info",
+        "detail": "the daily update covers Potluck itself only: to update the menu bar item, run its installer again (install-menu); Tart and Softnet are updated the way you installed them, and potluck doctor says which versions this Mac needs"
+      }
+    ],
+    "next": "fix what the validation stage says, then run again: potluck host",
+    "next_id": "setup",
+    "view": {
+      "heading": "This Mac is set up, but the last change didn't finish",
+      "lead": "Setup stopped while testing that jobs run safely. Paste your invite link again. If it doesn't work, ask for a new one. If it stops again, copy the details and send them to the person who invited you. Your previous lending settings are still in place.",
+      "do": {
+        "label": "Try again",
+        "args": [
+          "--json",
+          "host",
+          "--yes",
+          "--no-sudo",
+          "--detach",
+          "--instead-of-invite=",
+          "--"
+        ],
+        "invite_args": [
+          "--json",
+          "host",
+          "--yes",
+          "--no-sudo",
+          "--detach",
+          "--invite-stdin"
+        ],
+        "invite": true
+      },
+      "invite_later": true,
+      "sections": [
+        {
+          "title": "This Mac",
+          "rows": [
+            {
+              "state": "done",
+              "text": "Potluck is installed"
+            },
+            {
+              "state": "done",
+              "text": "Potluck is running"
+            },
+            {
+              "state": "blocked",
+              "text": "The last setup stopped before it finished"
+            },
+            {
+              "state": "done",
+              "text": "Lends up to 4 processor cores at once"
+            },
+            {
+              "state": "info",
+              "text": "Lends at any time, even while you use it"
+            }
+          ]
+        },
+        {
+          "title": "Optional",
+          "rows": [
+            {
+              "state": "info",
+              "text": "Potluck can open automatically when you log in",
+              "do": {
+                "label": "Start at login",
+                "app": "login_item"
+              }
+            },
+            {
+              "state": "info",
+              "text": "Potluck doesn't update itself",
+              "do": {
+                "label": "Turn on daily updates",
+                "args": [
+                  "--json",
+                  "upgrade",
+                  "enable"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "progress": {
+        "title": "Last setup",
+        "rows": [
+          {
+            "state": "done",
+            "text": "Check this Mac"
+          },
+          {
+            "state": "done",
+            "text": "Download what jobs need"
+          },
+          {
+            "state": "blocked",
+            "text": "Test that jobs run safely"
+          },
+          {
+            "state": "",
+            "text": "Join your group"
+          },
+          {
+            "state": "",
+            "text": "Start lending"
+          }
+        ]
+      },
+      "details": "Potluck v1.2.3 setup\nsetup: blocked: the last setup run was blocked at validation (3 of 5): conformance failed at boot; what was shared before still lends\n  fix what the validation stage says, then run again: potluck host",
+      "key": "blocked daemon=true shares=true listed=true limits=true mode=auto state=accepting refused=false early=false next=setup --json host --yes --no-sudo --detach --instead-of-invite= --"
+    }
+  }
+}

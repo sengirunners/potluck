@@ -100,6 +100,9 @@ func TestProbeChecks(t *testing.T) {
 			m.Tart.CLI, m.Tart.Problems = "/Users/b/Applications/tart.app/Contents/MacOS/tart", []string{"lacks required run option"}
 			s.TartInstall = "potluck tart install"
 		}, want{checks: map[string]string{"tart": Todo}, nextID: "tart", doArgs: "--json tart install", detail: "lacks required run option"}},
+		{"a broken tart.app in the person's own Applications", func(m *hostprobe.MacParts, _ *SetupFacts) {
+			m.Tart.CLI, m.Tart.Problems = "/Users/b/Applications/tart.app/Contents/MacOS/tart", []string{"cannot run on this host"}
+		}, want{checks: map[string]string{"tart": Todo}, nextID: "tart", doURL: hostprobe.TartReleases, next: "download tart.tar.gz from " + hostprobe.TartReleases + ", unpack it and drag tart.app into Applications"}},
 		{"an old tart.app", func(m *hostprobe.MacParts, _ *SetupFacts) {
 			m.Tart.CLI, m.Tart.Problems = "/Applications/tart.app/Contents/MacOS/tart", []string{"Tart at /Applications/tart.app/Contents/MacOS/tart lacks required run option --net-softnet-block"}
 		}, want{checks: map[string]string{"tart": Todo}, nextID: "tart", doURL: hostprobe.TartReleases, detail: "lacks required run option"}},
@@ -112,6 +115,10 @@ func TestProbeChecks(t *testing.T) {
 		{"macOS 15, a candidate only", func(m *hostprobe.MacParts, _ *SetupFacts) {
 			m.Report.MacOS, m.Softnet = "15.1", hostprobe.Layer{Name: "tart", Problems: notInstalled}
 		}, want{checks: map[string]string{"softnet": Blocked}, nextID: "softnet", detail: "not installed"}},
+		{"macOS 15, the candidate installed and changed since", func(m *hostprobe.MacParts, _ *SetupFacts) {
+			m.Report.MacOS, m.Softnet = "15.1", hostprobe.Layer{Name: "tart", Problems: []string{"the managed Softnet cannot be used: it is not setuid"}}
+			m.SoftnetStore = &softnet.Status{Current: &softnet.Installed{ID: "x", Problem: "it is not setuid"}}
+		}, want{checks: map[string]string{"softnet": Blocked}, nextID: "softnet", detail: "it is not setuid"}},
 		{"macOS 26, no Softnet", func(m *hostprobe.MacParts, _ *SetupFacts) {
 			m.Softnet = hostprobe.Layer{Name: "tart", Problems: notInstalled}
 		}, want{checks: map[string]string{"softnet": Todo}, nextID: "softnet", doArgs: "--json softnet install --no-sudo"}},
@@ -178,7 +185,7 @@ func TestProbeChecks(t *testing.T) {
 			s.Exe, s.InstallDir, s.BundledRelease = "/Applications/Potluck.app/Contents/Resources/bin/potluck", "/Users/b/.local/bin", "/Applications/Potluck.app/Contents/Resources/release"
 			s.InstallBundled = "potluck upgrade --release ..."
 		}, want{checks: map[string]string{"potluck": Todo}, nextID: "potluck", next: "potluck upgrade --release ...",
-			doArgs: "upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"}},
+			doArgs: "--json upgrade --release /Applications/Potluck.app/Contents/Resources/release --dir /Users/b/.local/bin"}},
 		{"bundled release, installed", func(_ *hostprobe.MacParts, s *SetupFacts) {
 			s.Exe, s.InstallDir, s.BundledRelease = "/Users/b/.local/bin/potluck", "/Users/b/.local/bin", "/x/release"
 		}, want{checks: map[string]string{"potluck": Done}, nextID: "setup"}},
@@ -236,6 +243,23 @@ func TestProbeChecks(t *testing.T) {
 				t.Errorf("detail %q, want %q in it", c.Detail, tc.want.detail)
 			}
 		})
+	}
+}
+
+// Potluck's build withdrawn: upstream's takes root by hand, so nothing to
+// press, and the words do not say there is none.
+func TestSoftnetBuildWithdrawn(t *testing.T) {
+	old := softnet.Builds
+	t.Cleanup(func() { softnet.Builds = old })
+	softnet.Builds = slices.Clone(old)
+	for i := range softnet.Builds {
+		softnet.Builds[i].Withdrawn = "x"
+	}
+	m := fineMac()
+	m.Softnet = hostprobe.Layer{Problems: []string{"install the latest upstream Softnet"}}
+	c := softnetCheck(&m, SetupFacts{})
+	if c.State != Blocked || c.Do != nil || c.Action != "" || !strings.Contains(c.Detail, "upstream") || !strings.Contains(c.words, "by hand") {
+		t.Errorf("%+v, words %q", c, c.words)
 	}
 }
 

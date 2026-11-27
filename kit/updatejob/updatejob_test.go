@@ -378,11 +378,21 @@ func TestHandWrittenJob(t *testing.T) {
 // Escapes and continued lines that people write in units by hand.
 func TestArgvOfAHandWrittenUnitReadsAsSystemdDoes(t *testing.T) {
 	for body, want := range map[string][]string{
-		`ExecStart=/opt/my\x20tools/example upgrade`:            {"/opt/my tools/example", "upgrade"},
-		`ExecStart=/opt/my\040tools/example up\sgrade`:          {"/opt/my tools/example", "up grade"},
-		"ExecStart=/x/example \\\n  upgrade --min-age 72h":      {"/x/example", "upgrade", "--min-age", "72h"},
-		`ExecStart=@/x/example example upgrade "a;" \; b`:       {"example", "upgrade", "a;", ";", "b"},
-		"ExecStart=/x/example 'it''s' \"tab\\there\" \\\\ \\\"": {"/x/example", "its", "tab\there", `\`, `"`},
+		`ExecStart=/opt/my\x20tools/example upgrade`:                                               {"/opt/my tools/example", "upgrade"},
+		`ExecStart=/opt/my\040tools/example up\sgrade`:                                             {"/opt/my tools/example", "up grade"},
+		"ExecStart=/x/example \\\n  upgrade --min-age 72h":                                         {"/x/example", "upgrade", "--min-age", "72h"},
+		`ExecStart=@/x/example example upgrade "a;" \; b`:                                          {"example", "upgrade", "a;", ";", "b"},
+		"ExecStart = /x/example upgrade --min-age 72h":                                             {"/x/example", "upgrade", "--min-age", "72h"},
+		"  \tExecStart=/x/example upgrade":                                                         {"/x/example", "upgrade"},
+		"\tExecStart\t=\t/x/example \\\n   upgrade":                                                {"/x/example", "upgrade"},
+		"ExecStart=/bin/false\n  ExecStart =\nExecStart = /x/example upgrade":                      {"/x/example", "upgrade"},
+		"# ExecStart=/x/other\n; ExecStart=/x/other\nExecStart=/x/example upgrade":                 {"/x/example", "upgrade"},
+		"ExecStartPre=/x/other\nExecStart=/x/example upgrade":                                      {"/x/example", "upgrade"},
+		"ExecStartPost=/x/other\nExecStart=/x/example upgrade":                                     {"/x/example", "upgrade"},
+		"Environment=X=ExecStart=/x/a\nDescription=ExecStart = /x/b\nExecStart=/x/example upgrade": {"/x/example", "upgrade"},
+		"ExecStart=/x/example \\\n# a note\n  upgrade":                                             {"/x/example", "upgrade"},
+		"# old ExecStart=/x/a \\\nExecStart=/x/example upgrade":                                    {"/x/example", "upgrade"},
+		"ExecStart=/x/example 'it''s' \"tab\\there\" \\\\ \\\"":                                    {"/x/example", "its", "tab\there", `\`, `"`},
 	} {
 		s, _ := newSchedule(t, "linux")
 		os.MkdirAll(s.unitDir(), 0o755)
@@ -494,5 +504,24 @@ func TestArgvReadsAJobFileOfTheLargestSize(t *testing.T) {
 	}
 	if got, err := s.Argv(); err != nil || !slices.Equal(got, []string{"/x/example", "upgrade"}) {
 		t.Errorf("argv = %q, %v", got, err)
+	}
+}
+
+// A hand-written unit whose ExecStart line has indent, space around the =, or
+// a continuation is as foreign as one written plainly.
+func TestForeignSeesTheFormsSystemdReadsAsExecStart(t *testing.T) {
+	for name, body := range map[string]string{
+		"plain":        "[Service]\nExecStart=/x/example upgrade\n",
+		"indent":       "[Service]\n  ExecStart=/x/example upgrade\n",
+		"spaced":       "[Service]\nExecStart = /x/example upgrade\n",
+		"continuation": "[Service]\nExecStart=/x/example \\\n  upgrade\n",
+		"indent+tab":   "[Service]\n\tExecStart\t=\t/x/example upgrade\n",
+	} {
+		s, _ := newSchedule(t, "linux")
+		os.MkdirAll(s.unitDir(), 0o755)
+		os.WriteFile(filepath.Join(s.unitDir(), name+".service"), []byte(body), 0o644)
+		if f := s.Foreign(); !strings.HasPrefix(filepath.Base(f), name) {
+			t.Errorf("%s: foreign = %q", name, f)
+		}
 	}
 }

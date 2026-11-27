@@ -88,6 +88,11 @@ type Deps struct {
 	// machine numbers (MachineZm.Job). The program sets it; nil reports no
 	// job.
 	UpdateJob func() *api.UpdateJob
+	// UpdateSources are the release repositories this machine's updater
+	// reads, in order (MachineZm.Sources); the daemon calls it each time it
+	// builds its machine numbers. The program sets it; nil, or an empty
+	// answer (a config it could not read), reports none.
+	UpdateSources func() []string
 	// GitHubLogin is the GitHub login an identity (by ID) is linked to, or
 	// "" (the owners brick sets it; nil in a module's tests).
 	GitHubLogin func(ctx context.Context, identity string) string

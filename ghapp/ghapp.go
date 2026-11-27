@@ -244,6 +244,13 @@ func NoRepoAccess(err error) bool {
 	return NotFound(err) || errors.As(err, &se) && se.status == http.StatusUnprocessableEntity && strings.Contains(se.path, "/access_tokens")
 }
 
+// RunnerBusy reports whether err is GitHub refusing to delete a runner it has
+// given a job (DeleteRunner).
+func RunnerBusy(err error) bool {
+	var se *statusError
+	return errors.As(err, &se) && se.method == http.MethodDelete && se.status == http.StatusUnprocessableEntity && strings.Contains(se.path, "/actions/runners/")
+}
+
 func (e *statusError) Error() string {
 	return fmt.Sprintf("github %s %s: %d %s", e.method, e.path, e.status, e.msg)
 }

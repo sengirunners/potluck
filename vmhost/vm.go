@@ -84,36 +84,6 @@ const deadman = `vm=$1; bin=$2; shift 2; exec 3<&0
 ( cat <&3; kill -KILL $p; "$bin" delete "$vm" ) >/dev/null 2>&1 & g=$!; exec 3<&-
 wait $p; s=$?; kill $g 2>/dev/null; exit $s`
 
-// softnetArgs isolate a Tart guest. Softnet passes the gateway (this Mac) by
-// default: block it but DNS, so a guest reaches no host service either; and
-// block outbound mail (tcp 25, 465, 587, to anywhere; zm-eakh.12.5.13), so a
-// box cannot send spam from the lender's IP. Softnet's rule syntax, which
-// tart passes through as --block/--allow: "out proto tcp port 25" (target
-// 0.0.0.0/0 when omitted); a rule with a port wins over one without, and
-// block wins ties. Softnet filters IPv4 only and lets no IPv6 out.
-var softnetArgs = []string{"--net-softnet",
-	"--net-softnet-block=" + SoftnetBlockRules(),
-	"--net-softnet-allow=" + SoftnetAllowRules()}
-
-// SoftnetBlockRules and SoftnetAllowRules are the isolation policy used both
-// at boot and by the host's capability preflight. Keep the probe and boot on
-// the same rules, including the host DNS exception and outbound mail blocks.
-func SoftnetBlockRules() string { return "@host," + softnetMailBlock }
-func SoftnetAllowRules() string { return "out proto udp @host port 53,out proto tcp @host port 53" }
-
-// softnetMailBlock is one block rule per mail port.
-var softnetMailBlock = func() string {
-	rs := make([]string, len(mailPorts))
-	for i, p := range mailPorts {
-		rs[i] = "out proto tcp port " + strconv.Itoa(p)
-	}
-	return strings.Join(rs, ",")
-}()
-
-// mailPorts are outbound mail's TCP ports (SMTP, SMTPS, submission): every
-// layer blocks them for an isolated VM.
-var mailPorts = []int{25, 465, 587}
-
 // managedSoftnet is the Mac's managed Softnet store (a test replaces it):
 // a boot that pins its build checks the build again first.
 var managedSoftnet = softnet.System
@@ -148,7 +118,11 @@ func (t tartCLI) boot(vm string, isolated bool, log io.Writer, guard string) (*e
 			return nil, nil, fmt.Errorf("checked Softnet at %s is not executable", helper)
 		}
 	}
-	a := append(append([]string{"run"}, TartBootArguments(isolated)...), t.hardening()...)
+	boot, err := TartBootArguments(isolated)
+	if err != nil {
+		return nil, nil, err
+	}
+	a := append(append([]string{"run"}, boot...), t.hardening()...)
 	cmd := exec.Command("sh", append([]string{"-c", guard, "sh", vm, t.bin}, append(a, vm)...)...)
 	if isolated && t.softnetPath != "" {
 		// Tart resolves softnet through PATH. Use the helper preflight checked,

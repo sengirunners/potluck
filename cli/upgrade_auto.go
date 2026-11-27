@@ -10,6 +10,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/attach"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sengirunners/potluck/kit/api"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/updatejob"
 )
@@ -66,7 +68,7 @@ func updateSpec(cfg *config.Config) (updatejob.Spec, error) {
 	}
 	dir := filepath.Dir(p)
 	if err := writableDir(dir); err != nil {
-		return updatejob.Spec{}, err
+		return updatejob.Spec{}, api.Plainly(err, "Potluck is in a folder on this Mac that it can't change, so it can't update itself. Press Copy details and send what it copies to the person who invited you.")
 	}
 	env := []updatejob.EnvVar{
 		{Key: "PATH", Value: updatejob.Path(dir, os.Getenv("PATH"))},
@@ -134,7 +136,7 @@ func (a *app) upgradeEnableCmd() *cobra.Command {
 			}
 			r, err := s.Install(sp)
 			if err != nil {
-				return err
+				return api.Plainly(err, "This Mac wouldn't turn on daily updates. Potluck works without them; you can try again."+plainGetHelp)
 			}
 			if r.Foreign != "" { // appeared meanwhile
 				a.say("updates: this machine already has its own potluck updater (%s); potluck left it as it is", r.Foreign)
@@ -218,14 +220,14 @@ func (a *app) upgradeStatusCmd() *cobra.Command {
 			}
 			switch {
 			case st.Enabled && st.Loaded:
-				a.say("daily update: on (%s)", tildePath(st.Files[0]))
+				a.say("daily update: on (%s)", attach.Tilde(st.Files[0]))
 			case st.Enabled:
-				a.say("daily update: installed but not loaded (%s); potluck upgrade enable loads it again", tildePath(st.Files[0]))
+				a.say("daily update: installed but not loaded (%s); potluck upgrade enable loads it again", attach.Tilde(st.Files[0]))
 			default:
 				a.say("daily update: off (turn on: potluck upgrade enable)")
 			}
 			if st.Foreign != "" {
-				a.say("another potluck updater on this machine: %s (potluck leaves it as it is)", tildePath(st.Foreign))
+				a.say("another potluck updater on this machine: %s (potluck leaves it as it is)", attach.Tilde(st.Foreign))
 			}
 			if st.LastRun != "" {
 				a.say("last run: %s: %s", strings.Replace(st.LastRun, "T", " ", 1), st.LastLine)

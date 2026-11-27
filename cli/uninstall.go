@@ -6,15 +6,18 @@ package cli
 // one root step), the daemon, the daily update job, the line install.sh added
 // to a shell startup file, the host override file, the home and the programs.
 // It says first what it will do and asks; it never starts a daemon; every
-// step is safe to run again. What it cannot remove for the person (Tart's
-// images, which may be theirs, a menu bar app's login item) it names at the
-// end (docs/lending.md).
+// step is safe to run again. What it cannot remove for the person (the person's
+// own Tart and images, a menu bar app's login item) it names at the end
+// (docs/lending.md). The menu bar app's words for all of it are
+// uninstall_view.go's; Tart's part is uninstall_tart.go.
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/sengirunners/potluck/attach"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -28,9 +31,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sengirunners/potluck/computeclient"
+	"github.com/sengirunners/potluck/hostprobe"
 	"github.com/sengirunners/potluck/kit/client"
 	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/kit/daemonrecord"
+	"github.com/sengirunners/potluck/kit/swap"
+	"github.com/sengirunners/potluck/menubar"
 	"github.com/sengirunners/potluck/protocol"
 	"github.com/sengirunners/potluck/vmhost"
 )
@@ -49,18 +55,23 @@ const pathMarker = "# Potluck (install.sh): put potluck on PATH"
 var pathStartupFiles = []string{".zshrc", ".bashrc", ".bash_profile", ".bash_login", ".profile", filepath.Join(".config", "fish", "conf.d", "potluck.fish")}
 
 // uninstallStep is one thing uninstall does: what it says in the plan, and
-// how it does it.
+// how it does it. id names it, the same over two runs, and will and did are the
+// menu bar app's words for it (uninstall_view.go).
 type uninstallStep struct {
-	plan string
-	do   func(ctx context.Context) error
+	id, will, did string
+	plan          string
+	do            func(ctx context.Context) error
 }
 
-type uninstallFlags struct{ yes, dryRun, keepHome, force, noSudo bool }
+type uninstallFlags struct {
+	yes, dryRun, keepHome, force, noSudo bool
+	withTart                             tartScope
+}
 
 func (a *app) uninstallCmd() *cobra.Command {
 	var f uninstallFlags
 	cmd := &cobra.Command{
-		Use:   "uninstall [--yes] [--keep-home] [--force] [--dry-run] [--no-sudo]",
+		Use:   "uninstall [--yes] [--keep-home] [--force] [--with-tart[=images]] [--dry-run] [--no-sudo]",
 		Short: "Remove Potluck from this machine: stop sharing, leave its pools, stop the daemon, remove its files",
 		Long: `Uninstall takes Potluck off this machine. It prints what it will do and asks
 before it does anything (--dry-run only prints; --yes does not ask). In this
@@ -76,18 +87,29 @@ order:
   5. removes the Softnet download softnet install --no-sudo kept, the daily
      update job, the host override file and the lines install.sh added to a
      shell startup file;
-  6. removes the home (default ~/.potluck): your identity, the pools this
-     machine runs and everything they hold, so the pools end for their
-     members. --keep-home keeps it;
-  7. removes the programs install.sh put in the directory this potluck runs
+  6. on a Mac, with --with-tart, removes the Tart images Potluck pulled and
+     the tart.app Potluck installed (below);
+  7. on a Mac, deletes the image downloads a setup left unfinished (in
+     Potluck's own folder in Tart's), and removes the home (default
+     ~/.potluck): your identity, the pools this machine runs and everything
+     they hold, so the pools end for their members. --keep-home keeps both;
+  8. removes the programs install.sh put in the directory this potluck runs
      from (potluck, its drivers, potluck-conformance, potluck-e2b and their
      .prev copies), this one last.
 
 A step that fails stops the run and says so; run it again to go on, since
 every step is safe to repeat. It never starts a daemon: with none running,
 nothing is unshared and no pool is left by step 1 and 2, and the pools this machine joined are not told
-(their owners can revoke its token). It does not touch Tart or Tart's images
-(they may be yours), Tailscale, or a menu bar app; it names what is left.
+(their owners can revoke its token). It does not touch Tailscale, a menu bar
+app, or, without --with-tart, Tart and its images; it names what is left.
+
+--with-tart never touches a Tart, an image or a VM of yours. It removes an
+image only when Potluck's record says Potluck pulled it, and nothing else
+here may need it (a tag of its repository, another Potluck home); an image
+pulled before that record was kept stays. It removes tart.app only when
+Potluck installed it (` + a.cmd("tart install") + `), unchanged since, and Tart then
+holds nothing: any VM or image left keeps it. What it keeps it names.
+--with-tart=images removes the images only.
 
 --no-sudo runs no sudo: at the root step (3) it stops, with the steps before
 it done, and prints the root command; run that as root, then uninstall
@@ -99,13 +121,21 @@ that fails adds "error" and is the first of "left" (the exit is not 0); when
 --force would let it go on, "force" says what that does and the arguments.
 With --json --dry-run, "left" is the plan, "pools_run" the pools this machine
 runs, "warning" says what is lost for good, and "remove" is the question to
-ask and the arguments that run the plan.`,
+ask and the arguments that run the plan. "view" is the same in the words the
+menu bar app shows.`,
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error { return a.uninstall(cmd.Context(), f) },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if f.withTart != tartNone && f.withTart != tartImages && f.withTart != tartAll {
+				return fmt.Errorf("--with-tart takes images or all, not %q", f.withTart)
+			}
+			return a.uninstall(cmd.Context(), f)
+		},
 	}
 	cmd.Flags().BoolVar(&f.yes, "yes", false, "do not ask")
 	cmd.Flags().BoolVar(&f.dryRun, "dry-run", false, "print what it would do and change nothing")
 	cmd.Flags().BoolVar(&f.keepHome, "keep-home", false, "keep the home: your identity and the pools this machine runs")
+	cmd.Flags().StringVar((*string)(&f.withTart), "with-tart", "", "on a Mac, also remove the Tart images Potluck pulled and the tart.app Potluck installed, never yours")
+	cmd.Flags().Lookup("with-tart").NoOptDefVal = string(tartAll)
 	cmd.Flags().BoolVar(&f.noSudo, "no-sudo", false, "do not run sudo: stop at the root step and print it (with --json, as admin_step) for you or an app to run as root")
 	cmd.Flags().BoolVar(&f.force, "force", false, "stop sharing a size even while sandboxes run on one joined pool's machine (they go on until their lease ends)")
 	return cmd
@@ -130,6 +160,8 @@ type uninstallAnswer struct {
 	Warning string           `json:"warning,omitempty"`
 	Remove  *uninstallAction `json:"remove,omitempty"`
 	Force   *uninstallAction `json:"force,omitempty"`
+	// View is all of it as the menu bar app shows it.
+	View *uninstallView `json:"view,omitempty"`
 }
 
 // uninstallAction is what an app may run after the person said yes to
@@ -141,13 +173,17 @@ type uninstallAction struct {
 }
 
 // action is the run an app may start with these flags, its question first.
-func (f uninstallFlags) action(confirm, detail string) *uninstallAction {
+func (p uninstallPlan) action(f uninstallFlags, confirm, detail string) *uninstallAction {
 	args := []string{"--json", "uninstall", "--yes", "--no-sudo"}
 	if f.keepHome {
 		args = append(args, "--keep-home")
 	}
 	if f.force {
 		args = append(args, "--force")
+	}
+	// Never for Tart no plan the person saw names.
+	if s := p.tart.scope(f.withTart); s != tartNone {
+		args = append(args, "--with-tart="+string(s))
 	}
 	return &uninstallAction{Confirm: confirm, Detail: strings.TrimSpace(detail), Args: args}
 }
@@ -157,20 +193,32 @@ func (f uninstallFlags) action(confirm, detail string) *uninstallAction {
 type uninstallPlan struct {
 	steps    []uninstallStep
 	left     []string // not removed, as people-words
+	stays    []string // the same in the app's words
+	tart     *tartPart
 	poolsRun []string
-	warning  string
-	home     string   // the home, when there is one
-	stopsRun bool     // the first step stops a host run going on
-	running  bool     // its daemon answered
-	joined   []string // the pools it joined, when running
+	// poolsKnown is that the daemon said which those are.
+	poolsKnown bool
+	warning    string
+	home       string   // the home, when there is one
+	stopsRun   bool     // the first step stops a host run going on
+	running    bool     // its daemon answered
+	joined     []string // the pools it joined, when running
 	// joinedNow reads those again (nil: not running).
 	joinedNow func(ctx context.Context) ([]string, error)
 	// notes are what the step running could not do though it goes on, as
-	// people-words: they go with it in the answer's done.
+	// people-words: they go with it in the answer's done. said is the app's
+	// words for what it did instead of its own (uninstallStep.did).
 	notes *[]string
+	said  *string
+	// kept is what the step running kept after all, in the app's words: it
+	// goes with what stays, and the step is not done unless said says what was.
+	kept *string
 }
 
 func (a *app) uninstall(ctx context.Context, f uninstallFlags) error {
+	if err := a.ownLeftover(); err != nil {
+		return err
+	}
 	if err := a.notWhileAttached(a.cmd("uninstall")); err != nil {
 		return err
 	}
@@ -204,6 +252,8 @@ func (a *app) runUninstall(ctx context.Context, f uninstallFlags) (uninstallAnsw
 	steps, left := p.steps, p.left
 	ans.NotRemoved = append(ans.NotRemoved, left...)
 	ans.PoolsRun, ans.Warning = append(ans.PoolsRun, p.poolsRun...), p.warning
+	done := []viewStep{}
+	show := func(left []uninstallStep, o viewOutcome) { ans.View = p.view(f, done, left, o, ans) }
 	plans := func(steps []uninstallStep) []string {
 		out := []string{}
 		for _, s := range steps {
@@ -222,12 +272,16 @@ func (a *app) runUninstall(ctx context.Context, f uninstallFlags) (uninstallAnsw
 	if p.warning != "" {
 		a.say("%s (--keep-home keeps this.)", p.warning)
 	}
+	if s := p.tart.refusal(f); s != "" {
+		a.say("%s", s)
+	}
 	if f.dryRun {
 		a.sayLeftOver(left)
 		ans.Left = plans(steps)
 		if len(steps) > 0 {
-			ans.Remove = f.action("Remove Potluck from this machine?", p.warning)
+			ans.Remove = p.action(f, "Remove Potluck from this Mac?", p.confirmDetail(f))
 		}
+		show(steps, viewPlan)
 		return ans, nil
 	}
 	if len(steps) > 0 && !f.yes {
@@ -241,18 +295,21 @@ func (a *app) runUninstall(ctx context.Context, f uninstallFlags) (uninstallAnsw
 		var err error
 		if i == 0 && !p.stopsRun {
 			release, err = holdHost(ctx, p)
+			p.keepElsewhere(a, cfg.Home, err)
 		}
 		if err == nil {
 			err = s.do(ctx)
 		}
 		if err == nil && i == 0 && p.stopsRun {
 			release, err = holdHost(ctx, p)
+			p.keepElsewhere(a, cfg.Home, err)
 		}
 		var root *adminStepLeft
 		if errors.As(err, &root) {
 			ans.AdminStep, ans.Left = &root.step, plans(steps[i:])
+			show(steps[i:], viewAdmin)
 			a.say("--no-sudo: stopped at step %d, the root step, with the steps before it done. %s\nRun this as root, then run %s again to finish:\n  %s",
-				i+1, root.step.Why, a.cmd("uninstall --no-sudo"), root.step.command())
+				i+1, cmp.Or(root.step.detail, root.step.Why), a.uninstallAgain(f), root.step.command())
 			return ans, nil
 		}
 		if err != nil {
@@ -260,20 +317,60 @@ func (a *app) runUninstall(ctx context.Context, f uninstallFlags) (uninstallAnsw
 			if errors.As(err, &busy) && !f.force {
 				forced := f
 				forced.force = true
-				ans.Force = forced.action("Remove Potluck though sandboxes run, or may run, on this machine?", "They go on until their lease ends, out of reach of the members who made them.")
+				ans.Force = p.action(forced, forceQuestion(busy.live), forceDetail+p.alsoTart(f))
 			}
-			err = fmt.Errorf("step %d (%s) did not finish: %w\nnothing after it was done; fix that and run %s again (each step is safe to repeat)", i+1, s.plan, err, a.cmd("uninstall"))
+			err = fmt.Errorf("step %d (%s) did not finish: %w\nnothing after it was done; fix that and run %s again (each step is safe to repeat)", i+1, s.plan, err, a.uninstallAgain(f))
 			ans.Left, ans.Error = plans(steps[i:]), err.Error()
+			show(steps[i:], outcomeOf(s, err, f.force))
 			return ans, err
 		}
-		done := s.plan
-		if n := *p.notes; len(n) > 0 {
-			done += " (but: " + strings.Join(n, "; ") + ")"
+		if i == 0 { // from here Potluck is being removed: nothing starts its daemon by itself
+			_ = markStopped(cfg.Home)
 		}
-		ans.Done, *p.notes = append(ans.Done, done), nil
+		words := s.plan
+		notes := strings.Join(*p.notes, "; ")
+		if notes != "" {
+			words += " (but: " + notes + ")"
+		}
+		*p.notes = nil
+		if *p.kept != "" {
+			p.stays, *p.kept = append(p.stays, *p.kept), ""
+			stayed := words
+			if *p.said != "" { // part of it was done
+				stayed = notes
+			}
+			ans.NotRemoved, left = append(ans.NotRemoved, stayed), append(left, stayed)
+			if *p.said == "" {
+				continue
+			}
+		}
+		ans.Done = append(ans.Done, words)
+		v := s.view()
+		v.Did, *p.said = cmp.Or(*p.said, v.Did), ""
+		done = append(done, v)
 	}
 	a.sayLeftOver(left)
+	show(nil, viewDone)
 	return ans, nil
+}
+
+// uninstallAgain is the command that goes on with a run with f: as asked,
+// so that it neither takes nor leaves more. --force and --yes are said anew.
+func (a *app) uninstallAgain(f uninstallFlags) string {
+	c := "uninstall"
+	if f.keepHome {
+		c += " --keep-home"
+	}
+	switch f.withTart {
+	case tartAll:
+		c += " --with-tart"
+	case tartImages:
+		c += " --with-tart=images"
+	}
+	if f.noSudo {
+		c += " --no-sudo"
+	}
+	return a.cmd(c)
 }
 
 // holdHost keeps every other host run off the plan's home until release: one
@@ -340,7 +437,8 @@ var uninstallHealthWait = 10 * time.Second
 func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstallFlags) (p uninstallPlan, err error) {
 	var steps []uninstallStep
 	var left []string
-	p.notes = new([]string)
+	p.notes, p.said, p.kept = new([]string), new(string), new(string)
+	var stays []string
 	note := func(format string, args ...any) {
 		*p.notes = append(*p.notes, fmt.Sprintf(format, args...))
 		a.say(format, args...)
@@ -373,7 +471,7 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 		running = herr == nil
 		p.running = running
 		if !running && homeLockHeld(home) {
-			return p, fmt.Errorf("a daemon still holds %s (its lock is taken) but does not answer on %s: wait for it, or stop it with %s, then run %s again", tildePath(home), cfg.SocketPath(), a.cmd("daemon stop"), a.cmd("uninstall"))
+			return p, fmt.Errorf("a daemon still holds %s (its lock is taken) but does not answer on %s: wait for it, or stop it with %s, then run %s again", attach.Tilde(home), cfg.SocketPath(), a.cmd("daemon stop"), a.cmd("uninstall"))
 		}
 	}
 
@@ -381,6 +479,7 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 	if homeExists && hostBusy(home) {
 		p.stopsRun = true
 		steps = append(steps, uninstallStep{
+			id: "setup", will: "Stop the setup that is going on", did: "Stopped the setup that was going on",
 			plan: "stop the setup run (" + a.cmd("host") + ") going on",
 			do:   func(ctx context.Context) error { return stopHostRun(ctx, home) },
 		})
@@ -392,6 +491,7 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 			plan = "stop sharing " + strings.Join(shared, ", ") + " (as " + a.cmd("host stop") + " does)"
 		}
 		steps = append(steps, uninstallStep{
+			id: "lending", will: "Stop lending this Mac", did: "Stopped lending this Mac",
 			plan: plan,
 			do: func(ctx context.Context) error {
 				removed, err := hostStop(ctx, c, "", f.force, a.host.Stderr, a.name())
@@ -412,8 +512,10 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 		p.joined = joined
 		if len(joined) > 0 {
 			steps = append(steps, uninstallStep{
+				id: "groups", will: "Leave the groups this Mac joined: " + strings.Join(joined, ", "), did: "Left the groups this Mac joined: " + strings.Join(joined, ", "),
 				plan: "leave the pools this machine joined, asking each pool's machine to revoke this one's token: " + strings.Join(joined, ", "),
 				do: func(ctx context.Context) error {
+					var unheard []string
 					for _, p := range joined {
 						r, err := c.Leave(ctx, p)
 						if err != nil {
@@ -423,30 +525,45 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 							a.say("left %s", p)
 						} else {
 							note("left %s (the pool's machine did not answer: its owner can revoke this machine's token there)", p)
+							unheard = append(unheard, p)
 						}
+					}
+					if len(unheard) > 0 {
+						*p.said = "Left the groups this Mac joined, but could not tell " + strings.Join(unheard, ", ") + ": ask whoever runs it to remove this Mac"
 					}
 					return nil
 				},
 			})
 		}
 	} else if homeExists {
+		stays = append(stays, "Any group this Mac is still in can't be told that it left, because Potluck isn't running: ask whoever runs that group to remove this Mac")
 		left = append(left, a.cmd("daemon")+" is not running, so uninstall could not tell the pools this machine joined that it is leaving, or stop sharing through the daemon: start it ("+a.cmd("daemon --detach")+") and run "+a.cmd("uninstall")+" again to do that, or ask each pool's owner to revoke this machine's token")
 	}
 
 	runs, known := poolsRun(ctx, c, running)
-	if p.poolsRun = runs; homeExists && !f.keepHome {
+	p.poolsRun, p.poolsKnown = runs, known
+	dropping := homeLeftover(home) // a removal cut off part way through the home
+	if f.keepHome {
+		dropping = ""
+	}
+	switch {
+	case homeExists && !f.keepHome:
 		p.warning = homeWarning(runs, known)
+	case dropping != "":
+		p.warning = "This deletes for good what an earlier uninstall did not: it may hold this machine's identity and the pools it ran."
 	}
 
 	if store := softnetStore(); softnetGOOS == "darwin" && lexists(store.Dir) {
 		steps = append(steps, uninstallStep{
+			id: "helper", will: "Remove the network helper (macOS asks for this Mac's password)", did: "Removed the network helper",
 			plan: "remove the managed Softnet in " + store.Dir + " (the one root step: asks for your Mac password)",
 			do:   func(ctx context.Context) error { _, err := a.removeManagedSoftnet(ctx, store, f.noSudo); return err },
 		})
 	}
 	if d, err := softnetDownloadDir(); softnetGOOS == "darwin" && err == nil && lexists(d) {
 		steps = append(steps, uninstallStep{
-			plan: "remove the Softnet download " + a.cmd("softnet install --no-sudo") + " kept in " + tildePath(d),
+			id: "helper-download", will: "Remove the network helper's download", did: "Removed the network helper's download",
+			plan: "remove the Softnet download " + a.cmd("softnet install --no-sudo") + " kept in " + attach.Tilde(d),
 			do: func(context.Context) error {
 				if err := os.RemoveAll(d); err != nil {
 					return err
@@ -459,6 +576,7 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 
 	if running {
 		steps = append(steps, uninstallStep{
+			id: "stop", will: "Stop Potluck", did: "Stopped Potluck",
 			plan: "stop the daemon",
 			do:   func(ctx context.Context) error { return a.stopDaemon(ctx, cfg) },
 		})
@@ -466,7 +584,8 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 
 	if s, err := newUpdateSchedule(); err == nil && s.Supported() == nil && s.Installed() {
 		steps = append(steps, uninstallStep{
-			plan: "remove the daily update job (" + tildePath(s.Files()[0]) + ")",
+			id: "updates", will: "Turn off daily updates", did: "Turned off daily updates",
+			plan: "remove the daily update job (" + attach.Tilde(s.Files()[0]) + ")",
 			do: func(context.Context) error {
 				removed, foreign, err := s.Remove()
 				if removed {
@@ -474,6 +593,10 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 				}
 				if foreign != "" {
 					note("another job on this machine also runs potluck upgrade and was left alone: %s", foreign)
+					*p.said = "Left alone daily updates that something other than Potluck set up"
+					if removed {
+						*p.said = "Turned off daily updates, but not ones something other than Potluck set up"
+					}
 				}
 				return err
 			},
@@ -482,6 +605,7 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 
 	if p := hostOverrideFile(); lexists(p) {
 		steps = append(steps, uninstallStep{
+			id: "limits", will: "Remove your lending settings", did: "Removed your lending settings",
 			plan: "remove the host override file " + p + " (what " + a.cmd("host set") + " and " + a.cmd("host pause") + " write)",
 			do:   func(context.Context) error { return removeOverride(p) },
 		})
@@ -489,16 +613,18 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 
 	if files := pathLineFiles(); len(files) > 0 {
 		steps = append(steps, uninstallStep{
+			id: "shell", will: "Remove what the installer added to your Terminal settings", did: "Removed what the installer added to your Terminal settings",
 			plan: "remove the lines install.sh added to put its install directory on PATH, from " + strings.Join(tildeAll(files), ", "),
 			do: func(context.Context) error {
-				for _, p := range files {
+				for _, file := range files {
 					// A file that cannot be written (a read-only dotfiles
 					// store) must not stop the home and the programs going.
-					switch changed, err := removePathLine(p); {
+					switch changed, err := removePathLine(file); {
 					case err != nil:
-						note("could not edit %s (%v): remove potluck's PATH lines from it yourself", tildePath(p), err)
+						note("could not edit %s (%v): remove potluck's PATH lines from it yourself", attach.Tilde(file), err)
+						*p.said = "Could not change your Terminal settings: the lines the installer added stay there, and do no harm"
 					case changed:
-						a.say("removed potluck's PATH line from %s", tildePath(p))
+						a.say("removed potluck's PATH line from %s", attach.Tilde(file))
 					}
 				}
 				return nil
@@ -506,24 +632,69 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 		})
 	}
 
+	tartWait := uninstallTartWait
+	if f.withTart != tartNone && !f.dryRun {
+		tartWait = uninstallTartRunWait
+	}
+	if p.tart, err = a.readTartPart(ctx, home, f.keepHome, tartWait); err != nil {
+		return p, err
+	}
+	if p.tart.unread(f.withTart) != nil && f.withTart != tartNone { // it stops the run: before anything is given up
+		steps = append(p.tartSteps(a, f, note), steps...)
+	} else {
+		steps = append(steps, p.tartSteps(a, f, note)...)
+	}
+	tartLeft, tartStays := p.tart.left(a, f)
+	if tartLeft != "" {
+		left, stays = append(left, tartLeft), append(stays, tartStays)
+	}
+
+	steps = append(steps, p.tartLockSteps(note)...)
+	if files := p.tart.records(f); len(files) > 0 {
+		left = append(left, "Potluck's records for Tart ("+strings.Join(tildeAll(files), ", ")+"): what it pulled or installed, and lock files that keep two runs apart")
+		stays = append(stays, "Potluck's small records of what it downloaded for Tart")
+	}
+
 	// The driver's records say which Tart VMs are Potluck's sandboxes, and
 	// nothing here can show that none runs on them (a pool's own sandboxes
 	// are not all counted by stopping the shares), so the person removes them.
 	if dir := tartDriverState(); dir != "" {
-		left = append(left, "the Tart driver's records in "+tildePath(dir)+": they say which Tart VMs are Potluck's sandboxes, so they stay. When no sandbox runs: rm -r "+shellQuote(dir))
+		left = append(left, "the Tart driver's records in "+attach.Tilde(dir)+": they say which Tart VMs are Potluck's sandboxes, so they stay. When no sandbox runs: rm -r "+shellQuote(dir))
+		stays = append(stays, "Potluck's small records of the virtual machines that jobs ran in")
+	}
+
+	if setupGOOS == "darwin" && !f.keepHome {
+		if leave := hostprobe.TartLeaveAt("", home, false, nil); leave.HasPullHome() || (leave.Dir != "" && p.stopsRun) {
+			steps = append(steps, uninstallStep{
+				id: "downloads", will: "Delete any download a setup left unfinished", did: "Deleted any download a setup left unfinished",
+				plan: "delete the downloads a setup left unfinished in " + attach.Tilde(leave.PullHome()) + ", Potluck's own folder in Tart's (not one another Potluck home here goes on with)",
+				do: func(ctx context.Context) error {
+					if err := leave.DropPartials(ctx); err != nil { // the rest can go without it
+						note("could not delete the unfinished downloads in %s: %v", attach.Tilde(leave.PullHome()), err)
+						*p.kept = "A download a setup left unfinished, in " + attach.Tilde(leave.PullHome())
+					}
+					return nil
+				},
+			})
+		}
 	}
 
 	if homeExists && !f.keepHome {
 		if err := checkHomeRemovable(home); err != nil {
 			return p, err
 		}
+		also := ""
+		if dropping != "" {
+			also = "; and " + attach.Tilde(dropping) + ", what an earlier " + a.cmd("uninstall") + " left of it"
+		}
 		steps = append(steps, uninstallStep{
-			plan: "remove the home " + tildePath(home) + ": this machine's identity, the pools it runs and their data, and the daemon's log",
+			id: "data", will: "Delete Potluck's data on this Mac, with this Mac's identity and any groups it runs", did: "Deleted Potluck's data on this Mac",
+			plan: "remove the home " + attach.Tilde(home) + ": this machine's identity, the pools it runs and their data, and the daemon's log" + also,
 			do: func(context.Context) error {
 				if homeLockHeld(home) {
-					return fmt.Errorf("a daemon holds %s: stop it with %s", tildePath(home), a.cmd("daemon stop"))
+					return fmt.Errorf("a daemon holds %s: stop it with %s", attach.Tilde(home), a.cmd("daemon stop"))
 				}
-				if err := os.RemoveAll(home); err != nil {
+				if err := removeHome(home); err != nil {
 					return err
 				}
 				// The daemon removes its own record when it stops; take the
@@ -532,27 +703,35 @@ func (a *app) planUninstall(ctx context.Context, cfg *config.Config, f uninstall
 					_ = os.Remove(d)
 					_ = os.Remove(filepath.Dir(d))
 				}
-				a.say("removed %s", tildePath(home))
+				a.say("removed %s", attach.Tilde(home))
 				return nil
 			},
+		})
+	} else if dropping != "" {
+		steps = append(steps, uninstallStep{
+			id: "data", will: "Delete the rest of Potluck's data on this Mac", did: "Deleted the rest of Potluck's data on this Mac",
+			plan: "remove " + attach.Tilde(dropping) + ", the home an earlier " + a.cmd("uninstall") + " did not finish removing",
+			do:   func(context.Context) error { return dropHome(dropping) },
 		})
 	}
 
 	if dir, names := installedProgramFiles(); len(names) > 0 {
 		steps = append(steps, uninstallStep{
-			plan: "remove the programs in " + tildePath(dir) + ": " + strings.Join(namesOf(names), ", ") + " (this one last)",
+			id: "programs", will: "Remove the Potluck program", did: "Removed the Potluck program",
+			plan: "remove the programs in " + attach.Tilde(dir) + ": " + strings.Join(namesOf(names), ", ") + " (this one last)",
 			do: func(context.Context) error {
 				for _, p := range names {
 					if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 						return err
 					}
 				}
-				a.say("removed %d files from %s", len(names), tildePath(dir))
+				a.say("removed %d files from %s", len(names), attach.Tilde(dir))
 				return nil
 			},
 		})
 	}
-	p.steps, p.left = steps, append(left, a.leftOver()...)
+	machine, machineStays := a.leftOver()
+	p.steps, p.left, p.stays = steps, append(left, machine...), append(stays, machineStays...)
 	return p, nil
 }
 
@@ -586,22 +765,31 @@ func sharedSizeNames(ctx context.Context, c *client.Client) []string {
 	return names
 }
 
-// leftOver is what uninstall does not remove, as people-words, for this
-// machine.
-func (a *app) leftOver() []string {
-	var left []string
+// leftOver is what uninstall does not remove for this machine, as
+// people-words and in the menu bar app's, which leaves out the app itself:
+// it offers to move that to the Trash.
+func (a *app) leftOver() (left, stays []string) {
+	if d := softnetStore().EmptyParent(); softnetGOOS == "darwin" && d != "" {
+		left = append(left, "the empty folder the managed Softnet was in: sudo rmdir "+shellQuote(d))
+		stays = append(stays, "An empty folder the network helper was in: it does no harm")
+	}
 	if setupGOOS == "darwin" {
 		if p, ok := vmhost.SystemTartSearch().FindSoftnet(); ok {
 			if fi, err := os.Stat(p); err == nil && fi.Mode()&os.ModeSetuid != 0 {
 				left = append(left, "the softnet at "+p+" is setuid root: Potluck's root step made it so, or you did. If you do not use Tart for other things, undo it with: sudo chmod u-s "+shellQuote(p))
+				stays = append(stays, "A network helper from outside Potluck that still has an administrator's permission")
 			}
 		}
-		left = append(left,
-			"Tart, its images and any VM it still holds (the macOS image Potluck pulled is about 27 GB, and the current one is never removed by "+a.cmd("host images --remove")+"): `tart list` shows them and `tart delete <name>` removes one. Potluck deletes none of them: some may be yours",
-			"Potluck Menu, if you installed it: quit it from its menu, remove it from System Settings > General > Login Items, and delete the app (docs/menubar.md)",
-		)
+		left = append(left, "Potluck's menu bar app, if you installed it ("+strings.Join(menubar.AppNames, ", or before its rename ")+", in your Applications folder unless you put it elsewhere; not another program's app of that name): quit it from its menu, remove it from System Settings > General > Login Items if it is there, and delete the app (docs/menubar.md)")
+		if files := menuAppFiles(); len(files) > 0 {
+			left = append(left, "the menu bar app's own files ("+strings.Join(tildeAll(files), ", ")+"): the app may be using them; its Move to Trash removes them, else once it is gone, delete them")
+			stays = append(stays, "The Potluck app's own settings and temporary files, until the app moves itself to the Trash")
+		}
+		left = append(left, "what you downloaded to install Potluck (Potluck.zip, a Potluck.app in Downloads): those are your files, and uninstall does not look in your Downloads folder")
+		stays = append(stays, "What you downloaded to install Potluck, such as Potluck.zip or a Potluck app in your Downloads folder: those are yours to delete")
 	}
-	return append(left, "a Tailscale node named potluck-<this Mac's host name>-potluck, if you used Tailscale: remove it in the Tailscale admin console (https://login.tailscale.com/admin/machines)")
+	left = append(left, "a Tailscale node named potluck-<this Mac's host name>-potluck, if you used Tailscale: remove it in the Tailscale admin console (https://login.tailscale.com/admin/machines)")
+	return left, append(stays, "If you used Tailscale with Potluck: this Mac's Potluck entry in your Tailscale account")
 }
 
 func (a *app) sayLeftOver(left []string) {
@@ -642,30 +830,12 @@ func homeWarning(runs []string, known bool) string {
 	return w
 }
 
-// checkHomeRemovable refuses to remove a directory that does not look like a
-// Potluck home, or that is the user's own home or a parent of it: a
-// POTLUCK_HOME pointed at the wrong place must never take a person's files.
-func checkHomeRemovable(home string) error {
-	h, err := filepath.Abs(home)
-	if err != nil {
-		return err
-	}
-	if uh, err := os.UserHomeDir(); err == nil {
-		if rel, err := filepath.Rel(h, uh); err == nil && (rel == "." || !strings.HasPrefix(rel, "..")) {
-			return fmt.Errorf("%s is your own home folder or holds it: not removing it (POTLUCK_HOME names the wrong place?)", h)
-		}
-	}
-	// config.json alone proves nothing: a project folder has one. The
-	// registry is the daemon's own file, and `program` names its owner.
-	if lexists(filepath.Join(h, config.FileRegistry)) || config.HomeOwner(h) == config.Program {
-		return nil
-	}
-	return fmt.Errorf("%s does not look like a Potluck home (no %s, and no %s naming %s, in it): not removing it", h, config.FileRegistry, config.FileProgram, config.Program)
-}
-
 // installedProgramFiles are the files of InstalledPrograms (and their .prev
 // copies) that exist in the directory this potluck runs from, and that
-// directory. None when this potluck was not run from an installed copy.
+// directory: potluck itself first, so that with part of it gone the Mac app
+// and install.sh set up anew, and what an install cut off left there. None when this potluck was not run from an installed copy.
+// The copy the Mac app carries stands for the install directory's: the app
+// runs it when there is none there, and its own files are the app's.
 func installedProgramFiles() (dir string, files []string) {
 	exe, err := executable()
 	if err != nil {
@@ -689,14 +859,17 @@ func installedProgramFiles() (dir string, files []string) {
 	if filepath.Base(exe) != "potluck" {
 		return "", nil // go run, a test binary, a renamed copy: not an install
 	}
+	if d := installDir(); os.Getenv(EnvBundledRelease) != "" && d != "" {
+		dir = d
+	}
 	for _, n := range InstalledPrograms {
-		for _, name := range []string{n, n + ".prev"} {
+		for _, name := range []string{n, n + swap.PrevSuffix} {
 			if p := filepath.Join(dir, name); lexists(p) {
 				files = append(files, p)
 			}
 		}
 	}
-	return dir, files
+	return dir, append(files, swap.Leftovers(dir, InstalledPrograms)...)
 }
 
 // pathLineFiles are the startup files below the user's home that hold the
@@ -812,6 +985,20 @@ func tartDriverState() string {
 	return dir
 }
 
+// menuAppFiles are the Mac app's caches and settings, those that are there.
+func menuAppFiles() []string {
+	h, err := os.UserHomeDir()
+	if err != nil || h == "" {
+		return nil
+	}
+	lib := filepath.Join(h, "Library")
+	files := []string{filepath.Join(lib, "Caches", menuAppID), filepath.Join(lib, "Preferences", menuAppID+".plist")}
+	return slices.DeleteFunc(files, func(p string) bool { return !lexists(p) })
+}
+
+// menuAppID is the Mac app's bundle id (Place.swift's appBundleID).
+const menuAppID = "sh.potluck.menu"
+
 // hostOverrideFile is where the host-wide override file is (tests replace it).
 var hostOverrideFile = vmhost.HostOverrideFile
 
@@ -820,7 +1007,7 @@ func lexists(p string) bool { _, err := os.Lstat(p); return err == nil }
 func tildeAll(ps []string) []string {
 	out := make([]string, len(ps))
 	for i, p := range ps {
-		out[i] = tildePath(p)
+		out[i] = attach.Tilde(p)
 	}
 	return out
 }

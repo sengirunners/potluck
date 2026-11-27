@@ -103,14 +103,107 @@ type Run struct {
 	Again string `json:"again,omitempty"`
 	// AgainArgs is the same command as the program's arguments (the words
 	// after the program), for a program to run: no shell, no quoting. The
-	// invite code is never in it: NeedsInvite says to append it.
+	// invite code is never in it: NeedsInvite says to give it.
 	AgainArgs []string `json:"again_args,omitempty"`
-	// NeedsInvite is that AgainArgs needs the invite code appended: the run
-	// was given one and has not joined its pool yet (once it has, the pool's
-	// name stands in its place).
+	// NeedsInvite is that AgainArgs needs the invite code, on stdin with
+	// --invite-stdin: the run was given one and has not joined its pool yet
+	// (once it has, the pool's name stands in its place).
 	NeedsInvite bool `json:"needs_invite,omitempty"`
+	// Else is a pool AgainArgs, which need the invite, may go on with instead
+	// of one: the run's invite was refused, and this machine had joined this
+	// pool at the machine it names.
+	Else string `json:"else_pool,omitempty"`
+	// ElseID is Else's id, whatever it is called by now.
+	ElseID string `json:"else_pool_id,omitempty"`
+	// InviteRefused is that the machine the invite names refused it: given
+	// again it is refused again.
+	InviteRefused bool `json:"invite_refused,omitempty"`
+	// Lost is that AgainArgs named a pool before WithoutPool.
+	Lost bool `json:"-"`
+	// PoolID is the id of the pool AgainArgs name, whatever it is called by
+	// now ("": not known yet, or none).
+	PoolID string `json:"pool_id,omitempty"`
+	// Joining is the join this run is spending its invite on (nil: none, or
+	// it ended and the record says how). A pool this machine then joined
+	// there is that invite's, if the run was cut off before it noted so.
+	Joining *Joining `json:"joining,omitempty"`
 	// Stages are the stages reached, in Order.
 	Stages []Stage `json:"stages"`
+}
+
+// Joining is a join under way: the machine the invite names, by its key's
+// fingerprint and (not for every invite) its name, and when it began.
+type Joining struct {
+	Fingerprint string `json:"fingerprint"`
+	Machine     string `json:"machine,omitempty"`
+	At          string `json:"at"`
+}
+
+// Names reports whether the machine with that fingerprint and name is the
+// one joined.
+func (j Joining) Names(fingerprint, machine string) bool {
+	return strings.EqualFold(j.Fingerprint, fingerprint) && (j.Machine == "" || j.Machine == machine)
+}
+
+// Pool is the pool AgainArgs name ("": the invite's, or none).
+func (r *Run) Pool() string {
+	if i := r.poolArg(); i >= 0 {
+		return r.AgainArgs[i]
+	}
+	return ""
+}
+
+// poolArg is where Pool is in AgainArgs: the host command's argument, which
+// comes before its flags (-1: not there).
+func (r *Run) poolArg() int {
+	if r == nil || r.NeedsInvite {
+		return -1
+	}
+	i := slices.Index(r.AgainArgs, "host") + 1
+	if i == 0 || i == len(r.AgainArgs) || strings.HasPrefix(r.AgainArgs[i], "-") {
+		return -1
+	}
+	return i
+}
+
+// WithPool is r, which needs an invite, as it stands once the invite's pool
+// is joined: run again it names pool.
+func (r Run) WithPool(pool string) *Run {
+	if !r.NeedsInvite {
+		return &r
+	}
+	if i := slices.Index(r.AgainArgs, "host") + 1; i > 0 {
+		r.AgainArgs = slices.Insert(slices.Clone(r.AgainArgs), i, pool)
+	}
+	r.Again, r.NeedsInvite, r.Else, r.ElseID = strings.Replace(r.Again, InviteWord, pool, 1), false, "", ""
+	return &r
+}
+
+// Renamed is r, whose pool is called pool now.
+func (r Run) Renamed(pool string) *Run {
+	i := r.poolArg()
+	if i < 0 {
+		return &r
+	}
+	old := r.AgainArgs[i]
+	r.AgainArgs = slices.Clone(r.AgainArgs)
+	r.AgainArgs[i] = pool
+	r.Again = strings.Replace(r.Again, "host "+old, "host "+pool, 1)
+	return &r
+}
+
+// WithoutPool is r, whose pool this machine is no longer in: run again it
+// needs an invite.
+func (r Run) WithoutPool() *Run {
+	i := r.poolArg()
+	if i < 0 {
+		return &r
+	}
+	pool := r.AgainArgs[i]
+	r.Lost = true
+	r.AgainArgs = slices.Delete(slices.Clone(r.AgainArgs), i, i+1)
+	r.Again, r.NeedsInvite = strings.Replace(r.Again, "host "+pool, "host "+InviteWord, 1), true
+	return &r
 }
 
 // Blocked is the stage the run stopped at, or nil.
@@ -308,15 +401,53 @@ func (t *Tracker) End(failure error) *Stage {
 	return out
 }
 
+// Joining says the run is about to spend its invite at j's machine (j.At is
+// set here), so that a run cut off there is told from one that never tried.
+func (t *Tracker) Joining(j Joining) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	j.At = t.stamp()
+	t.run.Joining = &j
+	t.mu.Unlock()
+	t.save()
+}
+
+// NotJoined says that machine refused the join; refused is that it refused
+// the invite itself. had and hadID are the one pool this machine joined there
+// before ("": none, or not known which).
+func (t *Tracker) NotJoined(refused bool, had, hadID string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.run.Joining, t.run.InviteRefused, t.run.Else, t.run.ElseID = nil, refused, had, hadID
+	t.mu.Unlock()
+	t.save()
+}
+
 // Joined says the run joined pool: from now on the command that runs this
 // setup again names the pool, not the invite.
-func (t *Tracker) Joined(pool string) {
+func (t *Tracker) Joined(pool, id string) {
 	if t == nil {
 		return
 	}
 	t.mu.Lock()
 	t.again.Pool = pool
+	t.run.Joining, t.run.InviteRefused, t.run.Else, t.run.ElseID, t.run.PoolID = nil, false, "", "", id
 	t.setAgain()
+	t.mu.Unlock()
+	t.save()
+}
+
+// Shares says the pool the command names has this id.
+func (t *Tracker) Shares(id string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.run.PoolID = id
 	t.mu.Unlock()
 	t.save()
 }
@@ -436,7 +567,7 @@ func (t *Tracker) stamp() string {
 }
 
 // save writes the record (a temp file renamed over it, so a reader never
-// sees half of one).
+// sees half of one, nor a Mac that lost power an empty one).
 func (t *Tracker) save() {
 	if t == nil || t.path == "" {
 		return
@@ -458,7 +589,9 @@ func writeFile(path string, b []byte) error {
 		return err
 	}
 	tmp := f.Name()
-	_, err = f.Write(b)
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

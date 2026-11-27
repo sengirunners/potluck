@@ -145,6 +145,10 @@ type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 	Hint    string `json:"hint,omitempty"`
+	// Plain is the error for someone who has never used a terminal (the Mac
+	// app's windows show it): no command, path or inside name. A command's
+	// --json error carries it, never an answer on the wire.
+	Plain string `json:"plain,omitempty"`
 	// Data carries structured detail, e.g. the current lease on a claim
 	// conflict. It must be redacted for the caller (see SPEC "Leaks").
 	Data json.RawMessage `json:"data,omitempty"`

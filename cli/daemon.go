@@ -7,6 +7,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"github.com/sengirunners/potluck/attach"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -99,6 +100,7 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, w server.W
 		return err
 	}
 	defer release()
+	_ = os.Remove(filepath.Join(cfg.Home, stoppedName))
 	dm, err := server.New(ctx, cfg, log, w, server.ParkedListeners(wiring.Parked))
 	if err == nil {
 		err = dm.Serve(ctx)
@@ -115,6 +117,19 @@ func serve(ctx context.Context, cfg *config.Config, log *slog.Logger, w server.W
 // for this long after it stopped answering (a Go duration; tests).
 const EnvExitDelay = "POTLUCK_TEST_EXIT_DELAY"
 
+// stoppedName is the home's mark that a person stopped the daemon (not an
+// upgrade's restart), so the Mac app does not start it again by itself. A
+// daemon that starts takes it away.
+const stoppedName = "daemon-stopped"
+
+// markStopped leaves stoppedName in home (nothing when there is no home).
+func markStopped(home string) error {
+	if fi, err := os.Stat(home); err != nil || !fi.IsDir() {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(home, stoppedName), nil, 0o600)
+}
+
 // stopDaemon asks the daemon on cfg's socket to stop and waits until it is
 // gone (stopAndWait).
 func (a *app) stopDaemon(ctx context.Context, cfg *config.Config) error {
@@ -123,8 +138,15 @@ func (a *app) stopDaemon(ctx context.Context, cfg *config.Config) error {
 	if h, err := c.Health(ctx); err == nil {
 		pid = h.PID
 	}
+	// Before it stops, so a daemon started after it takes the mark away.
+	if err := markStopped(cfg.Home); err != nil {
+		return err
+	}
 	stopped, err := stopAndWait(ctx, c, pid, api.DaemonStopRequest{What: "stop"})
 	if err != nil {
+		if !stopped { // refused: it runs on
+			_ = os.Remove(filepath.Join(cfg.Home, stoppedName))
+		}
 		return err
 	}
 	if !stopped {
@@ -250,10 +272,10 @@ func (a *app) statusCmd() *cobra.Command {
 					return err
 				}
 			} else {
-				s := fmt.Sprintf("%s %s (%s, %s), home %s", a.name(), h.Version, h.Commit, h.Protocol, tildePath(cfg.Home))
+				s := fmt.Sprintf("%s %s (%s, %s), home %s", a.name(), h.Version, h.Commit, h.Protocol, attach.Tilde(cfg.Home))
 				if other != nil {
 					s = fmt.Sprintf("using %s's daemon (%s, %s), home %s: this machine's Potluck daemon",
-						other.Program, h.Version, h.Protocol, tildePath(cfg.Home))
+						other.Program, h.Version, h.Protocol, attach.Tilde(cfg.Home))
 				}
 				if h.Machine != "" {
 					s += fmt.Sprintf("\nmachine %s, pid %d, up %s", h.Machine, h.PID, time.Since(h.Started).Round(time.Second))
@@ -351,7 +373,7 @@ const fileAutostartLock = "autostart.lock"
 // starters, so two commands run at once start one daemon.
 func (a *app) autostart(ctx context.Context, cfg *config.Config) error {
 	if o := a.otherStarting(ctx); o != nil {
-		return fmt.Errorf("%s's daemon (home %s) has just started, and potluck's commands use it: run this again", o.Program, tildePath(o.Home))
+		return fmt.Errorf("%s's daemon (home %s) has just started, and potluck's commands use it: run this again", o.Program, attach.Tilde(o.Home))
 	}
 	if err := cfg.EnsureHome(); err != nil {
 		return err
@@ -369,7 +391,7 @@ func (a *app) autostart(ctx context.Context, cfg *config.Config) error {
 	if err != nil || already {
 		return err
 	}
-	fmt.Fprintf(a.host.Stderr, "%s: started the daemon (%s)\n", a.name(), tildePath(cfg.Home))
+	fmt.Fprintf(a.host.Stderr, "%s: started the daemon (%s)\n", a.name(), attach.Tilde(cfg.Home))
 	return nil
 }
 
@@ -398,7 +420,7 @@ func (a *app) startDetached(ctx context.Context, cfg *config.Config, tailnet boo
 	p, err := spawnDetached(ctx, swap.Detach{Argv: argv, Env: daemonEnv(os.Environ(), cfg.Home),
 		Log: cfg.Path(config.FileLog), Home: cfg.Home})
 	if err != nil {
-		return false, err
+		return false, api.Plainly(err, "This Mac wouldn't start Potluck. Try again."+plainGetHelp)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -407,13 +429,14 @@ func (a *app) startDetached(ctx context.Context, cfg *config.Config, tailnet boo
 		}
 		select {
 		case <-p.Exited: // say why (another daemon holds the lock), not "not running"
-			return false, fmt.Errorf("daemon did not start: %s", lastLine(cfg.Path(config.FileLog)))
+			return false, api.Plainly(fmt.Errorf("daemon did not start: %s", lastLine(cfg.Path(config.FileLog))), "Potluck didn't start. Try again."+plainGetHelp)
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-time.After(5 * time.Millisecond):
 		}
 		if time.Now().After(deadline) {
-			return false, fmt.Errorf("daemon did not answer within 10s; see %s", cfg.Path(config.FileLog))
+			return false, api.Plainly(fmt.Errorf("daemon did not answer within 10s; see %s", cfg.Path(config.FileLog)),
+				"Potluck is taking longer than usual to start. Wait a minute, then press Check again."+plainGetHelp)
 		}
 	}
 }
@@ -439,19 +462,4 @@ func lastLine(path string) string {
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
 	return lines[len(lines)-1]
-}
-
-// tildePath shows p under the user's home as ~/...
-func tildePath(p string) string {
-	h, err := os.UserHomeDir()
-	if err != nil || h == "" {
-		return p
-	}
-	if rel, err := filepath.Rel(h, p); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
-		if rel == "." {
-			return "~"
-		}
-		return "~/" + rel
-	}
-	return p
 }

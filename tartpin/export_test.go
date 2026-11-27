@@ -2,8 +2,8 @@ package tartpin
 
 import "errors"
 
-// SetBeforeMove runs f just before Install's move, for the test of a lender
-// putting their own tart.app in place while an install unpacks.
+// SetBeforeMove runs f just before Install's or Remove's move, for the test of a lender
+// putting their own tart.app in place meanwhile.
 func SetBeforeMove(f func()) (restore func()) {
 	old := beforeMove
 	beforeMove = f

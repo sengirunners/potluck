@@ -76,18 +76,41 @@ type Record struct {
 type recordFile struct {
 	Path    string   `json:"path"`
 	Bundles []Record `json:"bundles"`
+	// UsedElsewhere is MarkUsedElsewhere's fact.
+	UsedElsewhere bool `json:"used_elsewhere,omitempty"`
 }
 
-func (p Place) records() []Record {
+func (p Place) read() (f recordFile) {
 	data, err := os.ReadFile(p.RecordFile)
+	if err != nil || json.Unmarshal(data, &f) != nil || f.Path != p.App() {
+		return recordFile{}
+	}
+	return f
+}
+
+func (p Place) records() []Record { return p.read().Bundles }
+
+// UsedElsewhere reports MarkUsedElsewhere's fact.
+func (p Place) UsedElsewhere() bool { return p.read().UsedElsewhere }
+
+// MarkUsedElsewhere notes in the installs' record, when there is one, that
+// this Tart was used in a directory other than its usual one. The record
+// outlives what showed it (a home, the update job).
+func (p Place) MarkUsedElsewhere() error {
+	if !lexists(p.RecordFile) {
+		return nil
+	}
+	unlock, err := p.lock()
 	if err != nil {
+		return err
+	}
+	defer unlock()
+	f := p.read()
+	if len(f.Bundles) == 0 || f.UsedElsewhere {
 		return nil
 	}
-	var f recordFile
-	if json.Unmarshal(data, &f) != nil || f.Path != p.App() {
-		return nil
-	}
-	return f.Bundles
+	f.UsedElsewhere = true
+	return p.write(f)
 }
 
 // made is the record of the bundle at app, when it is one Potluck made and
@@ -347,7 +370,7 @@ func (p Place) Install(tarball string, b Build) (Result, error) {
 		return res, err
 	}
 	defer unlock()
-	p.sweep()
+	p.sweep(staleStage)
 	plan, err := p.Plan(b)
 	if err != nil {
 		return res, err
@@ -430,20 +453,40 @@ func (p Place) Install(tarball string, b Build) (Result, error) {
 	return res, nil
 }
 
-// lock holds RecordFile's lock until unlock: one install at a time.
-func (p Place) lock() (unlock func(), err error) {
-	if err := os.MkdirAll(filepath.Dir(p.RecordFile), 0o700); err != nil {
-		return nil, err
-	}
-	f, err := os.OpenFile(p.RecordFile+".lock", os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+// lock holds RecordFile's lock until unlock: one install or removal at a time.
+func (p Place) lock() (unlock func(), err error) { return p.flock(syscall.LOCK_EX) }
+
+// flock takes the lock as how says. A removal deletes the lock file: a run
+// that waited on the deleted one takes the one now there.
+func (p Place) flock(how int) (unlock func(), err error) {
+	name := p.RecordFile + ".lock"
+	for try := 0; ; try++ {
+		if err := os.MkdirAll(filepath.Dir(p.RecordFile), 0o700); err != nil {
+			return nil, err
+		}
+		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE, 0o600)
+		// A removal took the folder meanwhile (macOS: EINVAL while it goes).
+		if (errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.EINVAL)) && try < 100 {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := syscall.Flock(int(f.Fd()), how); err != nil {
+			f.Close()
+			return nil, err
+		}
+		held, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return nil, err
+		}
+		if now, err := os.Stat(name); err == nil && os.SameFile(held, now) {
+			return func() { f.Close() }, nil
+		}
 		f.Close()
-		return nil, err
 	}
-	return func() { f.Close() }, nil
 }
 
 // Sweep removes the work folders interrupted installs left in AppsDir.
@@ -453,11 +496,12 @@ func (p Place) Sweep() error {
 		return err
 	}
 	defer unlock()
-	p.sweep()
+	p.sweep(staleStage)
 	return nil
 }
 
-func (p Place) sweep() {
+// sweep removes the work folders older than age. Lock held.
+func (p Place) sweep(age time.Duration) {
 	ents, err := os.ReadDir(p.AppsDir)
 	if err != nil {
 		return
@@ -467,7 +511,7 @@ func (p Place) sweep() {
 		if !e.IsDir() || !swapped && !strings.HasPrefix(e.Name(), stagePrefix) {
 			continue
 		}
-		if fi, err := e.Info(); err != nil || time.Since(fi.ModTime()) <= staleStage {
+		if fi, err := e.Info(); err != nil || time.Since(fi.ModTime()) <= age {
 			continue
 		}
 		dir := filepath.Join(p.AppsDir, e.Name())
@@ -475,13 +519,18 @@ func (p Place) sweep() {
 			if _, ok := p.made(app); !ok {
 				continue
 			}
+			// Half deleted, it is still known as Potluck's under this name.
+			known := filepath.Join(p.AppsDir, stagePrefix+strings.TrimPrefix(e.Name(), swapPrefix))
+			if os.Rename(dir, known) == nil {
+				dir = known
+			}
 		}
 		os.RemoveAll(dir)
 	}
 }
 
 // Test seams: swapApps is swap, and beforeMove runs just before a bundle
-// moves to App().
+// moves to App() (Install) or away from it (Remove).
 var (
 	swapApps   = swap
 	beforeMove = func() {}
@@ -571,7 +620,11 @@ func unpack(tarball, dir string) error {
 
 // writeRecords replaces RecordFile, synced.
 func (p Place) writeRecords(recs []Record) error {
-	data, err := json.MarshalIndent(recordFile{Path: p.App(), Bundles: recs}, "", "  ")
+	return p.write(recordFile{Path: p.App(), Bundles: recs, UsedElsewhere: p.UsedElsewhere()})
+}
+
+func (p Place) write(f recordFile) error {
+	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}

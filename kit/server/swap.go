@@ -197,7 +197,8 @@ func (dm *Daemon) noteUpdate(u api.UpdateCheck) {
 // installed, the hold switch, the last update check, and the releases it
 // vouches for (ran release.Soak with no restart, the one it runs now
 // included once it has) or vetoes (failed here), and the update job it can
-// start (core.Deps.UpdateJob, read each time).
+// start (core.Deps.UpdateJob, read each time) and the release repositories its
+// updater reads (core.Deps.UpdateSources).
 func (dm *Daemon) zmState() *api.MachineZm {
 	d := dm.Deps
 	home := d.Config.Home
@@ -215,6 +216,9 @@ func (dm *Daemon) zmState() *api.MachineZm {
 	}
 	if d.UpdateJob != nil {
 		z.Job = d.UpdateJob()
+	}
+	if d.UpdateSources != nil {
+		z.Sources = slices.Clone(d.UpdateSources())
 	}
 	dm.swap.mu.Lock()
 	if u := dm.swap.update; u != nil {

@@ -76,7 +76,8 @@ func (r JITRun) Check(repo string) error {
 // this marker naming its own GITHUB_RUN_ID, GITHUB_WORKFLOW_REF (compared
 // without case) and GITHUB_REF; the plain marker (the run's id alone) never
 // matches it. The broker writes it only after its own checks of that job
-// and once that job's own credentials, and nothing else, are in the box.
+// and once that job's own credentials, and nothing else, are in the box
+// (none, for a job no grant names: its box was issued nothing).
 func ReguardMarker(r JITRun) string {
 	return strconv.FormatInt(r.ID, 10) + " " + strings.ToLower(r.WorkflowRef) + " " + r.Ref
 }

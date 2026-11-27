@@ -42,6 +42,7 @@ type doorGitHub struct {
 	runs     map[int64]doorRun
 	compare  map[string]string // head sha -> compare status (default identical)
 	tags     map[string]bool   // tag names that exist (default none)
+	branches map[string]bool   // branches besides main that exist (default none): a compare with another is 404
 	fail     map[string]bool   // "run", "compare", "tag": GitHub answers 500
 	refuse   string            // a permission GitHub refuses to mint (422)
 	gate     chan struct{}     // non-nil: the next mint waits for it (the fake's lock let go meanwhile)
@@ -96,7 +97,7 @@ func newDoorFixture(t *testing.T, issuer bool, grants ...[2]string) *doorFixture
 
 // newDoorFixtureOn is newDoorFixture on fixture f.
 func newDoorFixtureOn(t *testing.T, f *fixture, issuer bool, grants ...[2]string) *doorFixture {
-	d := &doorGitHub{runs: map[int64]doorRun{}, compare: map[string]string{}, tags: map[string]bool{}, fail: map[string]bool{},
+	d := &doorGitHub{runs: map[int64]doorRun{}, compare: map[string]string{}, tags: map[string]bool{}, branches: map[string]bool{}, fail: map[string]bool{},
 		files: map[string]string{".github/workflows/x.yml": pinnedWorkflow, ".github/actions/setup/action.yml": "runs:\n  using: composite\n  steps:\n    - run: true\n      shell: bash\n"}}
 	df := &doorFixture{f, d}
 	f.gh.mu.Lock()
@@ -194,7 +195,7 @@ func (df *doorFixture) answer(w http.ResponseWriter, r *http.Request) bool {
 	case r.Method == "GET" && p == "/repos/acme/app":
 		fmt.Fprintf(w, `{"id":%d,"full_name":"acme/app","private":true,"visibility":"private","fork":false,"default_branch":"main"}`, repoID("acme/app"))
 		return true
-	case r.Method == "GET" && strings.HasPrefix(p, "/repos/acme/app/compare/main..."):
+	case r.Method == "GET" && strings.HasPrefix(p, "/repos/acme/app/compare/"):
 		d.compares++
 		tok := g.tokens[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
 		if tok.repo != "acme/app" || tok.perms != "map[contents:read metadata:read]" {
@@ -206,7 +207,13 @@ func (df *doorFixture) answer(w http.ResponseWriter, r *http.Request) bool {
 			w.WriteHeader(500)
 			return true
 		}
-		st := d.compare[strings.TrimPrefix(p, "/repos/acme/app/compare/main...")]
+		branch, sha, _ := strings.Cut(strings.TrimPrefix(p, "/repos/acme/app/compare/"), "...")
+		if branch != "main" && !d.branches[branch] {
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{"message":"Not Found"}`)
+			return true
+		}
+		st := d.compare[sha]
 		if st == "" {
 			st = "identical"
 		}
@@ -408,11 +415,12 @@ func (df *doorFixture) startOn(job, run int64, repo, runner string) []byte {
 	return startEvent(job, run, repo, runner)
 }
 
-// applied delivers body and waits until the broker has applied it.
+// applied delivers body and waits until the broker has applied it, and
+// what it queued (a job served again: a box step) too.
 func (df *doorFixture) applied(t *testing.T, body []byte) {
 	t.Helper()
 	df.deliver(t, "workflow_job", body)
-	eventually(t, "applied", func() bool { return df.svc.Undone(context.Background()) == 0 })
+	eventuallyBox(t, "applied", func() bool { return df.svc.Undone(context.Background()) == 0 })
 	time.Sleep(200 * time.Millisecond)
 }
 

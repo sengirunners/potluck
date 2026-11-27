@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sengirunners/potluck/imagepins"
+	"github.com/sengirunners/potluck/kit/api"
 )
 
 // tartImageBudgetGB is the free disk, in GB, one image needs where Tart
@@ -59,7 +60,7 @@ func DiskNeedGB(images []string) (need int, estimate string) {
 // only when the disk is short; when it cannot be read (or run is nil), every
 // image counts as still to be pulled and the refusal says so. note also says
 // when an image's budget is an estimate.
-func tartDiskCheck(ctx context.Context, run Runner, r Report, images []string) (note string, err error) {
+func tartDiskCheck(ctx context.Context, run Runner, r Report, home string, images []string) (note string, err error) {
 	all, estimate := DiskNeedGB(images)
 	if r.TartDiskUnread != "" {
 		return fmt.Sprintf("the disk check was skipped: could not read the free disk in %s, where Tart stores images (%s); make sure about %d GB is free there before lending",
@@ -72,7 +73,7 @@ func tartDiskCheck(ctx context.Context, run Runner, r Report, images []string) (
 		return estimate, nil
 	}
 	layer, _ := r.Layer("tart")
-	toPull, need, listErr := tartPullNeed(ctx, run, layer.CLI, images)
+	toPull, need, listErr := tartPullNeed(ctx, run, r.TartDir, home, layer.CLI, images)
 	if r.TartFreeGB >= float64(need) {
 		return estimate, nil
 	}
@@ -84,21 +85,28 @@ func tartDiskCheck(ctx context.Context, run Runner, r Report, images []string) (
 	if listErr != nil {
 		why = fmt.Sprintf(" (Tart's image list could not be read: %v; so every image counts as still to pull)", listErr)
 	}
-	return "", fmt.Errorf("not enough disk to lend %s: only %.0f GB free in %s, where Tart stores images, and the pull, the unpacked image and its boxes need at least %d GB%s. Free some space, or move Tart's images to a bigger disk: set TART_HOME there in the shell that runs this, and in the environment of the potluck daemon too (a daemon started from another shell still looks in ~/.tart: stop it with `potluck daemon stop`, and run this again from the shell with TART_HOME set); nothing was downloaded%s",
-		strings.Join(names, ", "), r.TartFreeGB, r.TartDir, need, why, estimateSuffix(estimate))
+	return "", api.Plainly(fmt.Errorf("not enough disk to lend %s: only %.0f GB free in %s, where Tart stores images, and the pull, the unpacked image and its boxes need at least %d GB%s. Free some space, or move Tart's images to a bigger disk: set TART_HOME there in the shell that runs this, and in the environment of the potluck daemon too (a daemon started from another shell still looks in ~/.tart: stop it with `potluck daemon stop`, and run this again from the shell with TART_HOME set); nothing more was downloaded%s",
+		strings.Join(names, ", "), r.TartFreeGB, r.TartDir, need, why, estimateSuffix(estimate)),
+		fmt.Sprintf("There isn't enough free disk space: %.0f GB is free and at least %d GB is needed. Free some space, then try again. Nothing more was downloaded.", r.TartFreeGB, need))
 }
 
-// tartPullNeed is which of images Tart (cli) still has to pull, and the free
-// disk in GB they need: an image Tart already has counts for nothing. When
-// its list cannot be read (err), every image counts.
-func tartPullNeed(ctx context.Context, run Runner, cli string, images []string) (toPull []string, need int, err error) {
+// tartPullNeed is which of images Tart (cli, whose directory is dir) still has
+// to pull for a share on home, and the free disk in GB they need: an image
+// Tart already has counts for nothing, and what Potluck's unfinished
+// downloads already take is there to use (tartpull.go). When its list cannot
+// be read (err), every image counts.
+func tartPullNeed(ctx context.Context, run Runner, dir, home, cli string, images []string) (toPull []string, need int, err error) {
 	cached, err := tartCachedImages(ctx, run, cli)
 	for _, im := range images {
 		if !cached[im] {
 			toPull = append(toPull, im)
+			gb, _, _ := tartImageBudgetGB(im)
+			need = max(need, partialNeedGB(dir, im, gb))
 		}
 	}
-	need, _ = DiskNeedGB(toPull)
+	if need > 0 {
+		need = max(0, need-deadPartialsGB(dir, home, toPull))
+	}
 	return toPull, need, err
 }
 
