@@ -251,7 +251,7 @@ func TestOCICloneDNS(t *testing.T) {
 	for _, n := range []string{"none", "container:abc", "ns:/proc/1/ns/net"} {
 		o, dir := newFakeOCI(t, n)
 		o.dns, o.stateDir = []string{"1.1.1.1"}, t.TempDir()
-		if args := createArgs(o, dir, "n"); len(flag(args, "--dns")) > 0 || len(flag(args, "--mount")) > 0 {
+		if args := createArgs(o, dir, "n"); len(flag(args, "--dns")) > 0 || len(withoutDiskTmp(t, "n", flag(args, "--mount"))) > 0 {
 			t.Errorf("network %s got DNS: %v", n, args)
 		}
 	}
@@ -274,7 +274,7 @@ func TestOCICloneDNS(t *testing.T) {
 		if got := strings.Join(flag(args, "--dns"), ","); got != "1.1.1.1,8.8.8.8" {
 			t.Errorf("%s --dns %q: %v", cli, got, args)
 		}
-		ms := flag(args, "--mount")
+		ms := withoutDiskTmp(t, "a", flag(args, "--mount"))
 		if len(ms) != 1 {
 			t.Fatalf("%s: want one mount, the resolv.conf: %v", cli, args)
 		}
@@ -292,7 +292,7 @@ func TestOCICloneDNS(t *testing.T) {
 		}
 		// Each box has its own file; the first's is untouched by the second.
 		o.dns = []string{"9.9.9.9"}
-		other := flag(createArgs(o, dir, "b"), "--mount")
+		other := withoutDiskTmp(t, "b", flag(createArgs(o, dir, "b"), "--mount"))
 		if len(other) != 1 || !strings.Contains(other[0], "source="+filepath.Join(o.stateDir, "oci-resolv", "b.conf")+",") {
 			t.Errorf("%s: a second box's mount %v", cli, other)
 		}
@@ -614,8 +614,11 @@ func TestOCILayer(t *testing.T) {
 	if !strings.Contains(strings.Join(args, " "), "--entrypoint sh") || strings.Contains(strings.Join(args, " "), "infinity") {
 		t.Errorf("PID 1 must be a plain sh loop: %v", args)
 	}
-	for _, never := range []string{"-v", "--volume", "--mount", "--privileged", "--cap-add", "--device"} {
-		for _, a := range args {
+	for i, a := range args {
+		if a == "--mount" && i+1 < len(args) && args[i+1] == "type=volume,source=zmrt-x-r1-anon0,target="+ociDiskTmp {
+			continue // the box's own /tmp (ociDiskTmp)
+		}
+		for _, never := range []string{"-v", "--volume", "--mount", "--privileged", "--cap-add", "--device"} {
 			if a == never {
 				t.Errorf("create has %q: %v", never, args)
 			}

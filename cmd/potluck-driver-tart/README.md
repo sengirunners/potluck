@@ -179,13 +179,17 @@ potluck-driver-tart host set <open|drain|closed|auto> [--for 2h | --until 23:00]
 
 Linux boxes lend throwaway machines with the same driver: build
 it with `GOOS=linux go build ./cmd/potluck-driver-tart`. Each run is a container under a runtime that is a real boundary,
-created with no mounts (on a network, but a read-only `/etc/resolv.conf`: `oci_dns`), no new privileges (but with
-`root=on`, below) and a process limit, its checkout copied in, removed after.
+created with no host mounts (on a network, but a read-only `/etc/resolv.conf`: `oci_dns`), no new privileges (but with
+`root=on`, below) and a process limit, its checkout copied in, removed after. Its only volumes are its own (each of the
+image's `VOLUME` directories, `<vm>-anon<N>`; under gVisor `/tmp` too), deleted with it.
 
 - **Kata Containers** where `/dev/kvm` exists (bare metal, or a VM with nested virtualisation): each run gets its
   own Firecracker or Cloud Hypervisor microVM. Install Kata and register it with the container engine
   (`/etc/docker/daemon.json` `runtimes`, or containerd's `io.containerd.kata.v2`).
 - **gVisor** (`runsc`) where there is no KVM: a user-space kernel, weaker than a VM, far stronger than runc.
+  runsc would mount a tmpfs of its own at `/tmp`, which is the box's memory: a job writing a few GB of build cache
+  there is OOM-killed at its size. So a gVisor box's `/tmp` is a volume of its own on the engine's disk (docs/hosts.md,
+  "A box's files are not its memory").
 - The image needs `sh`, `git` and, for a box, `nc` and `ip` (the network checks). `buildpack-deps:bookworm-scm`
   has no netcat, so build on it, then push and pin the result by digest:
 

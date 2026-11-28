@@ -181,19 +181,19 @@ func TestOCIBoxVolumesNamedAndDestroyed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"type=volume,source=b1-anon0,target=/cache", "type=volume,source=b1-anon1,target=/var/lib/data",
-		"type=volume,source=b1-home,target=/home/u"} {
+	for _, want := range []string{"type=volume,source=b1-anon0,target=/cache", "type=volume,source=b1-anon1,target=/tmp",
+		"type=volume,source=b1-anon2,target=/var/lib/data", "type=volume,source=b1-home,target=/home/u"} {
 		if !strings.Contains(string(args), want+"\n") {
 			t.Errorf("create args lack %q:\n%s", want, args)
 		}
 	}
-	if strings.Contains(string(args), "b1-anon2") {
+	if strings.Contains(string(args), "b1-anon3") {
 		t.Errorf("HOME, already a volume, got a second one:\n%s", args)
 	}
 	addFakeVols(t, dir, "b2-home", "b2-anon0", "b1x-home")
 	o.Destroy("b1", 0)
 	have := fakeVols(t, dir)
-	for _, v := range []string{"b1-home", "b1-anon0", "b1-anon1"} {
+	for _, v := range []string{"b1-home", "b1-anon0", "b1-anon1", "b1-anon2"} {
 		if have[v] {
 			t.Errorf("Destroy left %s", v)
 		}
@@ -238,4 +238,62 @@ func TestOCIRmVolumesKeepsAMountedVolume(t *testing.T) {
 		t.Errorf("a volume that is not there: %v", err)
 	}
 	noForcedVolumeRm(t, dir)
+}
+
+// withoutDiskTmp is ms without the one mount every gVisor box vm gets, its
+// own volume at /tmp (ociDiskTmp), which it must have.
+func withoutDiskTmp(t *testing.T, vm string, ms []string) []string {
+	t.Helper()
+	own := "type=volume,source=" + ociAnonVolume(vm, 0) + ",target=" + ociDiskTmp
+	var out []string
+	for _, m := range ms {
+		if m != own {
+			out = append(out, m)
+		}
+	}
+	if len(out) == len(ms) {
+		t.Errorf("box %s has no volume of its own at %s: %v", vm, ociDiskTmp, ms)
+	}
+	return out
+}
+
+// A gVisor box's /tmp is a volume of its own on the CLI's disk, never
+// runsc's tmpfs, which is box memory (zm-eakh.12.47.10.10.13): one volume
+// however the image or another mount spells it, none when another create
+// flag mounts /tmp already, and Kata's /tmp (its guest kernel's) is left
+// alone.
+func TestOCIDiskTmp(t *testing.T) {
+	o, dir := newFakeOCI(t, "none")
+	vols := filepath.Join(dir, "images", "img.volumes")
+	if err := os.WriteFile(filepath.Join(dir, "images", "img"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		runtime, volumes string
+		taken            []string
+		want             []string
+	}{
+		{"runsc", "", nil, []string{"type=volume,source=b-anon0,target=/tmp"}},
+		{"runsc-root", "/data\n", nil, []string{"type=volume,source=b-anon0,target=/data", "type=volume,source=b-anon1,target=/tmp"}},
+		{"runsc", "/tmp/\n", nil, []string{"type=volume,source=b-anon0,target=/tmp"}},
+		{"runsc", "", []string{"--mount", "type=volume,source=x,target=/tmp/"}, nil},
+		{"kata", "", nil, nil},
+		{"kata", "/tmp\n", nil, []string{"type=volume,source=b-anon0,target=/tmp"}},
+	} {
+		if err := os.WriteFile(vols, []byte(c.volumes), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o.runtime = c.runtime
+		a, err := o.anonArgs("img", "b", c.taken)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for i := 1; i < len(a); i += 2 {
+			got = append(got, a[i])
+		}
+		if strings.Join(got, " ") != strings.Join(c.want, " ") {
+			t.Errorf("%s, VOLUME %q, taken %v: mounts %v, want %v", c.runtime, c.volumes, c.taken, got, c.want)
+		}
+	}
 }

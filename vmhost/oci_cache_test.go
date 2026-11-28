@@ -34,7 +34,7 @@ func TestOCICacheVolume(t *testing.T) {
 		if args[len(args)-3] != "zm-linux-ci" {
 			t.Fatalf("create's image is not where it was: %v", args)
 		}
-		return ms
+		return withoutDiskTmp(t, vm, ms)
 	}
 	o, dir := newFakeOCI(t, "none")
 	if ms := mounts(o, dir, "a"); len(ms) != 0 || len(env) != 0 {

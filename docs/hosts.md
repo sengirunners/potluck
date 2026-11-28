@@ -957,6 +957,38 @@ Network details for each layer are in `docs/network.md`. Adding a layer is in `d
   directory.
 - A waiting `output` on a terminal looks for new bytes every 10 ms, any other every 50 ms.
 
+### A box's files are not its memory
+
+On `vm=oci` a box's memory size (`--memory`) is what its programs use; the files it writes go to the container
+engine's disk, as page cache the kernel writes back and gives back under pressure.
+
+- gVisor mounts a tmpfs of the sentry's at `/tmp` when the container mounts nothing there and the image's `/tmp` is
+  empty. A tmpfs file is sandbox memory, charged to the box's memory limit and never given back while the file is
+  there: a Go CI job with `HOME` from `mktemp -d` (its build cache and test files under `/tmp`) was OOM-killed on a
+  2 vCPU / 8 GB box.
+- So every gVisor box gets a volume of its own at `/tmp`, made like those for the image's `VOLUME` directories
+  (`<vm>-anon<N>`: docker copies the image's `/tmp` in, its mode `1777` with it, an empty one too; deleted with the
+  box, and by the sweep after a failed destroy). The box's `/proc/mounts` then shows `/tmp` as runsc's gofer mount
+  (`9p`), not `tmpfs`. An image that names `/tmp` a `VOLUME` gets the one volume. Measured on Docker only, the one CLI
+  isolated boxes use.
+- The root needs nothing: runsc's root overlay (`overlay2` `root:self`) keeps its upper layer in a file on the same
+  disk, which reclaims the same way. `/dev/shm` stays a tmpfs (64 MB; box secrets live there).
+- Kata's `/tmp` is its guest kernel's and is unchanged.
+- Measured 2026-11-27 on runsc release-20261019.0, docker 29.1, cgroup v2, writing 5 GiB (`head -c 1G
+  /dev/urandom`, five files) in a box with `--memory` and no swap. Before, in `/tmp`: shmem 5,120 MiB, of which none
+  could be reclaimed (5,138 MiB in use after `memory.reclaim`); with a 2 GB limit the sandbox was OOM-killed. After:
+  shmem 0, 18 MiB in use after reclaim, and the same 5 GiB written under a 2 GB limit. The root (`HOME` on it) was
+  already 27 MiB after reclaim. `go build -a std` with `GOCACHE` in `/tmp` took 12.1 s on the tmpfs and 12.0 to
+  12.8 s on the volume (4 CPUs).
+- `docker=on` (rootless Docker, its runtime directory and socket in `/tmp/zm-docker`) works the same on the volume:
+  Potluck's Linux image under `runsc-root` started `zm-dockerd`, ran a container, and started it again after a
+  `docker restart`.
+- Disk: what a box writes to `/tmp` is now on the engine's disk, as its root's writes already were, and stays there
+  until the box is deleted. The free-disk floor (`persist_min_free_gb`, `--keep-free-gb`) is checked when a box
+  starts, not while it runs: a running box can fill the disk through `/tmp` as it already could through its root.
+  There is no per-box byte cap on either yet.
+- A kept box's `/tmp` survives its stops, as Kata's does (`zm-dockerd` starts its runtime directory under it clean).
+
 ### Kept disks
 
 Layers Tart and OCI; Incus not yet.

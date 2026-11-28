@@ -15,7 +15,8 @@ import (
 //     podman and nerdctl would otherwise give an anonymous volume: a volume
 //     named for its box, so a sweep can tell whose it is after the container
 //     is gone (an anonymous one names nothing; its container's rm -v is the
-//     only thing that ever deletes it).
+//     only thing that ever deletes it). Under gVisor /tmp is one too
+//     (ociDiskTmp).
 //
 // Destroy deletes them once the container is gone, and the sweep deletes
 // those of any box it does not keep, so one that outlived a failed Destroy or
@@ -152,9 +153,24 @@ func (o ociCLI) SweepLeaks(keep func(vm string) bool) {
 	}
 }
 
+// ociDiskTmp is the directory a gVisor box gets a volume of its own at, as
+// if its image named it a VOLUME. runsc mounts a tmpfs of the sentry's at
+// /tmp whenever the container's spec mounts nothing there and the image's
+// /tmp is empty, and a tmpfs page is the sandbox's memory, charged to the
+// box's memory limit and never given back while the file is there: a job
+// that writes its build cache or test files under /tmp (a HOME from mktemp
+// -d) was OOM-killed at the box's size with most of it in that tmpfs
+// (zm-eakh.12.47.10.10.13). With a mount there, runsc leaves /tmp to the
+// gofer, and the volume's files are on the CLI's disk: page cache the
+// kernel writes back and reclaims. The root itself needs nothing: runsc's
+// root overlay (overlay2 root:self) keeps its upper layer in a file on that
+// disk, which reclaims the same way. Kata's /tmp is its guest kernel's and
+// is left alone.
+const ociDiskTmp = "/tmp"
+
 // anonArgs mount a named volume of the box's own at each of the image's
-// VOLUME directories that the other create flags (a) do not mount already, so
-// none is anonymous. Each is mounted as an anonymous one is: the image's
+// VOLUME directories (and, under gVisor, ociDiskTmp) that the other create
+// flags (a) do not mount already, so none is anonymous. Each is mounted as an anonymous one is: the image's
 // files there copied in (docker and podman do this for a named volume as for
 // an anonymous one). Only --mount flags' target= counts as taken: clone gives
 // every mount that way.
@@ -175,6 +191,9 @@ func (o ociCLI) anonArgs(image, vm string, a []string) ([]string, error) {
 		}
 	}
 	var dirs []string
+	if o.gvisor() {
+		out += "\n" + ociDiskTmp
+	}
 	for _, d := range strings.Split(out, "\n") {
 		if d = strings.TrimSpace(d); d == "" {
 			continue
