@@ -202,17 +202,21 @@ func (s *Service) startRuntime(ctx context.Context, id, by int64, known *ghapp.J
 // gives a runner any queued job of its repository with its labels), to by:
 // the box's lease budget becomes by's limit plus the startup allowance, and
 // the box is renewed to it now, longer or shorter than id's. Where by has no
-// box of its own, by's row carries the box from here on and id, still queued
-// on GitHub, is served again with a new box (requeue; reserve asks GitHub
-// first). Where by has its own box, id keeps carrying this one: by's idle
-// runner is there for id's job. So too where id's box holds job grants of
-// id's run (it is guarded to that run and its secrets are issued through
-// id's row, issueSecrets; a row ended before any job claimed it still
-// guards the box: claimUnclaimed) or has an open guard (fork serving: the retire of
-// open runners, retireOpen, and the rules for who may take one go by id's
-// row). A box re-guarded to by's run (takeOver) is by's like any other; by's
-// rows of job grants for no box it holds go then, so nothing is ever issued
-// through them into the box by now carries.
+// box of its own, by's row carries the box from here on, with its runner's
+// guard (open_guard), and id, still queued on GitHub, is served again with a
+// new box at once (requeue; reserve asks GitHub first), as soon as a slot is
+// free: a box taken by another job never leaves its own job waiting for that
+// job to end. Where by has its own box, id keeps carrying this one: by's idle
+// runner is there for id's job. While job grants of id's run are still to be
+// issued into the box (planned, issuing, or ended before any job claimed it:
+// claimUnclaimed), or issued into this box to another job, id carries it
+// too, since they are issued through id's row (issueSecrets); startedOn
+// calls this again once issuing is over, and a row issued to by is found
+// through by's row from then on (carrierOf). A row issued into an earlier
+// box of id's, which went to its own taker, does not hold this one. A box
+// re-guarded to by's run (takeOver) is by's like any other; by's rows of job
+// grants for no box it holds go then, so nothing is ever issued through them
+// into the box by now carries.
 func (s *Service) followTaker(ctx context.Context, id, by int64) error {
 	holder, err := s.job(ctx, id)
 	if err != nil || holder.state != jobServing || holder.runs != by || holder.handle == "" {
@@ -231,15 +235,14 @@ func (s *Service) followTaker(ctx context.Context, id, by int64) error {
 	now := s.now().Unix()
 	carrier := id
 	var moved int64
-	if !holder.openGuard {
-		res, err := tx.ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = '', target = ?, handle = ?, runner = ?, ttl = ?, leased = ?, started = 1, runs = ?,
-			updated = ? WHERE job = ? AND state = ? AND NOT EXISTS (SELECT 1 FROM runners_job_secrets WHERE job = ? AND run = ? AND (state IN (?, ?, ?) OR `+claimUnclaimed+`))`, jobServing, holder.target,
-			holder.handle, holder.runner, ttl, holder.leased, by, now, by, jobRunning, id, holder.run, secretsPlanned, secretsIssuing, secretsIssued)
-		if err != nil {
-			return err
-		}
-		moved, _ = res.RowsAffected()
+	res, err := tx.ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = '', target = ?, handle = ?, runner = ?, ttl = ?, leased = ?, started = 1, runs = ?,
+		open_guard = ?, updated = ? WHERE job = ? AND state = ? AND NOT EXISTS (SELECT 1 FROM runners_job_secrets WHERE job = ? AND run = ?
+		AND (state IN (?, ?) OR (state = ? AND holder != ? AND handle = ?) OR `+claimUnclaimed+`))`, jobServing, holder.target,
+		holder.handle, holder.runner, ttl, holder.leased, by, holder.openGuard, now, by, jobRunning, id, holder.run, secretsPlanned, secretsIssuing, secretsIssued, by, holder.handle)
+	if err != nil {
+		return err
 	}
+	moved, _ = res.RowsAffected()
 	if moved > 0 {
 		carrier = by
 		res, err := tx.ExecContext(ctx, `UPDATE runners_jobs SET state = ?, why = ?, handle = '', started = 0, runs = 0, checked = 0, updated = ?

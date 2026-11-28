@@ -1743,7 +1743,12 @@ Other runs taking the runner:
 - `in_progress` is checked against the same rules: a runner of a serving job taken by a job they refuse (or cannot
   check) has its box released and the runner deleted at once, and its job is served again in the serve lane while
   GitHub still has it waiting (runner `potluck-<job id>-<n>`, request id `gh-<job id>-<n>`, 3 serves at
-  once, then one every 10 minutes). A job they would serve taking it is a swap, left alone, and uses up none of them. The refused job, if it is the pool's,
+  once, then one every 10 minutes). A job they would serve taking it is a swap, and uses up none of them: a taker
+  with no box of its own carries the box it took from then on (its lease follows the taker's time limit), and the
+  job the runner was minted for, while GitHub still has it queued, is served again at once, as soon as a slot is
+  free; it never waits for the taker to end. Where the box's job grants are to be issued, the box moves once they
+  are (to a job of the same run: the run's grants, as below). A taker with a box of its own leaves the box where it
+  is, for the job its own idle runner now waits for. The refused job, if it is the pool's,
   is recorded `ignored` with why ("refused when it started on runner ...").
 - On a runner with an open guard, every job that starts, the runner's own job too, is decided again
   at `in_progress` (unless its run already passed the full rules, its own branches and a trusted event, which hold
@@ -2198,8 +2203,8 @@ box, and nothing is minted before GitHub says the right job holds it.
   was cancelled before any job claimed its record holds nothing: a job of another run that took it is taken over the
   same way, and one of its run gets the run's grants there. A box with an open guard (fork serving) is never taken
   over: the driver's hook never holds a job for a re-guard marker under `open_if_private` (`docs/protocol.md`), so the
-  taker is stopped there whatever the broker does, gets nothing and is not re-run; the job the box was acquired for
-  is served again once the taker ends.
+  taker is stopped there whatever the broker does, gets nothing and is not re-run; the box goes to the taker's
+  record and the job it was acquired for is served again at once.
 - **Bounce**: when any of those checks refuses (or the driver cannot re-guard), the taker is stopped by the hook
   (killed, so none of its steps run, `if: always()` ones included), recorded to be re-run once GitHub fails it and
   its run completed (whichever of GitHub's `in_progress` and `completed` comes first, or the sweep), and the job the

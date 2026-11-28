@@ -830,7 +830,11 @@ func (s *Service) started(ctx context.Context, d delivery) error {
 	var taken string
 	var open bool
 	var level int
-	err := s.db().QueryRowContext(ctx, `SELECT job, why, open_guard, trusted FROM runners_jobs WHERE runner = ? AND state IN (?, ?) AND installation = ? AND repo = ? COLLATE NOCASE`,
+	// A job served again keeps its last runner's name for a moment after it is
+	// serving again (launch names the new one next): the record a job started
+	// on, which carries that runner's box now, is the one meant.
+	err := s.db().QueryRowContext(ctx, `SELECT job, why, open_guard, trusted FROM runners_jobs WHERE runner = ? AND state IN (?, ?) AND installation = ? AND repo = ? COLLATE NOCASE
+		ORDER BY started DESC LIMIT 1`,
 		name, jobServing, jobTaken, d.Installation.ID, d.Repo.FullName).Scan(&owner, &taken, &open, &level)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil // not a runner of ours, or already ended

@@ -645,8 +645,9 @@ func TestJobGrantTakeOverByATakerWithItsOwnBox(t *testing.T) {
 }
 
 // A box with an open guard (fork serving) is never taken over, nor its
-// taker bounced: B gets nothing there, A is not served again before B ends,
-// and B is not re-run.
+// taker bounced: B gets nothing there (its box's hook stops it) and keeps
+// the box until it ends, A, still queued, is served again at once, and B is
+// not re-run.
 func TestJobGrantOpenGuardIsNeverTakenOver(t *testing.T) {
 	f := newFixtureWith(t, func(c *config.Runners) { c.AllowForkPRs = true })
 	df := newDoorFixtureOn(t, f, true, grantGH)
@@ -657,13 +658,17 @@ func TestJobGrantOpenGuardIsNeverTakenOver(t *testing.T) {
 		t.Fatalf("A's guard %+v, want an open guard held to run 940", g)
 	}
 	df.applied(t, df.startOn(9411, 941, "acme/app", "potluck-9401"))
-	eventually(t, "A's box refused to B", func() bool { return df.svc.JobSecretsEver(ctx, 9401, "failed") })
+	eventuallyBox(t, "B keeps A's box, A served again", func() bool {
+		j := df.jobs(t)
+		return j[9411].State == "serving" && j[9411].Runner == "potluck-9401" && j[9401].Runner == "potluck-9401-2" &&
+			len(df.guards()) == 2 && df.svc.Undone(ctx) == 0
+	})
 	time.Sleep(500 * time.Millisecond)
 	if all, _ := df.issued(); len(all) != 0 || len(df.boxWrites()) != 0 {
 		t.Fatalf("issued %+v, box writes %v; want nothing anywhere", all, df.boxWrites())
 	}
-	if n := len(df.guards()); n != 1 {
-		t.Fatalf("%d acquires, want A's box alone (A is not served again before B ends)", n)
+	if n := len(df.guards()); n != 2 {
+		t.Fatalf("%d acquires, want A's first box and its new one", n)
 	}
 	df.failedOnGitHub(9411, 941)
 	df.applied(t, endOn(9411, 941, "failure", 1, "potluck-9401"))

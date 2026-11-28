@@ -31,8 +31,9 @@ const (
 // was minted for: GitHub gives a runner to any queued job of the repository
 // with its labels, so a fork's job (or a pull_request_target's) queued
 // beside an own branch's may take the own branch's runner, and runs there,
-// recorded as running on it; the own branch's job is served again only if
-// its box ends without it.
+// and carries that box from then on; the own branch's job, if GitHub still
+// has it queued, is served again at once (here GitHub has it running
+// elsewhere, so it is not).
 func TestForkJobRunsOnOwnBranchRunnerWhileForksAreServed(t *testing.T) {
 	for _, taker := range []string{"a fork's job", "a pull_request_target job"} {
 		t.Run(taker, func(t *testing.T) {
@@ -56,10 +57,9 @@ func TestForkJobRunsOnOwnBranchRunnerWhileForksAreServed(t *testing.T) {
 				t.Fatalf("an own branch's runner while forks are served is not guarded by the repository alone: %s", b)
 			}
 			f.deliver(t, "workflow_job", startEvent(7302, 732, "acme/app", "potluck-7301"))
-			eventually(t, "recorded running on the runner", func() bool {
+			eventually(t, "the taker carries the box", func() bool {
 				j := f.jobs(t)
-				return j[7302].State == "running" && strings.Contains(j[7302].Why, "running on runner potluck-7301") &&
-					j[7301].State == "serving" && f.svc.Undone(ctx) == 0
+				return j[7302].State == "serving" && j[7302].Runner == "potluck-7301" && j[7301].State != "serving" && f.svc.Undone(ctx) == 0
 			})
 			time.Sleep(200 * time.Millisecond)
 			if _, del := f.gh.snapshot(); len(del) != 0 || f.ready(t) != 1 || len(f.minted()) != 1 {
@@ -374,7 +374,10 @@ func TestOpenRunnerRefusesWhenGitHubDoesNotAnswer(t *testing.T) {
 			}
 			f.deliver(t, "workflow_job", startEvent(7202, 722, "acme/app", "potluck-7201"))
 			if answer == "on the second try" {
-				eventually(t, "runs", func() bool { return f.jobs(t)[7202].State == "running" && f.svc.Undone(ctx) == 0 })
+				eventually(t, "runs", func() bool {
+					j := f.jobs(t)[7202]
+					return j.State == "serving" && j.Runner == "potluck-7201" && f.svc.Undone(ctx) == 0
+				})
 				if _, del := f.gh.snapshot(); len(del) != 0 || f.ready(t) != 1 {
 					t.Fatalf("let through on the second try: deleted %v, %d boxes; want none, 1", del, f.ready(t))
 				}

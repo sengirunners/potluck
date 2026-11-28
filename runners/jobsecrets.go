@@ -343,7 +343,9 @@ const (
 // startedOn records that job d started on the runner of job owner (its
 // own, or a swap), then issues owner's box's job grants for d. Issuing runs
 // beside the delivery lane, so a slow GitHub or issuer never holds up the
-// completions (and revocations) queued behind it.
+// completions (and revocations) queued behind it. A box that kept carrying
+// owner while its job grants were to be issued (followTaker) goes to d once
+// issuing is over, whatever its outcome, and owner is served again.
 func (s *Service) startedOn(ctx context.Context, d delivery, owner int64) error {
 	if err := s.markStarted(ctx, owner, d.Job.ID); err != nil {
 		return err
@@ -352,6 +354,12 @@ func (s *Service) startedOn(ctx context.Context, d delivery, owner int64) error 
 	go func() {
 		defer s.wg.Done()
 		s.issueSecrets(ctx, d, owner)
+		if d.Job.ID == owner {
+			return
+		}
+		if err := s.followTaker(context.WithoutCancel(ctx), owner, d.Job.ID); err != nil {
+			s.logf("runners: job %d: giving its box to job %d, which took its runner: %v; it is served again when that job ends", owner, d.Job.ID, err)
+		}
 	}()
 	return nil
 }

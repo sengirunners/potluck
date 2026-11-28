@@ -94,7 +94,8 @@ func Status(targets []computeapi.RunTargetView, setup Setup) PoolStatus {
 	}
 	type candidate struct {
 		name   string
-		labels []string
+		labels []string // RunsOn's answer: a mapped label alone, or the pool request then its OS label
+		mac    bool
 		now    bool
 	}
 	var cands []candidate
@@ -107,7 +108,7 @@ func Status(targets []computeapi.RunTargetView, setup Setup) PoolStatus {
 		case e.Labels == nil:
 			st.Refused = append(st.Refused, t.Name+": "+e.Why)
 		default:
-			cands = append(cands, candidate{t.Name, e.Labels, e.Now})
+			cands = append(cands, candidate{t.Name, e.Labels, isMac(t), e.Now})
 			fits = append(fits, placement.FitOf(whenFree(t)))
 			if !e.Now {
 				st.Waiting = append(st.Waiting, t.Name+": "+e.Why)
@@ -122,10 +123,9 @@ func Status(targets []computeapi.RunTargetView, setup Setup) PoolStatus {
 	}
 	order := placement.Rank(fits)
 	rank := func(name string) int { return slices.Index(order, name) }
-	// Labels are the pool request followed by its OS label.
 	best := slices.MinFunc(cands, func(a, b candidate) int {
-		isMac := func(c candidate) int {
-			if c.labels[1] == "macos" {
+		mac := func(c candidate) int {
+			if c.mac {
 				return 0
 			}
 			return 1
@@ -136,9 +136,21 @@ func Status(targets []computeapi.RunTargetView, setup Setup) PoolStatus {
 			}
 			return 1
 		}
-		return cmp.Or(cmp.Compare(isMac(a), isMac(b)), cmp.Compare(free(a), free(b)), cmp.Compare(rank(a.name), rank(b.name)))
+		return cmp.Or(cmp.Compare(mac(a), mac(b)), cmp.Compare(free(a), free(b)), cmp.Compare(rank(a.name), rank(b.name)))
 	})
-	encoded, _ := json.Marshal([]string{"self-hosted", best.labels[1], best.labels[0]})
+	// self-hosted, then the OS label, then the pool request; a mapped label
+	// names its box on its own.
+	line := []string{"self-hosted"}
+	for _, l := range slices.Backward(best.labels) {
+		line = append(line, l)
+	}
+	encoded, _ := json.Marshal(line)
 	st.RunsOn = "runs-on: " + string(encoded)
 	return st
+}
+
+// isMac is whether box v runs macOS, as it describes its size (a box that
+// did not describe one is not taken for a Mac).
+func isMac(v computeapi.RunTargetView) bool {
+	return v.Describe != nil && v.Describe.Size != nil && placement.OSFits("macos", v.Describe.Size.OS)
 }

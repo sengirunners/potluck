@@ -7,6 +7,7 @@ import (
 
 	"github.com/sengirunners/potluck/computeapi"
 	"github.com/sengirunners/potluck/kit/api"
+	"github.com/sengirunners/potluck/kit/config"
 	"github.com/sengirunners/potluck/runners"
 )
 
@@ -151,5 +152,34 @@ func TestStatus(t *testing.T) {
 
 	if st := runners.Status(nil, statusSetup); st.RunsOn != "" || len(st.Waiting)+len(st.Refused) != 0 {
 		t.Fatalf("Status(nothing lent) = %+v", st)
+	}
+}
+
+// A pool with a label map answers a mapped label for a box it places a job
+// on: the runs-on line names it alone after self-hosted, and a Mac a mapped
+// label reaches is still named first.
+func TestStatusNamesAMappedLabel(t *testing.T) {
+	setup := statusSetup
+	setup.Labels = map[string]config.RunnersLabel{
+		"big-linux": {Size: "c4m16"},
+		"big-mac":   {Size: "c4m16", OS: "macos"},
+	}
+	linux := statusView("dev", "linux", nil)
+	linux.Describe.Size.CPU, linux.Describe.Size.MemoryMB = 4, 16384
+	if st := runners.Status([]computeapi.RunTargetView{linux}, setup); st.RunsOn != `runs-on: ["self-hosted","big-linux"]` {
+		t.Fatalf("Status(mapped linux) = %+v", st)
+	}
+	mac := statusView("mac", "darwin", away)
+	mac.Describe.Size.CPU, mac.Describe.Size.MemoryMB = 4, 16384
+	if st := runners.Status([]computeapi.RunTargetView{linux, mac}, setup); st.RunsOn != `runs-on: ["self-hosted","big-linux"]` && st.RunsOn != `runs-on: ["self-hosted","big-mac"]` {
+		t.Fatalf("Status(mapped linux and mac) = %+v", st)
+	} else if !strings.Contains(st.RunsOn, "big-mac") {
+		t.Fatalf("a Mac is named first: %+v", st)
+	}
+	// A box no mapped label places a job on keeps the pool label's line.
+	small := statusView("small", "linux", func(v *computeapi.RunTargetView) { v.Describe.Size.Name = "c2m4" })
+	small.Describe.Size.CPU, small.Describe.Size.MemoryMB = 2, 4096
+	if st := runners.Status([]computeapi.RunTargetView{small, linux}, setup); st.RunsOn == "" {
+		t.Fatalf("Status(mixed) = %+v", st)
 	}
 }
