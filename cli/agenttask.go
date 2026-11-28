@@ -332,27 +332,52 @@ func agentTask(ctx context.Context, c *client.Client, o agentTaskOptions) (res a
 			return "", err
 		}
 		box := daemonBox{c, bx.target, bx.id}
+		dir := agentTaskDir(bx.key)
+		// The prompt goes in beside the PATH probe: each is a round trip to
+		// the box, and the prompt in a box that cannot run the agent is
+		// harmless (the box ends). The credential goes only after both.
+		var promptErr error
+		var promptAt, promptDone time.Time
+		pctx, stopPrompt := context.WithCancel(ctx)
+		defer stopPrompt()
+		wrote := make(chan struct{})
+		go func() {
+			defer close(wrote)
+			promptAt = time.Now()
+			_, promptErr = boxcp.WriteFile(pctx, boxpush.Exec(c, bx.target, bx.id), dir+"/prompt", o.prompt, boxcp.Options{})
+			promptDone = time.Now()
+		}()
+		step := time.Now()
 		missing, err := agentrunners.Missing(ctx, box, o.adapter.Binary, "timeout")
+		o.timing.startStep("probe", step)
+		if err != nil || len(missing) > 0 { // the probe's answer is the error: the prompt's retries are not waited for
+			stopPrompt()
+		}
+		<-wrote
+		o.timing.startTook("prompt", promptDone.Sub(promptAt))
 		if err != nil {
 			return "", err
 		}
 		if len(missing) > 0 {
 			return "", fmt.Errorf("the sandbox has no %s on PATH: %s needs an image that ships it (the agent template's does)", strings.Join(missing, ", "), o.adapter.About)
 		}
-		dir := agentTaskDir(bx.key)
+		if promptErr != nil {
+			return "", fmt.Errorf("write the prompt into the sandbox: %w", promptErr)
+		}
+		step = time.Now()
 		taskArgv, err := o.prepareProxy(ctx, box, dir, argv)
+		if o.proxy.Profile != "" {
+			o.timing.startStep("proxy", step)
+		}
 		if err != nil {
 			return "", err
 		}
 		if o.proxy.Profile != "" {
 			res.Proxy = &o.proxy
 		}
-		if _, err := boxcp.WriteFile(ctx, boxpush.Exec(c, bx.target, bx.id), dir+"/prompt", o.prompt, boxcp.Options{}); err != nil {
-			return "", fmt.Errorf("write the prompt into the sandbox: %w", err)
-		}
 		fmt.Fprintf(o.errw, "%s: %s: starting %s\n", o.p.name(), sandboxID(bx.handle), o.adapter.About)
 		spawnArgv := append([]string{"sh", "-c", agenttasks.Entry, "potluck-agent-task", dir, pushed.Dir, b.Head, o.secretName, strconv.FormatFloat(o.timeout.Seconds(), 'f', -1, 64)}, taskArgv...)
-		return spawnAgentTask(ctx, box, spawnArgv, o.secretName, o.secret, int((o.timeout+o.finishGrace+time.Second-1)/time.Second), bx.key)
+		return spawnAgentTask(ctx, box, o.timing, spawnArgv, o.secretName, o.secret, int((o.timeout+o.finishGrace+time.Second-1)/time.Second), bx.key)
 	})
 	res.Last = tail.lines(agentTaskLast)
 	return res, err

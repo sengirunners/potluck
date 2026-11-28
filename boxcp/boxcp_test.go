@@ -553,14 +553,14 @@ func TestUploadRefusals(t *testing.T) {
 	ctx := context.Background()
 	exec, sh := refBox(t)
 	f := filepath.Join(t.TempDir(), "f")
-	write(t, f, []byte("x"), 0o644)
+	write(t, f, random(20<<10), 0o644) // over a chunk: the chunked copy
 	refuse := func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
 		if strings.Contains(req.Argv[2], "joined") {
 			return computeapi.RunTargetExec{Exit: 64, Stderr: "refused"}, nil
 		}
 		return exec(ctx, req)
 	}
-	if _, err := boxcp.Upload(ctx, refuse, f, "x", boxcp.Options{}); err == nil {
+	if _, err := boxcp.Upload(ctx, refuse, f, "x", boxcp.Options{ChunkSize: 8 << 10}); err == nil {
 		t.Fatal("a refused finish was taken")
 	}
 	if x := sh(`ls -A "$HOME/.potluck/push" 2>/dev/null | wc -l | tr -d ' '`); x.Stdout != "0\n" {
@@ -579,5 +579,89 @@ func TestUploadRefusals(t *testing.T) {
 	}
 	if _, err := boxcp.Upload(ctx, count, src, "y", boxcp.Options{}); err == nil || !strings.Contains(err.Error(), "temporary directory") || calls.Load() != 0 {
 		t.Fatalf("a source holding the temporary directory: %v (%d execs)", err, calls.Load())
+	}
+}
+
+// A file that fits one chunk goes in one exec: written where cp says, with
+// its mode, over a file already there, refused onto a directory; bytes
+// damaged on the way are sent again, never written; nothing is left for a
+// resume. One byte over a chunk takes the chunked copy.
+func TestUploadWholeFile(t *testing.T) {
+	ctx := context.Background()
+	exec, sh := refBox(t)
+	var calls atomic.Int32
+	count := func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
+		calls.Add(1)
+		return exec(ctx, req)
+	}
+	o := boxcp.Options{ChunkSize: 8 << 10}
+	local := t.TempDir()
+	data := random(8 << 10)
+	write(t, filepath.Join(local, "tool"), data, 0o755)
+	res, err := boxcp.Upload(ctx, count, filepath.Join(local, "tool"), "bin/", o)
+	if err != nil || calls.Load() != 1 || res.Chunks != 1 || res.Sent != 1 || !strings.HasSuffix(res.To, "/bin/tool") || res.Bytes != int64(len(data)) {
+		t.Fatalf("one chunk's file: %+v %v (%d execs)", res, err, calls.Load())
+	}
+	x := sh(`f=bin/tool; (sha256sum <"$f" 2>/dev/null || shasum -a 256 <"$f") | cut -c1-64; test -x "$f" && echo x; ls -A bin | wc -l | tr -d ' '; ls -A "$HOME/.potluck/push" 2>/dev/null | wc -l | tr -d ' '`)
+	if want := sum(data) + "\nx\n1\n0\n"; x.Stdout != want {
+		t.Fatalf("the box's copy: %+v, want %q", x, want)
+	}
+	calls.Store(0)
+	if res, err = boxcp.WriteFile(ctx, count, "bin/tool", []byte("again\n"), o); err != nil || calls.Load() != 1 || sh(`cat bin/tool`).Stdout != "again\n" {
+		t.Fatalf("over a file: %+v %v (%d execs)", res, err, calls.Load())
+	}
+	if _, err := boxcp.WriteFile(ctx, exec, "bin", []byte("x"), o); err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("onto a directory: %v", err)
+	}
+
+	var damaged atomic.Int32
+	damage := func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
+		if req.Encoding == computeapi.EncodingBase64 && damaged.Add(1) == 1 {
+			req.Stdin = base64.StdEncoding.EncodeToString([]byte("not the bytes"))
+		}
+		return exec(ctx, req)
+	}
+	if _, err := boxcp.WriteFile(ctx, damage, "notes/n.txt", []byte("the bytes\n"), o); err != nil || damaged.Load() != 2 || sh(`cat notes/n.txt`).Stdout != "the bytes\n" {
+		t.Fatalf("damaged once: %v (%d sends)", err, damaged.Load())
+	}
+	always := func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
+		req.Stdin = base64.StdEncoding.EncodeToString([]byte("not the bytes"))
+		return exec(ctx, req)
+	}
+	if _, err := boxcp.WriteFile(ctx, always, "notes/m.txt", []byte("x"), boxcp.Options{Retries: 2}); err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("always damaged: %v", err)
+	}
+	if x := sh(`ls -A notes | tr '\n' ' '`); x.Stdout != "n.txt " {
+		t.Fatalf("the box's notes after a damaged write: %q", x.Stdout)
+	}
+
+	// The answer lost after it wrote: sent again, the same path, one file,
+	// into an existing directory and at a new name alike.
+	for dest, want := range map[string]string{"bin/": "/bin/once", "fresh": "/fresh"} {
+		var sends atomic.Int32
+		lose := func(ctx context.Context, req computeapi.ExecRunTargetRequest) (computeapi.RunTargetExec, error) {
+			x, err := exec(ctx, req)
+			if sends.Add(1) == 1 {
+				return computeapi.RunTargetExec{}, api.Errorf(api.CodeUnavailable, "the relay dropped the answer")
+			}
+			return x, err
+		}
+		write(t, filepath.Join(local, "once"), []byte("once\n"), 0o644)
+		res, err := boxcp.Upload(ctx, lose, filepath.Join(local, "once"), dest, o)
+		if err != nil || sends.Load() != 2 || !strings.HasSuffix(res.To, want) {
+			t.Fatalf("%s, its answer lost: %+v %v (%d sends)", dest, res, err, sends.Load())
+		}
+		if x := sh(`cat "$HOME` + want + `"; ls -A "$(dirname "$HOME` + want + `")" | grep -c potluck-cp || true`); x.Stdout != "once\n0\n" {
+			t.Fatalf("%s after a resend: %q", dest, x.Stdout)
+		}
+	}
+	if x := sh(`ls -A bin | tr '\n' ' '`); x.Stdout != "once tool " {
+		t.Fatalf("bin after the resends: %q", x.Stdout)
+	}
+
+	calls.Store(0)
+	write(t, filepath.Join(local, "big"), random(8<<10+1), 0o644)
+	if res, err := boxcp.Upload(ctx, count, filepath.Join(local, "big"), "big", o); err != nil || res.Chunks != 2 || calls.Load() < 4 {
+		t.Fatalf("one byte over a chunk: %+v %v (%d execs)", res, err, calls.Load())
 	}
 }

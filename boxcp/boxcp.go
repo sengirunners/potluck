@@ -11,7 +11,9 @@
 // stdin, each checked against its SHA-256 there; one more exec joins them,
 // checks the whole SHA-256 and writes the file (or untars with the box's
 // tar) at exactly that path, so sent again it does the same. A copy cut
-// off resumes when run again.
+// off resumes when run again. A file of at most one chunk goes in one exec
+// instead: it resolves the destination, writes the bytes beside it, checks
+// their SHA-256 and renames; sent again it resolves to the same path.
 //
 // Down: one exec stages a snapshot in the box's TMPDIR (the file's bytes,
 // or a tar of the directory by the box's tar), capped at the limit, and
@@ -30,7 +32,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -64,6 +68,7 @@ const (
 // chunk missing, 69 a missing tool).
 const (
 	exitRefused  = 64 // not a file or directory, or the wrong kind at the destination
+	exitChecksum = 65 // the bytes did not match their sha256 (boxpush's)
 	exitMissing  = 66 // a chunk never arrived (boxpush's)
 	exitNotFound = 67 // no such path in the box
 	exitTooLarge = 68 // over the limit
@@ -147,14 +152,35 @@ func checkBoxPath(p string) error {
 // itself), answered as the one absolute path every later exec writes, so
 // a finish sent again after a lost answer writes the same place. A dest
 // ending in / is made a directory here.
-const shResolve = `case "$1" in /*) dest="$1" ;; "") dest="$HOME" ;; *) dest="$HOME/$1" ;; esac
+const shResolve = shDest + `printf '%s\n' "$dest"
+`
+
+// shDest sets dest to where a copy goes: $1 the path asked for, $2 the
+// kind, $3 the copy's own name (taken inside an existing directory).
+const shDest = `case "$1" in /*) dest="$1" ;; "") dest="$HOME" ;; *) dest="$HOME/$1" ;; esac
 case "$dest" in /*) ;; *) echo "the box's HOME is not an absolute path" >&2; exit 64 ;; esac
 case "$1" in */) mkdir -p -- "$dest" || exit 70 ;; esac
 if [ -n "$3" ] && [ -d "$dest" ]; then dest="${dest%/}/$3"; fi
 if [ "$2" = dir ]; then
   if [ -e "$dest" ] && [ ! -d "$dest" ]; then echo "$dest is a file, not a directory" >&2; exit 64; fi
 elif [ -d "$dest" ]; then echo "$dest is a directory" >&2; exit 64; fi
-printf '%s\n' "$dest"
+`
+
+// shWhole writes a file no larger than one chunk in one exec: shDest's
+// $1-$3, $4 its sha256, $5 its mode, the bytes on stdin. It writes beside
+// the destination and renames, so a resend after a lost answer does the
+// same again; bytes damaged on the way are refused (65) and nothing is
+// written.
+const shWhole = boxpush.ShSum + shDest + `[ -n "$(zmsum /dev/null)" ] || { echo "the box has no sha256sum, shasum or openssl" >&2; exit 69; }
+dir=$(dirname -- "$dest")
+mkdir -p -- "$dir" || exit 70
+b=$(mktemp "$dir/.potluck-cp.XXXXXX" 2>/dev/null) || { b="$dir/.potluck-cp.$$"; rm -f "$b"; } # an image with no mktemp
+trap 'rm -f "$b"' EXIT
+cat >"$b" || exit 70
+got=$(zmsum "$b")
+if [ "$got" != "$4" ]; then echo "the bytes' sha256 is $got, not $4: nothing written" >&2; exit 65; fi
+chmod "$5" "$b" && mv -f -- "$b" "$dest" || exit 70
+cd -- "$dir" && printf '%s/%s\n' "$(pwd -P)" "$(basename -- "$dest")"
 `
 
 // shPut is the box's side of an upload once boxpush.Send left the chunks:
@@ -275,6 +301,9 @@ func WriteFile(ctx context.Context, exec boxpush.ExecFunc, p string, data []byte
 
 func put(ctx context.Context, exec boxpush.ExecFunc, r io.ReaderAt, size int64, sum, dest, name string, mode os.FileMode, res Result, o Options) (Result, error) {
 	res.Bytes = size
+	if res.Kind == KindFile && size <= int64(o.ChunkSize) {
+		return putWhole(ctx, exec, r, size, sum, dest, name, mode, res, o)
+	}
 	x, err := boxpush.Retry(ctx, o.Retries, func() (computeapi.RunTargetExec, error) {
 		return exec(ctx, computeapi.ExecRunTargetRequest{Argv: boxpush.Script(shResolve, dest, res.Kind, name), TimeoutS: boxpush.ChunkTimeoutS})
 	})
@@ -316,6 +345,51 @@ func put(ctx context.Context, exec boxpush.ExecFunc, r io.ReaderAt, size int64, 
 		return res, boxpush.BoxErr("the box did not write it", x)
 	}
 	res.To = strings.TrimSpace(x.Stdout)
+	return res, nil
+}
+
+// putWhole is put for a file that fits one chunk: one exec, where the
+// chunked copy takes five (resolve, probe, chunk, finish, clean up); nothing
+// is left in the box to resume from.
+func putWhole(ctx context.Context, exec boxpush.ExecFunc, r io.ReaderAt, size int64, sum, dest, name string, mode os.FileMode, res Result, o Options) (Result, error) {
+	buf := make([]byte, size)
+	if _, err := r.ReadAt(buf, 0); err != nil && !errors.Is(err, io.EOF) {
+		return res, err
+	}
+	req := computeapi.ExecRunTargetRequest{Argv: boxpush.Script(shWhole, dest, res.Kind, name, sum, strconv.FormatUint(uint64(mode&0o777), 8)),
+		Stdin: base64.StdEncoding.EncodeToString(buf), Encoding: computeapi.EncodingBase64, TimeoutS: boxpush.FinishTimeoutS}
+	x, err := boxpush.Retry(ctx, o.Retries, func() (computeapi.RunTargetExec, error) {
+		x, err := exec(ctx, req)
+		if err == nil && x.Exit == exitChecksum { // damaged on the way: send it again
+			return x, boxpush.ErrResend
+		}
+		return x, err
+	})
+	switch {
+	case errors.Is(err, boxpush.ErrResend):
+		return res, boxpush.BoxErr("the box did not write it", x)
+	case err != nil:
+		return res, fmt.Errorf("writing in the box: %w", err)
+	case x.Exit != 0:
+		return res, boxpush.BoxErr("the box did not write it", x)
+	}
+	out := []byte(x.Stdout)
+	if x.Encoding == computeapi.EncodingBase64 { // asked for: stdout too is base64
+		if out, err = base64.StdEncoding.DecodeString(x.Stdout); err != nil {
+			return res, fmt.Errorf("the box's answer is not base64: refused")
+		}
+	}
+	final := strings.TrimSuffix(string(out), "\n")
+	if !strings.HasPrefix(final, "/") || checkBoxPath(final) != nil {
+		return res, fmt.Errorf("the box's answer is not a destination path: refused")
+	}
+	res.To = final
+	if size > 0 { // as the chunked copy counts: no bytes, no chunk
+		res.Chunks, res.Sent = 1, 1
+	}
+	if o.Progress != nil && size > 0 {
+		o.Progress(1, 1)
+	}
 	return res, nil
 }
 

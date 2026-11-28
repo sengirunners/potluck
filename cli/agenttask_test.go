@@ -67,6 +67,7 @@ type agentTaskResultJSON struct {
 	SetupS                            *float64           `json:"setup_s"`
 	Seconds                           float64            `json:"seconds"`
 	Phases                            map[string]float64 `json:"phases"`
+	StartDetails                      map[string]float64 `json:"start_details"`
 	Handle, State, Error, Ref, Commit string
 	Exit                              *int
 	Commits                           int
@@ -185,6 +186,19 @@ func TestAgentTask(t *testing.T) {
 			t.Fatalf("exit %d %+v %v\n%s", code, r, err, e)
 		}
 		assertJobTiming(t, r.Seconds, r.SetupS, r.Phases)
+		// start's parts: the probe and the prompt side by side, then the
+		// credential and the spawn; together never more than start.
+		for _, part := range []string{"probe", "prompt", "secrets", "spawn"} {
+			if d, ok := r.StartDetails[part]; !ok || d <= 0 || d > r.Phases["start"] {
+				t.Fatalf("start_details %v (start %v): %s", r.StartDetails, r.Phases["start"], part)
+			}
+		}
+		if _, ok := r.StartDetails["proxy"]; ok || r.StartDetails["secrets"]+r.StartDetails["spawn"]+max(r.StartDetails["probe"], r.StartDetails["prompt"]) > r.Phases["start"]+0.01 {
+			t.Fatalf("start_details %v over start %v", r.StartDetails, r.Phases["start"])
+		}
+		if !strings.Contains(e, "start ") || !strings.Contains(e, "(probe ") {
+			t.Fatalf("the stderr line names no start parts:\n%s", e)
+		}
 		noSecret(t, o, e)
 		if !strings.HasPrefix(r.Ref, AgentTaskRefs) || r.Commits != 2 || r.Commit != base {
 			t.Fatalf("result %+v\n%s", r, e)

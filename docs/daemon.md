@@ -1229,6 +1229,9 @@ Up:
   shell has it.
 - The chunks go after it answers, written or refused. With no answer (or a chunk missing) they stay, and the same copy
   again resumes.
+- A file of at most one chunk (512 KiB) goes in one exec instead (90 s): it resolves the destination as above, writes
+  the bytes beside it, checks their SHA-256 (a mismatch writes nothing and is sent again), keeps the mode, renames and
+  answers the path. Sent again after a lost answer, it writes the same path. There is nothing to resume.
 
 Down:
 

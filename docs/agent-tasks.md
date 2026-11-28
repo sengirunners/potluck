@@ -108,6 +108,10 @@ fields (`handle`, `target`, `commit`, `pid`, `state`, `exit`, `error`, `kept`, `
 entry through the spawn response; absent when no agent started), and `phases` (seconds for preparation,
 acquire, push, start, run, collect, cleanup; see `docs/daemon.md`, Jobs). Optional `acquire_details` reports
 base-fill time and the inclusive acquire time with dependencies; these overlap acquire, not extra time.
+`start_details` gives seconds for the parts of start: `probe` (the agent's command and `timeout` on PATH) and
+`prompt` (the prompt written into the box), which run side by side, then `proxy` (with `--cooperative-proxy`),
+`secrets` (the credential through the box secrets door) and `spawn`; they overlap start, not extra time. The
+stderr line names them after start.
 It also includes `ref` (absent when there are no commits), `commits` (how many past `commit`) and `last` (the agent's last 20
 lines of stdout); the agent's output then goes to stderr.
 

@@ -41,7 +41,7 @@ func TestAgentTaskDoorBeforeSpawn(t *testing.T) {
 				t.Errorf("unexpected route %s", r.URL.Path)
 			}
 		}))
-		pid, err := spawnAgentTask(context.Background(), daemonBox{c: c, target: "box", id: "h1"}, []string{"agent"}, "CLAUDE_CODE_OAUTH_TOKEN", "sentinel", 60, "request")
+		pid, err := spawnAgentTask(context.Background(), daemonBox{c: c, target: "box", id: "h1"}, nil, []string{"agent"}, "CLAUDE_CODE_OAUTH_TOKEN", "sentinel", 60, "request")
 		if refuse {
 			if err == nil || pid != "" || len(calls) != 1 {
 				t.Fatalf("refusal: pid=%s err=%v calls=%v", pid, err, calls)

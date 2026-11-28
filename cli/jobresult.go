@@ -25,6 +25,9 @@ type jobResult struct {
 	SetupS         *float64           `json:"setup_s,omitempty"`
 	Phases         map[string]float64 `json:"phases"`
 	AcquireDetails *jobAcquireDetails `json:"acquire_details,omitempty"`
+	// StartDetails are seconds of named parts of the start phase (agent-task:
+	// probe, proxy, prompt, secrets, spawn); they overlap start.
+	StartDetails map[string]float64 `json:"start_details,omitempty"`
 	// Deps are the acquire's answer for each layer asked for (--deps).
 	Deps     []computeapi.BoxDepsAnswer `json:"deps,omitempty"`
 	Kept     bool                       `json:"kept"`

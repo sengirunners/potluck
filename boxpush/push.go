@@ -508,12 +508,12 @@ func Send(ctx context.Context, exec ExecFunc, f io.ReaderAt, size int64, sum str
 				x, err := Retry(cctx, o.Retries, func() (computeapi.RunTargetExec, error) {
 					x, err := exec(cctx, req)
 					if err == nil && x.Exit == exitChecksum { // damaged on the way: send it again
-						return x, errResend
+						return x, ErrResend
 					}
 					return x, err
 				})
 				switch {
-				case err != nil && !errors.Is(err, errResend):
+				case err != nil && !errors.Is(err, ErrResend):
 					fail(&mu, &first, cancel, fmt.Errorf("chunk %d of %d: %w", i+1, n, err))
 					continue
 				case x.Exit != 0:
@@ -550,7 +550,9 @@ feed:
 	return res, ctx.Err()
 }
 
-var errResend = errors.New("resend")
+// ErrResend is a call whose bytes the box refused as damaged on the way
+// (exit 65): Retry sends it again.
+var ErrResend = errors.New("resend")
 
 func fail(mu *sync.Mutex, first *error, cancel func(), err error) {
 	mu.Lock()
@@ -583,7 +585,7 @@ func Retry(ctx context.Context, tries int, call func() (computeapi.RunTargetExec
 // Transient says whether a failed call may succeed when sent again: no
 // answer or a dropped relay, not a refusal by zm or the driver.
 func Transient(err error) bool {
-	if errors.Is(err, errResend) {
+	if errors.Is(err, ErrResend) {
 		return true
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
