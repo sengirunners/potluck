@@ -70,3 +70,58 @@ func TestDriverGetsThePrefix(t *testing.T) {
 		t.Errorf("the driver saw %q, want the prefix and no other variable", e.Message)
 	}
 }
+
+// A driver gets its binding's ttl_max_s as config, so a driver whose own
+// default cap is lower (potluck-driver-tart's 4 h) serves what the owner
+// bound; a binding with none sends none.
+func TestDriverGetsTheBindingsLifetimeCap(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg, err := config.LoadFrom(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Human, cfg.Machine = "judy", "mini"
+	dm, err := server.New(context.Background(), cfg, nil, wiring.Compute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dm.Close() })
+	fix, _ := filepath.EvalSymlinks(t.TempDir())
+	repo, err := refdriver.NewRepo(fix, "#!/bin/sh\nexit 0\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	drv := filepath.Join(fix, "zm-run-ttl")
+	// The driver refuses with the ttl_max_s its config carried ("-" for none).
+	body := "#!/bin/sh\nin=$(cat)\nv=$(printf '%s' \"$in\" | sed -n 's/.*\"ttl_max_s\":\"\\([0-9]*\\)\".*/\\1/p')\n" +
+		"printf '{\"ok\":false,\"error\":{\"code\":\"conflict\",\"message\":\"ttl=%s\"}}\\n' \"${v:--}\"\n"
+	if err := os.WriteFile(drv, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range dm.Modules() {
+		if s, ok := m.(*runtarget.Service); ok {
+			s.SetLookPath(func(string) (string, error) { return drv, nil })
+		}
+	}
+	ctx := context.Background()
+	owner := client.WithHandler(dm.SocketHandler())
+	owner.Project, owner.ProjectFrom = "acme", "flag"
+	if _, err := owner.CreateProject(ctx, api.NewProjectRequest{Slug: "acme", RepoRules: api.RepoRules{Paths: []string{fix}, Remotes: []string{repo.Remote}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		ttl  int
+		want string
+	}{{432000, "ttl=432000"}, {0, "ttl=-"}} {
+		_, err = computeclient.BindRunTarget(ctx, owner, computeapi.BindRunTargetRequest{Replace: true, Target: computeapi.RunTarget{
+			Name: "ttl", Driver: "ttl", Kind: "run", Isolation: "ephemeral", Repo: repo.Remote, Branch: "main", TTLMaxS: c.ttl}})
+		var e *api.Error
+		if !errors.As(err, &e) || e.Code != api.CodeConflict {
+			t.Fatalf("bind ttl_max_s %d: %v, want the driver's conflict", c.ttl, err)
+		}
+		if !strings.HasSuffix(e.Message, c.want) {
+			t.Errorf("bind ttl_max_s %d: the driver saw %q, want %s", c.ttl, e.Message, c.want)
+		}
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -83,13 +84,19 @@ func (s *Service) call(ctx context.Context, t computeapi.RunTarget, verb, id str
 }
 
 // driverConfig is the config a driver is sent for binding t: its own keys,
-// its name and kind, and the owner's image pins.
+// its name and kind, the owner's image pins and lifetime cap. The cap goes
+// as ttl_max_s so a driver whose own default is lower (potluck-driver-tart's
+// 4 h) serves what the owner bound; lifetimeCap still takes the lower of the
+// binding's and describe's, so a driver that keeps a lower cap still wins.
 func driverConfig(t computeapi.RunTarget) map[string]string {
 	cfg := map[string]string{}
 	for k, v := range t.Config {
 		cfg[k] = v
 	}
 	cfg["target"], cfg["kind"] = t.Name, t.Kind
+	if t.TTLMaxS > 0 {
+		cfg["ttl_max_s"] = strconv.Itoa(t.TTLMaxS)
+	}
 	if len(t.Images) > 0 {
 		cfg["images"] = strings.Join(t.Images, ",") // the owner's pins: the only images a box may boot
 	}

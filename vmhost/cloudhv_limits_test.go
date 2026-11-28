@@ -102,3 +102,21 @@ func TestCloudHVWarmBoxOfOtherRatesIsEnded(t *testing.T) {
 		t.Error("a warm box booted with rates would be handed out by a binding with none")
 	}
 }
+
+// A warm box whose supervisor holds another ttl_max_s than the binding now
+// sends (a rebind raised or lowered it) is not handed out: it would end at
+// the old cap.
+func TestWarmBoxOfOtherLifetimeCapIsEnded(t *testing.T) {
+	made := func(ttl string) record {
+		return record{Handle: "box:a/r1", OS: "linux", VM: "vm1", State: stStarting, Config: map[string]string{"ttl_max_s": ttl}}
+	}
+	d := &drv{cfg: config{VM: "tart", Kind: "box", TTLMax: 432300}}
+	if why := d.warmOffBinding(made("432300")); why != "" {
+		t.Errorf("a warm box with its binding's cap is ended: %s", why)
+	}
+	for _, other := range []string{"14400", "500000"} {
+		if why := d.warmOffBinding(made(other)); why != warmOffTTL {
+			t.Errorf("a warm box booted with ttl_max_s %s would be handed out under 432300: %q", other, why)
+		}
+	}
+}

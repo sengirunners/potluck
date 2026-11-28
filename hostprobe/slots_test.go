@@ -248,6 +248,7 @@ func TestShareBusyHostSaysWhy(t *testing.T) {
 	o.LinuxSlots, o.Sizes, o.Report = slotsPtr(2), []string{"c1m2", "c2m4", "c2m8", "c4m16", "c8m32"}, bigReport()
 	// every size, nothing left alone: the refusal's own way past
 	o.ShelfGB, o.ShelfFill, o.VolumeMaxGB = slotsPtr(0), "off", slotsPtr(20) // past the storage keys' own refusal
+	o.TTLMaxS = slotsPtr(14400)                                              // and the lifetime cap's
 	if _, err := checkOn(context.Background(), run, o); err != nil {
 		t.Errorf("--linux-slots 2 sharing every size with unread bindings: %v", err)
 	}

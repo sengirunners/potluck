@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -152,6 +153,9 @@ func (d *drv) fillWarm() {
 // warmOffPin is why a warm box booted on an image its binding no longer lends ended.
 const warmOffPin = "the binding's image changed since it booted"
 
+// warmOffTTL is why a warm box booted under another lifetime cap ended.
+const warmOffTTL = "the binding's lifetime cap changed since it booted"
+
 // warmOffBinding says why warm box r is not a box the binding makes now, ""
 // when it is. A rebind moved the default image: a box handed out from the old
 // one would boot a digest none of the binding's pins name, and a pool's
@@ -160,10 +164,16 @@ const warmOffPin = "the binding's image changed since it booted"
 // out, it would have root where describe lists none, or none where it does.
 // Or it naps as a driver that did not seal naps started it (napsAnyway):
 // handed out, it would take no secrets where describe lists them. Or its
-// VM is held to other rates than the binding's (cloudhvRatesDiffer).
+// VM is held to other rates than the binding's (cloudhvRatesDiffer). Or its
+// supervisor holds another lifetime cap (ttl_max_s, which the daemon sends
+// from the binding): handed out, it would end before, or outlive, the cap
+// describe states.
 func (d *drv) warmOffBinding(r record) string {
 	if r.Image != d.cfg.Image {
 		return warmOffPin
+	}
+	if v := r.Config["ttl_max_s"]; v != "" && v != strconv.Itoa(d.cfg.TTLMax) {
+		return warmOffTTL
 	}
 	if why := cloudhvRatesDiffer(r.Config, d.cfg); why != "" {
 		return why

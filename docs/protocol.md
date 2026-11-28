@@ -63,7 +63,7 @@ the resource at that deadline itself, whether or not the daemon is up.
 | `verb` | yes | the operation |
 | `id` | no | the handle, for every verb that acts on one resource |
 | `args` | no | the operation's arguments. The daemon leaves it out when there are none; the conformance suite sends `{}`. Accept both. |
-| `config` | yes | the binding's driver config (strings only), plus `target` (the binding's name) and `kind`; for a box binding with pinned images, also `images`: the pins joined with commas |
+| `config` | yes | the binding's driver config (strings only), plus `target` (the binding's name) and `kind`; for a box binding with pinned images, also `images`: the pins joined with commas; when the binding sets `ttl_max_s`, also `ttl_max_s` (decimal seconds), which a driver with a lifetime cap of its own should take as that cap |
 
 ### The answer
 

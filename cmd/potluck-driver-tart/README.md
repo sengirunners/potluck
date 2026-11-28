@@ -42,7 +42,7 @@ takes inbound connections) as root through `sudo -n`, and ends the VM while port
 | `network` | `softnet` | `nat` is for development only: the guest reaches the host and the LAN, so the binding describes `isolation = "none"` (on every layer: Softnet off on Tart, the fence unchecked on Incus, any `oci_network` on OCI), and Potluck refuses it as a box |
 | `linux_slots` / `macos_slots` | 2 / 2 | concurrent runs, counting every live box of the state directory whichever binding made it. `potluck host --linux-slots N` sets `linux_slots` on every size it shares ([docs/hosts.md](../../docs/hosts.md), "How many Linux boxes at once"). macOS is capped at 2 per host, counting every running macOS VM. A refusal past it says `no free <os> slot`. |
 | `cpu`, `memory` | the image's | per-VM CPUs and MB |
-| `ttl_max_s` | 14400 | lifetime cap since acquire |
+| `ttl_max_s` | 14400 | lifetime cap since acquire. The daemon sends a binding's own `ttl_max_s` here, so a binding may raise it as well as lower it; `potluck host --ttl-max-s N` sets it on every size it shares, 900..435600 ([docs/hosts.md](../../docs/hosts.md), "How long a box may live"). |
 | `boot_timeout_s` | 90 | clone, boot and checkout must finish within this |
 | `reclaim_idle_s` | off | the owner counts as active while HID idle time (keyboard, pointer) is under this |
 | `window` | always | `HH:MM[:SS]-HH:MM[:SS]` local time, may wrap midnight: work only inside it, every day |

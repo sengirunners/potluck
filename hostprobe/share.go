@@ -154,6 +154,10 @@ type ShareOptions struct {
 	// once, bound as linux_slots on every size (slots.go). Unset (nil), an
 	// earlier binding's is kept, else the driver's default, Slots.
 	LinuxSlots *int
+	// TTLMaxS (--ttl-max-s) is how long a box may live, in seconds, bound
+	// as the binding's ttl_max_s on every size (ttl.go). Unset (nil), an
+	// earlier binding's is kept, else the driver's default.
+	TTLMaxS *int
 	// AdmissionURL, AdmissionTokenFile and AdmissionTTLS are zm-run-tart's
 	// admission keys for a host that runs other work beside zm (admission.go):
 	// every box lent takes a lease first; share's own conformance boxes do
@@ -199,13 +203,16 @@ type Step struct {
 
 // SizeResult is one size's outcome.
 type SizeResult struct {
-	Size        Size              `json:"size"`
-	Binding     string            `json:"binding"`
-	Config      map[string]string `json:"config"`
-	Conformance []string          `json:"conformance_command"`
-	Passed      bool              `json:"passed"`
-	Bound       bool              `json:"bound"`
-	Error       string            `json:"error,omitempty"` // why it stayed unbound
+	Size    Size              `json:"size"`
+	Binding string            `json:"binding"`
+	Config  map[string]string `json:"config"`
+	// TTLMaxS is the binding's ttl_max_s (0: none), which the binding
+	// carries beside its config, not in it.
+	TTLMaxS     int      `json:"ttl_max_s,omitempty"`
+	Conformance []string `json:"conformance_command"`
+	Passed      bool     `json:"passed"`
+	Bound       bool     `json:"bound"`
+	Error       string   `json:"error,omitempty"` // why it stayed unbound
 	// StillBound: this run failed, but a binding of the name from an earlier
 	// run remains.
 	StillBound bool   `json:"still_bound,omitempty"`
@@ -262,6 +269,11 @@ type ShareResult struct {
 	LinuxSlots            int    `json:"linux_slots,omitempty"`
 	LinuxSlotsFrom        string `json:"linux_slots_kept_from,omitempty"`
 	LinuxSlotsByAdmission bool   `json:"linux_slots_by_admission,omitempty"`
+	// TTLMaxS is the ttl_max_s bound on every size (0: none, the driver's
+	// default); TTLMaxSFrom names the earlier binding it was kept from (""
+	// for the flag).
+	TTLMaxS     int    `json:"ttl_max_s,omitempty"`
+	TTLMaxSFrom string `json:"ttl_max_s_kept_from,omitempty"`
 	// Storage is the shelf and volume keys bound on every oci size, nil when
 	// none is set (ocistorage.go).
 	Storage *OCIStorage  `json:"storage,omitempty"`
@@ -763,6 +775,13 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 	if res.Storage != nil {
 		maps.Copy(base, res.Storage.Keys) // conformance tests what the binding carries
 	}
+	// After the slots' and storage keys' own refusals, which name their flags.
+	if res.TTLMaxS, res.TTLMaxSFrom, err = ttlMaxS(o, sizes); err != nil {
+		return res, err
+	}
+	if res.TTLMaxS > 0 {
+		res.Notes = append(res.Notes, ttlNote(res.TTLMaxS, res.TTLMaxSFrom))
+	}
 	for _, im := range res.Images {
 		res.Pulls = append(res.Pulls, Step{What: "pull " + im, Command: pull(im)})
 	}
@@ -838,7 +857,7 @@ func Check(ctx context.Context, run Runner, o ShareOptions) (ShareResult, error)
 		if res.RunnerDir != "" {
 			bound["runner_dir"] = res.RunnerDir
 		}
-		res.Sizes = append(res.Sizes, SizeResult{Size: s, Binding: o.NamePrefix + "-" + s.Name, Config: bound, Conformance: args})
+		res.Sizes = append(res.Sizes, SizeResult{Size: s, Binding: o.NamePrefix + "-" + s.Name, Config: bound, TTLMaxS: res.TTLMaxS, Conformance: args})
 	}
 	if o.DryRun {
 		return res, nil
@@ -1065,7 +1084,7 @@ func Bind(ctx context.Context, b Binder, o ShareOptions, res ShareResult) ShareR
 		}
 		req := computeapi.BindRunTargetRequest{Replace: true, Target: computeapi.RunTarget{
 			Name: sr.Binding, Driver: res.Driver, Kind: "box", Isolation: "ephemeral", Credentials: false,
-			Images: res.Images, Config: sr.Config,
+			Images: res.Images, Config: sr.Config, TTLMaxS: sr.TTLMaxS,
 		}}
 		if o.Pool != "" {
 			req.Host, req.Share = true, []string{o.Pool}

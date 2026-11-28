@@ -107,6 +107,25 @@ The sizes are `c1m2`, `c2m4`, `c2m8`, `c4m16` and `c8m32` (vCPU and GiB).
   whichever size's binding made it, so two of the largest size lent may run together.
 - `potluck host --linux-slots N` changes the Linux number (below, "How many Linux boxes at once").
 
+### How long a box may live
+
+`--ttl-max-s N` (900 to 435600 seconds) binds `ttl_max_s=N` on every size `potluck host` shares. The daemon sends a
+binding's `ttl_max_s` to its driver as config, so N raises or lowers the driver's own cap (4 hours on
+`potluck-driver-tart`); a box's lifetime cap is still the lower of the binding's and the driver's describe.
+
+- A runner job needs a box that lives its job time plus 300 s of startup: a program whose jobs may run GitHub's
+  five days (`job_ttl_s` 432000) needs at least `--ttl-max-s 432300`, or every size refuses its jobs (`boxes live at
+  most 14400s, job runtime plus 300s startup needs 432300s`).
+- The floor (15 minutes) leaves room for a boot and a real job; the ceiling is GitHub's five-day limit on a
+  self-hosted runner's job plus an hour, past which a cap serves no job and only lets a forgotten box hold a slot.
+- A re-run without the flag keeps the earlier bindings' value (bindings that disagree are refused until the owner
+  passes `--ttl-max-s`); a run that could not read those bindings is refused, since it would drop the value.
+  Without the flag on any run, nothing is bound and the driver's default holds.
+- A run whose `--sizes` leaves out a size bound with another cap is refused until that size is in the run or has
+  the same number (a size left out with none is fine). A warm box booted under another cap is ended, not handed out.
+- Conformance runs with the driver's default cap: the cap changes how long boxes may live, which the suite does not
+  wait out.
+
 ### How many Linux boxes at once
 
 `--linux-slots N` (1 to 256) binds `linux_slots=N` on every size `potluck host` shares, so the driver runs up to N
@@ -239,7 +258,7 @@ On Linux with a container CLI but no isolating runtime, the root line installs g
 ```
 potluck host ['<invite code>' | <pool>] [--image name@sha256:<64 hex>]... [--layer] [--sizes] [--name-prefix]
   [--oci-runtime] [--oci-cli] [--oci-network] [--net-allow] [--net-forbid] [--net-mail] [--net-mbit] [--runner-dir]
-  [--docker] [--root] [--shelf-gb] [--shelf-fill] [--volume-max-gb] [--linux-slots]
+  [--docker] [--root] [--shelf-gb] [--shelf-fill] [--volume-max-gb] [--linux-slots] [--ttl-max-s]
   [--admission-url] [--admission-token-file] [--admission-ttl-s] [--full] [--reclaim-idle-s | --when any|away]
   [--share] [--max-cores] [--max-ram-mb] [--state-dir] [--no-sudo] [--dry-run] [--detach] [--yes]
   [--invite-stdin]

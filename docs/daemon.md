@@ -221,11 +221,12 @@ A project uses a driver through a binding: a `[[run_targets]]` entry in `project
   - `allow_any_ref` (default false);
   - `scripts` (run; required when the effective class has `credentials` true or `isolation` `"none"`, checked at
     bind);
-  - `budget`, `ttl_max_s`, `handles_max`;
+  - `budget`, `ttl_max_s`, `handles_max` (`ttl_max_s` also goes to the driver as config, so a driver's own default
+    cap does not hold a binding below it);
   - for db, `create_in`;
   - anything else is driver config.
-- `config` on every call carries the driver config plus `target` (the binding name) and `kind`; `describe` answers
-  for that binding.
+- `config` on every call carries the driver config plus `target` (the binding name) and `kind`, and the binding's
+  `ttl_max_s` when it has one; `describe` answers for that binding.
 - The daemon uses the stricter class of the binding and `describe` (`none` over `ephemeral`, `true` over `false`): a
   target never declares itself safer than its owner did.
 - One-time work uses the driver's optional `setup`, called only by the owner's bind (a `dry_run` first; what it

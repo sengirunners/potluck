@@ -359,6 +359,7 @@ type shareFlags struct {
 	inviteStdin bool
 	instead     string // --instead-of-invite (menubar.InsteadFlag)
 	linuxSlots  int
+	ttlMaxS     int
 	wait        time.Duration // --wait: a size's check waits this long for a free slot (roomwait)
 }
 
@@ -385,6 +386,7 @@ func (s *shareFlags) add(cmd *cobra.Command, a *app) {
 	fl.StringVar(&o.ShelfFill, "shelf-fill", "", "oci: what fills the shelf: seed (only "+a.cmd("host shelf fill")+"; the default), \"boxes\" (also the public packages that lockfiles in sandboxes name, so a sandbox can tell someone on this host recently used a given public package) or off; needs --shelf-gb above 0 (default: what an earlier host run set)")
 	fl.IntVar(&s.volumeMaxGB, "volume-max-gb", 0, "oci: the most each renter's named volumes may hold on each size, in GiB, on every size this run shares (default 20; 0 turns volumes off; default: what an earlier host run set)")
 	fl.IntVar(&s.linuxSlots, "linux-slots", 0, fmt.Sprintf("how many Linux sandboxes run here at once, across every size, 1..%d: without an admission controller every size shared must fit that many times inside --share; with one it decides room and this is a ceiling. macOS stays at 2 (Apple's licence) (default: what an earlier host run set, else 2)", hostprobe.MaxLinuxSlots))
+	fl.IntVar(&s.ttlMaxS, "ttl-max-s", 0, fmt.Sprintf("the longest a sandbox may live, in seconds, on every size shared, %d..%d: raises or lowers the driver's own cap (4 h on tart); a runner job needs its job time plus 300 s (default: what an earlier host run set, else the driver's)", hostprobe.MinTTLMaxS, hostprobe.MaxTTLMaxS))
 	fl.BoolVar(&s.dryRun, "dry-run", false, "print the plan; pull, test and share nothing")
 	fl.BoolVar(&s.o.ShowCommands, "show-commands", false, "diagnostics: also print each image pull and conformance command line (the stages say what runs)")
 	fl.DurationVar(&s.pullTimeout, "pull-timeout", 0, "give up on an image pull after this long (default: image pin budget, else 60m; a stopped pull resumes)")
@@ -451,6 +453,9 @@ func (a *app) shareOptions(cmd *cobra.Command, s *shareFlags) (hostprobe.ShareOp
 	}
 	if cmd.Flags().Changed("linux-slots") {
 		o.LinuxSlots = &s.linuxSlots
+	}
+	if cmd.Flags().Changed("ttl-max-s") {
+		o.TTLMaxS = &s.ttlMaxS
 	}
 	if o.NamePrefix == "" { // the machine name, read without touching the daemon
 		cfg, err := a.loadClient()
